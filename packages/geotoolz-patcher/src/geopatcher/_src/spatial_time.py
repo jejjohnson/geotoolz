@@ -466,7 +466,7 @@ class _STPlan:
         ]
 
     def _windows(self, space: Any, time: int | None, chip: Any) -> list[_Read]:
-        data = chip.data if self.unpack is None else self.unpack(chip.data)
+        data = chip.data if self.unpack is None else self.unpack(chip)
         time_len = self.stp._time_len(data)
         self.stp.temporal._require_coord(self.coord, time_len)
         self.time_len = time_len

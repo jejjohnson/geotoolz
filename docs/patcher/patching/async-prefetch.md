@@ -118,6 +118,9 @@ stitched: np.ndarray = asyncio.run(run())             # (1, 512, 512) float64
   field whose read is awaitable.
 - `SpatialPatcher.asplit` works the same way; `AsyncSpatialPatcher` also
   makes `split` an alias of `asplit` and `patch_at` a coroutine.
+- `AsyncSpatialPatcher.reduce` / `two_pass` are the async global-statistics
+  passes ([Global statistics](../recipes/global-statistics.md)); they take
+  `asplit`'s `journal`, `cache` and backpressure arguments.
 - Under `max_in_flight` / `max_in_flight_bytes`, a patch may be closed on
   any thread (inside `asyncio.to_thread`, say); its slot returns to the
   loop that issued it.

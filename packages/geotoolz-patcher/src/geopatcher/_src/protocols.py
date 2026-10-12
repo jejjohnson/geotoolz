@@ -51,6 +51,13 @@ class Field(Protocol):
       raw output (usually a bare ``np.ndarray``); `SpatialPatcher.merge_to_field`
       and `SpatialPatcher.merge_to_xarray` call it to rebuild a global
       field (ADR-007).
+
+    Optional: ``placeholder(indexer, data)`` returns ``data`` (an all-NaN
+    array) in the carrier ``select(indexer)`` would return, without
+    reading; the patchers use it for the ``on_error="mask"`` placeholder
+    (ADR-011). Without it, a raster window on a domain with ``transform``
+    and ``crs`` becomes a NaN `GeoTensor` on the window's grid, and
+    anything else stays a bare array.
     """
 
     @property

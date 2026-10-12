@@ -65,6 +65,22 @@ class XarrayField:
         """
         return self.da.isel(**indexer)
 
+    def placeholder(self, indexer: dict[str, slice], data: np.ndarray) -> Any:
+        """``data`` as the `DataArray` `select` would return, without reading.
+
+        Used for the ``on_error="mask"`` placeholder. The chip's coords
+        come from the (lazy) slice; when its shape differs from ``data``
+        (a padded window past the edge) ``data`` is returned bare.
+        """
+        import xarray as xr
+
+        template = self.da.isel(**indexer)
+        if tuple(template.shape) != data.shape:
+            return data
+        return xr.DataArray(
+            data, dims=template.dims, coords=template.coords, name=template.name
+        )
+
     def with_data(self, array: Any) -> XarrayField:
         new = self.da.copy(data=np.asarray(array))
         return XarrayField(new)

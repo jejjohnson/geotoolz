@@ -57,3 +57,62 @@ z: np.ndarray = patcher.two_pass(
 `reduce` takes any streaming aggregation, including the sketches
 (`ApproxQuantile`, `StreamingHistogram`, …) for a global median or
 histogram — see [Streaming aggregations](../patching.md#streaming-aggregations).
+
+## Over an async field
+
+`AsyncSpatialPatcher.reduce` and `two_pass` are the same passes as
+coroutines, over an `AsyncField` (a `fields.CogField`, say), with
+`asplit`'s `journal`, `cache` and backpressure arguments:
+
+```python
+import asyncio
+from typing import Any
+
+import numpy as np
+import rasterio
+from georeader.geotensor import GeoTensor
+from rasterio.windows import Window
+
+import geopatcher as gp
+
+
+class AsyncRaster(gp.RasterField):
+    """A RasterField with an awaitable read, standing in for a remote COG."""
+
+    async def aselect(self, window: Window) -> GeoTensor:
+        await asyncio.sleep(0)                        # the network round trip
+        return self.select(window)                    # (1, 128, 128) float32
+
+
+field: AsyncRaster = AsyncRaster(
+    GeoTensor(
+        np.outer(np.linspace(0, 1, 512), np.linspace(0, 1, 512)).astype(np.float32)[None],  # (1, 512, 512) float32
+        transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
+        crs="EPSG:32611",
+    )
+)
+patcher: gp.AsyncSpatialPatcher = gp.AsyncSpatialPatcher(
+    geometry=gp.spatial.geometry.Rectangular(size=(128, 128)),
+    sampler=gp.spatial.sampler.RegularStride(step=(96, 96)),
+    window=gp.spatial.window.Hann(),
+    aggregation=gp.spatial.aggregation.OverlapAdd(),
+)
+
+
+async def run() -> tuple[dict[str, float], np.ndarray]:
+    stats: dict[str, Any] = await patcher.reduce(
+        field, gp.spatial.aggregation.MeanStd(), max_in_flight=8
+    )                                                 # {'mean': 0.25, 'std': 0.209}
+    z: np.ndarray = await patcher.two_pass(
+        field,
+        reduce_with=gp.spatial.aggregation.MeanStd(),
+        apply=lambda chip, s: (np.asarray(chip) - s["mean"]) / s["std"],
+        max_in_flight=8,
+    )                                                 # (1, 512, 512) float64
+    return stats, z
+
+
+stats, z = asyncio.run(run())
+```
+
+`apply` runs on the event loop: keep it cheap, or offload it yourself.

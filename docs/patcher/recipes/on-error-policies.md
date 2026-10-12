@@ -80,7 +80,12 @@ failures in `stp.spatial.errors`.
 ## Mask failures as NaN patches
 
 `"mask"` yields a NaN patch of the geometry's shape in place of each
-failure, so every anchor keeps its slot.
+failure, so every anchor keeps its slot. The placeholder is flagged
+`Patch.masked` and keeps the carrier of a successful read where the field
+allows: a `GeoTensor` on the window's grid for a raster field, a
+`DataArray` with the chip's coords for `fields.XarrayField` /
+`fields.RioXarrayField`. Operators that read `.transform` or `.rio` work on
+it unchanged, and `merge_to_field` stitches it like any other patch.
 
 ```python
 from typing import Any
@@ -130,12 +135,19 @@ patcher: gp.SpatialPatcher = gp.SpatialPatcher(
 )
 
 patches: list[gp.Patch] = list(patcher.split(field))  # 16 × (1, 64, 64), 4 all-NaN
-holes: int = sum(bool(np.isnan(np.asarray(p.data)).all()) for p in patches)  # 4
+holes: int = sum(p.masked for p in patches)  # 4
+hole: GeoTensor = next(p.data for p in patches if p.masked)  # (1, 64, 64) float64 · all NaN, window transform
 stitched: np.ndarray = patcher.merge(patches, field.domain)  # (1, 256, 256) float64 · NaN = masked
 ```
 
 Aggregations ignore NaN samples, so a masked patch is a transparent hole.
 Where overlapping patches cover it, their values fill it in.
+
+A field adapter of your own can shape its placeholder too: give it a
+`placeholder(indexer, data)` method that returns `data` (the NaN array) in
+the carrier its `select(indexer)` returns, without reading. Fields with
+neither a `placeholder` nor a raster domain (`transform` and `crs`) get the
+bare NaN array.
 
 ## Retry transient errors
 
