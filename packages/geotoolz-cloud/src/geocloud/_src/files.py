@@ -38,7 +38,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import obstore
 
@@ -364,6 +364,35 @@ def write_bytes(
     with_bucket_retry(lambda: obstore.put(target.store, target.key, bytes(data)))
 
 
+class _RetryingReader:
+    """An obstore reader whose ranged reads retry a spurious ``NoSuchBucket``.
+
+    Each ``read`` re-seeks to where it started before a retry, so a failed
+    request never moves the position. Everything else is the reader's own.
+    """
+
+    def __init__(self, handle: Any) -> None:
+        self._handle = handle
+
+    def read(self, size: int | None = None) -> Any:
+        start = self._handle.tell()
+
+        def attempt() -> Any:
+            self._handle.seek(start)
+            return self._handle.read() if size is None else self._handle.read(size)
+
+        return with_bucket_retry(attempt)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._handle, name)
+
+    def __enter__(self) -> _RetryingReader:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._handle.close()
+
+
 def open(  # `geocloud.files.open`, like `fsspec.open`
     uri: Location,
     mode: Literal["rb", "wb"] = "rb",
@@ -399,8 +428,14 @@ def open(  # `geocloud.files.open`, like `fsspec.open`
     """
     target = _resolve(uri, storage_options)
     if mode == "rb":
-        return with_bucket_retry(
-            lambda: obstore.open_reader(target.store, target.key), probe=target.probe
+        return cast(
+            "ReadableFile",
+            _RetryingReader(
+                with_bucket_retry(
+                    lambda: obstore.open_reader(target.store, target.key),
+                    probe=target.probe,
+                )
+            ),
         )
     if mode == "wb":
         return obstore.open_writer(target.store, target.key)
@@ -478,7 +513,8 @@ async def _stream_between(source: _Target, dest: _Target) -> None:
             options = _range_options(spans, (start, end), pinned)
             yield await awith_bucket_retry(lambda options=options: chunk(options))
 
-    await obstore.put_async(dest.store, dest.key, chunks())
+    # A retried upload starts over with a fresh chunk stream.
+    await awith_bucket_retry(lambda: obstore.put_async(dest.store, dest.key, chunks()))
 
 
 def copy(
@@ -709,7 +745,8 @@ def rm(
         ]
     )
     for start in range(0, len(keys), _DELETE_BATCH):
-        obstore.delete(target.store, keys[start : start + _DELETE_BATCH])
+        batch = keys[start : start + _DELETE_BATCH]
+        with_bucket_retry(lambda batch=batch: obstore.delete(target.store, batch))
     return len(keys)
 
 

@@ -102,7 +102,10 @@ async def awith_bucket_retry[T](
         try:
             return await call()
         except Exception as exc:
-            if attempt + 1 >= ATTEMPTS or not _retryable(exc, probe):
+            # The probe is a blocking LIST: run it off the event loop.
+            if attempt + 1 >= ATTEMPTS or not await asyncio.to_thread(
+                _retryable, exc, probe
+            ):
                 raise
             await asyncio.sleep(_sleep_s(attempt))
     raise AssertionError("unreachable")  # pragma: no cover
