@@ -341,3 +341,14 @@ def test_inconsistent_bounds_fall_back_to_the_coordinates(l2_file) -> None:
     with h5py.File(path, "r+") as f:
         f["x_image_bounds"][...] = np.float32([-1.0, 1.0])  # not 8 pixels wide
     assert goes.L2Reader(path).transform == reference
+
+
+def test_bounds_one_pixel_short_on_a_large_grid_are_ignored() -> None:
+    # 2,500 centred coordinates with bounds spanning (n - 1) steps that start
+    # on coords[0]: off by a whole pixel, so they must not shift the grid.
+    from geoproducts._src.geostationary import _as_centres
+
+    step = 5.6e-05
+    coords = -0.05 + step * np.arange(2500)
+    bounds = np.array([coords[0], coords[0] + step * 2499])
+    np.testing.assert_array_equal(_as_centres(coords, bounds), coords)
