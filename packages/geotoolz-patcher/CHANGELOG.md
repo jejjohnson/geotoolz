@@ -7,6 +7,11 @@
 
 * **patcher:** create the output folder for streaming OverlapAdd writer="cog" ([#467](https://github.com/jejjohnson/geotoolz/issues/467)) ([77780d0](https://github.com/jejjohnson/geotoolz/commit/77780d0b7e1e206fd085b54702313be897b28beb)), closes [#462](https://github.com/jejjohnson/geotoolz/issues/462)
 
+
+### Code Refactoring
+
+* **patcher:** georeferenced on_error mask placeholder and async reduce / two_pass ([#476](https://github.com/jejjohnson/geotoolz/issues/476)) ([a7e3edf](https://github.com/jejjohnson/geotoolz/commit/a7e3edf26802a44d17443c284502ed178ada980c)), closes [#405](https://github.com/jejjohnson/geotoolz/issues/405)
+
 ## [0.10.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.9.0...geotoolz-patcher-v0.10.0) (2026-10-08)
 
 
