@@ -49,12 +49,12 @@ operators = ["geotoolz"]
 # HDF5, read chunk-by-chunk through geotoolz-cloud's `geocloud.hdf` (h5py
 # over ranged reads, so an ``s3://`` file is never copied whole); the NOAA
 # bucket helpers (``goes.aws``) list and download through geotoolz-cloud.
-goes = ["geotoolz-cloud[hdf5]>=0.2.2"]
+goes = ["geotoolz-cloud[hdf5]>=0.4.1"]
 # Himawari AHI (``geoproducts.himawari``): the HSD L1b reader is numpy +
 # standard library; `geocloud.hdf` (h5py) reads the NOAA L2 cloud products
 # (NetCDF-4), and geotoolz-cloud serves the bucket helpers
 # (``himawari.aws``).
-himawari = ["geotoolz-cloud[hdf5]>=0.2.2"]
+himawari = ["geotoolz-cloud[hdf5]>=0.4.1"]
 carbonmapper = [
     "requests>=2",
     "pydantic>=2",

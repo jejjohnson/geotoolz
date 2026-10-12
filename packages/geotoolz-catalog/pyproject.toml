@@ -74,7 +74,7 @@ duckdb = ["duckdb>=1.1"]
 # through `geocloud.files` — one client pool and the credentials registered
 # in `geocloud.credentials` for both. Lower bound only, as for `patch`
 # below: a workspace sibling released in lockstep.
-cloud = ["geotoolz-cloud[fsspec]>=0.2.2"]
+cloud = ["geotoolz-cloud[fsspec]>=0.4.1"]
 # Streaming catalog builds (`engine="duckdb"` on the `build_*` helpers):
 # the writer itself is pyarrow (a base dependency); the sort-rewrite and
 # the resulting catalog are DuckDB.
