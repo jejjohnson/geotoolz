@@ -57,16 +57,15 @@ patch would overflow the domain.
 
 ## Window convention
 
-`spatial.window.Hann` and `spatial.window.Tukey` are periodic (DFT-even)
-tapers: per axis, `scipy.signal.windows.hann(n, sym=False)` and
-`tukey(n, alpha, sym=False)`, combined as an outer product.
+`spatial.window.Hann` and `spatial.window.Tukey` are periodic tapers of
+period `n` sampled at the pixel centres, `t = (k + ½) / n`: per axis, Hann
+is `sin²(π (k + ½) / n)`, and the two axes combine as an outer product.
 
 | Rule | Consequence |
 |---|---|
 | Hann is COLA at hop `N/2` | With an even size and `step = size // 2`, even `OverlapAdd(normalize_by_window=False)` reproduces a constant. Other overlapping strides still reconstruct exactly under the default normalisation. |
 | `Tukey(alpha=1.0)` is Hann, `alpha=0.0` is Boxcar | Tukey is COLA at hop `N · (1 − alpha/2)`. |
-| `w[0] = 0`, `w[-1] > 0` | The domain's first row and first column get zero weight and come back as the aggregation's `fill_value` (NaN by default). `"pad"` / `"reflect"` only extend the trailing edge, so they do not fix this. Crop the 1-pixel ring, or use `Gaussian` or `Boxcar`. |
-| `step == size` with Hann or Tukey | Every chip's first row and column get zero weight. Tapers need overlap; use `Boxcar` for non-overlapping tiles. |
+| No sample is zero, and the window is symmetric | Every pixel a chip covers keeps a non-zero weight, so the scene's outer rows and columns come back as data. With `step == size` the normalised merge reproduces the field exactly; the taper only blends where chips overlap. |
 | An axis shorter than 3 samples | The taper is flat (all ones) on that axis. |
 
 `spatial.window.Gaussian(sigma=...)` takes `sigma` as a fraction of the

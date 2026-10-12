@@ -678,9 +678,8 @@ class OverlapAdd(Aggregation):
             (default ``True``). Set to ``False`` for the raw weighted
             sum.
         fill_value: Written into cells whose accumulated weight of valid
-            samples is zero — uncovered, all-NaN, outside every mask, or
-            only reached by a taper's zero edge (the leading row / column
-            under a periodic `spatial.window.Hann`). Default NaN; pass e.g. the
+            samples is zero — uncovered, all-NaN, or outside every mask.
+            Default NaN; pass e.g. the
             domain's nodata to override. It is also the COG's nodata.
         dtype: Floating dtype of the streaming accumulators and output
             (default ``"float32"``). The in-RAM path is float64.

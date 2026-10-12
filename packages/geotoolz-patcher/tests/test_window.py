@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 import rasterio
 from georeader.geotensor import GeoTensor
-from scipy.signal.windows import hann, tukey
 
 from geopatcher import RasterField, SpatialPatcher, spatial
 
@@ -24,46 +23,70 @@ class TestSpatialBoxcar:
 
 
 class TestSpatialHann:
-    def test_periodic_values_pinned(self, geom: spatial.geometry.Rectangular) -> None:
-        # Periodic (DFT-even) Hann, n = 8: 0.5 - 0.5 cos(2 pi k / 8).
-        s = np.sqrt(2.0) / 4.0
-        ref_1d = np.array([0.0, 0.5 - s, 0.5, 0.5 + s, 1.0, 0.5 + s, 0.5, 0.5 - s])
+    def test_values_pinned(self, geom: spatial.geometry.Rectangular) -> None:
+        # Periodic Hann sampled at pixel centres, n = 8: sin²(π (k + ½) / 8).
+        ref_1d = np.sin(np.pi * (np.arange(8) + 0.5) / 8) ** 2
         w = spatial.window.Hann().weights(geom)
         assert w.shape == (8, 8)
         np.testing.assert_allclose(w, np.outer(ref_1d, ref_1d), rtol=0, atol=1e-15)
-        # Leading endpoint is zero, trailing endpoint is not (periodic).
-        assert w[0, 0] == 0.0
-        assert w[-1, -1] > 0.02
+        # Symmetric and never zero: no edge pixel is dropped.
+        np.testing.assert_allclose(w, w[::-1, ::-1], rtol=0, atol=1e-15)
+        assert w.min() == pytest.approx(np.sin(np.pi / 16) ** 4)
 
     def test_cola_at_half_hop(self) -> None:
         # w[k] + w[k + N/2] == 1 exactly for every k: true COLA at hop N/2.
         for n in (4, 8, 16, 256):
             w = spatial.window.Hann().weights(
-                spatial.geometry.Rectangular(size=(n, n))
-            )[n // 2]
+                spatial.geometry.Rectangular(size=(1, n))
+            )[0]
             np.testing.assert_allclose(
                 w[: n // 2] + w[n // 2 :], 1.0, rtol=0, atol=1e-15
             )
 
 
 def _ref(n: int, alpha: float | None) -> np.ndarray:
+    """Periodic Tukey / Hann of period ``n`` at the pixel centres (independent form)."""
     if n < 3:
         return np.ones(n)
-    if alpha is None:
-        return hann(n, sym=False)
-    return tukey(n, alpha=alpha, sym=False)
+    t = (np.arange(n) + 0.5) / n
+    a = 1.0 if alpha is None else alpha
+    if a <= 0:
+        return np.ones(n)
+    out = np.empty(n)
+    for i, ti in enumerate(t):
+        if ti < a / 2:
+            out[i] = 0.5 * (1 - np.cos(2 * np.pi * ti / a))
+        elif ti > 1 - a / 2:
+            out[i] = 0.5 * (1 - np.cos(2 * np.pi * (1 - ti) / a))
+        else:
+            out[i] = 1.0
+    return out
 
 
 @pytest.mark.parametrize("size", [(8, 8), (16, 12), (5, 7), (3, 32)])
 @pytest.mark.parametrize("alpha", [None, 0.0, 0.25, 0.5, 0.75, 1.0])
 def test_hann_tukey_convention(size: tuple[int, int], alpha: float | None) -> None:
-    """Both tapers are scipy's periodic (sym=False) windows, outer-producted."""
+    """Both tapers are periodic windows sampled at pixel centres, outer-producted."""
     geom = spatial.geometry.Rectangular(size=size)
     window = (
         spatial.window.Hann() if alpha is None else spatial.window.Tukey(alpha=alpha)
     )
     expected = np.outer(_ref(size[0], alpha), _ref(size[1], alpha))
     np.testing.assert_allclose(window.weights(geom), expected, rtol=0, atol=1e-15)
+
+
+@pytest.mark.parametrize("alpha", [0.25, 0.5, 0.75])
+def test_tukey_cola_at_its_hop(alpha: float) -> None:
+    # Overlap-add at hop n (1 - alpha / 2) sums to 1 exactly in the interior.
+    n = 16
+    hop = int(n * (1 - alpha / 2))
+    w = spatial.window.Tukey(alpha=alpha).weights(
+        spatial.geometry.Rectangular(size=(1, n))
+    )[0]
+    total = np.zeros(4 * n)
+    for start in range(0, 3 * n, hop):
+        total[start : start + n] += w
+    np.testing.assert_allclose(total[n : 2 * n], 1.0, rtol=0, atol=1e-15)
 
 
 @pytest.mark.parametrize("size", [(8, 8), (16, 12), (5, 7)])
@@ -159,14 +182,11 @@ def _merge_identity(patcher: SpatialPatcher, field: RasterField) -> np.ndarray:
 
 
 def test_overlap_add_constant_field_border() -> None:
-    """Periodic Hann at hop N/2 on a tileable 40x40 field (16/8, drop).
+    """Hann at hop N/2 on a tileable 40x40 field (16/8, drop).
 
-    Every interior seam is the constant exactly. The only defect is the
-    leading border ring — row 0 and column 0 — where the sole covering chip
-    has ``w[0] = 0``, so the accumulated weight is zero and OverlapAdd writes
-    its ``fill_value`` (NaN by default, never a value indistinguishable from
-    data). This pins today's anchor behaviour (regular samplers start at
-    anchor 0, never negative), not a property of the window alone.
+    Every pixel — interior seams and the scene's outer edge alike — is the
+    constant exactly: no taper sample is zero, so even a pixel only one chip
+    covers keeps a non-zero weight.
     """
     field = _constant_field(40)
     patcher = SpatialPatcher(
@@ -177,16 +197,11 @@ def test_overlap_add_constant_field_border() -> None:
     )
     out = _merge_identity(patcher, field)
     assert out.shape == (40, 40)
-    # Everything but the leading ring — including all interior seams (rows
-    # / cols 8, 16, 24, 32) and the trailing row/col — is exactly C.
-    np.testing.assert_allclose(out[1:, 1:], _C, rtol=1e-15, atol=0)
-    # Leading border ring: zero weight -> NaN fill.
-    assert np.isnan(out[0, :]).all()
-    assert np.isnan(out[:, 0]).all()
+    np.testing.assert_allclose(out, _C, rtol=1e-15, atol=0)
 
     # True COLA: without normalisation the doubly-covered interior is
-    # already C (sum of shifted periodic Hann == 1); only the outer band
-    # of width `step`, covered by a single chip, carries the bare taper.
+    # already C (sum of shifted Hann == 1); only the outer band of width
+    # `step`, covered by a single chip, carries the bare taper.
     raw_patcher = SpatialPatcher(
         geometry=patcher.geometry,
         sampler=patcher.sampler,
@@ -195,16 +210,14 @@ def test_overlap_add_constant_field_border() -> None:
     )
     raw = _merge_identity(raw_patcher, field)
     np.testing.assert_allclose(raw[8:32, 8:32], _C, rtol=1e-15, atol=0)
-    w1 = hann(16, sym=False)
-    # Row 0 has zero accumulated weight even un-normalised → NaN fill.
-    assert np.isnan(raw[0, 20])
-    np.testing.assert_allclose(raw[1:8, 20], _C * w1[1:8], rtol=1e-14, atol=1e-15)
+    w1 = _ref(16, None)
+    np.testing.assert_allclose(raw[0:8, 20], _C * w1[0:8], rtol=1e-14, atol=1e-15)
     np.testing.assert_allclose(raw[32:40, 20], _C * w1[8:16], rtol=1e-14, atol=0)
 
 
-def test_overlap_add_hann_step_equals_size_zero_seams() -> None:
-    """``step == size`` with Hann leaves every chip's first row/col at zero
-    weight — documented reason to overlap chips (or use Boxcar)."""
+def test_overlap_add_hann_step_equals_size_tiles_exactly() -> None:
+    """``step == size`` with Hann: every pixel is covered by one chip with a
+    non-zero weight, so the normalised merge reproduces the field."""
     field = _constant_field(32)
     patcher = SpatialPatcher(
         geometry=spatial.geometry.Rectangular(size=(16, 16)),
@@ -213,8 +226,4 @@ def test_overlap_add_hann_step_equals_size_zero_seams() -> None:
         aggregation=spatial.aggregation.OverlapAdd(),
     )
     out = _merge_identity(patcher, field)
-    seam = np.zeros((32, 32), dtype=bool)
-    seam[[0, 16], :] = True
-    seam[:, [0, 16]] = True
-    assert np.isnan(out[seam]).all()
-    np.testing.assert_allclose(out[~seam], _C, rtol=1e-15, atol=0)
+    np.testing.assert_allclose(out, _C, rtol=1e-15, atol=0)

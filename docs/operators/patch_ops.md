@@ -56,9 +56,9 @@ assert result.transform == scene.transform
 axes they carry, so NDVI's one-band chips merge into an `(H, W)` result.
 It needs the output `domain` when you build it, so build the field first.
 
-`gp.spatial.window.Hann` weighs each chip's first row and column at zero,
-so the scene's top row and left column come out `NaN`. `TriangularWindow`
-and `gp.spatial.window.Gaussian` keep them.
+Every window here (`gp.spatial.window.Hann`, `TriangularWindow`,
+`gp.spatial.window.Gaussian`) gives every pixel a non-zero weight, so the
+merged map covers the whole scene, edges included.
 
 ## Run a model on each tile
 

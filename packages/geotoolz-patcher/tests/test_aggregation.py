@@ -349,23 +349,17 @@ def _hann_merge(field: RasterField, aggregation: Any) -> np.ndarray:
 @pytest.mark.parametrize(
     "cls", [spatial.aggregation.OverlapAdd, spatial.aggregation.WeightedSum]
 )
-def test_periodic_hann_leading_ring_is_nodata(cls: type) -> None:
-    # Periodic Hann + drop: the sole chip covering row 0 / col 0 puts its
-    # w[0] = 0 sample there, so Σw = 0 — the leading ring used to be 0.0,
-    # indistinguishable from data.
+def test_hann_keeps_the_leading_ring(cls: type) -> None:
+    # The sole chip covering row 0 / col 0 weighs it sin²(π / 2n) > 0, so the
+    # scene's leading edge is data, not the fill.
     out = _hann_merge(_hann_constant_field(), cls())
-    assert np.isnan(out[0, :]).all()
-    assert np.isnan(out[:, 0]).all()
-    assert not np.isnan(out[1:, 1:]).any()
+    assert not np.isnan(out).any()
     if cls is spatial.aggregation.OverlapAdd:
-        np.testing.assert_allclose(out[1:, 1:], 2.5, rtol=1e-14)
+        np.testing.assert_allclose(out, 2.5, rtol=1e-14)
 
-    # The domain's nodata as the override.
     field = _hann_constant_field(fill=-9999.0)
     out = _hann_merge(field, cls(fill_value=field.domain.fill_value_default))
-    np.testing.assert_array_equal(out[0, :], -9999.0)
-    np.testing.assert_array_equal(out[:, 0], -9999.0)
-    assert (out[1:, 1:] > 0).all()
+    assert (out > 0).all()
 
 
 def test_by_index_grid_anchors() -> None:

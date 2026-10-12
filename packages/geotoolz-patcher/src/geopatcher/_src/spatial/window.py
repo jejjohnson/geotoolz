@@ -9,16 +9,14 @@ Five windows: `spatial.window.Boxcar` (no taper), `spatial.window.Hann`,
 `spatial.window.Tukey`, `spatial.window.Gaussian`, and a `spatial.window.Custom` escape
 hatch for caller-supplied weight functions.
 
-Taper convention: `spatial.window.Hann` and `spatial.window.Tukey` are **periodic**
-(DFT-even, ``scipy.signal.windows.*(n, sym=False)``), applied separably
-along each axis. A periodic length-``N`` Hann sums to exactly ``1`` when
-shifted by ``N / 2`` (constant overlap-add), so with even ``N`` and
-``step = N / 2`` every interior seam is covered at full weight. The first
-sample of each axis is ``0`` and the last is not, so the only cells left
-with zero accumulated weight are the leading (top / left) row and column
-of the domain — the "border ring" — which no chip covers with non-zero
-weight because regular samplers start at anchor ``0``. Axes shorter than
-3 samples cannot carry a taper and fall back to boxcar (all ones).
+Taper convention: `spatial.window.Hann` and `spatial.window.Tukey` sample
+a periodic taper of period ``N`` at the **pixel centres**, ``t = (k + 1/2) / N``
+for ``k = 0 .. N - 1``, applied separably along each axis. A length-``N``
+Hann then sums to exactly ``1`` when shifted by ``N / 2`` (constant
+overlap-add), so with even ``N`` and ``step = N / 2`` every interior seam is
+covered at full weight; and no sample is ``0``, so every pixel a chip covers
+— the scene's outer edge included — keeps a non-zero weight. Axes shorter
+than 3 samples fall back to boxcar (all ones).
 """
 
 from __future__ import annotations
@@ -63,48 +61,51 @@ class Boxcar(Window):
 
 @dataclass(eq=False)
 class Hann(Window):
-    """Periodic Hann (raised-cosine) window — the standard overlap-add taper.
+    """Hann (raised-cosine) window — the standard overlap-add taper.
 
-    Each axis of length ``n`` is ``scipy.signal.windows.hann(n, sym=False)``,
-    i.e. ``0.5 - 0.5 * cos(2 * pi * k / n)`` for ``k = 0 .. n - 1``. The
-    periodic form is exactly COLA at hop ``n / 2``: with an even patch size
-    and ``step = size / 2`` the windows of neighbouring chips sum to ``1``,
-    so even un-normalised overlap-add reproduces a constant field across
+    Each axis of length ``n`` is ``sin²(π (k + 1/2) / n)`` for
+    ``k = 0 .. n - 1``: a periodic Hann sampled at the pixel centres. It is
+    exactly COLA at hop ``n / 2``: with an even patch size and
+    ``step = size / 2`` the windows of neighbouring chips sum to ``1``, so
+    even un-normalised overlap-add reproduces a constant field across
     interior seams.
 
-    Endpoints: ``w[0] = 0`` and ``w[-1] > 0``. Merged with
-    `spatial.aggregation.OverlapAdd`, the domain's first row and column therefore get
-    zero accumulated weight (filled with ``0.0``); see the "Window
-    convention" section of the patching docs. With ``step == size`` every
-    chip's first row/column is a zero-weight seam — overlap the chips or
-    use `spatial.window.Boxcar` for exact tiling.
+    The window is symmetric and never ``0`` (the edge weight is
+    ``sin²(π / 2n)``), so merged with `spatial.aggregation.OverlapAdd` every
+    covered pixel keeps its value — the scene's first row and column
+    included — and ``step == size`` tiles reproduce the field exactly.
 
-    Axes shorter than 3 samples fall back to boxcar (all ones): a 1- or
-    2-sample taper is ``[1]`` / ``[0, 1]``, which only zeroes data.
+    Example:
+        >>> from geopatcher import spatial
+        >>> w = spatial.window.Hann().weights(
+        ...     spatial.geometry.Rectangular(size=(4, 4))
+        ... )  # (4, 4) float64
+        >>> bool((w > 0).all())
+        True
+
+    Axes shorter than 3 samples fall back to boxcar (all ones).
     """
 
     def weights(self, geometry: SpatialGeometry) -> np.ndarray:
-        from scipy.signal.windows import hann
-
         shape = geom_shape(geometry)
-        return _separable(shape, lambda n: _tapered(n, lambda m: hann(m, sym=False)))
+        return _separable(shape, lambda n: _tapered(n, lambda m: _tukey_1d(m, 1.0)))
 
 
 @dataclass(eq=False)
 class Tukey(Window):
-    """Periodic Tukey (tapered-cosine) window.
+    """Tukey (tapered-cosine) window.
 
-    Each axis of length ``n`` is
-    ``scipy.signal.windows.tukey(n, alpha, sym=False)`` — the same periodic
-    (DFT-even) convention as `spatial.window.Hann`, so ``alpha = 1.0`` is exactly
-    `spatial.window.Hann` and ``alpha = 0.0`` is exactly `spatial.window.Boxcar`. A
-    periodic Tukey is COLA at hop ``n * (1 - alpha / 2)`` (``0.75 * n`` for the
-    default ``alpha = 0.5``); other hops still reconstruct correctly under
+    Each axis of length ``n`` is a periodic Tukey of period ``n`` — cosine
+    tapers over a fraction ``alpha`` of the window, flat in between —
+    sampled at the pixel centres ``t = (k + 1/2) / n``, the same convention
+    as `spatial.window.Hann`: ``alpha = 1.0`` is exactly `spatial.window.Hann`
+    and ``alpha = 0.0`` is exactly `spatial.window.Boxcar`. It is COLA at hop
+    ``n * (1 - alpha / 2)`` (``0.75 * n`` for the default ``alpha = 0.5``);
+    other hops still reconstruct correctly under
     `spatial.aggregation.OverlapAdd`'s normalisation, just not as a partition of unity.
 
-    Like `spatial.window.Hann`, ``w[0] = 0`` for ``alpha > 0`` (the leading
-    border-ring caveat applies), and axes shorter than 3 samples fall back
-    to boxcar.
+    Like `spatial.window.Hann` it is symmetric and never ``0``, and axes
+    shorter than 3 samples fall back to boxcar.
 
     Args:
         alpha: Fraction of the window occupied by the cosine taper
@@ -115,12 +116,9 @@ class Tukey(Window):
     alpha: float = 0.5
 
     def weights(self, geometry: SpatialGeometry) -> np.ndarray:
-        from scipy.signal.windows import tukey
-
         shape = geom_shape(geometry)
         return _separable(
-            shape,
-            lambda n: _tapered(n, lambda m: tukey(m, alpha=self.alpha, sym=False)),
+            shape, lambda n: _tapered(n, lambda m: _tukey_1d(m, self.alpha))
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -223,15 +221,34 @@ def _separable(
 def _tapered(n: int, taper: Callable[[int], np.ndarray]) -> np.ndarray:
     """``taper(n)``, or boxcar (all ones) when ``n < 3``.
 
-    A periodic taper of length 1 or 2 is ``[1]`` / ``[0, 1]`` — no taper at
-    all, or one that just throws half the samples away (``step == size == 2``
-    would leave every other row with zero weight). Boxcar keeps every sample
-    and stays per-axis, so a ``(1, 256)`` strip still tapers along its long
-    axis.
+    A taper of length 1 or 2 is flat anyway (``[1]`` / ``[0.5, 0.5]``);
+    boxcar keeps unit weights and stays per-axis, so a ``(1, 256)`` strip
+    still tapers along its long axis.
     """
     if n < 3:
         return np.ones(n, dtype=np.float64)
     return np.asarray(taper(n), dtype=np.float64)
+
+
+def _tukey_1d(n: int, alpha: float) -> np.ndarray:
+    """A periodic Tukey of period ``n`` sampled at the pixel centres.
+
+    ``t = (k + 1/2) / n``; the rising taper ``0.5 * (1 - cos(2π t / alpha))`` covers
+    ``t < alpha / 2`` and mirrors at the other end. ``alpha >= 1`` is the Hann
+    ``sin²(π t)``; ``alpha <= 0`` is all ones. Shifting the samples by half a
+    pixel keeps every COLA property of the periodic window (overlap-add is
+    shift-invariant) while no sample lands on the taper's zero.
+    """
+    t = (np.arange(n, dtype=np.float64) + 0.5) / n
+    if alpha <= 0:
+        return np.ones(n, dtype=np.float64)
+    if alpha >= 1:
+        return np.sin(np.pi * t) ** 2
+    w = np.ones(n, dtype=np.float64)
+    edge = np.minimum(t, 1.0 - t)  # distance to the nearer period boundary
+    taper = edge < alpha / 2
+    w[taper] = 0.5 * (1.0 - np.cos(2.0 * np.pi * edge[taper] / alpha))
+    return w
 
 
 def _gaussian_1d(n: int, sigma_frac: float) -> np.ndarray:

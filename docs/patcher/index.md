@@ -79,9 +79,9 @@ stitched: np.ndarray = patcher.merge(out, field.domain)             # (1, 512, 5
 
 `patch.anchor` is the patch origin in pixels (`(0, 0)`, `(0, 96)`, …).
 `merge` returns a bare array; `patcher.merge_to_field(out, field)` returns
-a `GeoTensor` with the source's transform and CRS. The Hann taper is zero
-on each patch's leading row and column, so the scene's first row and
-column come back as NaN — see [Window convention](patching.md#window-convention).
+a `GeoTensor` with the source's transform and CRS. The Hann taper never
+reaches zero, so every covered pixel — the scene's edges included — comes
+back as data; see [Window convention](patching.md#window-convention).
 
 ## What's inside
 
