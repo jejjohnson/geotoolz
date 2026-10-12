@@ -253,6 +253,22 @@ class TestCogWriter:
             assert src.count == 3
             np.testing.assert_allclose(src.read(), data, rtol=1e-6)
 
+    def test_creates_missing_parent_directories(self, tmp_path: Path) -> None:
+        pytest.importorskip("zarr")  # streams via a scratch zarr store
+        target = tmp_path / "a" / "b" / "out.tif"
+        data = np.random.default_rng(0).random((1, 8, 8)).astype(np.float32)
+        domain = GeoTensor(
+            values=data, transform=rasterio.Affine.identity(), crs="EPSG:32630"
+        )
+        patch = Patch(data=data, anchor=(0, 0), indices=Window(0, 0, 8, 8))
+        agg = spatial.aggregation.OverlapAdd(
+            streaming=True, target_path=str(target), writer="cog"
+        )
+        assert agg.merge([patch], domain) == str(target)
+        with rasterio.open(target) as src:
+            np.testing.assert_allclose(src.read(), data, rtol=1e-6)
+        assert sorted(p.name for p in target.parent.iterdir()) == ["out.tif"]
+
     def test_rejects_bad_rank(self, tmp_path: Path) -> None:
         class _Domain:
             shape = (2, 2, 2, 2)

@@ -84,7 +84,7 @@ to_cog: gp.spatial.aggregation.OverlapAdd = gp.spatial.aggregation.OverlapAdd(
 path: str = to_cog.merge(patcher.split(field), field.domain)    # "scene.tif", (1, 512, 512) float32
 ```
 
-The parent directory must exist. `chunks` defaults to the COG block size. Other `cog` keys pass through as
+Missing parent directories are created. `chunks` defaults to the COG block size. Other `cog` keys pass through as
 GDAL COG creation options, such as `overview_resampling`.
 
 ## Patcher of patchers

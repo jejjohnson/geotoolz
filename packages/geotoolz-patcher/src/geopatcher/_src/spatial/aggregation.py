@@ -810,6 +810,7 @@ class OverlapAdd(Aggregation):
             )
         chunks = self.chunks or tuple(min(blocksize, n) for n in shape[-2:])
         parent = os.path.dirname(os.path.abspath(target))
+        os.makedirs(parent, exist_ok=True)  # as the zarr writer does
         with tempfile.TemporaryDirectory(dir=parent, prefix=".geopatcher-") as tmp:
             rec = self._merge_streaming(
                 patches, domain, tmp, chunks, overwrite=True, layout=layout
