@@ -59,7 +59,8 @@ patch would overflow the domain.
 
 `spatial.window.Hann` and `spatial.window.Tukey` are periodic tapers of
 period `n` sampled at the pixel centres, `t = (k + ½) / n`: per axis, Hann
-is `sin²(π (k + ½) / n)`, and the two axes combine as an outer product.
+is `sin²(π (k + ½) / n)`, and the two axes combine as an outer product
+([ADR-010](decisions.md#adr-010-tapered-windows-sample-their-taper-at-the-pixel-centres)).
 
 | Rule | Consequence |
 |---|---|

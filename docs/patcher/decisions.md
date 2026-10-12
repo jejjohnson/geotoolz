@@ -646,6 +646,50 @@ in `OverlapAdd`: its leading axes are kept.
 
 ---
 
+## ADR-010 — Tapered windows sample their taper at the pixel centres
+
+**Status.** Accepted.
+
+**Context.** `spatial.window.Hann` and `spatial.window.Tukey` were SciPy's
+periodic windows, `hann(n, sym=False)` / `tukey(n, alpha, sym=False)`,
+sampled at `t = k / n`. That puts `w[0] = 0` on every patch's first row
+and column. A pixel that only one patch covers there — the scene's first
+row and column under any regular sampler, and every seam with
+`step == size` — had zero accumulated weight, so `OverlapAdd` and
+`WeightedSum` wrote it as the fill (NaN): a padded Hann merge of a
+`(450, 400)` scene lost 849 pixels. The docs told users to crop the ring.
+
+**Decision.**
+
+- Both windows sample the same periodic taper of period `n` at the pixel
+  centres, `t = (k + ½) / n`: the odd samples of SciPy's length-`2n`
+  periodic Tukey (`tukey(2n, alpha, sym=False)[1::2]`). Hann is
+  `sin²(π (k + ½) / n)`, symmetric and never zero.
+- The overlap-add properties are kept, since overlap-add is
+  shift-invariant: Hann sums to 1 at hop `n / 2`, Tukey at hop
+  `n (1 − alpha / 2)`; `Tukey(alpha=1)` is Hann, `alpha=0` is Boxcar.
+- Axes shorter than 3 samples stay boxcar.
+
+**Alternatives considered.**
+
+- *Keep the periodic windows and fall back to an unweighted mean where a
+  covered pixel has zero weight* — fixes the scene edge but needs the same
+  special case in every aggregation (in-memory, streaming, `WeightedSum`),
+  and `step == size` would still blend nothing at its zero-weight seams.
+- *Symmetric windows (`sym=True`)* — zero at both ends, so they lose two
+  rows per patch and are not COLA at `n / 2`.
+- *Start the samplers at a negative anchor* — changes every sampler's
+  anchors and the patch count to hide a property of two windows.
+
+**Consequences.** Every covered pixel keeps its value: the 849 NaNs of the
+example are gone and `step == size` reproduces the field. The weights
+change slightly (e.g. the 8-sample Hann was `[0, 0.146, …]`, now
+`[0.038, 0.309, …]`), so merged outputs of overlapping tapered patches
+differ in the last digits from earlier releases; a window's config is
+unchanged.
+
+---
+
 ## How to add a decision
 
 1. Open a PR with the proposed addition. The PR description argues the
