@@ -76,7 +76,7 @@ add it here first.
 | `_src.stack` | `geoproducts.stack` — any readers onto one reference grid | public |
 | `_src.presets` | `Recipe`, `rgb_recipe`, `geotoolz_module` (the lazy geotoolz import), `parallax_correct` | `goes`, `himawari` recipes and presets |
 | `_src.net` | `retrying` (one retry loop for raising *and* response-returning clients), `retry_after_seconds` (`Retry-After` or backoff, clamped), `stream_to_file` (atomic `.part` writes), `bearer_headers_for` (a token only ever sent to its own host) | `carbonmapper`, `_src.s3` |
-| `_src.s3` | anonymous public buckets, unsigned through `geocloud.files`: `list_objects`, `download_object`, `object_url`, `s3_wait` (S3's spurious `NoSuchBucket`) | `goes.aws`, `himawari.aws` |
+| `_src.s3` | anonymous public buckets, unsigned through `geocloud.files`: `list_objects`, `download_object`, `object_url` (retries come from geotoolz-cloud) | `goes.aws`, `himawari.aws` |
 | `_src.files` | `atomic_path` / `atomic_write_text` / `write_private_json` — complete-or-absent writes; `private=True` is owner-only (`0600`) from the first byte | `himawari.aws`, `_src.credentials`, `_src.net` |
 | `_src.credentials` | `auth_path(provider)` (`~/.geoproducts/auth_<provider>.json`), `read_json_config`, `write_private_json`, `jwt_expiry` | `carbonmapper` |
 | `_src.query` | `validate_lonlat_bbox`, `as_utc`, `rfc3339_utc`, `time_interval` (STAC / OGC ranges) | `carbonmapper`, `goes.aws`, `himawari.aws` |

@@ -36,11 +36,6 @@ __all__ = [
 # (``ABI-L2-ACMC``, ``ABI-L2-MCMIPF``, ...).
 PRODUCTS: tuple[str, ...] = ("ABI-L1b-RadF", "ABI-L1b-RadC", "ABI-L1b-RadM")
 _SATELLITES = (16, 17, 18, 19)
-# Transient failures (5xx, dropped connections, a spurious ``NoSuchBucket``
-# for a bucket that answered the listing) are retried with exponential
-# backoff; a missing key or a refused request fails at once.
-_ATTEMPTS = 4
-_BACKOFF_S = 1.0
 _KEY_RE = re.compile(
     r"OR_(?P<product>ABI-L(?:1b|2)-[A-Za-z0-9]+?)(?P<sector>[12])?-M(?P<mode>\d)"
     r"(?:C(?P<channel>\d{2}))?_G(?P<satellite>\d{2})"
@@ -154,13 +149,7 @@ def list_files(
     hour = start.replace(minute=0, second=0, microsecond=0)
     while hour < end:
         prefix = f"{product}/{hour:%Y}/{hour:%j}/{hour:%H}/"
-        for key, size in s3.list_objects(
-            bucket(satellite),
-            prefix,
-            attempts=_ATTEMPTS,
-            backoff_s=_BACKOFF_S,
-            extra="goes",
-        ):
+        for key, size in s3.list_objects(bucket(satellite), prefix, extra="goes"):
             try:
                 item = parse_key(key, size=size)
             except ValueError:
@@ -210,12 +199,7 @@ def download(
     if target.exists() and not overwrite:
         return target
     return s3.download_object(
-        bucket(satellite or item.satellite),
-        item.key,
-        target,
-        attempts=_ATTEMPTS,
-        backoff_s=_BACKOFF_S,
-        extra="goes",
+        bucket(satellite or item.satellite), item.key, target, extra="goes"
     )
 
 

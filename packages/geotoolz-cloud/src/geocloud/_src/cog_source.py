@@ -79,6 +79,7 @@ import numpy as np
 
 from geocloud._src.aio import _run_coroutine_safely
 from geocloud._src.extras import missing_extra
+from geocloud._src.retry import awith_bucket_retry, with_bucket_retry
 
 
 if TYPE_CHECKING:
@@ -516,9 +517,18 @@ class CogSource:
                 )
             object_path = path
 
+        def probe() -> None:  # tells a missing bucket from a missing key
+            import obstore
+
+            parent = object_path.rsplit("/", 1)[0] if "/" in object_path else None
+            obstore.list_with_delimiter(store, prefix=parent)
+
         # Upstream only warns on striped TIFFs; the tiled check below raises.
         geotiff = await _with_timeout(
-            async_geotiff.GeoTIFF.open(object_path, store=store),
+            awith_bucket_retry(
+                lambda: async_geotiff.GeoTIFF.open(object_path, store=store),
+                probe=probe,
+            ),
             timeout=timeout,
             message=f"opening COG {url!r}",
         )
@@ -605,7 +615,7 @@ class CogSource:
             store = get_obstore(self.url, storage_options=self.storage_options)
             key = _uri_path(self.url)
         try:
-            meta = store.head(key)
+            meta = with_bucket_retry(lambda: store.head(key))
         except Exception as exc:
             warnings.warn(
                 f"CogSource: HEAD of {self.url!r} failed ({exc}); changes to "

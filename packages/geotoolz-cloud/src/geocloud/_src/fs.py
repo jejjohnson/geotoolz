@@ -34,6 +34,7 @@ from geocloud._src.files import (
     rm,
     write_bytes,
 )
+from geocloud._src.retry import with_bucket_retry
 from geocloud._src.store import local_path
 
 
@@ -74,7 +75,11 @@ class _ObjectFile(AbstractBufferedFile):
         target = _resolve(self.path, self.fs._options())
         if end <= start:
             return b""
-        return bytes(obstore.get_range(target.store, target.key, start=start, end=end))
+        return with_bucket_retry(
+            lambda: bytes(
+                obstore.get_range(target.store, target.key, start=start, end=end)
+            )
+        )
 
 
 class GeoCloudFileSystem(AbstractFileSystem):
@@ -180,7 +185,11 @@ class GeoCloudFileSystem(AbstractFileSystem):
         target = _resolve(path, self._options())
         if end <= start:
             return b""
-        return bytes(obstore.get_range(target.store, target.key, start=start, end=end))
+        return with_bucket_retry(
+            lambda: bytes(
+                obstore.get_range(target.store, target.key, start=start, end=end)
+            )
+        )
 
     def pipe_file(
         self, path: str, value: bytes, mode: str = "overwrite", **kwargs: Any

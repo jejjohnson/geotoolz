@@ -44,6 +44,7 @@ import obstore
 
 from geocloud._src.aio import _run_coroutine_safely
 from geocloud._src.redact import redact
+from geocloud._src.retry import awith_bucket_retry, with_bucket_retry
 from geocloud._src.store import (
     Location,
     _absolute,
@@ -136,6 +137,20 @@ class _Target:
     def name(self) -> str:
         """The last path segment of the key (the file name)."""
         return PurePosixPath(self.key).name
+
+    def probe(self) -> None:
+        """List the key's parent: tells a bodiless HEAD 404 for a missing
+        bucket from one for a missing key (`geocloud._src.retry`)."""
+        if self.local or not self.listable:
+            return
+        parent = self.key.rsplit("/", 1)[0] if "/" in self.key else None
+        obstore.list_with_delimiter(self.store, prefix=parent)
+
+    def head(self) -> Mapping[str, Any]:
+        """The object's metadata; ``FileNotFoundError`` when it is absent."""
+        return with_bucket_retry(
+            lambda: obstore.head(self.store, self.key), probe=self.probe
+        )
 
     def describe(self, meta: Mapping[str, Any]) -> ObjectInfo:
         return ObjectInfo(
@@ -256,11 +271,18 @@ def ls(
     if recursive:
         found = [
             target.describe(meta)
-            for page in obstore.list(target.store, prefix=_prefix(target))
-            for meta in page
+            for meta in with_bucket_retry(
+                lambda: [
+                    meta
+                    for page in obstore.list(target.store, prefix=_prefix(target))
+                    for meta in page
+                ]
+            )
         ]
     else:
-        level = obstore.list_with_delimiter(target.store, prefix=_prefix(target))
+        level = with_bucket_retry(
+            lambda: obstore.list_with_delimiter(target.store, prefix=_prefix(target))
+        )
         found = [target.describe(meta) for meta in level["objects"]]
         found += [
             ObjectInfo(target.child(path) + "/", 0, is_dir=True)
@@ -285,7 +307,7 @@ def info(
         3
     """
     target = _resolve(uri, storage_options)
-    return target.describe(obstore.head(target.store, target.key))
+    return target.describe(target.head())
 
 
 def exists(uri: Location, *, storage_options: Mapping[str, Any] | None = None) -> bool:
@@ -321,7 +343,10 @@ def read_bytes(
         b'abc'
     """
     target = _resolve(uri, storage_options)
-    return bytes(obstore.get(target.store, target.key).bytes())
+    return with_bucket_retry(
+        lambda: bytes(obstore.get(target.store, target.key).bytes()),
+        probe=target.probe,
+    )
 
 
 def write_bytes(
@@ -336,7 +361,7 @@ def write_bytes(
     atomically: readers see the old object or the new one, never a part.
     """
     target = _resolve(uri, storage_options)
-    obstore.put(target.store, target.key, bytes(data))
+    with_bucket_retry(lambda: obstore.put(target.store, target.key, bytes(data)))
 
 
 def open(  # `geocloud.files.open`, like `fsspec.open`
@@ -374,7 +399,9 @@ def open(  # `geocloud.files.open`, like `fsspec.open`
     """
     target = _resolve(uri, storage_options)
     if mode == "rb":
-        return obstore.open_reader(target.store, target.key)
+        return with_bucket_retry(
+            lambda: obstore.open_reader(target.store, target.key), probe=target.probe
+        )
     if mode == "wb":
         return obstore.open_writer(target.store, target.key)
     raise ValueError(f"open: mode must be 'rb' or 'wb'; got {mode!r}.")
@@ -408,7 +435,7 @@ def _range_options(
 
 def _stream_to_file(source: _Target, dest: Path) -> None:
     """Fetch ``source`` range by range into ``dest`` through a ``.part`` file."""
-    spans, pinned = _ranges(obstore.head(source.store, source.key))
+    spans, pinned = _ranges(source.head())
     expected = spans[-1][1] if spans else 0
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.part")
@@ -416,12 +443,14 @@ def _stream_to_file(source: _Target, dest: Path) -> None:
         written = 0
         with part.open("wb") as fh:
             for start, end in spans:
-                result = obstore.get(
-                    source.store,
-                    source.key,
-                    options=_range_options(spans, (start, end), pinned),
+                options = _range_options(spans, (start, end), pinned)
+                written += fh.write(
+                    with_bucket_retry(
+                        lambda options=options: obstore.get(
+                            source.store, source.key, options=options
+                        ).bytes()
+                    )
                 )
-                written += fh.write(result.bytes())
         if written != expected:
             raise OSError(
                 f"short read of {_r(source.child(source.key))}: "
@@ -434,16 +463,20 @@ def _stream_to_file(source: _Target, dest: Path) -> None:
 
 async def _stream_between(source: _Target, dest: _Target) -> None:
     """Copy across stores: ranged GETs feeding one multipart upload."""
-    spans, pinned = _ranges(await obstore.head_async(source.store, source.key))
+    spans, pinned = _ranges(
+        await awith_bucket_retry(
+            lambda: obstore.head_async(source.store, source.key), probe=source.probe
+        )
+    )
+
+    async def chunk(options: Any) -> bytes:
+        result = await obstore.get_async(source.store, source.key, options=options)
+        return bytes(await result.bytes_async())
 
     async def chunks() -> AsyncIterator[bytes]:
         for start, end in spans:
-            result = await obstore.get_async(
-                source.store,
-                source.key,
-                options=_range_options(spans, (start, end), pinned),
-            )
-            yield bytes(await result.bytes_async())
+            options = _range_options(spans, (start, end), pinned)
+            yield await awith_bucket_retry(lambda options=options: chunk(options))
 
     await obstore.put_async(dest.store, dest.key, chunks())
 
@@ -495,9 +528,11 @@ def copy(
     if dest.local:
         _stream_to_file(source, Path(dest.root) / dest.key)
     elif source.store is dest.store and source.root == dest.root:
-        obstore.copy(dest.store, source.key, dest.key)
+        with_bucket_retry(lambda: obstore.copy(dest.store, source.key, dest.key))
     elif source.local:
-        obstore.put(dest.store, dest.key, Path(source.root) / source.key)
+        with_bucket_retry(
+            lambda: obstore.put(dest.store, dest.key, Path(source.root) / source.key)
+        )
     else:
         _run_coroutine_safely(_stream_between(source, dest))
     return dst
@@ -625,11 +660,12 @@ def _walk(target: _Target) -> dict[str, tuple[str, int]]:
     """``{path relative to target: (store key, size)}`` of everything below it."""
     base = _prefix(target)
     cut = len(base) + 1 if base else 0
-    return {
-        meta["path"][cut:]: (meta["path"], int(meta["size"]))
-        for page in obstore.list(target.store, prefix=base)
-        for meta in page
-    }
+    listed = with_bucket_retry(
+        lambda: [
+            meta for page in obstore.list(target.store, prefix=base) for meta in page
+        ]
+    )
+    return {meta["path"][cut:]: (meta["path"], int(meta["size"])) for meta in listed}
 
 
 def rm(
@@ -661,15 +697,17 @@ def rm(
     """
     target = _resolve(uri, storage_options)
     if not recursive:
-        obstore.head(target.store, target.key)  # FileNotFoundError if absent
-        obstore.delete(target.store, target.key)
+        target.head()  # FileNotFoundError if absent
+        with_bucket_retry(lambda: obstore.delete(target.store, target.key))
         return 1
     _require_listable(target, uri)
-    keys = [
-        meta["path"]
-        for page in obstore.list(target.store, prefix=_prefix(target))
-        for meta in page
-    ]
+    keys = with_bucket_retry(
+        lambda: [
+            meta["path"]
+            for page in obstore.list(target.store, prefix=_prefix(target))
+            for meta in page
+        ]
+    )
     for start in range(0, len(keys), _DELETE_BATCH):
         obstore.delete(target.store, keys[start : start + _DELETE_BATCH])
     return len(keys)

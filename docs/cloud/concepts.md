@@ -31,6 +31,11 @@ head: bytes = bytes(store.get_range(object_key(uri), start=0, length=16_384))  #
   key, so different options give a different client.
 - **Fork-safe.** `clear_obstore_pool()` drops every client. It runs by
   itself in a forked child; call it after rotating credentials.
+- **Retried.** obstore retries server errors, dropped connections and
+  throttling. On top of that, every `geocloud.files` verb, `CogSource`
+  and the fsspec view retry S3's spurious `NoSuchBucket` (an answer S3
+  sometimes gives for a bucket that exists) with exponential backoff; a
+  missing key still fails at once.
 
 ## Store roots
 

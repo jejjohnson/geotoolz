@@ -1404,5 +1404,5 @@ helper is added here, not inline in one caller.
 | `geoproducts._src.net` | HTTP plumbing shared by every product reader. | `backoff_seconds`, `retry_after_seconds`, `retrying`, `stream_to_file`, `bearer_headers_for` |
 | `geoproducts._src.presets` | Shared building blocks of the per-product geotoolz presets. | `Recipe`, `geotoolz_module`, `rgb_recipe`, `parallax_correct` |
 | `geoproducts._src.query` | Query-parameter helpers shared by provider clients: bounding boxes and times. | `validate_lonlat_bbox`, `as_utc`, `rfc3339_utc`, `time_interval` |
-| `geoproducts._src.s3` | Anonymous access to public S3 buckets, through `geocloud.files`. | `object_url`, `s3_wait`, `list_objects`, `download_object` |
+| `geoproducts._src.s3` | Anonymous access to public S3 buckets, through `geocloud.files`. | `object_url`, `list_objects`, `download_object` |
 | `geoproducts._src.stack` | Put several readers on one grid. | `stack` |
