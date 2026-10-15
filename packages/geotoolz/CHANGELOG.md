@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.3](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.10.2...geotoolz-v0.10.3) (2026-10-15)
+
+
+### Features
+
+* **geotoolz:** publish the helpers plume and matched_filter import ([#484](https://github.com/jejjohnson/geotoolz/issues/484)) ([ad940fe](https://github.com/jejjohnson/geotoolz/commit/ad940fe35f2ca2b6dfd8fd616087d1e369e96fb6)), closes [#480](https://github.com/jejjohnson/geotoolz/issues/480)
+
 ## [0.10.2](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.10.1...geotoolz-v0.10.2) (2026-10-12)
 
 
