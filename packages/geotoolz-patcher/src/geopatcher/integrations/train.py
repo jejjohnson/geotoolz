@@ -153,14 +153,21 @@ class XarrayWindowDataset(TrainingDataset):
         block_reader: when ``True``, the dataset advertises ``build_batch_iter``
             so the adapter drives the cloud-scale block reader (coalesced reads
             + window shuffle + sharding). Default ``False`` (per-example path).
-        buffer_size_in_bytes, buffer_diversity: shuffle-buffer sizing for the
-            block reader (ignored unless ``block_reader=True``).
-        shard_index, shard_count: multi-host sharding for the block reader. When
-            both are ``None`` and ``block_reader=True`` they are auto-detected
-            from JAX (``process_index`` / ``process_count``) at build time.
+        buffer_size_in_bytes: shuffle-buffer byte budget for the block reader
+            (ignored unless ``block_reader=True``).
+        buffer_diversity: blocks represented in the shuffle buffer (ignored
+            unless ``block_reader=True``).
+        shard_index: this host's shard for the block reader. When it and
+            ``shard_count`` are both ``None`` and ``block_reader=True``, both
+            are auto-detected from JAX (``process_index`` / ``process_count``)
+            at build time.
+        shard_count: number of shards for the block reader (see
+            ``shard_index``).
         split_guard: origins to drop on the interior side of each split
             boundary. ``None`` → auto-derive from the widest stencil span.
-        seed, split: standard `TrainingDataset` knobs.
+        seed: RNG seed, the standard `TrainingDataset` knob.
+        split: ``"train"``, ``"val"`` or ``"test"``, the standard
+            `TrainingDataset` knob.
     """
 
     forbid_in_yaml: ClassVar[bool] = True  # source carries an open store
