@@ -4,8 +4,7 @@ geotoolz sits in GeoStack, tier 1 (operators on arrays and GeoTensors). Its
 packages must not import or depend on filterax, finitevolX, gauss_flows,
 gaussx, geonnax, kernellib, optax_bayes, plumax, pyrox, radtrax, somax,
 spectraldiffx, vardax, xrtoolz, xtremax: they sit above it, or beside it in the
-same tier. Every import of a stack library is declared: a module-level import
-as a base dependency, a lazy or ``try``-guarded one as a dependency or an
+same tier. Every import of a stack library is declared, as a dependency or an
 extra. Dev, docs and tutorial dependency groups are not checked.
 
 The rules: https://github.com/jejjohnson/geostack/blob/main/docs/api/dependency_graph.md
@@ -96,6 +95,10 @@ ALLOWED: dict[str, str] = {
     "pipekit_train": "pipekit-train",
 }
 
+#: imports left undeclared on purpose, kept in step with geostack:
+#: distribution -> reason
+UNDECLARED_OK: dict[str, str] = {}
+
 
 def _norm(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
@@ -176,12 +179,11 @@ def test_stack_imports_are_declared(dist: str) -> None:
     for f in _files(PACKAGES[dist][1]):
         for top, how, line in _imports(f):
             target = ALLOWED.get(top)
-            if target is None or target == dist or how == "typing":
+            if target in (None, dist) or how == "typing" or target in UNDECLARED_OK:
                 continue
-            if target not in (base if how == "module" else base | extras):
-                kind = "a dependency" if how == "module" else "a dependency or extra"
+            if target not in base | extras:
                 found.append(
                     f"{f.relative_to(ROOT)}:{line} imports {top} ({how});"
-                    f" declare {target} as {kind} of {dist}"
+                    f" declare {target} as a dependency or an extra of {dist}"
                 )
     assert not found, "\n".join(found)
