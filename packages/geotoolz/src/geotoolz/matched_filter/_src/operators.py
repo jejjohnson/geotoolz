@@ -33,12 +33,18 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 import numpy as np
 from pipekit import Operator
 
-from geotoolz._src.config import callable_name, jsonable, reject_config_summary
-from geotoolz._src.fitted import fit_once
-from geotoolz._src.samples import cube_to_samples
-from geotoolz._src.shape import keep_band_axis, require_ndim
-from geotoolz._src.valid import invalid_values, restore_fill
-from geotoolz._src.wrap import wrap_like
+from geotoolz.carrier import (
+    callable_name,
+    cube_to_samples,
+    fit_once,
+    invalid_values,
+    jsonable,
+    keep_band_axis,
+    reject_config_summary,
+    require_ndim,
+    restore_fill,
+    wrap_like,
+)
 from geotoolz.matched_filter._src.array import (
     AdaptiveBackground,
     ClusterBackground,

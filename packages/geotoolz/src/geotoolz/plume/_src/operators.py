@@ -45,32 +45,28 @@ from pyproj import CRS, Transformer
 from shapely.geometry import LineString
 from shapely.ops import unary_union
 
-from geotoolz._src.bands import SENTINEL2_L2A_BANDS, BandRef, resolve_band
-from geotoolz._src.config import (
+from geotoolz.carrier import (
+    SENTINEL2_L2A_BANDS,
+    BandRef,
     as_tuple,
     callable_name,
+    carried_fill,
+    import_optional,
+    invalid_values,
+    keep_band_axis,
+    mask_invalid_to_nan,
+    over_frames,
     reject_config_summary,
-)
-from geotoolz._src.geo import (
     require_geotensor,
     require_grid_match,
+    require_ndim,
     require_projected_crs,
-)
-from geotoolz._src.labels import (
-    DEFAULT_REGIONPROPS,
-    regionprops_frame,
-    skeleton_length,
-)
-from geotoolz._src.optional import import_optional
-from geotoolz._src.shape import keep_band_axis, over_frames, require_ndim
-from geotoolz._src.valid import (
-    carried_fill,
-    invalid_values,
-    mask_invalid_to_nan,
+    resolve_band,
     valid_pixels,
     wrap_filled,
+    wrap_like,
 )
-from geotoolz._src.wrap import wrap_like
+from geotoolz.measure import DEFAULT_REGIONPROPS, regionprops_frame, skeleton_length
 from geotoolz.plume._src.array import (
     ColumnUnit,
     Connectivity,

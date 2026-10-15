@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from geotoolz.measure._src.array import (
     DEFAULT_REGIONPROPS,
+    Connectivity,
     label_components,
     regionprops_frame,
     regionprops_to_crs_units,
@@ -23,6 +24,7 @@ from geotoolz.measure._src.operators import (
 __all__ = [
     "DEFAULT_REGIONPROPS",
     "RANSAC",
+    "Connectivity",
     "FindContours",
     "LabelConnectedComponents",
     "ProfileLine",

@@ -21,20 +21,40 @@ Nodata:
 
 Bands:
     `resolve_band` / `resolve_bands` (an integer position or a name looked
-    up in ``band_names``, ``descriptions``, ``bands``), `band_names`.
+    up in ``band_names``, ``descriptions``, ``bands``), `band_names`;
+    `BandRef` (the type of a band reference) and `SENTINEL2_L2A_BANDS`
+    (the canonical Sentinel-2 L2A band order).
 
 Shape:
     `band_axis`, `require_ndim`, `map_frames` / `over_frames` (run a
-    per-scene function on each frame of a ``(T, C, H, W)`` stack) and
-    `keep_band_axis` (a band-collapsing result keeps its time axis).
+    per-scene function on each frame of a ``(T, C, H, W)`` stack),
+    `keep_band_axis` (a band-collapsing result keeps its time axis) and
+    `single_band` (pick one band as a 2-D plane).
+
+Samples:
+    `cube_to_samples` / `samples_to_cube` turn a ``(c, h, w)`` cube into
+    an ``(n, c)`` sample matrix for a per-pixel estimator and back;
+    `sample_layout` / `SampleLayout` describe the round trip.
 
 Grids:
     `require_geotensor`, `require_projected_crs`, `require_grid_match`,
-    `grid_matches`.
+    `grid_matches`, and `pixel_xy` (map coordinates of pixel centres).
 
 Dtypes and fitting:
     `as_float` (promote integer DNs before arithmetic) and `fit_once`
     (fit on first call, once, without races).
+
+Config:
+    The operator side of the contract: `jsonable` coerces a
+    ``get_config()`` value to JSON builtins, `as_tuple` turns lists back
+    into tuples on reload, `mapping_to_pairs` / `mapping_from_pairs`
+    carry non-string-keyed mappings, `nested_config` / `callable_name`
+    describe a nested operator or a callable, and `reject_config_summary`
+    refuses a debug summary passed back to a constructor.
+
+Optional dependencies:
+    `import_optional` imports an extra's module inside the function that
+    needs it, with an error naming the extra.
 
 Example:
     An operator that keeps the carrier contract::
@@ -61,14 +81,37 @@ Example:
 
 from __future__ import annotations
 
-from geotoolz._src.bands import band_names, resolve_band, resolve_bands
+from geotoolz._src.bands import (
+    SENTINEL2_L2A_BANDS,
+    BandRef,
+    band_names,
+    resolve_band,
+    resolve_bands,
+)
+from geotoolz._src.config import (
+    as_tuple,
+    callable_name,
+    jsonable,
+    mapping_from_pairs,
+    mapping_to_pairs,
+    nested_config,
+    reject_config_summary,
+)
 from geotoolz._src.dtype import as_float
 from geotoolz._src.fitted import fit_once
 from geotoolz._src.geo import (
     grid_matches,
+    pixel_xy,
     require_geotensor,
     require_grid_match,
     require_projected_crs,
+)
+from geotoolz._src.optional import import_optional
+from geotoolz._src.samples import (
+    SampleLayout,
+    cube_to_samples,
+    sample_layout,
+    samples_to_cube,
 )
 from geotoolz._src.shape import (
     band_axis,
@@ -76,6 +119,7 @@ from geotoolz._src.shape import (
     map_frames,
     over_frames,
     require_ndim,
+    single_band,
 )
 from geotoolz._src.valid import (
     carried_fill,
@@ -90,17 +134,30 @@ from geotoolz._src.wrap import INHERIT, wrap_like
 
 __all__ = [
     "INHERIT",
+    "SENTINEL2_L2A_BANDS",
+    "BandRef",
+    "SampleLayout",
     "as_float",
+    "as_tuple",
     "band_axis",
     "band_names",
+    "callable_name",
     "carried_fill",
+    "cube_to_samples",
     "fit_once",
     "grid_matches",
+    "import_optional",
     "invalid_values",
+    "jsonable",
     "keep_band_axis",
     "map_frames",
+    "mapping_from_pairs",
+    "mapping_to_pairs",
     "mask_invalid_to_nan",
+    "nested_config",
     "over_frames",
+    "pixel_xy",
+    "reject_config_summary",
     "require_geotensor",
     "require_grid_match",
     "require_ndim",
@@ -108,6 +165,9 @@ __all__ = [
     "resolve_band",
     "resolve_bands",
     "restore_fill",
+    "sample_layout",
+    "samples_to_cube",
+    "single_band",
     "valid_pixels",
     "wrap_filled",
     "wrap_like",

@@ -56,7 +56,7 @@ import numpy as np
 from jaxtyping import Float, Int
 from scipy import ndimage, stats
 
-from geotoolz._src.samples import cube_to_samples
+from geotoolz.carrier import cube_to_samples
 
 
 MeanMethod = Literal["mean", "median", "trimmed", "huber"]
