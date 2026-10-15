@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from geotoolz.segment._src.array import (
+    ThresholdMode,
     fill_invalid,
     mask_nms,
     merge_nearby_instances,
@@ -36,6 +37,7 @@ __all__ = [
     "Quickshift",
     "RandomWalker",
     "Threshold",
+    "ThresholdMode",
     "Watershed",
     "fill_invalid",
     "mask_nms",

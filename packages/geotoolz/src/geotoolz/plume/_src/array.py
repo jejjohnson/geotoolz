@@ -21,10 +21,9 @@ import numpy as np
 from jaxtyping import Bool, Float, Num, Shaped
 from shapely.geometry import MultiPoint
 
-from geotoolz._src.geo import pixel_xy
-from geotoolz._src.labels import Connectivity, label_components, skeleton_length
-from geotoolz._src.shape import single_band
-from geotoolz.segment._src.array import ThresholdMode, threshold_mask
+from geotoolz.carrier import pixel_xy, single_band
+from geotoolz.measure import Connectivity, label_components, skeleton_length
+from geotoolz.segment import ThresholdMode, threshold_mask
 
 
 ColumnUnit = Literal["ppm_m", "mol_m2", "kg_m2"]

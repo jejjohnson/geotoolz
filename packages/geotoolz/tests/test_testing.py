@@ -128,3 +128,35 @@ def test_carrier_is_the_shared_toolkit() -> None:
     assert wrap_like is wrap.wrap_like
     assert mask_invalid_to_nan is valid.mask_invalid_to_nan
     assert over_frames is shape.over_frames
+
+
+def test_carrier_publishes_the_moving_families_helpers() -> None:
+    """The names `plume` and `matched_filter` need are the `_src` objects (#480)."""
+    import geotoolz.carrier as carrier
+    from geotoolz._src import bands, config, geo, optional, samples, shape
+
+    for module in (bands, config, geo, optional, samples, shape):
+        for name in carrier.__all__:
+            if hasattr(module, name):
+                assert getattr(carrier, name) is getattr(module, name), name
+
+
+@pytest.mark.parametrize("family", ["plume", "matched_filter"])
+def test_moving_families_import_no_private_helpers(family: str) -> None:
+    """Gate P6: code moving to plumax.geo / radtrax.geo uses public names only.
+
+    Their own ``<family>._src`` is moving with them; every other geotoolz
+    name must come from a public module (#480).
+    """
+    import ast
+    from pathlib import Path
+
+    import geotoolz
+
+    src = Path(geotoolz.__file__).parent / family / "_src"
+    for path in src.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                module = node.module
+                own = module.startswith(f"geotoolz.{family}.")
+                assert own or "._src" not in module, f"{path.name}: {module}"
