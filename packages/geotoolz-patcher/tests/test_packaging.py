@@ -43,6 +43,7 @@ IMPORT_TO_DIST = {
 # Extras that are deliberately not part of ``[patch-full]``, and why.
 NOT_IN_PATCH_FULL = {
     "pipekit": "the operator-graph bridge, not a Field substrate",
+    "train": "the training-data bridge to pipekit-train, not a Field substrate",
 }
 
 

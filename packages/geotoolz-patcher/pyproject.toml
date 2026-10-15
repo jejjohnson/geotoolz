@@ -80,6 +80,11 @@ patch-full = [
 # The patcher core stays framework-free; only this integration module
 # imports `pipekit.Operator`.
 pipekit = ["pipekit>=0.0.2"]
+# Training-data bridge: `geopatcher.integrations.train.XarrayWindowDataset`, a
+# pipekit-train `TrainingDataset` of windows from lazy xarray / Zarr stores.
+# It rides the Equinox adapter's Grain path, so the extra pulls that adapter
+# (jax, equinox, optax, grain, orbax) with pipekit-train.
+train = ["pipekit-train[equinox]>=0.0.2", "xarray>=2024.1", "zarr>=3.0"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"

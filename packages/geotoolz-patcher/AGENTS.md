@@ -19,6 +19,7 @@ contract, and add one for a new decision.
 | `geopatcher.observe` | hooks, the resumable journal, error records, strict mode |
 | `geopatcher.config` | `axis_envelope`, `from_config`, `config_from_fields` |
 | `geopatcher.integrations.pipekit` | pipekit operator wrappers (`[pipekit]` extra) |
+| `geopatcher.integrations.train` | `XarrayWindowDataset`, windowed-Zarr training data for pipekit-train (`[train]` extra) |
 
 Facades re-export only; implementation lives in `_src/` (`_src/spatial/`,
 `_src/temporal/`, `_src/fields/`, `_src/runners.py`, …). Enforced by
