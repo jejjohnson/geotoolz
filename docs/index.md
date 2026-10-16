@@ -30,7 +30,7 @@ an operator — *tile → predict → stitch* is one more `Sequential`.
 
 | Package | Import | Use it to… | Docs |
 |---|---|---|---|
-| `geotoolz` | `geotoolz` | compute on rasters with carrier-preserving operators (radiometry, indices, masks, geometry, ML, …) | [Operators](operators/index.md) |
+| `geotoolz-ops` | `geoops` | compute on rasters with carrier-preserving operators (radiometry, indices, masks, geometry, ML, …) | [Operators](operators/index.md) |
 | `geotoolz-patcher` | `geopatcher` | split a field into patches, run an operator per patch, stitch back (Geometry × Sampler × Window × Aggregation) | [Patcher](patcher/index.md) |
 | `geotoolz-catalog` | `geocatalog` | find, index, join, load and stage files (`GeoSlice` queries over GeoParquet) | [Catalog](catalog/index.md) |
 | `geotoolz-cloud` | `geocloud` | reach object storage: one client pool, file verbs, credentials, COG reads and writes | [Cloud](cloud/index.md) |
@@ -54,7 +54,7 @@ pip install geotoolz-products                 # product readers
 
 | To connect… | Install |
 |---|---|
-| operators ↔ patcher (`geotoolz.patch_ops`) | `geotoolz[patch]` |
+| operators ↔ patcher (`geoops.patch_ops`) | `geotoolz-ops[patch]` |
 | catalog → patcher (`geocatalog.patch.field_for`) | `geotoolz-catalog[patch]` |
 | catalog staging from buckets (`geocatalog.staging.stage`) | `geotoolz-catalog[cloud]` |
 | catalog ← STAC searches (`geocatalog.sources.from_stac_search`) | `geotoolz-catalog[stac]` |
@@ -76,7 +76,7 @@ Summer-2024 NDVI over Lake Tahoe: discover Sentinel-2 L2A on the Planetary
 Computer, mosaic the red and near-infrared bands onto one grid, and run
 NDVI tile by tile with feathered seams. Every binding is typed and every
 array is annotated with its shape. It needs
-`pip install 'geotoolz[patch]' 'geotoolz-catalog[stac,cloud,patch]'`.
+`pip install 'geotoolz-ops[patch]' 'geotoolz-catalog[stac,cloud,patch]'`.
 
 ```python
 import numpy as np
@@ -87,8 +87,8 @@ from georeader.geotensor import GeoTensor
 
 import geocatalog as gc
 import geopatcher as gp
-import geotoolz as gz
-from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
+import geoops as gz
+from geoops.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 client: pystac_client.Client = pystac_client.Client.open(
     "https://planetarycomputer.microsoft.com/api/stac/v1",

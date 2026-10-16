@@ -3,7 +3,7 @@
 Per-pixel composites over co-registered frame stacks and matched multi-source tuples.
 
 - **Temporal composites:** `MedianComposite`, `MaxNDVIComposite` (NDVI via
-  `geotoolz.indices.ndvi`), `CloudFreeComposite`, `MinCloudComposite`, `BAPComposite`
+  `geoops.indices.ndvi`), `CloudFreeComposite`, `MinCloudComposite`, `BAPComposite`
 - **Multi-source fusion:** `StackMatched`, `BlendMatched`
 - **Calling convention:** every composite is an N-ary reducer — frames as positional arguments
   (`MedianComposite()(f1, f2, f3)`, so `op(Input("a"), Input("b"))` works in a `Graph`) or one
@@ -15,4 +15,4 @@ Per-pixel composites over co-registered frame stacks and matched multi-source tu
   per-criterion BAP scores `doy_distance`, `doy_score`, `view_angle_score`, `cloud_distance_score`,
   `opacity_score`
 
-::: geotoolz.compositing
+::: geoops.compositing

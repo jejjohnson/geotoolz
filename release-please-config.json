@@ -28,6 +28,18 @@
         {"type": "toml", "path": "/uv.lock", "jsonpath": "$.package[?(@.name.value==='geotoolz')].version"}
       ]
     },
+    "packages/geotoolz-ops": {
+      "release-type": "python",
+      "package-name": "geotoolz-ops",
+      "component": "geotoolz-ops",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/geoops/__init__.py",
+        {"type": "toml", "path": "/uv.lock", "jsonpath": "$.package[?(@.name.value==='geotoolz-ops')].version"}
+      ]
+    },
     "packages/geotoolz-patcher": {
       "release-type": "python",
       "package-name": "geotoolz-patcher",

@@ -16,4 +16,4 @@ spectral-response convolution is [`radiometry.ApplySRF`](radiometry.md); the for
 `spectral.NormalizedDifference`, `spectral.ApplySRF` and `spectral.GaussianSRF` duplicates were
 removed.
 
-::: geotoolz.spectral
+::: geoops.spectral

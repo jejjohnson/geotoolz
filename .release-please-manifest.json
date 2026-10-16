@@ -1,5 +1,6 @@
 {
   "packages/geotoolz": "0.10.3",
+  "packages/geotoolz-ops": "0.10.3",
   "packages/geotoolz-patcher": "0.10.2",
   "packages/geotoolz-catalog": "0.5.1",
   "packages/geotoolz-products": "0.4.2",

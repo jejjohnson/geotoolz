@@ -6,7 +6,7 @@ A `MatchedField` wraps:
 * N **secondary** `Field`s keyed by name,
 * a **coregistration callable** per secondary (any `Callable`; the
   intended choice is a `pipekit.Operator` from
-  ``geotoolz.geom.coregister``, but the type is the broader Callable
+  ``geoops.geom.coregister``, but the type is the broader Callable
   so geopatcher's core stays framework-free — see ADR-003).
 
 It satisfies the existing `Field` Protocol by exposing the primary's
@@ -84,7 +84,7 @@ class MatchedField:
             Names appear as keys in `MatchedPatch.members`.
         coreg: ``{name: CoregFn}`` — one coregistration callable
             per secondary. Typically a
-            ``geotoolz.geom.coregister.*`` operator, but any
+            ``geoops.geom.coregister.*`` operator, but any
             ``Callable[[Any, Any], Any]`` works. The callable is
             invoked as ``coreg[name](raw_secondary, primary_patch)``
             and its return value lands in

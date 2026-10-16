@@ -1,4 +1,4 @@
-# `geotoolz.augment` — RS-safe augmentations
+# `geoops.augment` — RS-safe augmentations
 
 Curated augmentation operators for training on remote-sensing `GeoTensor`
 patches. Spatial operators preserve CRS and either preserve the existing
@@ -8,7 +8,7 @@ physical measurements instead of generic RGB channels.
 ## Quick pipeline
 
 ```python
-import geotoolz as gz
+import geoops as gz
 
 augment = gz.augment.Compose(
     augmentations=[
@@ -51,7 +51,7 @@ sequence. A per-call `seed` is a deterministic one-off draw that leaves the
 stream untouched:
 
 ```python
-import geotoolz as gz
+import geoops as gz
 
 op = gz.augment.GaussianNoise(sigma=0.01, seed=1)
 a, b = op(patch), op(patch)          # different noise, reproducible sequence
@@ -75,107 +75,107 @@ must receive identical spatial transforms (call them in lockstep).
 
 ## Composer
 
-::: geotoolz.augment._src.operators.Compose
+::: geoops.augment._src.operators.Compose
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Geometry
 
-::: geotoolz.augment._src.operators.RandomFlip
+::: geoops.augment._src.operators.RandomFlip
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.operators.RandomRotate90
+::: geoops.augment._src.operators.RandomRotate90
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.operators.RandomCrop
+::: geoops.augment._src.operators.RandomCrop
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.operators.RandomShift
+::: geoops.augment._src.operators.RandomShift
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Radiometric
 
-::: geotoolz.augment._src.operators.BrightnessJitter
+::: geoops.augment._src.operators.BrightnessJitter
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.operators.ContrastJitter
+::: geoops.augment._src.operators.ContrastJitter
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.operators.GaussianNoise
+::: geoops.augment._src.operators.GaussianNoise
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.operators.SpeckleNoise
+::: geoops.augment._src.operators.SpeckleNoise
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Band-level
 
-::: geotoolz.augment._src.operators.BandDropout
+::: geoops.augment._src.operators.BandDropout
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.operators.BandJitter
+::: geoops.augment._src.operators.BandJitter
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## RS-specific
 
-::: geotoolz.augment._src.operators.SunAngleJitter
+::: geoops.augment._src.operators.SunAngleJitter
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.operators.AtmosphericHaze
+::: geoops.augment._src.operators.AtmosphericHaze
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.operators.SimulatedClouds
+::: geoops.augment._src.operators.SimulatedClouds
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.operators.CutMix
+::: geoops.augment._src.operators.CutMix
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Tier-A primitives
 
-::: geotoolz.augment._src.array.rot90_transform
+::: geoops.augment._src.array.rot90_transform
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.array.sun_angle_scale
+::: geoops.augment._src.array.sun_angle_scale
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.array.rayleigh_weights
+::: geoops.augment._src.array.rayleigh_weights
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: geotoolz.augment._src.array.cloud_alpha
+::: geoops.augment._src.array.cloud_alpha
     options:
       show_root_heading: true
       show_signature_annotations: true

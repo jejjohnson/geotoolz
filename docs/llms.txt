@@ -2,12 +2,12 @@
 
 > A composable remote-sensing stack in Python on georeader's GeoTensor: find and index files (geocatalog), read Earth-observation products (geoproducts), tile and stitch large scenes (geopatcher), compute with carrier-preserving pipekit operators (geotoolz), and read object storage (geocloud). Build on these primitives instead of re-implementing them.
 
-Five packages, installed separately: `geotoolz`, `geotoolz-catalog`, `geotoolz-products`, `geotoolz-patcher`, `geotoolz-cloud` (import names `geotoolz`, `geocatalog`, `geoproducts`, `geopatcher`, `geocloud`). Every step takes and returns `georeader.GeoTensor`; every operator is a `pipekit.Operator`, so steps chain with `geotoolz.Sequential`. Before writing a helper, search the capability index — it lists every public name with a one-line summary, including pipekit's control-flow, caching, QC and parallel-map blocks. A step you add must keep two contracts.
+Five packages, installed separately: `geotoolz`, `geotoolz-catalog`, `geotoolz-products`, `geotoolz-patcher`, `geotoolz-cloud` (import names `geotoolz`, `geocatalog`, `geoproducts`, `geopatcher`, `geocloud`). Every step takes and returns `georeader.GeoTensor`; every operator is a `pipekit.Operator`, so steps chain with `geoops.Sequential`. Before writing a helper, search the capability index — it lists every public name with a one-line summary, including pipekit's control-flow, caching, QC and parallel-map blocks. A step you add must keep two contracts.
 
 - **pipekit `Operator`:** implement `_apply`, with a keyword-only constructor that holds configuration only and an auto-derived JSON `get_config()`.
 - **`GeoTensor`:** bands on axis -3; a GeoTensor in returns a GeoTensor on the same grid; a fresh `attrs` dict; `fill_value_default` is nodata.
 
-Keep both with the public helpers in `geotoolz.carrier`, and test a new step with `geotoolz.testing.check_operator`. See "Concepts" below. Claude Code users can install the `geotoolz` plugin: `/plugin marketplace add jejjohnson/geotoolz`, then `/plugin install geotoolz@geotoolz`.
+Keep both with the public helpers in `geoops.carrier`, and test a new step with `geoops.testing.check_operator`. See "Concepts" below. Claude Code users can install the `geotoolz` plugin: `/plugin marketplace add jejjohnson/geotoolz`, then `/plugin install geotoolz@geotoolz`.
 
 ## Start here
 
@@ -36,7 +36,7 @@ Keep both with the public helpers in `geotoolz.carrier`, and test a new step wit
 
 ## Contracts
 
-- [Carrier helpers and contract checks](https://jejjohnson.github.io/geotoolz/operators/api/carrier/): `geotoolz.carrier` and `geotoolz.testing.check_operator`
+- [Carrier helpers and contract checks](https://jejjohnson.github.io/geotoolz/operators/api/carrier/): `geoops.carrier` and `geoops.testing.check_operator`
 - [Concepts](https://jejjohnson.github.io/geotoolz/operators/concepts/): the pipekit Operator, Sequential and Graph; multi-input operators; georeferencing checks; band names; mask polarity; fitted operators
 
 ## Optional

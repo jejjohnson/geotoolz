@@ -7,7 +7,8 @@ adds its own rules in `packages/<package>/AGENTS.md`.
 
 ## What this repo is
 
-`geotoolz` is a uv workspace of five Python packages: a remote-sensing stack on
+`geotoolz` is a uv workspace of five Python packages (plus a `geotoolz`
+umbrella distribution that installs all five and holds no code): a remote-sensing stack on
 `georeader.GeoTensor`, with the Operator / Sequential / Graph composition core
 from [`pipekit`](https://github.com/jejjohnson/pipekit). People build bigger
 things on top of it, so **the packages are primitives**: new code should
@@ -16,14 +17,14 @@ person will find and reuse it.
 
 | Package (dist) | Import | Use it for | Depends on |
 |---|---|---|---|
-| `geotoolz` | `geotoolz` | Operator families on `GeoTensor` (radiometry, indices, mask, geom, viz, learn, …) and the `patch_ops` bridge | georeader, pipekit; `[patch]` → geotoolz-patcher |
+| `geotoolz-ops` | `geoops` | Operator families on `GeoTensor` (radiometry, indices, mask, geom, viz, learn, …) and the `patch_ops` bridge | georeader, pipekit; `[patch]` → geotoolz-patcher |
 | `geotoolz-patcher` | `geopatcher` | Split a field into patches, process, stitch back (geometry × sampler × window × aggregation) | georeader; `[cog]` → geotoolz-cloud; `[pipekit]` |
 | `geotoolz-catalog` | `geocatalog` | Find, index, join, load and stage files (`GeoSlice` queries, GeoParquet) | geopandas / pyarrow; `[patch]` → geotoolz-patcher; `[cloud]` → geotoolz-cloud |
 | `geotoolz-cloud` | `geocloud` | Object storage: the one obstore client pool, file verbs, credentials, async COG reads | georeader, obstore |
-| `geotoolz-products` | `geoproducts` | Readers for EO products (GOES, Himawari, CarbonMapper, …) → `GeoData` / `GeoTensor` | georeader; `[goes]` / `[himawari]` → geotoolz-cloud; `[operators]` → geotoolz |
+| `geotoolz-products` | `geoproducts` | Readers for EO products (GOES, Himawari, CarbonMapper, …) → `GeoData` / `GeoTensor` | georeader; `[goes]` / `[himawari]` → geotoolz-cloud; `[operators]` → geotoolz-ops |
 
 Dependencies point one way and every cross-package link is an optional extra:
-`geotoolz` never depends on `geoproducts`, the patcher never on `geotoolz`,
+`geoops` never depends on `geoproducts`, the patcher never on `geoops`,
 and no package depends on `geotoolz-catalog`.
 
 ## Reuse before you write
@@ -66,13 +67,13 @@ Before writing a helper, an adapter or a reader, find out whether it exists:
 | fsspec for xarray / zarr / pyarrow / geopandas | `geocloud.fs.filesystem` — never s3fs / gcsfs / adlfs |
 | A geostationary fixed grid (GOES, Himawari, MTG, SEVIRI) | `geoproducts._src.geostationary` (`FixedGrid`, `geos_crs`) |
 | Several readers on one grid | `geoproducts._src.stack.stack` |
-| Band lookup by index or name, wavelengths | `geotoolz._src.bands` (`resolve_band`, `resolve_bands`) |
-| Nodata handling | `geotoolz._src.valid` |
-| Wrapping a result back into a `GeoTensor` | `geotoolz._src.wrap.wrap_like` |
-| The carrier helpers above from another package or a downstream project | `geotoolz.carrier` (the same objects, public); check an operator with `geotoolz.testing.check_operator` |
+| Band lookup by index or name, wavelengths | `geoops._src.bands` (`resolve_band`, `resolve_bands`) |
+| Nodata handling | `geoops._src.valid` |
+| Wrapping a result back into a `GeoTensor` | `geoops._src.wrap.wrap_like` |
+| The carrier helpers above from another package or a downstream project | `geoops.carrier` (the same objects, public); check an operator with `geoops.testing.check_operator` |
 | A spatial index of files, a `GeoSlice` query, loading a mosaic | `geocatalog` (`build`, `query`, `load`) |
 | Tiling, overlap-blending, stitching | `geopatcher` (`SpatialPatcher` + `spatial.*` axes) |
-| Optional-dependency imports with an install hint | the package's `_src` extras helper (`geotoolz._src.optional`, `geoproducts._src.extras`, `geopatcher._src._extras`, `geocatalog._src._extras`, `geocloud._src.extras`) |
+| Optional-dependency imports with an install hint | the package's `_src` extras helper (`geoops._src.optional`, `geoproducts._src.extras`, `geopatcher._src._extras`, `geocatalog._src._extras`, `geocloud._src.extras`) |
 | Retry, fallback, branching, first-that-works | `pipekit` `Retry`, `Try`, `Branch` / `Switch`, `Coalesce` |
 | Caching, side-effect taps, QC assertions | `pipekit` `Cache` / `Memoize`, `Tap` / `Sink` / `Snapshot`, `AssertShape` / `AssertDType` / `Quarantine` |
 | Mapping an operator over many items | `pipekit` `ThreadMap` / `ProcessMap` / `AsyncMap` / `BatchedMap`; over patches, `geopatcher.run` |
@@ -113,7 +114,7 @@ hard rules. The long form, with examples, is
 - **Learned state uses fit / transform.** `fit(x) -> self` writes
   trailing-underscore attributes (`mean_`), and `transform` is read-only.
   `_apply` never overwrites constructor attributes. Use
-  `geotoolz._src.fitted.fit_once` to fit on first call without races.
+  `geoops._src.fitted.fit_once` to fit on first call without races.
 - **Don't rebuild what pipekit already has.** Control flow, caching,
   observation, QC, parallel maps, carry-state (`StatefulOperator`) and
   serialisation are all in pipekit (see the table above). pipekit is
@@ -129,14 +130,14 @@ hard rules. The long form, with examples, is
   carrier is 2-D to 4-D. The spatial axes are the last two, and the band
   axis is always `-3`, never `0`.
   - Handle a `(T, C, H, W)` stack frame by frame
-    (`geotoolz._src.shape.map_frames` / `over_frames`), or reject it with
+    (`geoops._src.shape.map_frames` / `over_frames`), or reject it with
     an error that names the operator.
   - A result that collapses the bands keeps a singleton band axis,
     `(T, 1, H, W)`.
 - **Both carriers in, same carrier out.** Read the data with
   `np.asarray(x)`. A GeoTensor input returns a GeoTensor with the input's
   georeferencing, and a plain array returns a plain array.
-  - Rewrap with `geotoolz._src.wrap.wrap_like`. Pass `transform=` for an
+  - Rewrap with `geoops._src.wrap.wrap_like`. Pass `transform=` for an
     output on a new grid.
   - Inside an operator, never build a `GeoTensor` by hand, and never
     mutate the input.
@@ -147,20 +148,20 @@ hard rules. The long form, with examples, is
 - **Nodata.** `fill_value_default` *is* nodata: georeader's `validmask()`
   is `values != fill`.
   - A pixel is invalid when any of its bands is non-finite or equals the
-    fill (`geotoolz._src.valid`).
+    fill (`geoops._src.valid`).
   - Leave invalid pixels out of statistics and fits, then write the
     output's fill back into them.
   - The output fill follows the output's dtype and meaning: `False` for
     masks, `0` for labels and counts, `NaN` for new float quantities, and
     `carried_fill` for outputs that carry the input's values.
 - **Bands.** A band is referenced by integer position or by name. Resolve
-  it with `geotoolz._src.bands.resolve_band`, which looks names up in
+  it with `geoops._src.bands.resolve_band`, which looks names up in
   `band_names`, then `descriptions`, then `bands`.
 - **Masks.** `True` means drop the pixel. Region masks pick the side that
   survives with `keep=`.
 - **Several carriers.** Carriers are positional and must share a pixel
   grid: the same `(H, W)`, the same CRS and an exactly equal transform
-  (`geotoolz._src.geo.require_grid_match`). An operator that measures in
+  (`geoops._src.geo.require_grid_match`). An operator that measures in
   metres requires a projected CRS (`require_projected_crs`).
 - **Readers.** A reader returns a `GeoTensor`, or a lazy georeader
   `GeoData` (`transform`, `crs`, `shape`, `load()`, `read_from_window()`).
@@ -169,7 +170,7 @@ hard rules. The long form, with examples, is
   - A geotoolz operator needs pixels: call `.load()` (or use an `io`
     operator) first.
 
-`packages/geotoolz/tests/test_operator_contract.py` walks every operator
+`packages/geotoolz-ops/tests/test_operator_contract.py` walks every operator
 class automatically and checks:
 
 - state round-trip and JSON config;
@@ -185,9 +186,9 @@ arguments, add it to `CTOR_KWARGS` (or `RUNTIME_CTOR_KWARGS` when it needs
 live objects).
 
 Outside geotoolz — another package of this repo, or a project built on the
-stack — the same helpers are public in `geotoolz.carrier`, and
-`geotoolz.testing.check_operator(op, scene)` runs the same checks (they share
-`geotoolz._src.contract`) on one operator.
+stack — the same helpers are public in `geoops.carrier`, and
+`geoops.testing.check_operator(op, scene)` runs the same checks (they share
+`geoops._src.contract`) on one operator.
 
 The other contracts each belong to one package, and their rules live in
 that package's `AGENTS.md`:
@@ -201,7 +202,7 @@ that package's `AGENTS.md`:
 Each package's `AGENTS.md` holds its layout, conventions and the tests that
 enforce them. Read it before changing that package:
 
-- [`packages/geotoolz/AGENTS.md`](packages/geotoolz/AGENTS.md) — operator families, two-tier layout, parameter vocabulary
+- [`packages/geotoolz-ops/AGENTS.md`](packages/geotoolz-ops/AGENTS.md) — operator families, two-tier layout, parameter vocabulary
 - [`packages/geotoolz-patcher/AGENTS.md`](packages/geotoolz-patcher/AGENTS.md) — axes, `Field` contract, config envelopes
 - [`packages/geotoolz-catalog/AGENTS.md`](packages/geotoolz-catalog/AGENTS.md) — namespaces, `GeoSlice` contract, lazy extras
 - [`packages/geotoolz-cloud/AGENTS.md`](packages/geotoolz-cloud/AGENTS.md) — the client pool and the COG engine

@@ -15,7 +15,7 @@ import numpy as np
 from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
-import geotoolz as gz
+import geoops as gz
 
 rng: np.random.Generator = np.random.default_rng(0)
 grid: dict = {"transform": from_origin(750_000, 4_350_000, 10, 10), "crs": "EPSG:32610", "fill_value_default": np.nan}
@@ -46,7 +46,7 @@ scene arrives first.
 ```python
 import numpy as np
 
-import geotoolz as gz
+import geoops as gz
 
 rng: np.random.Generator = np.random.default_rng(0)
 first: np.ndarray = rng.normal(0.2, 0.05, (4, 32, 32))   # (4, 32, 32) float64
@@ -66,7 +66,7 @@ better than min / max scaling.
 ```python
 import numpy as np
 
-import geotoolz as gz
+import geoops as gz
 
 rgb: np.ndarray = np.random.default_rng(0).gamma(2.0, 0.05, (3, 64, 64))           # (3, 64, 64) float64
 stretched: np.ndarray = gz.normalize.HistogramStretch(lower=2, upper=98)(rgb)       # (3, 64, 64) float64 → (3, 64, 64) float64 · in [0, 1]

@@ -45,8 +45,11 @@ jobs:
       # "Extended Tests" workflow (workflow_dispatch), never automatically.
       # Each package runs from its own directory so its pytest + coverage
       # config (markers, gates, bench ignores) applies unchanged.
-      - name: Test geotoolz
+      - name: Test geotoolz-ops
         run: uv run pytest -v -m "not slow and not integration"
+        working-directory: packages/geotoolz-ops
+      - name: Test geotoolz (umbrella)
+        run: uv run pytest -v
         working-directory: packages/geotoolz
       # The all-extras run of the patcher suite (jax included): every
       # extras-gated test must actually run here, so a skip (a missing
@@ -113,5 +116,5 @@ jobs:
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v7
         with:
-          files: packages/geotoolz/coverage.xml,packages/geotoolz-patcher/coverage.xml,packages/geotoolz-catalog/coverage.xml,packages/geotoolz-products/coverage.xml,packages/geotoolz-cloud/coverage.xml
+          files: packages/geotoolz-ops/coverage.xml,packages/geotoolz-patcher/coverage.xml,packages/geotoolz-catalog/coverage.xml,packages/geotoolz-products/coverage.xml,packages/geotoolz-cloud/coverage.xml
           fail_ci_if_error: false

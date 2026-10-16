@@ -18,7 +18,7 @@ import numpy as np
 from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
-import geotoolz as gz
+import geoops as gz
 
 rng: np.random.Generator = np.random.default_rng(0)
 grid: dict = {"transform": from_origin(750_000, 4_350_000, 10, 10), "crs": "EPSG:32610"}
@@ -50,7 +50,7 @@ is already reflectance passes through.
 ```python
 import numpy as np
 
-import geotoolz as gz
+import geoops as gz
 
 to_reflectance: gz.Branch = gz.Branch(
     predicate=lambda x: np.issubdtype(np.asarray(x).dtype, np.integer),
@@ -80,7 +80,7 @@ import numpy as np
 from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
-import geotoolz as gz
+import geoops as gz
 
 ndvi_by_sensor: gz.Switch = gz.Switch(
     key=lambda gt: gt.attrs["platform"],
@@ -112,7 +112,7 @@ import numpy as np
 from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
-import geotoolz as gz
+import geoops as gz
 
 rng: np.random.Generator = np.random.default_rng(0)
 scene: GeoTensor = GeoTensor(
@@ -137,7 +137,7 @@ preprocessing chain; the `Sequential` then returns the graph's dict.
 ```python
 import numpy as np
 
-import geotoolz as gz
+import geoops as gz
 
 x: gz.Input = gz.Input("reflectance")
 indices: gz.Graph = gz.Graph(

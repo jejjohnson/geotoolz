@@ -8,7 +8,7 @@ messages) and checks two things:
   importable module prefix, then ``getattr`` the rest, so a renamed or
   removed name breaks this test instead of silently rotting in prose;
 * no text uses a name or location the monorepo retired — the pre-monorepo
-  ``docs/design/`` tree and standalone docs site, ``geotoolz.patch``
+  ``docs/design/`` tree and standalone docs site, ``geoops.patch``
   (now ``geopatcher``), install commands naming the ``geocatalog`` /
   ``geopatcher`` *distributions* (they are ``geotoolz-catalog`` /
   ``geotoolz-patcher``), and private ``_src`` paths in the user docs.

@@ -8,7 +8,7 @@ outputs): reflectance factor (0-1) for B01-B06, brightness temperature
 ``"brightness_temperature"`` reads put on one grid with
 :func:`geoproducts.stack`.
 
-``himawari.presets`` turns a recipe into a ``geotoolz.viz.RGBRecipe``
+``himawari.presets`` turns a recipe into a ``geoops.viz.RGBRecipe``
 operator; the recipes themselves need no extra.
 """
 

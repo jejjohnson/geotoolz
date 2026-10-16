@@ -15,4 +15,4 @@ Display-time helpers: composites, stretches, colormaps, hillshade overlays. Outp
 - **Tier-A primitives:** `stretch_to_uint8`, `gamma_correct_display`, `rgb_recipe`, `rgba_from_scalar`,
   `rgba_from_categories`, `ensure_rgba`, `blend_rgba`
 
-::: geotoolz.viz
+::: geoops.viz

@@ -6,7 +6,7 @@ each example:
 
 * **parses** it (top-level ``await`` allowed; doctest ``>>>`` / ``...``
   prompts stripped), so a typo'd example fails here;
-* **resolves** every name it takes from the stack — ``import geotoolz as
+* **resolves** every name it takes from the stack — ``import geoops as
   gz`` then ``gz.NDVI``, ``from geocloud.cog import write_cog``,
   ``gp.spatial.window.Hann`` — by importing the module and walking the
   attributes, so a rename breaks CI instead of rotting in an example;
@@ -39,10 +39,10 @@ from types import ModuleType
 
 
 ROOT = Path(__file__).resolve().parents[1]
-STACK = ("geotoolz", "geopatcher", "geocatalog", "geocloud", "geoproducts", "pipekit")
+STACK = ("geoops", "geopatcher", "geocatalog", "geocloud", "geoproducts", "pipekit")
 SKIP_MARK = "<!-- docs-check: skip -->"
 # The stack's conventional aliases: a fence that uses one must import it.
-ALIASES = {"gz": "geotoolz", "gp": "geopatcher", "gc": "geocatalog"}
+ALIASES = {"gz": "geoops", "gp": "geopatcher", "gc": "geocatalog"}
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```(?P<lang>[\w+-]*)[^\n]*$")
 _TOP_LEVEL_AWAIT = ast.PyCF_ALLOW_TOP_LEVEL_AWAIT
 

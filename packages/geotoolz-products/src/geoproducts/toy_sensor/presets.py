@@ -24,7 +24,7 @@ def NDVI() -> Operator:
     Raises:
         ImportError: geotoolz is not installed (the ``[operators]`` extra).
     """
-    indices = require("geotoolz.indices", "toy_sensor.presets.NDVI", "operators")
+    indices = require("geoops.indices", "toy_sensor.presets.NDVI", "operators")
     return indices.NDVI(red=constants.BAND_RED, nir=constants.BAND_NIR)
 
 

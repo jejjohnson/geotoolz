@@ -191,7 +191,7 @@ import numpy as np
 from georeader.geotensor import GeoTensor
 
 import geoproducts
-import geotoolz as gz
+import geoops as gz
 from geoproducts import goes
 from geoproducts.goes import aws
 

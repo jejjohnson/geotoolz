@@ -27,13 +27,13 @@ def _stack(values: dict[str, float], *, crs: str = "EPSG:4326") -> GeoTensor:
 
 
 def test_ndvi_reads_red_c02_and_nir_c03() -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     out = goes.NDVI()(_stack({"C01": 0.05, "C02": 0.1, "C03": 0.5}))
     np.testing.assert_allclose(np.asarray(out), (0.5 - 0.1) / (0.5 + 0.1), rtol=1e-6)
 
 
 def test_synthetic_green_is_the_cimss_mix() -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     out = goes.SyntheticGreen()(_stack({"C01": 0.2, "C02": 0.4, "C03": 0.6}))
     assert np.asarray(out).shape[-2:] == (4, 4)
     np.testing.assert_allclose(
@@ -43,7 +43,7 @@ def test_synthetic_green_is_the_cimss_mix() -> None:
 
 
 def test_parallax_correct_binds_the_goes_geometry() -> None:
-    gz = pytest.importorskip("geotoolz")
+    gz = pytest.importorskip("geoops")
     op = goes.ParallaxCorrect(
         satellite_lon_deg=constants.GOES_WEST_LON_DEG, target_height_m=0.0
     )
@@ -71,15 +71,15 @@ def test_parallax_correct_binds_the_goes_geometry() -> None:
     ],
 )
 def test_presets_name_the_operators_extra(monkeypatch, preset) -> None:
-    for name in [m for m in sys.modules if m.split(".")[0] == "geotoolz"]:
+    for name in [m for m in sys.modules if m.split(".")[0] == "geoops"]:
         monkeypatch.setitem(sys.modules, name, None)
-    monkeypatch.setitem(sys.modules, "geotoolz", None)
+    monkeypatch.setitem(sys.modules, "geoops", None)
     with pytest.raises(ImportError, match=rf"{preset}.*geotoolz-products\[operators\]"):
         getattr(goes.presets, preset)()
 
 
 def test_mask_clouds_reads_the_clear_sky_mask() -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     stack = _stack({"BCM": 1.0, "ACM": float(constants.ACM_CLOUDY)})
     data = np.asarray(stack).copy()
     data[0, 0, 0] = constants.BCM_CLEAR
@@ -95,7 +95,7 @@ def test_mask_clouds_reads_the_clear_sky_mask() -> None:
 
 @pytest.mark.parametrize("name", sorted(recipes.RECIPES))
 def test_recipe_presets_follow_the_recipe_table(name: str) -> None:
-    gz = pytest.importorskip("geotoolz")
+    gz = pytest.importorskip("geoops")
     spec = recipes.RECIPES[name]
     op = goes.presets.Recipe(name)
     assert isinstance(op, gz.viz.RGBRecipe)
@@ -114,7 +114,7 @@ def test_recipe_presets_follow_the_recipe_table(name: str) -> None:
 
 
 def test_true_color_mixes_the_synthetic_green() -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     rgb = np.asarray(goes.TrueColor()(_stack({"C01": 0.2, "C02": 0.4, "C03": 0.6})))
     green = 0.45 * 0.4 + 0.1 * 0.6 + 0.45 * 0.2
     np.testing.assert_allclose(
@@ -123,7 +123,7 @@ def test_true_color_mixes_the_synthetic_green() -> None:
 
 
 def test_day_cloud_phase_inverts_the_brightness_temperature() -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     cold = goes.DayCloudPhase()(_stack({"C02": 0.5, "C05": 0.3, "C13": 219.65}))
     warm = goes.DayCloudPhase()(_stack({"C02": 0.5, "C05": 0.3, "C13": 280.65}))
     assert np.asarray(cold)[0, 0, 0] == pytest.approx(1.0)
@@ -131,7 +131,7 @@ def test_day_cloud_phase_inverts_the_brightness_temperature() -> None:
 
 
 def test_named_presets_match_recipe() -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     pairs = {
         "true_color": goes.TrueColor,
         "natural_color": goes.NaturalColor,

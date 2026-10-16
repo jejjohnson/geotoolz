@@ -59,7 +59,7 @@ def geotoolz_module(module: str, feature: str) -> Any:
     Raises:
         ImportError: geotoolz is not installed (the ``[operators]`` extra).
     """
-    return require(f"geotoolz.{module}", feature, "operators")
+    return require(f"geoops.{module}", feature, "operators")
 
 
 def rgb_recipe(spec: Recipe, feature: str) -> Operator:

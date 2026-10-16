@@ -174,7 +174,7 @@ class Custom(Window):
 def geom_shape(geometry: SpatialGeometry) -> tuple[int, ...]:
     """Shape of the weight array a `spatial.window.Window` returns for ``geometry``.
 
-    Public so third-party windows (e.g. ``geotoolz.patch_ops.TriangularWindow``)
+    Public so third-party windows (e.g. ``geoops.patch_ops.TriangularWindow``)
     size their weights exactly like the built-in ones.
 
     Args:

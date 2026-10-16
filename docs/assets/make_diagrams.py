@@ -247,7 +247,7 @@ def make_pipeline_ecosystem() -> Path:
     # group rects — centred at y=2.0, each 2.8 wide x 3.2 tall
     _group(ax, 1.9, 2.0, 2.8, 3.2, "geocatalog — discover & load")
     _group(ax, 5.7, 2.0, 2.8, 3.2, "geotoolz — operate")
-    _group(ax, 9.5, 2.0, 2.8, 3.2, "geopatcher (via geotoolz.patch_ops)")
+    _group(ax, 9.5, 2.0, 2.8, 3.2, "geopatcher (via geoops.patch_ops)")
 
     # geocatalog: stack STAC -> LoadScene vertically
     _box(ax, 1.9, 3.0, 1.8, 0.55, "STAC catalogue", face="#FEF9C3", edge="#CA8A04")

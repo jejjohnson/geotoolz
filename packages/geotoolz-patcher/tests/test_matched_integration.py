@@ -12,7 +12,7 @@ Coverage focus:
 * Identity-coreg pipeline produces members equal to direct
   field reads (no metadata corruption).
 * A non-identity coreg callable (the kind of thing
-  ``geotoolz.geom.coregister.RasterToRasterLike`` would do)
+  ``geoops.geom.coregister.RasterToRasterLike`` would do)
   actually transforms the secondary data.
 * `valid_mask=True` populates per-source masks from real NaN
   data — the P1 fix from the earlier review.
@@ -141,7 +141,7 @@ class TestNonIdentityCoreg:
     """A coreg callable that applies a known transform proves the
     output of `MatchedField.select` reflects the callable's work.
 
-    Mimics what ``geotoolz.geom.coregister.RasterToRasterLike`` would
+    Mimics what ``geoops.geom.coregister.RasterToRasterLike`` would
     do (apply a warp / resample) without dragging rasterio in.
     """
 

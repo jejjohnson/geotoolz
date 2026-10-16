@@ -158,7 +158,7 @@ class ProductReader(GeoData, ABC):
             window = self._clip_window(window)
         values = self._read_window(window)
         # The canonical key every band resolver reads first (see
-        # geotoolz._src.bands.DEFAULT_BAND_KEYS).
+        # geoops._src.bands.DEFAULT_BAND_KEYS).
         attrs = {"band_names": self.bands, **self._band_attrs()}
         return GeoTensor(
             values,

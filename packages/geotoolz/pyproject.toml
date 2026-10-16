@@ -1,7 +1,7 @@
 [project]
 name = "geotoolz"
 version = "0.10.3"
-description = "Composable Operator library for remote sensing on top of georeader.GeoTensor."
+description = "The geostack in one install: geotoolz-ops, -patcher, -catalog, -cloud and -products."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]
@@ -12,111 +12,36 @@ requires-python = ">=3.12"
 classifiers = [
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: GIS",
-    "Topic :: Scientific/Engineering :: Image Processing",
-    "Topic :: Software Development :: Libraries",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Natural Language :: English",
     "License :: OSI Approved :: MIT License",
     "Intended Audience :: Science/Research",
     "Development Status :: 2 - Pre-Alpha",
 ]
+# The umbrella holds no code: it installs the five packages, each imported
+# under its own name (geoops, geopatcher, geocatalog, geocloud, geoproducts).
+# Lower bounds only: workspace siblings released in lockstep.
 dependencies = [
-    # GeoTensor and the GeoData / AsyncGeoData protocols. Pinning to >=2.1
-    # so the v2.0 numpy-subclass GeoTensor (with __array_ufunc__) is
-    # available — that's the substrate the two-tier model depends on.
-    "georeader-spaceml>=2.1",
-    "numpy>=1.26",
-    # Shape/dtype annotations on the Tier-A numpy primitives (the
-    # `Float[np.ndarray, "c h w"]` aliases). Annotation-only usage — no
-    # runtime checking decorators — so the import cost is trivial.
-    "jaxtyping>=0.2.36",
-    # Signal windows + numerical primitives used across the radiometry,
-    # restore, augment, mask, spectral, and plume operator families.
-    "scipy>=1.11",
-    # `georeader.geotensor` imports `Self` from typing_extensions without
-    # declaring it as a dep (upstream packaging bug in >=2.1). Pin it
-    # here so a slim install (without optional extras that would
-    # otherwise drag it in transitively) still works.
-    "typing-extensions>=4.0",
-    # rasterio (windows, transforms, CRS, resampling enums, features) and
-    # affine are imported at module top level by `io`, `geom`, `augment`
-    # and `patch_ops`; declared directly rather than relying on
-    # georeader-spaceml pulling them in transitively.
-    "rasterio>=1.3",
-    "affine>=2.4",
-    # pandas: `_src.labels` / `measure` / `feature` / `plume` region tables
-    # and `radiometry` per-band fitted stats. pyproj: `geom` reprojection and
-    # `plume` CRS-aware advection geometry. geopandas: vector inputs in
-    # `feature`, `mask`, `measure` and `plume`. shapely: footprint algebra
-    # and rasterisation in `geom`, `io`, `mask`, `measure` (`io` needs
-    # shapely only, not geopandas).
-    "pandas>=2.1",
-    "pyproj>=3.6",
-    "geopandas>=0.14",
-    "shapely>=2.0",
-    # skimage: `_src.labels` (connected components / skeletons), `feature`
-    # and `geom` (Resize / Resample) import it at module top level.
-    "scikit-image>=0.25",
-    # The Operator / Sequential / Graph composition layer lives in pipekit
-    # (formerly geotoolz.core). Every per-domain operator subclasses
-    # `pipekit.Operator`; the dependency is now load-bearing rather than
-    # optional. The workspace root's [tool.uv.sources] pins the dev-time
-    # git source.
-    "pipekit>=0.0.2",
-    # Universal tensor-notation layer: the `geotoolz.einx` operator
-    # family AND the internal linear algebra of the Tier-A primitives
-    # (matched_filter covariance/scoring, restore PCA, SRF fill
-    # propagation, static channel-order flips) are expressed as einx
-    # patterns. >=0.4 for the non-deprecated `einx.id` entry point.
-    "einx>=0.4",
+    "geotoolz-ops>=0.10.3",
+    "geotoolz-patcher>=0.10.2",
+    "geotoolz-catalog>=0.5.1",
+    "geotoolz-cloud>=0.4.1",
+    "geotoolz-products>=0.4.2",
 ]
 
-# Every third-party module imported at module top level by anything
-# `import geotoolz` loads must be listed above;
-# tests/test_packaging.py enforces this. Everything below is imported
-# lazily, at call time, and raises an ImportError naming its extra.
+# Extras forward to the package that owns them, so `pip install
+# 'geotoolz[viz]'` and `pip install 'geotoolz-ops[viz]'` install the same thing.
 [project.optional-dependencies]
-# `viz.ApplyColormap` resolves named matplotlib colormaps; the rest of
-# `viz` needs no extra.
-viz = ["matplotlib>=3.10.8"]
-# `learn` estimator adapters: scikit-learn for the imputer NaN strategies
-# and state metadata (and `plume`'s DBSCAN clump counting); joblib for
-# `save_state` / `load_state` / `state_path=`. The estimator you pass in
-# usually brings scikit-learn itself.
-learn = ["scikit-learn>=1.4", "joblib>=1.3"]
-# Optional `hydra-zen` integration for declarative pipeline construction
-# (`docs/concepts.md`). The core composition layer round-trips its own
-# get_config() / __repr__ without hydra — this extra is only needed if
-# you want `builds()` / `instantiate()` from YAML.
-hydra = ["hydra-zen>=0.14"]
-# The four-axis Patcher framework lives in its own package now; pull it
-# in (with its `[pipekit]` extra so `geopatcher.integrations.pipekit` is
-# importable — `geotoolz.patch_ops` re-exports the same classes) and use
-# either `geotoolz.patch_ops` or `geopatcher.integrations.pipekit` for
-# the Operator-graph bridge. The substrate extras (grid, vector, point,
-# xarray-raster, streaming) are exposed through `geopatcher` directly —
-# install e.g. `pip install 'geotoolz-patcher[patch-full]'` for the full
-# substrate matrix. Lower bound only (workspace sibling released in
-# lockstep): 0.9 is the first release with the task-organised layout
-# (`geopatcher.config`, `geopatcher.spatial.*`) that patch_ops imports.
-patch = ["geotoolz-patcher[pipekit]>=0.9"]
-# Vector-cube backend (`xvec`, which brings `xarray`) needed by the
-# `geom.coregister.RasterToPoints` / `PointsToRaster` operators that
-# extract raster values onto point geometries (AERONET stations, buoys,
-# in-situ matchups), and by bilinear `raster_to_point_cloud` sampling.
-vector-cube = ["xvec>=0.4"]
-# `io.WriteCOG` writes through geotoolz-cloud's validated `write_cog`.
-# Lower bound only: a workspace sibling released in lockstep.
-cloud = ["geotoolz-cloud>=0.4.1"]
-# File formats for `io.ReadHDF` (HDF5 / HDF4) and `io.ReadNetCDF`: the
-# readers are geotoolz-cloud's (`geocloud.hdf`), local or remote.
-hdf5 = ["geotoolz-cloud[hdf5]>=0.4.1"]
-hdf4 = ["geotoolz-cloud[hdf4]>=0.4.1"]
-netcdf = ["geotoolz-cloud[netcdf]>=0.4.1"]
-# Zarr sink (`io.WriteZarr`); targets the zarr-python 3 API
-# (`Group.create_array`).
-zarr = ["zarr>=3"]
+viz = ["geotoolz-ops[viz]"]
+learn = ["geotoolz-ops[learn]"]
+hydra = ["geotoolz-ops[hydra]"]
+vector-cube = ["geotoolz-ops[vector-cube]"]
+zarr = ["geotoolz-ops[zarr]"]
+hdf5 = ["geotoolz-ops[hdf5]"]
+hdf4 = ["geotoolz-ops[hdf4]"]
+netcdf = ["geotoolz-ops[netcdf]"]
+patch = ["geotoolz-ops[patch]"]
+operators = ["geotoolz-products[operators]"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
@@ -124,32 +49,6 @@ Repository = "https://github.com/jejjohnson/geotoolz"
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
-    "pytest-cov>=7.1.0",
-    "pre-commit>=4.5.1",
-]
-lint = [
-    "ruff>=0.15.11",
-]
-typecheck = [
-    "ty>=0.0.35",
-]
-docs = [
-    "mkdocs>=1.6.1",
-    "mkdocs-material>=9.7.6",
-    "mkdocstrings[python]>=1.0.4",
-    "mkdocs-jupyter>=0.26.3",
-    "jupytext>=1.19.2",
-    "ipykernel>=7.2.0",
-    # matplotlib + watermark used by the example notebooks during local
-    # re-execution. The guarded watermark cell in each notebook no-ops
-    # if the package is missing, but installing it here lets the version
-    # readout actually print under `nbconvert --execute`.
-    "matplotlib>=3.10.8",
-    "watermark>=2.6.0",
-    # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
-    # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
-    # through as None. Pin until a fixed pymdown-extensions release ships (#38).
-    "pygments>=2.19,<2.21",
 ]
 
 [build-system]
@@ -159,95 +58,5 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/geotoolz"]
 
-[tool.ruff]
-target-version = "py312"
-line-length = 88
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "TID251"]
-# F722 is disabled per jaxtyping's documented guidance: shape-annotated
-# aliases like `Float[np.ndarray, "c h w"]` parse as forward references.
-ignore = ["E402", "E721", "E731", "E741", "F722"]
-
-[tool.ruff.lint.per-file-ignores]
-# Notebooks render to docs and use Greek/math glyphs (α, σ, ×, →) in
-# axis labels and prose. RUF001/002/003 flag them as ambiguous, which is
-# noise here. Line-length (E501) is also relaxed because long dict /
-# tuple literals in tutorials are clearer on one line than split.
-"*.ipynb" = ["RUF001", "RUF002", "RUF003", "E501"]
-# The RS operator modules carry LaTeX + Greek-letter math (ρ, ε, ×,
-# em-dashes) in their docstrings — the formulas are the documentation.
-# Same relaxation as notebooks: RUF ambiguity and E501 are noise here.
-"src/geotoolz/indices/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
-"src/geotoolz/radiometry/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
-"src/geotoolz/geom/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
-"src/geotoolz/normalize/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
-"src/geotoolz/matched_filter/**/*.py" = ["RUF001", "RUF002", "RUF003"]
-"tests/test_matched_filter.py" = ["RUF001", "RUF002", "RUF003"]
-"src/geotoolz/augment/**/*.py" = ["RUF001", "RUF002", "RUF003"]
-"src/geotoolz/compositing/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
-"src/geotoolz/plume/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
-"src/geotoolz/restore/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
-"tests/test_restore.py" = ["RUF001", "RUF002", "RUF003"]
-
-# Reuse guard rails (see AGENTS.md, "Reuse before you write"): other
-# packages are used through their public API, and object-store clients
-# come from the one pool in geocloud.store.
-[tool.ruff.lint.flake8-tidy-imports.banned-api]
-"geopatcher._src".msg = "private to geopatcher: import its public API (docs/capabilities.md), or make the helper public there first"
-"geocatalog._src".msg = "private to geocatalog: import its public API (docs/capabilities.md), or make the helper public there first"
-"geocloud._src".msg = "private to geocloud: import its public API (docs/capabilities.md), or make the helper public there first"
-"geoproducts._src".msg = "private to geoproducts: import its public API (docs/capabilities.md), or make the helper public there first"
-"obstore.store.S3Store".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
-"obstore.store.GCSStore".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
-"obstore.store.AzureStore".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
-"obstore.store.HTTPStore".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
-"obstore.store.from_url".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
-
-[tool.ruff.lint.isort]
-combine-as-imports = true
-lines-after-imports = 2
-
-[tool.ty.environment]
-python-version = "3.12"
-
-[tool.ty.rules]
-# Optional-extra backends (xarray, xvec, rioxarray, zarr) are guarded
-# with try/except ImportError. Without the extras installed in the
-# typecheck env, ty can't resolve them — that's expected and fine.
-unresolved-import = "ignore"
-# `xarray = None` after a failed import is intentional; ty doesn't
-# track the typing-redefinition pattern.
-invalid-assignment = "ignore"
-# rasterio.windows.Window doesn't carry parameter names in its stub, so
-# `Window(col_off=..., row_off=..., width=..., height=...)` looks like
-# unknown kwargs to ty.
-unknown-argument = "ignore"
-# Some call sites unify narrow typing-stub unions (xarray Dataset|DataArray,
-# GeoData|ndarray, geopandas list|GeoDataFrame) in ways the stubs flag
-# spuriously. None of these are real bugs.
-invalid-argument-type = "ignore"
-invalid-return-type = "ignore"
-unresolved-attribute = "ignore"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src/geotoolz --cov-report=term-missing --cov-report=xml:coverage.xml --strict-markers"
-# Tier markers. The default CI run excludes `slow` and `integration`
-# (see .github/workflows/ci.yml); the extended tiers run manually via
-# the "Extended Tests" workflow_dispatch workflow or `make test-all`.
-markers = [
-    "slow: long-running tests (built wheels, big arrays, model inference) — excluded from the default CI run",
-    "integration: tests that touch external services or real remote data — run manually, never in automatic CI",
-]
-
-[tool.coverage.run]
-source = ["src/geotoolz"]
-omit = ["tests/*"]
-
-[tool.coverage.report]
-show_missing = true
-# Optional-extra paths (e.g. the `hydra` integration, the geopatcher
-# bridge tests) aren't always installed in the baseline coverage run.
-# CI re-runs with extras enabled and would hit higher than this floor.
-fail_under = 65

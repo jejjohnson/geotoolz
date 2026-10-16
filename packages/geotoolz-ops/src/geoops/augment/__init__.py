@@ -1,0 +1,55 @@
+"""Remote-sensing-safe data augmentations.
+
+The operators in this module preserve ``GeoTensor`` metadata, avoid
+band-channel shuffling by default, and centralise per-operator plus
+per-call seed handling for reproducible training pipelines.
+"""
+
+from __future__ import annotations
+
+from geoops.augment._src.array import (
+    cloud_alpha,
+    rayleigh_weights,
+    rot90_transform,
+    sun_angle_scale,
+)
+from geoops.augment._src.operators import (
+    AtmosphericHaze,
+    BandDropout,
+    BandJitter,
+    BrightnessJitter,
+    Compose,
+    ContrastJitter,
+    CutMix,
+    GaussianNoise,
+    RandomCrop,
+    RandomFlip,
+    RandomRotate90,
+    RandomShift,
+    SimulatedClouds,
+    SpeckleNoise,
+    SunAngleJitter,
+)
+
+
+__all__ = [
+    "AtmosphericHaze",
+    "BandDropout",
+    "BandJitter",
+    "BrightnessJitter",
+    "Compose",
+    "ContrastJitter",
+    "CutMix",
+    "GaussianNoise",
+    "RandomCrop",
+    "RandomFlip",
+    "RandomRotate90",
+    "RandomShift",
+    "SimulatedClouds",
+    "SpeckleNoise",
+    "SunAngleJitter",
+    "cloud_alpha",
+    "rayleigh_weights",
+    "rot90_transform",
+    "sun_angle_scale",
+]

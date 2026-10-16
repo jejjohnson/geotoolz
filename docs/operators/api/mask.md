@@ -1,7 +1,7 @@
 # Mask
 
 Geometry-based masks, morphological mask ops, and boolean mask algebra. Convention: `True` means
-"mask this pixel out" (consistent with `geotoolz.qa`; see [Mask polarity](../concepts.md#mask-polarity)).
+"mask this pixel out" (consistent with `geoops.qa`; see [Mask polarity](../concepts.md#mask-polarity)).
 
 - **Geometry / DEM masks:** `PolygonMask`, `BBoxMask`, `DistanceMask`, `LandMask`, `OceanMask`,
   `CountryMask`, `AltitudeMask`, `SlopeMask` — `keep="inside"` (default) keeps the region and masks
@@ -20,4 +20,4 @@ Geometry-based masks, morphological mask ops, and boolean mask algebra. Conventi
   `buffer_mask`, `clean_mask`, `remove_small_objects`, `remove_small_holes`, `combine_masks`,
   `invert_mask`, `distance_mask`, `altitude_mask`, `slope_mask`, `slope_degrees`
 
-::: geotoolz.mask
+::: geoops.mask

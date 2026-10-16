@@ -66,7 +66,7 @@ parse, and every name it takes from the stack must exist.
   Build tiny synthetic inputs (`np.random.default_rng(0)…`) or name the
   real public data (`s3://sentinel-cogs/…`, `noaa-goes19`). Secrets come
   from the environment (`os.environ["…"]`).
-- **Imports first**, stack aliases as everywhere else: `import geotoolz
+- **Imports first**, stack aliases as everywhere else: `import geoops
   as gz`, `import geopatcher as gp`, `import geocatalog as gc`, `from
   geocloud import files`, `from geoproducts import goes`.
 - **Notebook-only syntax is labelled.** Top-level `await` gets a comment

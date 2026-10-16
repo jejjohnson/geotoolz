@@ -95,7 +95,7 @@ back as data; see [Window convention](patching.md#window-convention).
 | `geopatcher.run` | `parallel_map`, `prefetch_iterable`, Dask and JAX bridges, `PatchCache`, `IndexedPatchView` | [Cache reads](recipes/patch-cache.md) · [API](api/run.md) |
 | `geopatcher.observe` | `PatcherHook`, `PatchJournal`, `PatchErrorRecord`, strict mode | [Hooks](observability.md) · [Journal](recipes/journal-and-resume.md) |
 | `geopatcher.config` | `axis_envelope` / `from_config` round-trips | [API](api/config.md) |
-| `geopatcher.integrations.pipekit` | `GridSampler`, `ApplyToChips`, `MergePatches` (re-exported as `geotoolz.patch_ops`) | [API](api/integrations.md) |
+| `geopatcher.integrations.pipekit` | `GridSampler`, `ApplyToChips`, `MergePatches` (re-exported as `geoops.patch_ops`) | [API](api/integrations.md) |
 
 Cloud-Optimized GeoTIFF reads come from [geotoolz-cloud](../cloud/index.md);
 `geopatcher.fields.CogField` is their `Field`.
@@ -121,8 +121,8 @@ import rasterio
 from georeader.geotensor import GeoTensor
 
 import geopatcher as gp
-import geotoolz as gz
-from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
+import geoops as gz
+from geoops.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 rng: np.random.Generator = np.random.default_rng(0)
 scene: GeoTensor = GeoTensor(

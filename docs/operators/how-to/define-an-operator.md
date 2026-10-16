@@ -6,19 +6,19 @@ walkthrough; the model behind it is in [Concepts](../concepts.md#the-operator).
 
 ## Write the operator
 
-Subclass `geotoolz.Operator` (pipekit's), store each keyword-only argument
+Subclass `geoops.Operator` (pipekit's), store each keyword-only argument
 under its own name, and do the work in `_apply`. Rewrap the result with
-`geotoolz.carrier.wrap_like`, or `wrap_filled` when nodata pixels need the
-output's fill, then run `geotoolz.testing.check_operator`.
+`geoops.carrier.wrap_like`, or `wrap_filled` when nodata pixels need the
+output's fill, then run `geoops.testing.check_operator`.
 
 ```python
 import numpy as np
 from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
-import geotoolz as gz
-from geotoolz.carrier import carried_fill, wrap_filled
-from geotoolz.testing import check_operator
+import geoops as gz
+from geoops.carrier import carried_fill, wrap_filled
+from geoops.testing import check_operator
 
 
 class Scale(gz.Operator):
@@ -73,7 +73,7 @@ assert gz.Operator.from_state(op.state).get_config() == op.get_config()
 | Use the shared parameter names | `red` / `nir` / `qa_band` for one band, `bands`, `fill_value`, `window`, `seed`, `eps`. |
 
 The full parameter vocabulary is in
-[`packages/geotoolz/AGENTS.md`](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/AGENTS.md#operator-parameter-vocabulary).
+[`packages/geotoolz-ops/AGENTS.md`](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz-ops/AGENTS.md#operator-parameter-vocabulary).
 
 ## Collapse bands and judge nodata
 
@@ -87,9 +87,9 @@ import numpy as np
 from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
-import geotoolz as gz
-from geotoolz.carrier import mask_invalid_to_nan, over_frames, resolve_band, wrap_like
-from geotoolz.testing import check_operator
+import geoops as gz
+from geoops.carrier import mask_invalid_to_nan, over_frames, resolve_band, wrap_like
+from geoops.testing import check_operator
 
 
 class RedEdgeChlorophyll(gz.Operator):
@@ -132,8 +132,8 @@ from collections.abc import Callable
 
 import numpy as np
 
-import geotoolz as gz
-from geotoolz.carrier import wrap_like
+import geoops as gz
+from geoops.carrier import wrap_like
 
 
 class ApplyFunction(gz.Operator):
@@ -167,7 +167,7 @@ from pathlib import Path
 
 import numpy as np
 
-import geotoolz as gz
+import geoops as gz
 
 
 class SaveNpy(gz.Operator):
@@ -201,7 +201,7 @@ attributes in `_apply`. It follows the
 
 - `fit(x) -> self` writes trailing-underscore attributes (`mean_`);
 - `transform(x)` only reads them;
-- `_apply` calls `transform`, after `geotoolz.carrier.fit_once` when it
+- `_apply` calls `transform`, after `geoops.carrier.fit_once` when it
   learns on the first call, so concurrent first calls fit once.
 
 Fitted attributes are not constructor arguments, so they stay out of
@@ -212,4 +212,4 @@ Fitted attributes are not constructor arguments, so they stay out of
 - [Branching pipelines](branching-pipelines.md): combine your operator
   with others in a `Graph`, `Branch` or `Switch`.
 - [Carrier helpers](../api/carrier.md): every helper in
-  `geotoolz.carrier` and `geotoolz.testing`.
+  `geoops.carrier` and `geoops.testing`.

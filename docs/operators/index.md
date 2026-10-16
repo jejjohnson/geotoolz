@@ -1,4 +1,4 @@
-# geotoolz
+# geotoolz-ops (`geoops`)
 
 > **Compose remote-sensing pipelines like you compose functions.**
 > Sentinel-2 to cloud-free NDVI in a handful of small operators, with the
@@ -31,7 +31,7 @@ Until the first PyPI release, install from a clone (see the
 
 ```bash
 pip install geotoolz                 # every operator family
-pip install 'geotoolz[patch]'        # + tile → operate → stitch with geopatcher
+pip install 'geotoolz-ops[patch]'        # + tile → operate → stitch with geopatcher
 ```
 
 Backends that only a few operators use are extras. Those operators import
@@ -48,7 +48,7 @@ without them and raise an `ImportError` naming the extra when called.
 | `netcdf` | geotoolz-cloud with `netCDF4` | `io.ReadNetCDF` |
 | `vector-cube` | `xvec` (+ `xarray`) | `geom.coregister.RasterToPoints` / `PointsToRaster`, bilinear point sampling |
 | `hydra` | `hydra-zen` | YAML `builds()` / `instantiate()` round-trips |
-| `patch` | `geotoolz-patcher[pipekit]` | `geotoolz.patch_ops` (tile → map → stitch, label-aware samplers) |
+| `patch` | `geotoolz-patcher[pipekit]` | `geoops.patch_ops` (tile → map → stitch, label-aware samplers) |
 
 ## Quickstart
 
@@ -62,7 +62,7 @@ import numpy as np
 from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
-import geotoolz as gz
+import geoops as gz
 
 L2A: list[str] = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B11", "B12"]
 rng: np.random.Generator = np.random.default_rng(0)
@@ -108,7 +108,7 @@ its fill because it is a new float quantity; the mask uses `False`.
 | reuse a remote-sensing step across scenes and scripts | an `Operator` ([define one](how-to/define-an-operator.md)) |
 | chain two to six steps | `Sequential` (`a \| b \| c`) |
 | branch, fan in, or return several named outputs | `Graph` ([branching pipelines](how-to/branching-pipelines.md)) |
-| run a model tile by tile over a large raster | `geotoolz.patch_ops` ([tile → operate → stitch](patch_ops.md)) |
+| run a model tile by tile over a large raster | `geoops.patch_ops` ([tile → operate → stitch](patch_ops.md)) |
 | find and load scenes from STAC or local files | [geocatalog](../catalog/index.md), then pass the `GeoTensor` in |
 
 ## What's inside
@@ -120,7 +120,7 @@ numpy primitives (`gz.indices.ndvi`).
 | Namespace | What it does | Reference |
 |---|---|---|
 | core | `Operator`, `Sequential`, `Graph`, `Input`, `Branch`, `Switch`, `Fanout`, `Tap`, `Snapshot`, … (from pipekit) and `ModelOp` | [Core](api/core.md) |
-| `geotoolz.carrier`, `geotoolz.testing` | helpers that keep the `GeoTensor` contract, and `check_operator` | [Carrier](api/carrier.md) |
+| `geoops.carrier`, `geoops.testing` | helpers that keep the `GeoTensor` contract, and `check_operator` | [Carrier](api/carrier.md) |
 | `radiometry` | DN ↔ radiance ↔ reflectance, sun geometry, brightness temperature, DOS1, stretches | [Radiometry](api/radiometry.md) |
 | `indices` | spectral indices: NDVI, EVI, NDWI, NBR, NDSI, … | [Indices](api/indices.md) |
 | `qa` | cloud and quality masks from QA bits, SCL classes and sensor presets | [QA](api/qa.md) |
@@ -155,4 +155,4 @@ numpy primitives (`gz.indices.ndvi`).
 - **Tutorial**: [operators on Sentinel-2 over Lake Tahoe](notebooks/operators_lake_tahoe.ipynb).
 - **Reference**: start at [Core](api/core.md); the
   [capability index](../capabilities.md) lists every public name once.
-- **Changelog**: [`packages/geotoolz/CHANGELOG.md`](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/CHANGELOG.md).
+- **Changelog**: [`packages/geotoolz-ops/CHANGELOG.md`](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz-ops/CHANGELOG.md).

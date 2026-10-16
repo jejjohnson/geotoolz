@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "docs" / "capabilities.md"
 
 PACKAGES = {
-    "geotoolz": "geotoolz",
+    "geoops": "geotoolz-ops",
     "geopatcher": "geotoolz-patcher",
     "geocatalog": "geotoolz-catalog",
     "geocloud": "geotoolz-cloud",
@@ -51,7 +51,7 @@ UPSTREAM = ("pipekit",)
 # Shared private toolkits: modules whose helpers every family / reader of the
 # package builds on. Listed by path, read with ``ast`` (nothing imported).
 TOOLKITS = {
-    "geotoolz": ["packages/geotoolz/src/geotoolz/_src"],
+    "geoops": ["packages/geotoolz-ops/src/geoops/_src"],
     "geocatalog": ["packages/geotoolz-catalog/src/geocatalog/_src/utils"],
     "geoproducts": ["packages/geotoolz-products/src/geoproducts/_src"],
 }
@@ -77,7 +77,7 @@ def _allowed_by_layout(owners: dict[str, object]) -> bool:
     # operator's own name (geoproducts.goes.presets.NDVI).
     if any(m.endswith(".presets") for m in modules):
         return True
-    # geotoolz.patch_ops re-exports the geopatcher pipekit bridge objects.
+    # geoops.patch_ops re-exports the geopatcher pipekit bridge objects.
     return len({id(obj) for obj in owners.values()}) == 1
 
 
@@ -94,7 +94,7 @@ def _public_modules(package: str) -> list[types.ModuleType]:
 def _rank(module_name: str, obj: object) -> tuple[bool, bool, int]:
     """Order candidate homes: inside the defining package first (a re-export
     from another package never hides the original), then the shallowest home
-    below the package root (``geotoolz.indices`` over ``geotoolz``;
+    below the package root (``geoops.indices`` over ``geoops``;
     ``geoproducts.himawari`` over ``geoproducts.himawari.reader``).
     """
     origin = (getattr(obj, "__module__", None) or "").split(".")[0]

@@ -36,4 +36,4 @@ by default so a save is deterministic and writes a single file.
 
 ## API reference
 
-::: geotoolz.learn
+::: geoops.learn

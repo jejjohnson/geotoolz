@@ -1,0 +1,998 @@
+"""Carrier-aware mask operators."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import tempfile
+from collections.abc import Sequence
+from functools import cache
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, ClassVar
+from urllib.request import urlopen
+from zipfile import ZipFile
+
+import geopandas as gpd
+import numpy as np
+import shapely.geometry
+import shapely.geometry.base
+from georeader import rasterize
+from pipekit import Operator
+
+from geoops._src.config import jsonable, nested_config
+from geoops._src.geo import (
+    ground_pixel_size,
+    require_geotensor,
+    require_grid_match,
+    require_projected_crs,
+)
+from geoops._src.shape import gather_inputs
+from geoops._src.valid import carried_fill, carrier_fill_value, wrap_filled
+from geoops._src.wrap import wrap_like
+from geoops.mask._src.array import (
+    Keep,
+    _check_keep,
+    _drop_polarity,
+    altitude_mask,
+    apply_mask,
+    buffer_mask,
+    clean_mask,
+    close_mask,
+    combine_masks,
+    dilate_mask,
+    distance_mask,
+    erode_mask,
+    invert_mask,
+    open_mask,
+    remove_small_holes,
+    remove_small_objects,
+    slope_mask,
+)
+
+
+if TYPE_CHECKING:
+    from georeader.geotensor import GeoTensor
+
+
+_NATURAL_EARTH_URLS = {
+    "land": "https://naturalearth.s3.amazonaws.com/10m_physical/ne_10m_land.zip",
+    "ocean": "https://naturalearth.s3.amazonaws.com/10m_physical/ne_10m_ocean.zip",
+    "countries": "https://naturalearth.s3.amazonaws.com/10m_cultural/ne_10m_admin_0_countries.zip",
+}
+
+
+class PolygonMask(Operator):
+    """Rasterize a shapely geometry or GeoDataFrame into a boolean mask.
+
+    Follows the package polarity (True = drop): with the default
+    ``keep="inside"`` the mask is True *outside* the geometry, so
+    ``ApplyMask(mask=PolygonMask(...))`` keeps the area of interest.
+
+    Geo-dependent: rasterization needs the carrier's transform/CRS, so
+    the input must be a georeferenced ``GeoTensor``. The mask matches
+    the carrier's spatial grid and is returned as a boolean ``(H, W)``
+    GeoTensor with ``fill_value_default=False`` whatever the carrier's
+    rank: every band and every frame of a ``(T, C, H, W)`` stack share
+    the same grid, so one mask serves them all (it broadcasts in
+    :class:`ApplyMask`).
+
+    Args:
+        geometry: Shapely geometry or ``GeoDataFrame`` to burn in.
+        crs: CRS of ``geometry`` when it doesn't carry one itself
+            (required for a CRS-less GeoDataFrame).
+        all_touched: Burn every pixel touched by the geometry instead
+            of only pixels whose center is inside.
+        keep: ``"inside"`` (default) keeps the geometry's interior (mask
+            True outside it); ``"outside"`` keeps the exterior (mask True
+            inside the geometry).
+
+    Examples:
+        >>> PolygonMask(geometry=box(1.0, 1.0, 3.0, 3.0))(scene)  # doctest: +SKIP
+    """
+
+    forbid_in_yaml: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        *,
+        geometry: shapely.geometry.base.BaseGeometry | gpd.GeoDataFrame,
+        crs: str | None = None,
+        all_touched: bool = False,
+        keep: Keep = "inside",
+    ) -> None:
+        self.geometry = geometry
+        self.crs = crs
+        self.all_touched = all_touched
+        self.keep = _check_keep(keep, type(self).__name__)
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        burned = _rasterize_geometry_like(
+            self.geometry,
+            gt,
+            crs=self.crs,
+            all_touched=self.all_touched,
+        )
+        mask = _drop_polarity(burned, self.keep, type(self).__name__)
+        return wrap_like(gt, mask, fill_value_default=False)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "geometry": _geometry_config(self.geometry),
+            "crs": self.crs,
+            "all_touched": self.all_touched,
+            "keep": self.keep,
+        }
+
+
+class BBoxMask(PolygonMask):
+    """Rasterize an axis-aligned bounding box into a boolean mask.
+
+    Geo-dependent: requires a georeferenced ``GeoTensor`` input (see
+    :class:`PolygonMask`).
+
+    Args:
+        bounds: ``(minx, miny, maxx, maxy)`` box in ``crs`` coordinates.
+        crs: CRS of ``bounds``; defaults to the carrier's CRS.
+        keep: ``"inside"`` (default) keeps the box (mask True outside
+            it); ``"outside"`` drops the box.
+
+    Examples:
+        >>> aoi = BBoxMask(bounds=(1.0, 1.0, 3.0, 3.0))  # doctest: +SKIP
+        >>> ApplyMask(mask=aoi)(scene)  # keeps the box  # doctest: +SKIP
+    """
+
+    forbid_in_yaml: ClassVar[bool] = False
+
+    def __init__(
+        self,
+        *,
+        bounds: tuple[float, float, float, float],
+        crs: str | None = None,
+        keep: Keep = "inside",
+    ) -> None:
+        self.bounds = tuple(bounds)
+        if len(self.bounds) != 4:
+            raise ValueError("BBoxMask: `bounds` must contain exactly four values")
+        super().__init__(
+            geometry=shapely.geometry.box(*self.bounds), crs=crs, keep=keep
+        )
+
+    def get_config(self) -> dict[str, Any]:
+        return {"bounds": self.bounds, "crs": self.crs, "keep": self.keep}
+
+
+class DistanceMask(PolygonMask):
+    """Mask pixels by their distance from a geometry (True = drop).
+
+    Rasterizes the geometry onto the carrier grid, then buffers it by
+    ``distance`` (CRS units, using the carrier's ground pixel steps
+    ``hypot(a, d)`` / ``hypot(b, e)`` so rotated grids measure true
+    distances; sheared grids raise ``ValueError``; see
+    :func:`geoops.mask.distance_mask`). Geo-dependent: requires a
+    georeferenced ``GeoTensor`` input. Like :class:`PolygonMask`, it
+    returns one boolean ``(H, W)`` mask whatever the carrier's rank.
+
+    Args:
+        geometry: Shapely geometry or ``GeoDataFrame``.
+        distance: Maximum distance from the geometry, in CRS units.
+        keep: ``"inside"`` (default) keeps pixels within ``distance`` of
+            the geometry (mask True beyond it); ``"outside"`` drops the
+            zone within ``distance``.
+        crs: CRS of ``geometry`` when it doesn't carry one itself.
+        all_touched: Rasterization rule; see :class:`PolygonMask`.
+            Default True so thin geometries are not lost.
+    """
+
+    def __init__(
+        self,
+        *,
+        geometry: shapely.geometry.base.BaseGeometry | gpd.GeoDataFrame,
+        distance: float,
+        keep: Keep = "inside",
+        crs: str | None = None,
+        all_touched: bool = True,
+    ) -> None:
+        self.distance = distance
+        super().__init__(geometry=geometry, crs=crs, all_touched=all_touched, keep=keep)
+
+    def _apply(self, gt: GeoTensor) -> GeoTensor:
+        burned = _rasterize_geometry_like(
+            self.geometry,
+            gt,
+            crs=self.crs,
+            all_touched=self.all_touched,
+        )
+        mask = distance_mask(
+            burned,
+            self.distance,
+            keep=self.keep,
+            pixel_size=ground_pixel_size(gt.transform, type(self).__name__),
+        )
+        return wrap_like(gt, mask, fill_value_default=False)
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "geometry": _geometry_config(self.geometry),
+            "distance": self.distance,
+            "keep": self.keep,
+            "crs": self.crs,
+            "all_touched": self.all_touched,
+        }
+
+
+class _NaturalEarthMask(PolygonMask):
+    """Base for the Natural Earth masks: the polygons load on first use.
+
+    Construction, ``get_config`` and ``Operator.from_state`` never touch the
+    network or disk, so building (or hydra-instantiating) a pipeline has no
+    I/O side effects. The vectors are read by :meth:`_load_geometry` the
+    first time :attr:`geometry` is needed (normally the first call) and
+    memoised on the instance. Loads go through a process-lifetime cache
+    shared by every instance; release it with
+    :func:`geoops.mask.clear_natural_earth_cache`.
+    """
+
+    forbid_in_yaml: ClassVar[bool] = False
+
+    def __init__(self, *, source: str, keep: Keep) -> None:
+        # Deliberately not ``PolygonMask.__init__``: ``geometry`` is lazy.
+        self.source = source
+        self.crs = "EPSG:4326"
+        self.all_touched = False
+        self.keep = _check_keep(keep, type(self).__name__)
+        self._geometry: gpd.GeoDataFrame | None = None
+
+    @property
+    def geometry(self) -> gpd.GeoDataFrame:
+        """The mask polygons, loaded (and memoised) on first access."""
+        if self._geometry is None:
+            self._geometry = self._load_geometry()
+        return self._geometry
+
+    def _load_geometry(self) -> gpd.GeoDataFrame:
+        raise NotImplementedError
+
+
+class LandMask(_NaturalEarthMask):
+    """Rasterize Natural Earth land polygons into a boolean mask.
+
+    Geo-dependent: requires a georeferenced ``GeoTensor`` input (see
+    :class:`PolygonMask`). The polygons are loaded on the first call,
+    never in the constructor.
+
+    Args:
+        source: ``"natural_earth_10m"`` (default) downloads and caches
+            the Natural Earth 1:10m land polygons on first use; any other
+            value is a local vector file path passed to
+            ``geopandas.read_file``.
+        keep: ``"inside"`` (default) keeps land pixels (mask True
+            elsewhere); ``"outside"`` drops them.
+    """
+
+    def __init__(
+        self, *, source: str = "natural_earth_10m", keep: Keep = "inside"
+    ) -> None:
+        super().__init__(source=source, keep=keep)
+
+    def _load_geometry(self) -> gpd.GeoDataFrame:
+        return _load_natural_earth("land", self.source)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"source": self.source, "keep": self.keep}
+
+
+class OceanMask(_NaturalEarthMask):
+    """Rasterize Natural Earth ocean polygons into a boolean mask.
+
+    Geo-dependent: requires a georeferenced ``GeoTensor`` input (see
+    :class:`PolygonMask`). The polygons are loaded on the first call,
+    never in the constructor.
+
+    Args:
+        source: ``"natural_earth_10m"`` (default) downloads and caches
+            the Natural Earth 1:10m ocean polygons on first use; any
+            other value is a local vector file path passed to
+            ``geopandas.read_file``.
+        keep: ``"inside"`` (default) keeps ocean pixels (mask True
+            elsewhere); ``"outside"`` drops them.
+    """
+
+    def __init__(
+        self, *, source: str = "natural_earth_10m", keep: Keep = "inside"
+    ) -> None:
+        super().__init__(source=source, keep=keep)
+
+    def _load_geometry(self) -> gpd.GeoDataFrame:
+        return _load_natural_earth("ocean", self.source)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"source": self.source, "keep": self.keep}
+
+
+class CountryMask(_NaturalEarthMask):
+    """Rasterize Natural Earth country polygons selected by ISO A3 code.
+
+    Geo-dependent: requires a georeferenced ``GeoTensor`` input (see
+    :class:`PolygonMask`). The polygons are loaded on the first call,
+    never in the constructor.
+
+    Args:
+        iso_a3: One ISO A3 country code or a sequence of them (e.g.
+            ``"ESP"`` or ``("ESP", "PRT")``).
+        source: ``"natural_earth_10m"`` (default) downloads and caches
+            the Natural Earth 1:10m admin-0 countries on first use; any
+            other value is a local vector file path with an ``ISO_A3``
+            column.
+        keep: ``"inside"`` (default) keeps the selected countries (mask
+            True elsewhere); ``"outside"`` drops them.
+
+    Raises:
+        ValueError: On the first call, if none of the requested codes are
+            found (codes are checked only once the polygons load).
+    """
+
+    def __init__(
+        self,
+        *,
+        iso_a3: str | Sequence[str],
+        source: str = "natural_earth_10m",
+        keep: Keep = "inside",
+    ) -> None:
+        self.iso_a3 = (iso_a3,) if isinstance(iso_a3, str) else tuple(iso_a3)
+        super().__init__(source=source, keep=keep)
+
+    def _load_geometry(self) -> gpd.GeoDataFrame:
+        countries = _load_natural_earth("countries", self.source)
+        selected = countries[countries["ISO_A3"].isin(self.iso_a3)]
+        if selected.empty:
+            raise ValueError(f"CountryMask: no countries found for {list(self.iso_a3)}")
+        return selected
+
+    def get_config(self) -> dict[str, Any]:
+        iso_a3: str | list[str]
+        iso_a3 = self.iso_a3[0] if len(self.iso_a3) == 1 else list(self.iso_a3)
+        return {"iso_a3": iso_a3, "source": self.source, "keep": self.keep}
+
+
+class AltitudeMask(Operator):
+    """Build a boolean mask from DEM elevation bounds.
+
+    Follows the package polarity (True = drop): with the default
+    ``keep="inside"`` the mask is True where the DEM falls *outside* the
+    requested elevation interval. Either bound may be ``None`` for an
+    open-ended interval.
+
+    Called as ``op(scene, dem)``: the output mask is wrapped like
+    ``scene`` (a GeoTensor or plain ndarray), and ``dem`` is a single-band
+    carrier on the scene's pixel grid -- same spatial shape and, when both
+    are georeferenced, the same transform / CRS (``ValueError``
+    otherwise).
+
+    Args:
+        min_elev: Inclusive lower bound (units of the DEM).
+        max_elev: Inclusive upper bound.
+        keep: ``"inside"`` (default) keeps cells inside the interval;
+            ``"outside"`` keeps cells outside it.
+
+    Examples:
+        >>> AltitudeMask(min_elev=500.0)(scene, dem)  # doctest: +SKIP
+    """
+
+    def __init__(
+        self,
+        *,
+        min_elev: float | None = None,
+        max_elev: float | None = None,
+        keep: Keep = "inside",
+    ) -> None:
+        self.min_elev = min_elev
+        self.max_elev = max_elev
+        self.keep = _check_keep(keep, "AltitudeMask")
+
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, dem: GeoTensor | np.ndarray
+    ) -> GeoTensor | np.ndarray:
+        require_grid_match(gt, dem, "AltitudeMask", names=("scene", "dem"))
+        mask = altitude_mask(
+            np.asarray(dem),
+            min_elev=self.min_elev,
+            max_elev=self.max_elev,
+            keep=self.keep,
+        )
+        return wrap_like(gt, mask, fill_value_default=False)
+
+
+class SlopeMask(Operator):
+    """Build a boolean mask from DEM slope bounds in degrees.
+
+    Slope is computed from the DEM with central differences scaled by
+    the DEM's ground pixel steps (``hypot(a, d)`` / ``hypot(b, e)``, so
+    rotated grids measure true distances; sheared grids are rejected).
+    The DEM must be in a projected CRS: a geographic DEM's pixel size is
+    in degrees and raises ``ValueError``. Follows the package polarity
+    (True = drop): with the default ``keep="inside"`` the mask is True
+    where the slope (degrees) falls *outside* the requested interval.
+
+    Called as ``op(scene, dem)``. Geo-dependent on the DEM side: ``dem``
+    must be a single-band georeferenced ``GeoTensor`` (its transform
+    supplies the pixel size, in the same units as the elevation values)
+    on the scene's pixel grid. The scene may be a GeoTensor or plain
+    ndarray; when both are georeferenced, their transform / CRS must
+    match (``ValueError`` otherwise).
+
+    Args:
+        min_slope_deg: Inclusive lower bound, degrees.
+        max_slope_deg: Inclusive upper bound, degrees.
+        keep: ``"inside"`` (default) keeps cells inside the interval;
+            ``"outside"`` keeps cells outside it.
+
+    Examples:
+        >>> SlopeMask(max_slope_deg=10.0)(scene, dem)  # doctest: +SKIP
+    """
+
+    def __init__(
+        self,
+        *,
+        min_slope_deg: float | None = None,
+        max_slope_deg: float | None = None,
+        keep: Keep = "inside",
+    ) -> None:
+        self.min_slope_deg = min_slope_deg
+        self.max_slope_deg = max_slope_deg
+        self.keep = _check_keep(keep, "SlopeMask")
+
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, dem: GeoTensor
+    ) -> GeoTensor | np.ndarray:
+        dem = require_geotensor(dem, "SlopeMask", arg="dem")
+        require_projected_crs(dem, "SlopeMask", what="slopes", metres=False)
+        require_grid_match(gt, dem, "SlopeMask", names=("scene", "dem"))
+        mask = slope_mask(
+            np.asarray(dem),
+            ground_pixel_size(dem.transform, "SlopeMask"),
+            min_slope_deg=self.min_slope_deg,
+            max_slope_deg=self.max_slope_deg,
+            keep=self.keep,
+        )
+        return wrap_like(gt, mask, fill_value_default=False)
+
+
+class DilateMask(Operator):
+    """Dilate a boolean mask over its trailing spatial axes.
+
+    Wraps :func:`scipy.ndimage.binary_dilation`. The structuring element
+    defaults to a 3x3 box (8-connectivity). Stacks of masks of shape
+    ``(C, H, W)`` are processed per channel. Accepts a GeoTensor or a
+    plain ndarray and returns the same carrier kind.
+
+    Args:
+        iterations: Number of dilation passes. ``0`` is a no-op copy.
+        structure: Optional 2-D structuring element.
+
+    Examples:
+        >>> DilateMask(iterations=2)(mask)  # doctest: +SKIP
+    """
+
+    def __init__(
+        self, *, iterations: int = 1, structure: np.ndarray | None = None
+    ) -> None:
+        self.iterations = iterations
+        self.structure = structure
+
+    def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        out = dilate_mask(np.asarray(mask), self.iterations, self.structure)
+        return wrap_like(mask, out, fill_value_default=False)
+
+    def get_config(self) -> dict[str, Any]:
+        return _morph_config(self.iterations, self.structure)
+
+
+class ErodeMask(Operator):
+    """Erode a boolean mask over its trailing spatial axes.
+
+    Wraps :func:`scipy.ndimage.binary_erosion`; see :class:`DilateMask`
+    for the structuring-element and carrier conventions.
+
+    Args:
+        iterations: Number of erosion passes. ``0`` is a no-op copy.
+        structure: Optional 2-D structuring element.
+
+    Examples:
+        >>> ErodeMask(iterations=1)(mask)  # doctest: +SKIP
+    """
+
+    def __init__(
+        self, *, iterations: int = 1, structure: np.ndarray | None = None
+    ) -> None:
+        self.iterations = iterations
+        self.structure = structure
+
+    def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        out = erode_mask(np.asarray(mask), self.iterations, self.structure)
+        return wrap_like(mask, out, fill_value_default=False)
+
+    def get_config(self) -> dict[str, Any]:
+        return _morph_config(self.iterations, self.structure)
+
+
+class OpenMask(Operator):
+    """Open (erode then dilate) a boolean mask.
+
+    Wraps :func:`scipy.ndimage.binary_opening`. Useful for removing
+    isolated True pixels (salt) while preserving large True components.
+    Accepts a GeoTensor or a plain ndarray and returns the same carrier
+    kind.
+
+    Args:
+        iterations: Number of opening passes. ``0`` is a no-op copy.
+
+    Examples:
+        >>> OpenMask(iterations=1)(mask)  # doctest: +SKIP
+    """
+
+    def __init__(self, *, iterations: int = 1) -> None:
+        self.iterations = iterations
+
+    def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        out = open_mask(np.asarray(mask), self.iterations)
+        return wrap_like(mask, out, fill_value_default=False)
+
+
+class CloseMask(Operator):
+    """Close (dilate then erode) a boolean mask.
+
+    Wraps :func:`scipy.ndimage.binary_closing`. Useful for filling
+    pin-holes (pepper) inside otherwise solid True regions. Accepts a
+    GeoTensor or a plain ndarray and returns the same carrier kind.
+
+    Args:
+        iterations: Number of closing passes. ``0`` is a no-op copy.
+
+    Examples:
+        >>> CloseMask(iterations=1)(mask)  # doctest: +SKIP
+    """
+
+    def __init__(self, *, iterations: int = 1) -> None:
+        self.iterations = iterations
+
+    def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        out = close_mask(np.asarray(mask), self.iterations)
+        return wrap_like(mask, out, fill_value_default=False)
+
+
+class BufferMask(Operator):
+    """Radially expand True pixels in a mask by a Euclidean buffer.
+
+    Wraps :func:`geoops.mask.buffer_mask`. With ``unit="pixels"``
+    (default) the op is metadata-free and accepts a GeoTensor or a
+    plain ndarray, returning the same carrier kind. With
+    ``unit="meters"`` the op is geo-dependent: the input must be a
+    georeferenced ``GeoTensor`` whose transform supplies the ground
+    pixel steps (rotated grids are measured correctly, sheared grids
+    raise ``ValueError``), and ``radius`` is measured in CRS units.
+
+    Args:
+        radius: Buffer distance, in pixels or CRS units per ``unit``.
+        unit: ``"pixels"`` (default), ``"meters"``, or ``"meter"``.
+
+    Examples:
+        >>> BufferMask(radius=2.0)(mask)  # doctest: +SKIP
+    """
+
+    def __init__(self, *, radius: float, unit: str = "pixels") -> None:
+        self.radius = radius
+        self.unit = unit
+
+    def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        if self.unit in {"meter", "meters"}:
+            if not hasattr(mask, "transform"):
+                raise ValueError(
+                    "BufferMask(unit='meters') requires a GeoTensor with a "
+                    f"transform; got {type(mask).__name__}."
+                )
+            pixel_size = ground_pixel_size(mask.transform, "BufferMask")
+        else:
+            pixel_size = (1.0, 1.0)
+        out = buffer_mask(
+            np.asarray(mask), self.radius, unit=self.unit, pixel_size=pixel_size
+        )
+        return wrap_like(mask, out, fill_value_default=False)
+
+
+class RemoveSmallObjects(Operator):
+    """Remove connected True components smaller than ``min_area_px`` pixels.
+
+    Wraps :func:`geoops.mask.remove_small_objects` (4-connectivity).
+    Accepts a GeoTensor or a plain ndarray and returns the same carrier
+    kind.
+
+    Args:
+        min_area_px: Minimum component area, in pixels, to keep.
+    """
+
+    def __init__(self, *, min_area_px: int) -> None:
+        self.min_area_px = min_area_px
+
+    def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        out = remove_small_objects(np.asarray(mask), self.min_area_px)
+        return wrap_like(mask, out, fill_value_default=False)
+
+
+class RemoveSmallHoles(Operator):
+    """Fill enclosed False components up to ``max_hole_area_px`` pixels.
+
+    Wraps :func:`geoops.mask.remove_small_holes`; holes touching the
+    image border are never filled. Accepts a GeoTensor or a plain
+    ndarray and returns the same carrier kind.
+
+    Args:
+        max_hole_area_px: Maximum hole area, in pixels, to fill.
+    """
+
+    def __init__(self, *, max_hole_area_px: int) -> None:
+        self.max_hole_area_px = max_hole_area_px
+
+    def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        out = remove_small_holes(np.asarray(mask), self.max_hole_area_px)
+        return wrap_like(mask, out, fill_value_default=False)
+
+
+class CleanMask(Operator):
+    """Remove small objects, fill small holes, then close the mask.
+
+    Convenience composition of :class:`RemoveSmallObjects`,
+    :class:`RemoveSmallHoles`, and :class:`CloseMask`, in that order.
+    Accepts a GeoTensor or a plain ndarray and returns the same carrier
+    kind.
+
+    Args:
+        min_area_px: Components smaller than this are removed.
+        max_hole_area_px: Enclosed holes up to this size are filled.
+        close_iter: Binary-closing iterations applied last; ``0`` skips
+            the closing step.
+    """
+
+    def __init__(
+        self,
+        *,
+        min_area_px: int = 25,
+        max_hole_area_px: int = 25,
+        close_iter: int = 1,
+    ) -> None:
+        self.min_area_px = min_area_px
+        self.max_hole_area_px = max_hole_area_px
+        self.close_iter = close_iter
+
+    def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        out = clean_mask(
+            np.asarray(mask),
+            min_area_px=self.min_area_px,
+            max_hole_area_px=self.max_hole_area_px,
+            close_iter=self.close_iter,
+        )
+        return wrap_like(mask, out, fill_value_default=False)
+
+
+class CombineMasks(Operator):
+    """Combine boolean masks on one pixel grid with ``or``, ``and`` or ``xor``.
+
+    Called with the masks as positional arguments, ``op(m1, m2, ...)``
+    (GeoTensors or plain ndarrays) -- so it wires straight into a
+    ``pipekit.Graph`` as ``CombineMasks()(Input("a"), Input("b"))`` -- or
+    with one sequence of them, ``op([m1, m2])``, or one ``(T, C, H, W)``
+    stack whose frames are the masks. Every mask must sit on the first
+    mask's pixel grid (``ValueError`` otherwise, see
+    :func:`geoops._src.geo.grid_matches`). The output takes its carrier
+    kind -- and, for GeoTensors, its metadata -- from the first mask.
+    Every input must use the package polarity (True = drop), so
+    ``op="or"`` drops a pixel that *any* mask drops. Use :class:`InvertMask`
+    for the complement.
+
+    Args:
+        op: ``"or"`` (default), ``"and"`` or ``"xor"``.
+    """
+
+    def __init__(self, *, op: str = "or") -> None:
+        self.op = op
+
+    def _apply(self, *masks: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        masks = gather_inputs(masks, "CombineMasks", split_stack=True)
+        for idx, mask in enumerate(masks[1:], start=1):
+            require_grid_match(
+                masks[0], mask, "CombineMasks", names=("mask 0", f"mask {idx}")
+            )
+        out = combine_masks([np.asarray(mask) for mask in masks], self.op)
+        return wrap_like(masks[0], out, fill_value_default=False)
+
+
+class InvertMask(Operator):
+    """Invert a boolean mask element-wise.
+
+    The one complement operator (wraps :func:`geoops.mask.invert_mask`):
+    turns a keep-polarity mask (True = keep, e.g. ``validmask()``) into
+    the package's drop polarity, and back. Accepts a GeoTensor or a
+    plain ndarray and returns the same carrier kind. Takes no parameters.
+    """
+
+    def _apply(self, mask: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        out = invert_mask(np.asarray(mask))
+        return wrap_like(mask, out, fill_value_default=False)
+
+
+class ApplyMask(Operator):
+    """Apply a boolean mask to the carrier, filling True pixels.
+
+    Accepts a GeoTensor or a plain ndarray and returns the same
+    carrier kind. This is the canonical mask-application operator.
+    Delegates the actual masking to
+    :func:`geoops.mask._src.array.apply_mask` so the broadcasting +
+    dtype-preservation rules stay in one place.
+
+    Convention: the mask is True where pixels should be *masked out* —
+    the polarity every ``geoops.mask`` and ``geoops.qa`` producer
+    returns, so geometry masks keep their area of interest by default.
+    Flip a keep-polarity mask (e.g. ``validmask()``) with
+    :class:`InvertMask` / :func:`~geoops.mask.invert_mask` first.
+
+    Called as ``op(gt, mask)`` with the boolean mask carrier (GeoTensor
+    or ndarray) on ``gt``'s pixel grid (``ValueError`` otherwise), so it
+    wires into a ``pipekit.Graph`` as ``ApplyMask()(Input("x"),
+    Input("mask"))``. Alternatively configure a mask *operator* (e.g. a
+    geometry mask) that builds the mask from ``gt`` and call ``op(gt)``.
+
+    Args:
+        mask: Optional ``Operator`` producing the mask when called on the
+            input. Mask arrays are passed at call time, not here.
+        fill_value: Value substituted where the mask says "drop". The
+            default ``None`` uses the carrier's ``fill_value_default``
+            when it has one that the carrier's dtype can hold (so an
+            integer carrier is not upcast), and ``NaN`` otherwise. The
+            output declares this value as its ``fill_value_default``, and
+            the input's own nodata pixels are rewritten to it, so
+            ``validmask()`` marks every dropped and nodata pixel.
+            Note that georeader treats the fill value as nodata even when
+            it is ``0``.
+
+    Examples:
+        >>> import geoops as gz, numpy as np
+        >>> aoi = gz.mask.BBoxMask(bounds=(1.0, 1.0, 3.0, 3.0))
+        >>> keep_aoi = gz.mask.ApplyMask(mask=aoi)  # fills outside the box
+        >>> out = keep_aoi(scene)  # doctest: +SKIP
+        >>> out = gz.mask.ApplyMask()(scene, cloud_mask)  # doctest: +SKIP
+    """
+
+    def __init__(
+        self,
+        *,
+        mask: Operator | None = None,
+        fill_value: float | None = None,
+    ) -> None:
+        if mask is not None and not isinstance(mask, Operator):
+            raise TypeError(
+                "ApplyMask(mask=...) takes a mask-producing Operator; pass a "
+                "mask array or GeoTensor at call time instead: "
+                "ApplyMask()(gt, mask)"
+            )
+        self.mask = mask
+        self.fill_value = fill_value
+
+    def _apply(
+        self, gt: GeoTensor | np.ndarray, mask: GeoTensor | np.ndarray | None = None
+    ) -> GeoTensor | np.ndarray:
+        if (mask is None) == (self.mask is None):
+            raise ValueError(
+                "ApplyMask needs exactly one mask: a mask carrier at call time, "
+                "ApplyMask()(gt, mask), or a mask operator, ApplyMask(mask=op)(gt)"
+            )
+        if mask is not None:
+            require_grid_match(gt, mask, "ApplyMask", names=("input", "mask"))
+        elif self.mask is not None:
+            mask = self.mask(gt)
+        mask_arr = np.asarray(mask)
+        fill = self._resolve_fill(gt)
+        out = apply_mask(np.asarray(gt), mask_arr, fill_value=fill)
+        if np.ndim(out) < 2:
+            return wrap_like(gt, out, fill_value_default=fill)
+        return wrap_filled(gt, out, fill_value_default=fill)
+
+    def _resolve_fill(self, gt: GeoTensor | np.ndarray) -> Any:
+        """The fill to write: explicit, else a usable carrier fill, else NaN."""
+        if self.fill_value is not None:
+            return self.fill_value
+        fill = carrier_fill_value(gt)
+        dtype = np.asarray(gt).dtype
+        if np.issubdtype(dtype, np.bool_):
+            usable = isinstance(fill, bool | np.bool_)
+        else:
+            # ``carried_fill`` is None when an integer dtype cannot hold it.
+            usable = carried_fill(gt, dtype) is not None
+        return fill if usable else np.nan
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "mask": None if self.mask is None else nested_config(self.mask),
+            "fill_value": self.fill_value,
+        }
+
+
+def _rasterize_geometry_like(
+    geometry: shapely.geometry.base.BaseGeometry | gpd.GeoDataFrame,
+    gt: GeoTensor,
+    *,
+    crs: str | None,
+    all_touched: bool,
+) -> np.ndarray:
+    if isinstance(geometry, gpd.GeoDataFrame):
+        gdf = geometry.copy()
+        if gdf.crs is None:
+            if crs is None:
+                raise ValueError(
+                    "PolygonMask: GeoDataFrame CRS is missing; pass `crs=...` "
+                    "or set `geometry.crs` before creating the operator"
+                )
+            gdf = gdf.set_crs(crs)
+        gdf["__mask__"] = 1
+        burned = rasterize.rasterize_geopandas_like(
+            gdf, gt, column="__mask__", all_touched=all_touched, return_only_data=True
+        )
+    else:
+        burned = rasterize.rasterize_geometry_like(
+            geometry,
+            gt,
+            value=1,
+            dtype=np.uint8,
+            crs_geometry=crs,
+            fill=0,
+            all_touched=all_touched,
+            return_only_data=True,
+        )
+    return np.asarray(burned, dtype=bool)
+
+
+@cache
+def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
+    """Load and cache Natural Earth vectors.
+
+    Supports ``kind`` values ``"land"``, ``"ocean"``, and ``"countries"``.
+    The special ``source="natural_earth_10m"`` downloads the corresponding
+    Natural Earth 1:10m zip once into the geotoolz cache directory and reuses
+    the extracted shapefile. Any other source is passed to
+    ``geopandas.read_file``. Called lazily, on a Natural Earth mask's first
+    use. The in-process ``@cache`` avoids repeated reads across operator
+    instances and holds the GeoDataFrames for the process lifetime (the
+    1:10m layers are tens of MB); release them with
+    :func:`clear_natural_earth_cache`. The downloaded zip and extracted
+    shapefile are cached separately on disk across sessions.
+    """
+    if source != "natural_earth_10m":
+        return gpd.read_file(source)
+
+    cache_dir = _natural_earth_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = cache_dir / Path(_NATURAL_EARTH_URLS[kind]).name
+    extract_dir = cache_dir / zip_path.stem
+    if not extract_dir.exists():
+        if not zip_path.exists():
+            try:
+                _download_url(_NATURAL_EARTH_URLS[kind], zip_path)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"failed to download Natural Earth {kind!r} data from "
+                    f"{_NATURAL_EARTH_URLS[kind]}; check network/firewall "
+                    "access or pass a local vector file path as `source`"
+                ) from exc
+        with ZipFile(zip_path) as zf:
+            bad_member = zf.testzip()
+            if bad_member is not None:
+                raise RuntimeError(
+                    f"Natural Earth {kind!r} archive failed CRC validation at "
+                    f"{bad_member!r}; remove the cached archive to re-download it"
+                )
+            # Extract next to the target and rename into place, so a
+            # half-extracted directory never passes the `exists()` check.
+            staging = Path(
+                tempfile.mkdtemp(dir=cache_dir, prefix=f".{extract_dir.name}.")
+            )
+            try:
+                _safe_extract_zip(zf, staging)
+                try:
+                    staging.rename(extract_dir)
+                except OSError:
+                    if not extract_dir.exists():  # not just lost a race
+                        raise
+            finally:
+                shutil.rmtree(staging, ignore_errors=True)
+    shapefiles = list(extract_dir.glob("*.shp"))
+    if not shapefiles:
+        raise FileNotFoundError(
+            f"Natural Earth {kind!r} archive did not contain a top-level .shp "
+            "file; remove the cached archive to re-download it or pass a "
+            "valid local vector file path as `source`"
+        )
+    shp = shapefiles[0]
+    return gpd.read_file(shp)
+
+
+def clear_natural_earth_cache() -> None:
+    """Release the in-process Natural Earth GeoDataFrames.
+
+    `LandMask` / `OceanMask` / `CountryMask` share one process-lifetime
+    cache keyed on ``(kind, source)``, so each layer is read at most once
+    per session. Call this to free that memory, or to re-read a local
+    ``source`` file that changed on disk. Mask instances that already
+    loaded their polygons keep them; the on-disk download cache is
+    untouched.
+    """
+    _load_natural_earth.cache_clear()
+
+
+def _download_url(url: str, destination: Path, *, timeout: float = 60.0) -> None:
+    """Download ``url`` to ``destination`` atomically.
+
+    The bytes go to a temporary sibling renamed into place once complete, so
+    an interrupted download never leaves a truncated archive the cache
+    would later trust.
+    """
+    fd, tmp = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
+    try:
+        with urlopen(url, timeout=timeout) as response, os.fdopen(fd, "wb") as dst:
+            shutil.copyfileobj(response, dst)
+        os.replace(tmp, destination)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
+
+
+def _natural_earth_cache_dir() -> Path:
+    """Return the on-disk Natural Earth cache directory.
+
+    The location follows ``$XDG_CACHE_HOME/geotoolz/natural_earth`` when
+    ``XDG_CACHE_HOME`` is set, otherwise ``~/.cache/geotoolz/natural_earth``.
+    In restricted environments where the home directory cannot be resolved,
+    it falls back to the system temporary directory.
+    """
+    cache_root = os.environ.get("XDG_CACHE_HOME")
+    if cache_root is not None:
+        return Path(cache_root) / "geotoolz" / "natural_earth"
+    try:
+        return Path.home() / ".cache" / "geotoolz" / "natural_earth"
+    except RuntimeError:
+        return Path(tempfile.gettempdir()) / "geotoolz" / "natural_earth"
+
+
+def _safe_extract_zip(zf: ZipFile, extract_dir: Path) -> None:
+    extract_root = extract_dir.resolve()
+    for member in zf.infolist():
+        target = (extract_root / member.filename).resolve()
+        if not target.is_relative_to(extract_root):
+            raise RuntimeError(
+                f"refusing to extract unsafe zip member {member.filename!r}"
+            )
+    zf.extractall(extract_root)
+
+
+def _morph_config(iterations: int, structure: np.ndarray | None) -> dict[str, Any]:
+    return {
+        "iterations": iterations,
+        "structure": None if structure is None else np.asarray(structure).tolist(),
+    }
+
+
+def _geometry_config(
+    geometry: shapely.geometry.base.BaseGeometry | gpd.GeoDataFrame,
+) -> dict[str, Any]:
+    """Return a JSON-safe summary of a geometry / GeoDataFrame.
+
+    Shapely geometries are emitted as GeoJSON-ish ``__geo_interface__``
+    dicts (with tuples cast to lists for strict JSON safety). GeoDataFrames
+    are summarised by length + CRS to avoid embedding many features.
+    """
+    if isinstance(geometry, gpd.GeoDataFrame):
+        return {
+            "type": "GeoDataFrame",
+            "length": len(geometry),
+            "crs": None if geometry.crs is None else str(geometry.crs),
+        }
+    # `shapely.geometry.mapping` returns the GeoJSON-style dict for any
+    # base geometry (including MultiPolygon / GeometryCollection). We
+    # coerce nested tuples to lists for strict JSON serialisability.
+    return jsonable(shapely.geometry.mapping(geometry))

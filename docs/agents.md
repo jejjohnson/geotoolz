@@ -45,14 +45,14 @@ stack:
 ```markdown
 ## Geospatial code: build on the geotoolz stack
 
-This project uses geotoolz (operators), geocatalog (find / index / load),
+This project uses geoops (operators), geocatalog (find / index / load),
 geopatcher (tile / stitch), geoproducts (EO product readers) and geocloud
 (object storage). Before writing any raster, catalog, tiling, product-reading
 or object-store helper, search the capability index
 (https://jejjohnson.github.io/geotoolz/capabilities/) or the installed
 packages' `__all__`, and compose what exists. New processing steps are
 `pipekit.Operator`s that keep the two contracts, so they chain with
-`geotoolz.Sequential` and run in a `pipekit.Graph`:
+`geoops.Sequential` and run in a `pipekit.Graph`:
 
 - **Operator.**
   - Implement `_apply`, never `__call__`.
@@ -72,9 +72,9 @@ packages' `__all__`, and compose what exists. New processing steps are
   - `fill_value_default` is nodata: `False` for masks, `0` for labels,
     `NaN` for new floats.
   - Several rasters must share a grid; mask `True` means drop.
-- Keep them with the helpers in `geotoolz.carrier` (`wrap_like`,
+- Keep them with the helpers in `geoops.carrier` (`wrap_like`,
   `mask_invalid_to_nan`, `over_frames`, `resolve_band`, `require_grid_match`),
-  and test every new step with `geotoolz.testing.check_operator(op, scene)`.
+  and test every new step with `geoops.testing.check_operator(op, scene)`.
 ```
 
 The `build-geo-pipeline` skill in the plugin below spells the contracts out,

@@ -1,0 +1,36 @@
+"""Cross-modality coregistration primitives + operators.
+
+Single-source geometric ops (reproject / resample / rasterize /
+phase-align / optical-flow) already live in
+``geoops.geom._src.operators``. The operators in this subpackage
+are their *multi-input cousins* — each takes two or more inputs of
+potentially different modalities (LEO raster, GEO grid, vector,
+point cloud, vector-cube of stations) and emits one aligned tensor.
+
+Used downstream by ``geopatcher.matched.MatchedField`` so a single
+sampler can read co-located neighborhoods across heterogeneous
+sources without geopatcher knowing how the alignment was done.
+
+See ``docs/catalog/design/query-matchup.md`` §5 for the full design.
+"""
+
+from __future__ import annotations
+
+from geoops.geom._src.coregister.operators import (
+    PointCloudToRaster,
+    PointsToRaster,
+    RasterToPointCloud,
+    RasterToPoints,
+    RasterToRasterLike,
+    VectorToRasterAgg,
+)
+
+
+__all__ = [
+    "PointCloudToRaster",
+    "PointsToRaster",
+    "RasterToPointCloud",
+    "RasterToPoints",
+    "RasterToRasterLike",
+    "VectorToRasterAgg",
+]

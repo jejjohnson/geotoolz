@@ -1,6 +1,6 @@
 name: Base install
 
-# `pip install geotoolz` without extras must import and run: every module-scope
+# `pip install geotoolz-ops` without extras must import and run: every module-scope
 # import is a declared base dependency, and extra-backed operators fail only
 # when used, with an ImportError naming the extra. tests/test_packaging.py
 # checks this statically; this job checks it against a real slim environment.
@@ -21,10 +21,10 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-      # Only geotoolz and its base dependencies from the lockfile: no extras,
+      # Only geotoolz-ops and its base dependencies from the lockfile: no extras,
       # no dependency groups, no other workspace members.
-      - name: Install geotoolz (base, no extras)
-        run: uv sync --locked --package geotoolz --no-default-groups
+      - name: Install geotoolz-ops (base, no extras)
+        run: uv sync --locked --package geotoolz-ops --no-default-groups
       - name: Import and smoke test
         run: |
           uv run --no-sync python - <<'EOF'
@@ -36,7 +36,7 @@ jobs:
           from georeader.geotensor import GeoTensor
           from rasterio.transform import from_origin
 
-          import geotoolz as gz
+          import geoops as gz
 
           # The extras really are absent from this environment.
           for module in ("matplotlib", "sklearn", "joblib", "zarr", "xvec", "hydra_zen"):
@@ -44,8 +44,8 @@ jobs:
 
           # Every module imports on a base install (patch_ops is the
           # documented exception: it is itself the [patch] extra's entry point).
-          for info in pkgutil.walk_packages(gz.__path__, "geotoolz."):
-              if info.name != "geotoolz.patch_ops":
+          for info in pkgutil.walk_packages(gz.__path__, "geoops."):
+              if info.name != "geoops.patch_ops":
                   importlib.import_module(info.name)
 
           values = np.arange(32, dtype="float32").reshape(2, 4, 4) + 1.0
@@ -62,10 +62,10 @@ jobs:
           try:
               op(out)
           except ImportError as exc:
-              assert "geotoolz[viz]" in str(exc), exc
+              assert "geotoolz-ops[viz]" in str(exc), exc
           else:
               raise AssertionError("ApplyColormap ran without matplotlib")
-          print("geotoolz base install OK")
+          print("geotoolz-ops base install OK")
           EOF
 
   # `pip install geotoolz-catalog` without extras: every module imports, the

@@ -29,7 +29,7 @@ def require(module: str, feature: str, extra: str) -> ModuleType:
     which extra to install.
 
     Args:
-        module: Module to import (``"h5py"``, ``"geotoolz.viz"``).
+        module: Module to import (``"h5py"``, ``"geoops.viz"``).
         feature: What needs it, for the message (``"goes.TrueColor"``).
         extra: The ``geotoolz-products`` extra that provides it.
 

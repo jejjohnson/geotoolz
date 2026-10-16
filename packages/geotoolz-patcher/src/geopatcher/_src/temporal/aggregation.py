@@ -10,7 +10,7 @@ Four aggregations:
 
 `temporal.aggregation.Fold` is the design's `Sequential` time aggregation, renamed to
 avoid clashing with operator-graph `Sequential` types in downstream
-composition libraries (e.g. `geotoolz.Sequential`).
+composition libraries (e.g. `geoops.Sequential`).
 """
 
 from __future__ import annotations

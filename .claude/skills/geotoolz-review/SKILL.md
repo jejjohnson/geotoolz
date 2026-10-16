@@ -13,7 +13,7 @@ description: Review a change or pull request in the geotoolz workspace against t
    primitive is the main way this stack decays.
 3. **Contracts** — first "The two contracts" in the root `AGENTS.md`, for
    every new or changed operator in any package (the geotoolz families,
-   `geotoolz.patch_ops`, `geopatcher.integrations.pipekit`, the
+   `geoops.patch_ops`, `geopatcher.integrations.pipekit`, the
    geoproducts presets). Check:
    - pipekit `Operator`:
      - a keyword-only constructor that holds no carrier;

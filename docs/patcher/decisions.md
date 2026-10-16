@@ -132,7 +132,7 @@ patchers (`MatchedSpatialPatcher`, `MatchedTemporalPatcher`,
   coregistration callable per secondary, called as
   `coreg[name](raw_secondary, primary_data)`. Type is the broad
   `Callable[[Any, Any], Any]`, but the **recommended** value is a
-  `pipekit.Operator` from `geotoolz.geom.coregister.*` so the
+  `pipekit.Operator` from `geoops.geom.coregister.*` so the
   alignment step round-trips through YAML.
 - `MatchedField.select(indexer)` returns a plain
   `dict[str, data]` — the primary's read under `"primary"`
@@ -167,7 +167,7 @@ and without forcing geopatcher's framework-free core to depend on
 The composite-Field approach satisfies all three constraints: every
 existing sampler, geometry and window places anchors and indexers on
 a `MatchedField` unchanged (they only see the primary's domain); the
-heavy alignment work lives in `geotoolz.geom.coregister.*`
+heavy alignment work lives in `geoops.geom.coregister.*`
 `pipekit.Operator`s; geopatcher's only new typing dependency is the
 standard-library `Callable` (since `pipekit.Operator` IS callable).
 
@@ -206,7 +206,7 @@ standard-library `Callable` (since `pipekit.Operator` IS callable).
 
 - *A dedicated `CoregistrationStrategy` ABC in geopatcher.* Would
   duplicate the operators already present in
-  `geotoolz.geom.coregister`, force geopatcher to import or
+  `geoops.geom.coregister`, force geopatcher to import or
   reimplement reprojection / rasterization / KDTree binning, and
   break the "core is numpy + scipy only" invariant. Rejected;
   geotoolz owns the coreg logic.

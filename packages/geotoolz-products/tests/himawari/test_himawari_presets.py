@@ -25,13 +25,13 @@ def _stack(values: dict[str, float]) -> GeoTensor:
 
 
 def test_ndvi_reads_red_b03_and_nir_b04() -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     out = himawari.NDVI()(_stack({"B03": 0.1, "B04": 0.5}))
     np.testing.assert_allclose(np.asarray(out), (0.5 - 0.1) / (0.5 + 0.1), rtol=1e-6)
 
 
 def test_hybrid_green_mixes_in_the_near_infrared() -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     scene = _stack({"B02": 0.2, "B04": 0.6})
     out = np.asarray(himawari.HybridGreen()(scene))
     f = constants.HYBRID_GREEN_NIR_FRACTION
@@ -43,7 +43,7 @@ def test_hybrid_green_mixes_in_the_near_infrared() -> None:
 
 
 def test_parallax_correct_binds_the_himawari_geometry() -> None:
-    gz = pytest.importorskip("geotoolz")
+    gz = pytest.importorskip("geoops")
     op = himawari.ParallaxCorrect()
     assert isinstance(op, gz.geom.GeostationaryParallaxCorrect)
     config = op.get_config()
@@ -54,7 +54,7 @@ def test_parallax_correct_binds_the_himawari_geometry() -> None:
 
 
 def test_mask_clouds_reads_the_cloud_mask() -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     data = np.stack(
         [
             np.full((4, 4), constants.CLOUD_MASK_BINARY_CLOUDY, np.float32),
@@ -88,16 +88,16 @@ def test_mask_clouds_reads_the_cloud_mask() -> None:
     ],
 )
 def test_presets_name_the_operators_extra(monkeypatch, preset) -> None:
-    for name in [m for m in sys.modules if m.split(".")[0] == "geotoolz"]:
+    for name in [m for m in sys.modules if m.split(".")[0] == "geoops"]:
         monkeypatch.setitem(sys.modules, name, None)
-    monkeypatch.setitem(sys.modules, "geotoolz", None)
+    monkeypatch.setitem(sys.modules, "geoops", None)
     with pytest.raises(ImportError, match=rf"{preset}.*geotoolz-products\[operators\]"):
         getattr(himawari.presets, preset)()
 
 
 @pytest.mark.parametrize("name", sorted(recipes.RECIPES))
 def test_recipe_presets_follow_the_recipe_table(name: str) -> None:
-    gz = pytest.importorskip("geotoolz")
+    gz = pytest.importorskip("geoops")
     spec = recipes.RECIPES[name]
     op = himawari.presets.Recipe(name)
     assert isinstance(op, gz.viz.RGBRecipe)
@@ -113,7 +113,7 @@ def test_recipe_presets_follow_the_recipe_table(name: str) -> None:
 
 
 def test_named_presets_match_recipe() -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     pairs = {
         "true_color": himawari.TrueColor,
         "natural_color": himawari.NaturalColor,
@@ -127,7 +127,7 @@ def test_named_presets_match_recipe() -> None:
 
 
 def test_true_color_uses_the_hybrid_green() -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     rgb = np.asarray(
         himawari.TrueColor()(_stack({"B01": 0.2, "B02": 0.3, "B03": 0.4, "B04": 0.6}))
     )

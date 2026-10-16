@@ -38,8 +38,8 @@ jobs:
       # Coverage is disabled: a marker-filtered subset can't meet the
       # repo-wide fail_under floor. pytest exit code 5 (nothing collected
       # for the marker) is treated as success so an empty tier stays green.
-      - name: Run extended tests (geotoolz)
-        working-directory: packages/geotoolz
+      - name: Run extended tests (geotoolz-ops)
+        working-directory: packages/geotoolz-ops
         run: |
           set +e
           uv run pytest -v --no-cov -m "${{ inputs.marker }}"
