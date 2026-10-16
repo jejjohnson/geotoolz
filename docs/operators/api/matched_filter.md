@@ -28,4 +28,4 @@ Ledoit-Wolf needs the sample fourth moment `m₄ = mean‖xₖ − x̄‖⁴`: `
 from the pixels, `StreamingBackground` streams it through `WelfordAccumulator.m4`, and a direct
 `shrink_covariance(method="ledoit_wolf", ...)` call must pass `fourth_moment=`.
 
-::: geotoolz.matched_filter
+::: geoops.matched_filter

@@ -6,6 +6,6 @@ way, and `check_operator`, which runs the package's own contract checks on any
 operator. The rules are in [Concepts](../concepts.md) and
 [Define an operator](../how-to/define-an-operator.md).
 
-::: geotoolz.carrier
+::: geoops.carrier
 
-::: geotoolz.testing
+::: geoops.testing

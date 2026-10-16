@@ -15,4 +15,4 @@ readers and writer ([`geocloud.hdf`](../../cloud/how-to/hdf.md),
 [`geocloud.cog.write_cog`](../../cloud/how-to/write-cogs.md)), so they read
 and write local paths and bucket URIs alike.
 
-::: geotoolz.io
+::: geoops.io

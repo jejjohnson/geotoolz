@@ -1,0 +1,749 @@
+"""Tier-B restoration Operators — carrier-aware wrappers.
+
+Each Operator wraps a primitive in :mod:`geoops.restore._src.array`
+and rewraps the result to match the input carrier via
+:func:`geoops._src.wrap.wrap_like`: a ``GeoTensor`` input round-trips
+its ``transform`` / ``crs`` / ``fill_value_default``, while a plain
+``np.ndarray`` input returns a plain ``np.ndarray``. All restoration
+primitives are metadata-independent per-pixel/window math, so every
+operator here supports both carriers transparently. All constructor
+parameters are keyword-only and JSON-safe for hydra-zen ``builds()``
+round-trips. :class:`MNF` is a fitted operator (``fit`` / ``transform``
+/ ``inverse``); its fitted basis is never part of ``get_config()``.
+
+Nodata: a pixel is invalid when any band is non-finite or equals the
+carrier's ``fill_value_default`` (see :mod:`geoops._src.valid`; per
+frame for ``(T, C, H, W)``, and per pixel across the band ``axis`` for
+the PCA / MNF operators). Filters, fits and outlier statistics are
+computed from valid pixels only -- invalid pixels never leak into their
+neighbours -- and invalid pixels hold the output's fill value. Outputs
+that carry the input's values keep its ``fill_value_default`` when the
+input is floating point and switch to ``NaN`` when an integer input is
+promoted to float (see :func:`geoops._src.valid.carried_fill`); the
+:class:`MNF` scores always use ``NaN``. The
+exceptions are the ``GapFill*`` operators, which treat every invalid
+*element* as a gap and replace it with the interpolated value (only
+gaps they cannot fill hold the fill value), and the boolean
+:class:`OutlierMask`, which reports ``False`` at invalid pixels and
+declares ``fill_value_default=False`` (saturation flags live in
+:class:`geoops.qa.MaskSaturated`, with the same nodata rule).
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Literal, Self
+
+import numpy as np
+from pipekit import Operator
+
+from geoops._src.fitted import fit_once
+from geoops._src.shape import require_ndim
+from geoops._src.valid import (
+    carried_fill,
+    invalid_values,
+    mask_invalid_to_nan,
+    valid_pixels,
+    wrap_filled,
+)
+from geoops.restore._src.array import (
+    bilateral_denoise,
+    despeckle_frost,
+    despeckle_lee,
+    despeckle_refined_lee,
+    destripe_column,
+    fit_mnf,
+    gap_fill_biharmonic,
+    gap_fill_idw,
+    gap_fill_laplacian,
+    gap_fill_nearest,
+    gaussian_denoise,
+    median_denoise,
+    nl_means,
+    outlier_mask,
+    pca_denoise,
+    project_bands,
+    reconstruct_bands,
+    replace_outliers,
+)
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from georeader.geotensor import GeoTensor
+
+
+def _valid(gt: Any) -> np.ndarray:
+    """Validity mask of ``gt``.
+
+    Per pixel over the trailing ``(H, W)`` axes (per frame for 4-D
+    input); 1-D input falls back to elementwise validity.
+    """
+    if np.ndim(gt) < 2:
+        return ~invalid_values(gt)
+    return valid_pixels(gt, keep_time=True)
+
+
+def _masked(gt: Any) -> tuple[np.ndarray, np.ndarray]:
+    """Float64 copy of ``gt`` with invalid pixels ``NaN``, plus the validity mask."""
+    valid = _valid(gt)
+    return mask_invalid_to_nan(gt, valid=valid, dtype=float), valid
+
+
+def _rewrap(gt: Any, out: np.ndarray, valid: np.ndarray) -> Any:
+    """Write the carried output fill into invalid pixels and rewrap like ``gt``."""
+    fill = carried_fill(gt, np.asarray(out).dtype)
+    return wrap_filled(gt, out, fill_value_default=fill, valid=valid)
+
+
+def _filter(gt: Any, fn: Callable[[np.ndarray], np.ndarray]) -> Any:
+    """Apply a NaN-aware primitive to valid pixels only; invalid -> fill."""
+    arr, valid = _masked(gt)
+    return _rewrap(gt, fn(arr), valid)
+
+
+def _band_masked(gt: Any, axis: int) -> np.ndarray:
+    """Float64 copy of ``gt`` with pixels invalid in any band along ``axis`` NaN."""
+    values = np.asarray(gt, dtype=float)
+    invalid = invalid_values(gt).any(axis=axis, keepdims=True)
+    return np.where(invalid, np.nan, values)
+
+
+def _rewrap_finite(gt: Any, out: np.ndarray) -> Any:
+    """Write the output fill wherever ``out`` is non-finite and rewrap."""
+    return _rewrap(gt, out, np.isfinite(out))
+
+
+def _gap_fill(gt: Any, fn: Callable[[np.ndarray], np.ndarray]) -> Any:
+    """Treat every invalid element (fill / non-finite) as a gap and fill it.
+
+    Filled gaps hold the interpolated value; gaps the primitive leaves
+    unfilled hold the output fill value.
+    """
+    values = np.where(invalid_values(gt), np.nan, np.asarray(gt, dtype=float))
+    return _rewrap_finite(gt, fn(values))
+
+
+class DespeckleLee(Operator):
+    """Lee (1980) local-statistics speckle filter.
+
+    Carrier-aware wrapper around
+    :func:`~geoops.restore._src.array.despeckle_lee`:
+    ``x̂ = z̄ + k·(z − z̄)`` with the MMSE gain
+    ``k = σ_x² / (σ_x² + Cᵤ²·z̄²)``, ``σ_x² = (σ_z² − Cᵤ²·z̄²) / (1 + Cᵤ²)``
+    clipped at ``0`` -- the local mean on homogeneous speckle, ``k → 1``
+    (pass-through) at edges. Best suited to multiplicative speckle in SAR
+    imagery. Nodata (fill / non-finite) pixels are excluded from the
+    window statistics and hold the output fill.
+
+    Args:
+        window: Side length of the local window in pixels.
+        cu: Noise coefficient of variation ``Cᵤ``. ``0.523`` is the
+            single-look amplitude value; use ``1/√L`` for ``L``-look
+            intensity.
+
+    Examples:
+        >>> import geoops as gz
+        >>> pipe = gz.restore.DespeckleLee(window=7) | gz.restore.MedianDenoise(window=3)
+        >>> clean = pipe(sar_geotensor)
+    """
+
+    def __init__(self, *, window: int = 7, cu: float = 0.523) -> None:
+        self.window = window
+        self.cu = cu
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _filter(gt, lambda a: despeckle_lee(a, window=self.window, cu=self.cu))
+
+
+class DespeckleFrost(Operator):
+    """Frost (1982) adaptive exponential-kernel speckle filter.
+
+    Wraps :func:`~geoops.restore._src.array.despeckle_frost`: a
+    normalised weighted window mean with kernel
+    ``m(t) = exp(−K·Cᵥ²·|t|)``, where ``Cᵥ² = σ_z²/z̄²`` is the local
+    squared coefficient of variation and ``|t|`` the distance from the
+    centre pixel. The kernel is wide on homogeneous speckle and narrows
+    onto the centre pixel at edges. Nodata (fill / non-finite) pixels
+    get zero weight and hold the output fill.
+
+    Args:
+        window: Side length of the kernel window in pixels.
+        damping: Damping factor ``K``; larger values keep more edge
+            contrast, ``0`` is the box mean.
+
+    Examples:
+        >>> gz.restore.DespeckleFrost(window=7, damping=2.0)(sar_geotensor)
+    """
+
+    def __init__(self, *, window: int = 7, damping: float = 2.0) -> None:
+        self.window = window
+        self.damping = damping
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _filter(
+            gt, lambda a: despeckle_frost(a, window=self.window, damping=self.damping)
+        )
+
+
+class DespeckleRefinedLee(Operator):
+    """Refined-Lee speckle filter approximation.
+
+    Wraps :func:`~geoops.restore._src.array.despeckle_refined_lee`.
+    This is currently a dependency-light alias for :class:`DespeckleLee`
+    (Lee 1980 gain) with default ``cu``; the eight-direction sub-window selection of the
+    canonical Refined-Lee is not yet implemented. Nodata pixels are
+    handled as in :class:`DespeckleLee`.
+
+    Args:
+        window: Side length of the local window in pixels.
+
+    Examples:
+        >>> gz.restore.DespeckleRefinedLee(window=7)(sar_geotensor)
+    """
+
+    def __init__(self, *, window: int = 7) -> None:
+        self.window = window
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _filter(gt, lambda a: despeckle_refined_lee(a, window=self.window))
+
+
+class DestripeColumn(Operator):
+    """Subtract per-column (or per-row) offsets from striped imagery.
+
+    Wraps :func:`~geoops.restore._src.array.destripe_column`. Use
+    ``method="mean"`` for additive stripes, ``"median"`` for stripes
+    with outlier contamination, and ``"moment_matching"`` for stripes
+    with a per-detector gain *and* offset: every column is linearly
+    rescaled so its mean and standard deviation match a reference
+    (``(z − μ_j)·σᵣ/σ_j + μᵣ``; the moving average of the column moments
+    over ``window`` columns, or global with ``window=None``). Nodata
+    (fill / non-finite) pixels are excluded from the column / row
+    statistics and hold the output fill.
+
+    Args:
+        method: ``"mean"``, ``"median"`` (offset only) or
+            ``"moment_matching"`` (gain and offset).
+        direction: Striping direction. ``"column"`` removes vertical
+            stripes, ``"row"`` removes horizontal stripes.
+        window: Reference window (in columns / rows) for
+            ``method="moment_matching"``; ``None`` uses a global
+            reference. Ignored for the other methods but accepted for
+            hydra-zen round-trip uniformity.
+
+    Examples:
+        >>> gz.restore.DestripeColumn(method="median", direction="column")(scene)
+    """
+
+    def __init__(
+        self,
+        *,
+        method: Literal["mean", "median", "moment_matching"] = "mean",
+        direction: Literal["column", "row"] = "column",
+        window: int | None = 21,
+    ) -> None:
+        self.method = method
+        self.direction = direction
+        self.window = window
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _filter(
+            gt,
+            lambda a: destripe_column(
+                a, method=self.method, direction=self.direction, window=self.window
+            ),
+        )
+
+
+class MomentMatching(Operator):
+    """Destripe by matching every column's mean and std to a reference.
+
+    Convenience operator equivalent to
+    ``DestripeColumn(method="moment_matching", direction="column", window=...)``
+    (same nodata handling): ``out[:, j] = (z[:, j] − μ_j)·σᵣ_j/σ_j + μᵣ_j``
+    (Gadallah et al. 2000).
+
+    Args:
+        window: Number of neighbouring columns averaged into the
+            reference moments, or ``None`` for a global reference.
+
+    Examples:
+        >>> gz.restore.MomentMatching(window=21)(scene)
+    """
+
+    def __init__(self, *, window: int | None = 21) -> None:
+        self.window = window
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _filter(
+            gt,
+            lambda a: destripe_column(
+                a, method="moment_matching", direction="column", window=self.window
+            ),
+        )
+
+
+class DenoisePCA(Operator):
+    """Reconstruct a multi-band raster from its top PCA components.
+
+    Projects the carrier onto its leading ``n_components`` principal
+    directions and reconstructs in the original space. Effective at
+    suppressing band-uncorrelated noise; can soften sharp
+    band-localised features. The components are fitted on valid pixels
+    only (a pixel invalid in any band is excluded); invalid pixels hold
+    the output fill.
+
+    Args:
+        n_components: Number of principal components to keep.
+            ``n_components < bands`` performs noise reduction.
+        axis: Position of the band axis. Defaults to ``-3``
+            (``(bands, H, W)`` or ``(time, bands, H, W)``).
+
+    Inputs are ``(C, H, W)`` cubes or ``(T, C, H, W)`` stacks; a stack is
+    fitted once over the pixels of every frame (one PCA basis for the
+    time series). A 2-D ``(H, W)`` map has no band axis and raises
+    ``ValueError`` -- its rows are never treated as bands.
+
+    Examples:
+        >>> gz.restore.DenoisePCA(n_components=10)(hyperspectral_scene)
+    """
+
+    def __init__(self, *, n_components: int, axis: int = -3) -> None:
+        self.n_components = n_components
+        self.axis = axis
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        require_ndim(gt, (3, 4), type(self).__name__)
+        out = pca_denoise(
+            _band_masked(gt, self.axis), n_components=self.n_components, axis=self.axis
+        )
+        return _rewrap_finite(gt, out)
+
+
+class MNF(Operator):
+    """Minimum Noise Fraction transform (Green et al. 1988), with its inverse.
+
+    Wraps :func:`~geoops.restore._src.array.fit_mnf`. The noise
+    covariance ``Σ_N`` is estimated from horizontal shift differences
+    (``Σ_N = Cov(z(i, j) − z(i, j + 1)) / 2``, see
+    :func:`~geoops.restore._src.array.shift_difference_noise_covariance`);
+    the data are noise-whitened with ``Σ_N^(−1/2)`` (Cholesky) and the
+    whitened data are rotated onto their principal components. The
+    output carrier holds the scores, ordered by decreasing SNR, and
+    :meth:`inverse` maps scores back to band space with
+    ``x̂ = Σ_N·A_k·y + x̄`` -- keeping the first ``n_components`` and
+    inverting is the classical MNF noise filter.
+
+    Fitted operator (see *Fitted operators* in the concepts guide):
+    :meth:`fit` learns the basis, :meth:`transform` projects any cube with
+    the same bands onto it and :meth:`inverse` reconstructs, neither
+    mutating the operator. Calling an unfitted operator fits the basis on
+    that first call (once, even under concurrent calls) and every later
+    call reuses it; call :meth:`fit` explicitly to choose the scene, e.g.
+    before parallel use. The basis is never part of ``get_config()``.
+
+    The covariance and noise covariance are estimated from valid pixels
+    only (a pixel invalid in any band is excluded, and so is any
+    neighbour pair touching it); invalid pixels hold ``NaN`` in the
+    returned scores, and pixels with a non-finite score hold the output
+    fill after :meth:`inverse`.
+
+    Inputs are ``(C, H, W)`` cubes or ``(T, C, H, W)`` stacks (one fit
+    over every frame's pixels; noise pairs never cross frames); the
+    scores keep the input layout with the band axis replaced by the
+    component axis (``(K, H, W)`` / ``(T, K, H, W)``). A 2-D ``(H, W)``
+    map raises ``ValueError``.
+
+    Args:
+        n_components: Number of components to keep. ``None`` keeps all.
+        axis: Position of the band axis. Default ``-3``.
+
+    Attributes:
+        state_: The fitted basis (``"components"`` ``A_k``,
+            ``"loadings"`` ``Σ_N·A_k``, ``"mean"``, ``"eigenvalues"``,
+            ``"noise_covariance"``), or ``None`` before :meth:`fit`.
+        eigenvalues_: The generalised eigenvalues ``λᵢ`` of
+            ``Σ·a = λ·Σ_N·a`` (descending) -- the variance of each MNF
+            score in units of its noise variance, i.e. the inverse of the
+            component's noise fraction. ``None`` before :meth:`fit`.
+        snr_: Per-component signal-to-noise ratio ``λᵢ − 1`` (signal
+            variance over noise variance for signal uncorrelated with the
+            noise), descending. ``None`` before :meth:`fit`.
+
+    Examples:
+        >>> mnf = gz.restore.MNF(n_components=3).fit(scene)
+        >>> scores = mnf(scene)
+        >>> denoised = mnf.inverse(scores)
+    """
+
+    def __init__(self, *, n_components: int | None = None, axis: int = -3) -> None:
+        self.n_components = n_components
+        self.axis = axis
+        self.state_: dict[str, np.ndarray] | None = None
+        self.eigenvalues_: np.ndarray | None = None
+        self.snr_: np.ndarray | None = None
+
+    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+        """Learn the MNF basis from the valid pixels of ``gt``.
+
+        Returns:
+            This operator, for chaining.
+        """
+        require_ndim(gt, (3, 4), type(self).__name__)
+        fitted = fit_mnf(
+            _band_masked(gt, self.axis),
+            n_components=self.n_components,
+            axis=self.axis,
+        )
+        eigenvalues = np.asarray(fitted["eigenvalues"])
+        self.eigenvalues_ = eigenvalues
+        self.snr_ = eigenvalues - 1.0
+        self.state_ = {  # published last: the fit-once check reads ``state_``
+            key: np.asarray(fitted[key])
+            for key in (
+                "components",
+                "loadings",
+                "mean",
+                "eigenvalues",
+                "noise_covariance",
+            )
+        }
+        return self
+
+    def _fitted(self) -> dict[str, np.ndarray]:
+        state = self.state_
+        if state is None:
+            raise ValueError("MNF must be fitted (fit() or a first call) first")
+        return state
+
+    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Project ``gt`` onto the fitted MNF basis.
+
+        Raises:
+            ValueError: If the operator is not fitted, ``gt`` is not 3-D /
+                4-D or has a different band count than the fit.
+        """
+        require_ndim(gt, (3, 4), type(self).__name__)
+        state = self._fitted()
+        scores = project_bands(
+            _band_masked(gt, self.axis),
+            components=state["components"],
+            mean=state["mean"],
+            axis=self.axis,
+        )
+        # Scores are a new quantity: NaN marks nodata, never the input fill.
+        return wrap_filled(
+            gt, scores, fill_value_default=np.nan, valid=np.isfinite(scores)
+        )
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        fit_once(self, gt, lambda: self.state_ is not None)
+        return self.transform(gt)
+
+    def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        """Reconstruct band space from MNF scores (``x̂ = Σ_N·A_k·y + x̄``).
+
+        With all components the reconstruction is exact; with fewer it
+        removes the low-SNR components (the MNF noise filter).
+
+        Args:
+            gt: Scores as returned by :meth:`transform` (``(K, H, W)`` or
+                ``(T, K, H, W)``).
+
+        Returns:
+            The reconstructed ``(C, H, W)`` / ``(T, C, H, W)`` carrier;
+            pixels with a non-finite score hold the output fill.
+
+        Raises:
+            ValueError: If the operator is not fitted or ``gt`` has a
+                different component count.
+        """
+        require_ndim(gt, (3, 4), f"{type(self).__name__}.inverse")
+        state = self._fitted()
+        out = reconstruct_bands(
+            _band_masked(gt, self.axis),
+            loadings=state["loadings"],
+            mean=state["mean"],
+            axis=self.axis,
+        )
+        return _rewrap_finite(gt, out)
+
+
+class GaussianDenoise(Operator):
+    """Gaussian smoother over the trailing two spatial axes.
+
+    Normalized convolution: nodata (fill / non-finite) pixels are
+    excluded from both the numerator and the normalising weight, so
+    they never smear into their neighbours, and hold the output fill.
+    Non-spatial axes (e.g. bands) are not filtered.
+
+    Args:
+        sigma: Gaussian standard deviation in pixels.
+
+    Examples:
+        >>> gz.restore.GaussianDenoise(sigma=1.0)(scene)
+    """
+
+    def __init__(self, *, sigma: float = 1.0) -> None:
+        self.sigma = sigma
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _filter(gt, lambda a: gaussian_denoise(a, sigma=self.sigma))
+
+
+class MedianDenoise(Operator):
+    """Median filter over the trailing two spatial axes.
+
+    Robust to impulse noise (salt-and-pepper, hot pixels). Larger
+    ``window`` blurs sharper features. Nodata (fill / non-finite) pixels
+    are replaced by the median of the valid pixels before filtering and
+    hold the output fill.
+
+    Args:
+        window: Side length of the median window in pixels.
+
+    Examples:
+        >>> gz.restore.MedianDenoise(window=3)(scene)
+    """
+
+    def __init__(self, *, window: int = 3) -> None:
+        self.window = window
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _filter(gt, lambda a: median_denoise(a, window=self.window))
+
+
+class BilateralDenoise(Operator):
+    """Edge-aware denoise using a range-weighted Gaussian.
+
+    Wraps :func:`~geoops.restore._src.array.bilateral_denoise`. Use
+    ``sigma_color`` to control how aggressively edges are preserved
+    (smaller = stronger preservation) and ``sigma_space`` for the
+    spatial smoothing scale.
+
+    Caveat: this is a single-pass approximation of a full bilateral
+    filter, not the canonical per-pixel-neighbourhood form. Nodata (fill
+    / non-finite) pixels are excluded from the smoothing and hold the
+    output fill.
+
+    Examples:
+        >>> gz.restore.BilateralDenoise(sigma_color=0.1, sigma_space=5.0)(scene)
+    """
+
+    def __init__(self, *, sigma_color: float = 0.1, sigma_space: float = 5.0) -> None:
+        self.sigma_color = sigma_color
+        self.sigma_space = sigma_space
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _filter(
+            gt,
+            lambda a: bilateral_denoise(
+                a, sigma_color=self.sigma_color, sigma_space=self.sigma_space
+            ),
+        )
+
+
+class NLMeans(Operator):
+    """Lightweight non-local-means-style denoiser.
+
+    Wraps :func:`~geoops.restore._src.array.nl_means`. This is a
+    dependency-light approximation of the canonical NL-means; for
+    production use prefer ``skimage.restoration.denoise_nl_means``.
+    Nodata (fill / non-finite) pixels are excluded from the smoothing
+    and hold the output fill.
+
+    Args:
+        window: Nominal patch (comparison-window) side length in pixels.
+        search_radius: Nominal search-window radius in pixels.
+        h: Range bandwidth in data units.
+
+    Examples:
+        >>> gz.restore.NLMeans(window=5, search_radius=6, h=0.1)(scene)
+    """
+
+    def __init__(
+        self, *, window: int = 5, search_radius: int = 6, h: float = 0.1
+    ) -> None:
+        self.window = window
+        self.search_radius = search_radius
+        self.h = h
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _filter(
+            gt,
+            lambda a: nl_means(
+                a,
+                window=self.window,
+                search_radius=self.search_radius,
+                h=self.h,
+            ),
+        )
+
+
+class GapFillIDW(Operator):
+    """Fill NaNs with inverse-distance weighted finite neighbours.
+
+    Wraps :func:`~geoops.restore._src.array.gap_fill_idw`. NaNs whose
+    neighbourhood within ``radius`` contains no finite pixels are left
+    unfilled — chain with :class:`GapFillNearest` for unconditional fill.
+    Nodata elements (fill value or non-finite) are the gaps: the output
+    there is the filled value, *not* the fill value; only gaps left
+    unfilled hold the output fill.
+
+    Args:
+        power: IDW exponent. ``2.0`` is the standard choice.
+        radius: Search radius in pixels.
+
+    Examples:
+        >>> gz.restore.GapFillIDW(power=2.0, radius=5)(scene)
+    """
+
+    def __init__(self, *, power: float = 2.0, radius: int = 5) -> None:
+        self.power = power
+        self.radius = radius
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _gap_fill(
+            gt, lambda a: gap_fill_idw(a, power=self.power, radius=self.radius)
+        )
+
+
+class GapFillInpaintBiharmonic(Operator):
+    """Smoothly inpaint NaN gaps with a biharmonic-style fill.
+
+    Wraps :func:`~geoops.restore._src.array.gap_fill_biharmonic`,
+    which already preserves the original finite pixels — the operator
+    just round-trips carrier metadata.
+    Nodata elements (fill value or non-finite) are the gaps: the output
+    there is the filled value, *not* the fill value; only gaps left
+    unfilled hold the output fill.
+
+    Caveat: this is a dependency-light surrogate, not the canonical
+    scikit-image biharmonic inpainting; it can be slow for very large
+    masks because it iterates the Laplace solver internally.
+
+    Examples:
+        >>> gz.restore.GapFillInpaintBiharmonic()(scene)
+    """
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _gap_fill(gt, gap_fill_biharmonic)
+
+
+class GapFillLaplacian(Operator):
+    """Fill NaNs by solving a discrete Laplace equation.
+
+    Wraps :func:`~geoops.restore._src.array.gap_fill_laplacian`. The
+    harmonic interpolant — smooth, but linearly biased toward the mean
+    of the boundary. Pair with :class:`GaussianDenoise` for a smoother
+    transition near the mask edge.
+    Nodata elements (fill value or non-finite) are the gaps: the output
+    there is the filled value, *not* the fill value; only gaps left
+    unfilled hold the output fill.
+
+    Args:
+        iterations: Number of Jacobi sweeps. Increase for larger gaps.
+
+    Examples:
+        >>> gz.restore.GapFillLaplacian(iterations=500)(scene)
+    """
+
+    def __init__(self, *, iterations: int = 200) -> None:
+        self.iterations = iterations
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _gap_fill(
+            gt, lambda a: gap_fill_laplacian(a, iterations=self.iterations)
+        )
+
+
+class GapFillNearest(Operator):
+    """Fill NaNs from the nearest finite neighbour.
+
+    Wraps :func:`~geoops.restore._src.array.gap_fill_nearest`. Fast
+    and unconditional unless ``max_distance`` is set.
+    Nodata elements (fill value or non-finite) are the gaps: the output
+    there is the filled value, *not* the fill value; only gaps left
+    unfilled hold the output fill.
+
+    Args:
+        max_distance: Maximum Euclidean fill radius in pixels. ``None``
+            (default) fills every NaN with a finite neighbour anywhere
+            in its 2-D plane.
+
+    Examples:
+        >>> gz.restore.GapFillNearest(max_distance=3)(scene)
+    """
+
+    def __init__(self, *, max_distance: int | None = None) -> None:
+        self.max_distance = max_distance
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        return _gap_fill(
+            gt, lambda a: gap_fill_nearest(a, max_distance=self.max_distance)
+        )
+
+
+class OutlierMask(Operator):
+    """Flag global outliers with a MAD or z-score threshold.
+
+    Wraps :func:`~geoops.restore._src.array.outlier_mask` and returns
+    a boolean carrier (``True`` marks outliers). Outputs the result
+    as ``bool`` to keep the mask explicit. Nodata (fill / non-finite)
+    pixels are excluded from the statistics and reported as ``False``.
+
+    Args:
+        method: ``"mad"`` (robust, default) or ``"zscore"``.
+        k: Threshold in scaled units.
+
+    Examples:
+        >>> gz.restore.OutlierMask(method="mad", k=3.0)(scene)
+    """
+
+    def __init__(
+        self, *, method: Literal["mad", "zscore"] = "mad", k: float = 3.0
+    ) -> None:
+        self.method = method
+        self.k = k
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        arr, valid = _masked(gt)
+        mask = outlier_mask(arr, method=self.method, k=self.k).astype(bool)
+        return wrap_filled(gt, mask, fill_value_default=False, valid=valid)
+
+
+class ReplaceOutliers(Operator):
+    """Replace outliers with median, NaN, or nearest-neighbour interpolation.
+
+    Wraps :func:`~geoops.restore._src.array.replace_outliers`.
+    Nodata (fill / non-finite) pixels are excluded from the outlier
+    statistics and hold the output fill value (they are not filled).
+
+    Args:
+        method: Outlier detector. See :class:`OutlierMask`.
+        k: Threshold in scaled units.
+        strategy: ``"median"`` (inlier median), ``"nan"`` (mark as missing),
+            or ``"interp"`` (NaN then nearest-neighbour fill).
+
+    Examples:
+        >>> gz.restore.ReplaceOutliers(method="mad", k=3.0, strategy="median")(scene)
+    """
+
+    def __init__(
+        self,
+        *,
+        method: Literal["mad", "zscore"] = "mad",
+        k: float = 3.0,
+        strategy: Literal["median", "nan", "interp"] = "median",
+    ) -> None:
+        self.method = method
+        self.k = k
+        self.strategy = strategy
+
+    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+        arr, valid = _masked(gt)
+        out = replace_outliers(
+            arr, method=self.method, k=self.k, strategy=self.strategy
+        )
+        return _rewrap(gt, out, valid)

@@ -20,9 +20,9 @@ jobs:
           python-version: "3.12"
       - name: Install typecheck dependencies
         run: uv sync --group typecheck
-      - name: Typecheck geotoolz
-        run: uv run --group typecheck ty check src/geotoolz
-        working-directory: packages/geotoolz
+      - name: Typecheck geotoolz-ops
+        run: uv run --group typecheck ty check src/geoops
+        working-directory: packages/geotoolz-ops
       - name: Typecheck geotoolz-patcher
         run: uv run --group typecheck ty check src/geopatcher
         working-directory: packages/geotoolz-patcher

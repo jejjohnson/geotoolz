@@ -85,7 +85,7 @@ Observers return their input unchanged, so they drop into any chain.
 ```python
 import numpy as np
 
-import geotoolz as gz
+import geoops as gz
 
 rng: np.random.Generator = np.random.default_rng(0)
 dn: np.ndarray = rng.integers(200, 4000, size=(4, 32, 32), dtype=np.uint16)  # (4, 32, 32) uint16
@@ -134,7 +134,7 @@ configuration, which is what lets a `Graph` wire carriers in.
 
 ## Georeferencing checks
 
-Every family uses the helpers in `geotoolz.carrier`, so the errors read
+Every family uses the helpers in `geoops.carrier`, so the errors read
 the same everywhere.
 
 - **Geo-dependent operators** (reprojection, rasterising, metre-based
@@ -148,7 +148,7 @@ the same everywhere.
 ## Band names
 
 Every operator that takes a band reference resolves it with
-`geotoolz.carrier.resolve_band`, so `"B4"` means the same band in every
+`geoops.carrier.resolve_band`, so `"B4"` means the same band in every
 family.
 
 - **Integers** are positions on the band axis and work on any carrier.
@@ -195,7 +195,7 @@ They share one contract (decision record #143) and satisfy
 ```python
 import numpy as np
 
-import geotoolz as gz
+import geoops as gz
 
 rng: np.random.Generator = np.random.default_rng(0)
 train: np.ndarray = rng.normal(0.2, 0.05, size=(4, 32, 32))  # (4, 32, 32) float64

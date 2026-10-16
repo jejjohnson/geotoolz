@@ -50,13 +50,13 @@ operator. Because operators are plain `pipekit` objects, the patcher
 itself becomes an operator: *tile → predict → stitch* is one more
 `Sequential`, typed and YAML-serialisable like the rest.
 
-<p align="center"><img src="docs/assets/diagrams/stack-overview.png" alt="The geostack: find with geotoolz-catalog, read with geotoolz-products, cut with geotoolz-patcher, compute with geotoolz, stitch back with geotoolz-patcher" width="100%"></p>
+<p align="center"><img src="docs/assets/diagrams/stack-overview.png" alt="The geostack: find with geotoolz-catalog, read with geotoolz-products, cut with geotoolz-patcher, compute with geotoolz-ops, stitch back with geotoolz-patcher" width="100%"></p>
 
 ## The packages
 
 | Package (dist) | Import | One-liner | Docs |
 |---|---|---|---|
-| [`geotoolz`](packages/geotoolz) | `geotoolz` | Carrier-preserving `pipekit.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/operators/) |
+| [`geotoolz-ops`](packages/geotoolz-ops) | `geoops` | Carrier-preserving `pipekit.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/operators/) |
 | [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher (Geometry × Sampler × Window × Aggregation): split a field into patches, run an operator per patch, stitch back | [Patcher →](https://jejjohnson.github.io/geotoolz/patcher/) |
 | [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files: STAC/CMR discovery → GeoParquet catalog → `GeoSlice` → loaders | [Catalog →](https://jejjohnson.github.io/geotoolz/catalog/) |
 | [`geotoolz-cloud`](packages/geotoolz-cloud) | `geocloud` | Cloud object storage for the stack: one process-wide obstore client pool, file verbs (ls / download / upload / copy / sync / sign), per-bucket credentials, and Cloud-Optimized GeoTIFF reads and validated writes | [Cloud →](https://jejjohnson.github.io/geotoolz/cloud/) |
@@ -85,8 +85,8 @@ from georeader.geotensor import GeoTensor
 
 import geocatalog as gc
 import geopatcher as gp
-import geotoolz as gz
-from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
+import geoops as gz
+from geoops.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 client: pystac_client.Client = pystac_client.Client.open(
     "https://planetarycomputer.microsoft.com/api/stac/v1",
@@ -162,9 +162,9 @@ from georeader.geotensor import GeoTensor
 
 import geocatalog as gc
 import geopatcher as gp
-import geotoolz as gz
+import geoops as gz
 from geoproducts import carbonmapper as cm
-from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
+from geoops.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 bbox_lonlat: tuple[float, float, float, float] = (-104.2, 31.9, -103.9, 32.2)  # Delaware Basin
 utm: str = "EPSG:32613"                                                         # UTM 13N, metres
@@ -246,7 +246,7 @@ for the full tour):
 - **`ProductReader`** — every geoproducts reader is a georeader `GeoData`,
   so a reader drops into `geopatcher.RasterField` or a geotoolz operator
   without adapters.
-- **Coregistration operators** — `geotoolz.geom.coregister` ops are the
+- **Coregistration operators** — `geoops.geom.coregister` ops are the
   intended coreg callables for `geopatcher.matched.MatchedField`, aligning
   multi-source patches found by the catalog's matchup engine.
 - **One obstore pool, one credential registry** — `geocloud.store` owns the
@@ -258,8 +258,9 @@ for the full tour):
 ## Install
 
 ```bash
-pip install geotoolz                              # operators only
-pip install 'geotoolz[patch]'                     # + patcher (geopatcher)
+pip install geotoolz                              # the whole stack (all five packages)
+pip install geotoolz-ops                          # operators only (geoops)
+pip install 'geotoolz-ops[patch]'                 # + patcher (geopatcher)
 pip install geotoolz-catalog                      # catalog only
 pip install 'geotoolz-catalog[patch]'             # catalog + patcher bridge
 pip install 'geotoolz-catalog[stac]'              # + STAC searches (from_stac_search)

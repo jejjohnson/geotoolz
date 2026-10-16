@@ -13,4 +13,4 @@ Per-band scaling and contrast operators for model inputs and display.
 
 See the [Normalization guide](../normalization.md) for when to use which.
 
-::: geotoolz.normalize
+::: geoops.normalize

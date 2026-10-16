@@ -14,7 +14,7 @@ every read or write that touches a bucket goes through it.
 | **Find** — which files cover my area and dates? | `geocatalog` | a `GeoSlice` query result, staged local files |
 | **Read** — open this mission's product | `geoproducts` | a georeader `GeoData` / `GeoTensor` |
 | **Cut** — make model-sized pieces and put them back | `geopatcher` | `Patch`es, then a stitched `GeoTensor` |
-| **Compute** — what do I do to each piece? | `geotoolz` | a `GeoTensor` with the input's georeferencing |
+| **Compute** — what do I do to each piece? | `geoops` | a `GeoTensor` with the input's georeferencing |
 | **Store** — buckets, credentials, COGs | `geocloud` | pooled clients, files on disk, validated COGs |
 
 ## The seams
@@ -40,7 +40,7 @@ A `geoproducts` reader drops into `geopatcher.RasterField` or
 call `reader.load()` first. A sensor's presets bind
 geotoolz operators to its band names (`geotoolz-products[operators]`).
 
-**4. `geotoolz.patch_ops` — the patcher joins the operator graph.**
+**4. `geoops.patch_ops` — the patcher joins the operator graph.**
 `GridSampler → ApplyToChips → MergePatches` (the same classes as
 `geopatcher.integrations.pipekit`) puts tile → predict → stitch inside a
 `Sequential`, and the label-aware `StratifiedSample` / `BalancedSampler`
@@ -49,7 +49,7 @@ emit the same `Patch` carrier for training draws. See
 
 **5. Coregistration operators plug into matched patching.**
 `geopatcher.matched.MatchedField` fans one anchor out across sources and
-takes a coregistration callable per secondary — `geotoolz.geom.coregister`
+takes a coregistration callable per secondary — `geoops.geom.coregister`
 operators (`RasterToRasterLike`, `RasterToPoints`, …). The catalog's
 [matchup engine](catalog/design/query-matchup.md) finds the row pairs, the
 patcher reads them, the operators align them.
@@ -83,9 +83,9 @@ from georeader.geotensor import GeoTensor
 
 import geocatalog as gc
 import geopatcher as gp
-import geotoolz as gz
+import geoops as gz
 from geoproducts import carbonmapper as cm
-from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
+from geoops.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 bbox_lonlat: tuple[float, float, float, float] = (-104.2, 31.9, -103.9, 32.2)  # Delaware Basin
 utm: str = "EPSG:32613"                                                         # UTM 13N, metres

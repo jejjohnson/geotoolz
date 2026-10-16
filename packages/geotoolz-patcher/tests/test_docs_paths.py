@@ -9,7 +9,7 @@ messages) and checks two things:
   removed name breaks this test instead of silently rotting in prose;
 * no text uses a name or location the monorepo retired — the
   pre-monorepo ``docs/<page>.md`` / ``docs/design/`` paths, the standalone
-  ``geopatcher`` repository and docs site, ``geotoolz.patch`` (now
+  ``geopatcher`` repository and docs site, ``geoops.patch`` (now
   ``geopatcher``), install commands naming the ``geopatcher``
   *distribution* (it is ``geotoolz-patcher``), bare ``#NN`` references to
   the standalone repo's issues (qualify them as ``jejjohnson/geopatcher#NN``),

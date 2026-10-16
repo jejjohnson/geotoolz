@@ -228,7 +228,7 @@ Every `pipekit.Operator` constructor is keyword-only, and one concept has one
 parameter name across every family (`axis`, `bands`, `window`, `size`,
 `fill_value`, `seed`, …). The full table lives with the rest of the geotoolz
 package rules in
-[`packages/geotoolz/AGENTS.md`](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz/AGENTS.md#operator-parameter-vocabulary);
+[`packages/geotoolz-ops/AGENTS.md`](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz-ops/AGENTS.md#operator-parameter-vocabulary);
 `tests/test_operator_contract.py::test_constructors_are_keyword_only` and
 `::test_constructor_vocabulary` enforce it.
 
@@ -266,6 +266,6 @@ is written against is the one that is installed and tested. To move it:
 1. Pick the commit of a pipekit release tag (`git rev-list -n1 pipekit-vX.Y.Z`
    in a pipekit clone) and set it as `rev = "<sha>"`, updating the trailing
    `# pipekit-vX.Y.Z` comment.
-2. Raise the `pipekit>=X.Y.Z` floor in `packages/geotoolz/pyproject.toml` and
+2. Raise the `pipekit>=X.Y.Z` floor in `packages/geotoolz-ops/pyproject.toml` and
    `packages/geotoolz-patcher/pyproject.toml` if the new release is required.
 3. Run `uv lock --upgrade-package pipekit`, then the full pre-commit checklist.

@@ -1,6 +1,6 @@
 # Measure
 
-`geotoolz.measure` wraps `skimage.measure` for region properties and contour extraction. Outputs are
+`geoops.measure` wraps `skimage.measure` for region properties and contour extraction. Outputs are
 either label `GeoTensor`s or `GeoDataFrame`s with geometries in the input CRS.
 
 - `LabelConnectedComponents` — component labelling with `connectivity=4|8` (skimage's `1|2`
@@ -17,8 +17,8 @@ either label `GeoTensor`s or `GeoDataFrame`s with geometries in the input CRS.
 - `RANSAC` — generic model fitting on `(N, 2)` coordinate pairs
 - `ShannonEntropy` — single-band scalar entropy
 
-Shared primitives (also used by `geotoolz.mask` and `geotoolz.plume`): `label_components`,
+Shared primitives (also used by `geoops.mask` and `geoops.plume`): `label_components`,
 `skeleton_length`, `regionprops_frame` and `DEFAULT_REGIONPROPS`, plus
 `regionprops_to_crs_units` (the `scale_to_crs=True` conversion).
 
-::: geotoolz.measure
+::: geoops.measure

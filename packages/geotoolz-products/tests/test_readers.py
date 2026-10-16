@@ -184,7 +184,7 @@ def test_shared_csv_loader_caches_package_data() -> None:
 
 
 def test_toy_sensor_ndvi_preset_matches_generic_operator() -> None:
-    gz = pytest.importorskip("geotoolz")
+    gz = pytest.importorskip("geoops")
     op = toy_sensor.NDVI()
     expected = gz.indices.NDVI(red="red", nir="nir")
 
@@ -212,9 +212,9 @@ def test_ndvi_preset_without_geotoolz_names_the_extra(
     import sys
 
     # ``None`` in sys.modules makes any import of the name raise.
-    for name in [m for m in sys.modules if m.split(".")[0] == "geotoolz"]:
+    for name in [m for m in sys.modules if m.split(".")[0] == "geoops"]:
         monkeypatch.setitem(sys.modules, name, None)
-    monkeypatch.setitem(sys.modules, "geotoolz", None)
+    monkeypatch.setitem(sys.modules, "geoops", None)
     with pytest.raises(ImportError, match=r"geotoolz-products\[operators\]"):
         toy_sensor.NDVI()
 

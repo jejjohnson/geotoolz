@@ -11,8 +11,8 @@ Install the backend you need; the extras are listed on the
 [landing page](index.md#install):
 
 ```bash
-pip install 'geotoolz[hdf5,netcdf]'     # h5py, netCDF4
-pip install 'geotoolz[hdf4]'            # pyhdf, for HDF4 / HDF-EOS (MODIS)
+pip install 'geotoolz-ops[hdf5,netcdf]'     # h5py, netCDF4
+pip install 'geotoolz-ops[hdf4]'            # pyhdf, for HDF4 / HDF-EOS (MODIS)
 ```
 
 ## Read an HDF dataset
@@ -29,7 +29,7 @@ import h5py
 import numpy as np
 from georeader.geotensor import GeoTensor
 
-import geotoolz as gz
+import geoops as gz
 
 # A small swath file: 3 radiance bands plus per-pixel latitude / longitude.
 path: Path = Path(tempfile.mkdtemp()) / "swath.h5"
@@ -47,7 +47,7 @@ bands: GeoTensor = reader()                                       # (2, 20, 30) 
 
 HDF5 files go through `h5py`. HDF4 / HDF-EOS files are recognised by
 their signature and need `pyhdf`; without it the call raises an
-`ImportError` that names `geotoolz[hdf4]`.
+`ImportError` that names `geotoolz-ops[hdf4]`.
 
 ## Read a NetCDF-CF variable
 
@@ -65,7 +65,7 @@ import numpy as np
 from georeader.geotensor import GeoTensor
 from pyproj import CRS
 
-import geotoolz as gz
+import geoops as gz
 
 # A small Level-2 file: packed int16 methane on a UTM grid, inside group PRODUCT.
 path: Path = Path(tempfile.mkdtemp()) / "l2.nc"

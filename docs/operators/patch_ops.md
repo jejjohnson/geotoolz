@@ -3,14 +3,14 @@
 Run any operator or model tile by tile and get one result on the scene's
 grid. The chips of one scene are held in memory together; for scenes
 larger than memory, use [geopatcher's runners](../patcher/index.md) to
-stream them. `geotoolz.patch_ops` turns the
+stream them. `geoops.patch_ops` turns the
 [geopatcher](../patcher/index.md) steps into operators, so the whole flow
 is one `Sequential`.
 
 Install the `[patch]` extra (see [Install](index.md#install)):
 
 ```bash
-pip install 'geotoolz[patch]'
+pip install 'geotoolz-ops[patch]'
 ```
 
 ## Run a pipeline tile by tile
@@ -25,8 +25,8 @@ from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
 import geopatcher as gp
-import geotoolz as gz
-from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches, TriangularWindow
+import geoops as gz
+from geoops.patch_ops import ApplyToChips, GridSampler, MergePatches, TriangularWindow
 
 rng: np.random.Generator = np.random.default_rng(0)
 scene: GeoTensor = GeoTensor(
@@ -73,8 +73,8 @@ from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
 import geopatcher as gp
-import geotoolz as gz
-from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches, TriangularWindow
+import geoops as gz
+from geoops.patch_ops import ApplyToChips, GridSampler, MergePatches, TriangularWindow
 
 
 def water_model(chip: np.ndarray) -> np.ndarray:                    # (2, h, w) → (1, h, w) float32
@@ -126,8 +126,8 @@ import numpy as np
 from georeader.geotensor import GeoTensor
 from rasterio.transform import from_origin
 
-import geotoolz as gz
-from geotoolz.patch_ops import ApplyToChips, BalancedSampler, StratifiedSample
+import geoops as gz
+from geoops.patch_ops import ApplyToChips, BalancedSampler, StratifiedSample
 
 rng: np.random.Generator = np.random.default_rng(0)
 grid: dict = {"transform": from_origin(750_000, 4_350_000, 10, 10), "crs": "EPSG:32610"}

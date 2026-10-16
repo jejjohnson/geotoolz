@@ -9,9 +9,9 @@ almost here, extend it where it lives. Regenerate with
 `make capabilities` after changing a public API (CI checks it is
 current).
 
-## `geotoolz` (geotoolz)
+## `geoops` (geotoolz-ops)
 
-### `geotoolz`
+### `geoops`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -32,7 +32,7 @@ current).
 | `Switch` | class | Re-exported from `pipekit`. |
 | `Tap` | class | Re-exported from `pipekit`. |
 
-### `geotoolz.augment`
+### `geoops.augment`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -56,7 +56,7 @@ current).
 | `rot90_transform` | function | Compose ``transform`` with the pixel map of ``np.rot90(..., k)``. |
 | `sun_angle_scale` | function | TOA-reflectance factor for a solar-zenith change. |
 
-### `geotoolz.carrier`
+### `geoops.carrier`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -99,7 +99,7 @@ current).
 | `wrap_filled` | function | Write an explicit fill into ``ref``'s invalid pixels and rewrap ``out``. |
 | `wrap_like` | function | Rewrap a computed array to match the carrier of ``ref``. |
 
-### `geotoolz.compositing`
+### `geoops.compositing`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -122,7 +122,7 @@ current).
 | `take_by_spatial_index` | function | Select one frame per sample from a ``(T, ..., H, W)`` stack. |
 | `view_angle_score` | function | Gaussian view-zenith-angle score, best at nadir. |
 
-### `geotoolz.einx`
+### `geoops.einx`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -134,7 +134,7 @@ current).
 | `output_axes` | function | Return the top-level axis tokens of a pattern's output expression. |
 | `spatial_survives` | function | Return whether an einx pattern preserves the carrier's spatial grid. |
 
-### `geotoolz.feature`
+### `geoops.feature`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -153,7 +153,7 @@ current).
 | `multiscale_features` | function | Channel-first :func:`skimage.feature.multiscale_basic_features` stack. |
 | `structure_tensor_eigvals` | function | Eigenvalues of the local structure tensor, largest first. |
 
-### `geotoolz.geom`
+### `geoops.geom`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -181,7 +181,7 @@ current).
 | `Tile` | class | Split a `GeoTensor` into spatial tiles. |
 | `Vectorize` | class | Vectorize non-zero regions of a mask `GeoTensor` into polygons. |
 
-### `geotoolz.geom.coregister`
+### `geoops.geom.coregister`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -192,7 +192,7 @@ current).
 | `RasterToRasterLike` | class | Align one raster onto another's CRS + grid in a single op. |
 | `VectorToRasterAgg` | class | Rasterize a vector layer with an aggregation policy for overlaps. |
 
-### `geotoolz.indices`
+### `geoops.indices`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -239,7 +239,7 @@ current).
 | `normalized_difference` | function | Generic normalized-difference band ratio. |
 | `savi` | function | Soil-Adjusted Vegetation Index (Huete 1988). |
 
-### `geotoolz.io`
+### `geoops.io`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -261,7 +261,7 @@ current).
 | `WriteGeoTIFF` | class | Write a :class:`GeoTensor` as a tiled GeoTIFF (no overviews). |
 | `WriteZarr` | class | Write a :class:`GeoTensor` to a Zarr store with spatial metadata. |
 
-### `geotoolz.learn`
+### `geoops.learn`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -280,7 +280,7 @@ current).
 | `PixelwisePCA` | class | Pixel-wise PCA convenience operator. |
 | `SklearnOp` | class | Universal adapter for scikit-learn-compatible estimators on GeoTensors. |
 
-### `geotoolz.mask`
+### `geoops.mask`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -320,7 +320,7 @@ current).
 | `slope_degrees` | function | Compute slope in degrees from a single-band DEM. |
 | `slope_mask` | function | Mask DEM cells by a slope interval (True = drop). |
 
-### `geotoolz.matched_filter`
+### `geoops.matched_filter`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -358,7 +358,7 @@ current).
 | `shrink_covariance` | function | Shrink an empirical covariance toward a scaled-identity target. |
 | `validate_mf_inputs` | function | Raise ``ValueError`` for degenerate target/covariance pairs. |
 
-### `geotoolz.measure`
+### `geoops.measure`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -376,7 +376,7 @@ current).
 | `regionprops_to_crs_units` | function | Convert pixel-unit region-property columns to CRS units. |
 | `skeleton_length` | function | Longest geodesic path through the skeleton of a binary mask. |
 
-### `geotoolz.normalize`
+### `geoops.normalize`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -402,7 +402,7 @@ current).
 | `robust_scale` | function | Apply median/IQR scaling while preserving NaN pixels. |
 | `standard_scale` | function | Apply z-score scaling while preserving NaN pixels. |
 
-### `geotoolz.patch_ops`
+### `geoops.patch_ops`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -410,7 +410,7 @@ current).
 | `StratifiedSample` | class | Operator: ``scene → list[Patch]`` with class proportions matching a target. |
 | `TriangularWindow` | class | Linear-ramp triangular spatial window for overlap-add blending. |
 
-### `geotoolz.plume`
+### `geoops.plume`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -429,7 +429,7 @@ current).
 | `plume_mask` | function | Threshold an enhancement map and remove small connected components. |
 | `wind_advection_cone` | function | Rasterize an analytical downwind sector mask. |
 
-### `geotoolz.qa`
+### `geoops.qa`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -460,7 +460,7 @@ current).
 | `mask_from_qa_bits` | function | Decode a Landsat-style bitmask QA band. |
 | `mask_from_scl` | function | Decode a Sentinel-2 SCL band by class membership. |
 
-### `geotoolz.radiometry`
+### `geoops.radiometry`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -489,7 +489,7 @@ current).
 | `percentile_clip` | function | Robust contrast stretch using percentile thresholds. |
 | `radiance_to_dn` | function | Convert at-sensor radiance back to DN via the affine inverse. |
 
-### `geotoolz.restore`
+### `geoops.restore`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -526,7 +526,7 @@ current).
 | `pca_denoise` | function | Reconstruct an array from its top PCA components along ``axis``. |
 | `replace_outliers` | function | Replace detected outliers with a scalar or nearest-neighbour fill. |
 
-### `geotoolz.segment`
+### `geoops.segment`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -549,7 +549,7 @@ current).
 | `resolve_threshold` | function | Resolve an absolute, Otsu, or percentile threshold to a float. |
 | `threshold_mask` | function | Binary mask of the samples strictly above a resolved threshold. |
 
-### `geotoolz.spectral`
+### `geoops.spectral`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -570,13 +570,13 @@ current).
 | `spectral_binning` | function | Aggregate source bands into wavelength-centered bins. |
 | `spectral_smoothing` | function | Smooth spectra along the band axis. |
 
-### `geotoolz.testing`
+### `geoops.testing`
 
 | Name | Kind | What it does |
 |---|---|---|
 | `check_operator` | function | Assert that ``op`` keeps the pipekit `Operator` and `GeoTensor` contracts. |
 
-### `geotoolz.viz`
+### `geoops.viz`
 
 | Name | Kind | What it does |
 |---|---|---|
@@ -1386,24 +1386,24 @@ Not public API — the plumbing a package's own families and readers
 share. Contributors use these instead of writing new helpers; a missing
 helper is added here, not inline in one caller.
 
-### `geotoolz._src`
+### `geoops._src`
 
 | Module | Purpose | Helpers |
 |---|---|---|
-| `geotoolz._src.bands` | Shared utilities for resolving band references against GeoTensor metadata. | `band_count`, `per_band_values`, `strip_band_attrs`, `take_band_attrs`, `concat_band_attrs`, `band_names`, `resolve_band`, `resolve_bands`, `resolve_wavelengths` |
-| `geotoolz._src.blending` | Shared overlap-add blending primitives. | `triangular_weights`, `overlap_add`, `normalize_overlap_add` |
-| `geotoolz._src.config` | Shared ``get_config()`` coercion helpers. | `jsonable`, `as_tuple`, `mapping_to_pairs`, `mapping_from_pairs`, `reject_config_summary` |
-| `geotoolz._src.contract` | The pipekit `Operator` and `GeoTensor` carrier contracts, as assertions. | `geotensors`, `is_nested_operator`, `same`, `assert_keyword_only`, `assert_config_round_trips`, `assert_graph_mode`, `assert_same_carrier`, `assert_fresh_consistent_attrs`, `assert_fill_matches_dtype`, `assert_clear_rank_error`, `time_stack_of`, `frames`, `assert_time_stack` |
-| `geotoolz._src.dtype` | Shared dtype-promotion primitive. | `as_float` |
-| `geotoolz._src.fitted` | Shared plumbing for fitted operators (the ``fit`` / ``transform`` seam). | `PicklableLock`, `fit_lock`, `fit_once` |
-| `geotoolz._src.geo` | Shared georeferencing helpers. | `require_geotensor`, `require_projected_crs`, `ground_pixel_size`, `grid_matches`, `require_grid_match`, `pixel_xy` |
-| `geotoolz._src.labels` | Shared connected-component, hole, skeleton and region-property primitives. | `connectivity_structure`, `label_components`, `remove_small_holes`, `skeleton_length`, `regionprops_frame` |
-| `geotoolz._src.optional` | Lazy import of optional-extra dependencies with an actionable error. | `import_optional` |
-| `geotoolz._src.samples` | Shared pixel flattening: ``(c, h, w)`` cubes <-> ``(n, c)`` sample matrices. | `SampleLayout`, `cube_to_samples`, `samples_to_cube`, `sample_layout` |
-| `geotoolz._src.shape` | Shared shape-normalisation primitives. | `band_axis`, `require_ndim`, `keep_band_axis`, `map_frames`, `over_frames`, `single_band`, `gather_inputs` |
-| `geotoolz._src.stretch` | Shared percentile clip-and-stretch core. | `percentile_stretch` |
-| `geotoolz._src.valid` | Shared notion of an *invalid* (nodata) pixel. | `carrier_fill_value`, `is_fill`, `invalid_values`, `valid_pixels`, `mask_invalid_to_nan`, `restore_fill`, `carried_fill`, `wrap_filled` |
-| `geotoolz._src.wrap` | Carrier rewrap discipline shared by every operator family. | `Inherit`, `rewrap_attrs`, `adopt_attrs`, `wrap_like` |
+| `geoops._src.bands` | Shared utilities for resolving band references against GeoTensor metadata. | `band_count`, `per_band_values`, `strip_band_attrs`, `take_band_attrs`, `concat_band_attrs`, `band_names`, `resolve_band`, `resolve_bands`, `resolve_wavelengths` |
+| `geoops._src.blending` | Shared overlap-add blending primitives. | `triangular_weights`, `overlap_add`, `normalize_overlap_add` |
+| `geoops._src.config` | Shared ``get_config()`` coercion helpers. | `jsonable`, `as_tuple`, `mapping_to_pairs`, `mapping_from_pairs`, `reject_config_summary` |
+| `geoops._src.contract` | The pipekit `Operator` and `GeoTensor` carrier contracts, as assertions. | `geotensors`, `is_nested_operator`, `same`, `assert_keyword_only`, `assert_config_round_trips`, `assert_graph_mode`, `assert_same_carrier`, `assert_fresh_consistent_attrs`, `assert_fill_matches_dtype`, `assert_clear_rank_error`, `time_stack_of`, `frames`, `assert_time_stack` |
+| `geoops._src.dtype` | Shared dtype-promotion primitive. | `as_float` |
+| `geoops._src.fitted` | Shared plumbing for fitted operators (the ``fit`` / ``transform`` seam). | `PicklableLock`, `fit_lock`, `fit_once` |
+| `geoops._src.geo` | Shared georeferencing helpers. | `require_geotensor`, `require_projected_crs`, `ground_pixel_size`, `grid_matches`, `require_grid_match`, `pixel_xy` |
+| `geoops._src.labels` | Shared connected-component, hole, skeleton and region-property primitives. | `connectivity_structure`, `label_components`, `remove_small_holes`, `skeleton_length`, `regionprops_frame` |
+| `geoops._src.optional` | Lazy import of optional-extra dependencies with an actionable error. | `import_optional` |
+| `geoops._src.samples` | Shared pixel flattening: ``(c, h, w)`` cubes <-> ``(n, c)`` sample matrices. | `SampleLayout`, `cube_to_samples`, `samples_to_cube`, `sample_layout` |
+| `geoops._src.shape` | Shared shape-normalisation primitives. | `band_axis`, `require_ndim`, `keep_band_axis`, `map_frames`, `over_frames`, `single_band`, `gather_inputs` |
+| `geoops._src.stretch` | Shared percentile clip-and-stretch core. | `percentile_stretch` |
+| `geoops._src.valid` | Shared notion of an *invalid* (nodata) pixel. | `carrier_fill_value`, `is_fill`, `invalid_values`, `valid_pixels`, `mask_invalid_to_nan`, `restore_fill`, `carried_fill`, `wrap_filled` |
+| `geoops._src.wrap` | Carrier rewrap discipline shared by every operator family. | `Inherit`, `rewrap_attrs`, `adopt_attrs`, `wrap_like` |
 
 ### `geocatalog._src.utils`
 

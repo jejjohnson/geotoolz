@@ -87,13 +87,13 @@ This design covers all three packages because the user-facing workflow crosses a
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                                   GEOTOOLZ                                      │
 │                                                                                 │
-│   geotoolz.geom.coregister                                                      │
+│   geoops.geom.coregister                                                      │
 │   ─────────────────────────                                                     │
 │     RasterToRasterLike        RasterToPoints      PointsToRaster                │
 │     RasterToPointCloud        PointCloudToRaster  VectorToRasterAgg             │
 │     (SwathToGrid / GridToSwath: designed, not built — §8)                       │
 │                                                                                 │
-│   geotoolz.compositing                                                          │
+│   geoops.compositing                                                          │
 │   ────────────────────                                                          │
 │     StackMatched              BlendMatched (IVW, weighted mean)                 │
 │                                                                                 │
@@ -105,7 +105,7 @@ Three boundary rules that drive the rest of the document:
 
 1. **Geocatalog never transforms pixels.** It returns URIs and metadata; staging is opt-in; loading remains delegated to `georeader`/`rasterio`/`xarray`.
 2. **Geotoolz operators are the only place coregistration logic lives.** They take 1–N `GeoTensor`s in, return one out, are stateless, and serialize. Geopatcher and geocatalog both *call* them; neither *contains* them.
-3. **Geopatcher's core stays numpy+scipy.** `MatchedField` adds a composite Field that dispatches to operators (provided by the user, typically from geotoolz). The 4-axis machinery is untouched.
+3. **Geopatcher's core stays numpy+scipy.** `MatchedField` adds a composite Field that dispatches to operators (provided by the user, typically from geoops). The 4-axis machinery is untouched.
 
 ## 4. GeoCatalog: Sources, queries, matchups, staging
 
@@ -369,7 +369,7 @@ All cross-modality alignment lives in geotoolz under the existing `geom` namespa
 ### 5.1 New file layout
 
 ```
-src/geotoolz/
+src/geoops/
   geom/
     _src/
       array.py          # existing array primitives (reproject, resample, rasterize, …)
@@ -378,7 +378,7 @@ src/geotoolz/
         __init__.py
         array.py        # numpy/scipy primitives for cross-modality alignment
         operators.py    # pipekit.Operator wrappers
-    coregister.py       # public re-exports: from geotoolz.geom.coregister import *
+    coregister.py       # public re-exports: from geoops.geom.coregister import *
   compositing/
     _src/
       operators.py      # + StackMatched, BlendMatched (NEW)
@@ -413,7 +413,7 @@ vector-cube = ["xvec>=0.4"]
 ### 5.3 Operator signatures (illustrative)
 
 ```python
-# geotoolz/geom/_src/coregister/operators.py
+# geoops/geom/_src/coregister/operators.py
 
 class RasterToRasterLike(Operator):
     resampling: Resampling = Resampling.bilinear
@@ -488,7 +488,7 @@ class MatchedField:
     primary: Field
     secondaries: Mapping[str, Field]
     coreg: Mapping[str, Callable]   # any Callable; pipekit.Operator (e.g. from
-                                    # geotoolz.geom.coregister) is the recommended choice
+                                    # geoops.geom.coregister) is the recommended choice
                                     # — see ADR-003 for why the type is the broader Callable.
     valid_mask: bool = True         # matched patchers emit per-source nodata masks
 
@@ -621,7 +621,7 @@ from geocatalog.matchup import IouAtLeast, NearestInTime
 from geocatalog.sources import EarthAccessSource, STACSource
 import geopatcher as gp
 from geopatcher.matched import MatchedField, MatchedSpatialPatcher
-from geotoolz.geom.coregister import RasterToRasterLike
+from geoops.geom.coregister import RasterToRasterLike
 
 june = pd.Interval(pd.Timestamp("2024-06-01"), pd.Timestamp("2024-06-30"), closed="both")
 
@@ -800,7 +800,7 @@ geocatalog
   .backends
     .DuckDBGeoCatalog, .InMemoryGeoCatalog
 
-geotoolz.geom.coregister
+geoops.geom.coregister
   .RasterToRasterLike
   .RasterToPoints                   # requires [vector-cube] extra (xvec)
   .PointsToRaster                   # requires [vector-cube] extra
@@ -808,7 +808,7 @@ geotoolz.geom.coregister
   .PointCloudToRaster
   .VectorToRasterAgg
 
-geotoolz.compositing
+geoops.compositing
   .StackMatched
   .BlendMatched                     # method="mean" | "weighted_mean" | "ivw"
 

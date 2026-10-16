@@ -212,7 +212,7 @@ def test_cloud_top_height_stacks_onto_the_imagery_grid(
 
 
 def test_rgb_recipes_on_real_imagery(l2_downloads: dict[str, Path]) -> None:
-    pytest.importorskip("geotoolz")
+    pytest.importorskip("geoops")
     cmi = goes.L2Reader(l2_downloads["MCMIP"]).load()
     for name in goes.recipes.RECIPES:
         rgb = np.asarray(goes.presets.Recipe(name)(cmi))

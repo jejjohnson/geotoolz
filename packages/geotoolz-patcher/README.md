@@ -121,7 +121,7 @@ Cloud-Optimized GeoTIFF reads and the shared object-store pool live in
 ## With geotoolz operators
 
 The `[pipekit]` bridge (`geopatcher.integrations.pipekit`, re-exported as
-`geotoolz.patch_ops`) makes *split → operate → merge* one more operator
+`geoops.patch_ops`) makes *split → operate → merge* one more operator
 pipeline:
 
 ```python
@@ -130,8 +130,8 @@ import rasterio
 from georeader.geotensor import GeoTensor
 
 import geopatcher as gp
-import geotoolz as gz
-from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
+import geoops as gz
+from geoops.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 rng: np.random.Generator = np.random.default_rng(0)
 scene: GeoTensor = GeoTensor(

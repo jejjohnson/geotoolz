@@ -22,7 +22,7 @@ you write") and the `AGENTS.md` of each package the diff touches.
    existing equivalent:
    - `docs/capabilities.md` — every public name with its summary,
      including the upstream `pipekit` section;
-   - the shared toolkits: `packages/geotoolz/src/geotoolz/_src/`,
+   - the shared toolkits: `packages/geotoolz-ops/src/geoops/_src/`,
      `packages/geotoolz-products/src/geoproducts/_src/`,
      `packages/geotoolz-catalog/src/geocatalog/_src/utils/`,
      `packages/geotoolz-cloud/src/geocloud/`;
@@ -34,7 +34,7 @@ you write") and the `AGENTS.md` of each package the diff touches.
      CF scale-offset decoding or geostationary-grid maths written inline in
      a reader instead of using `geoproducts._src`;
    - nodata, band-resolution or rewrap logic written inline in a geotoolz
-     operator instead of using `geotoolz._src` (`valid`, `bands`,
+     operator instead of using `geoops._src` (`valid`, `bands`,
      `wrap_like`);
    - pipekit re-implemented:
      - a hand-rolled retry or backoff loop around an operator → `Retry`;

@@ -50,8 +50,8 @@ an object-store client — look it up:
 | copy remote assets locally | `geotoolz-catalog` | `geocatalog.staging.stage` |
 | read a sensor product (GOES, Himawari, …) | `geotoolz-products` | `geoproducts.<sensor>.Reader`, `.aws` download helpers, `geoproducts.stack` |
 | tile, process, stitch with overlap blending | `geotoolz-patcher` | `geopatcher.SpatialPatcher` + `spatial.geometry/sampler/window/aggregation` |
-| band math, masks, radiometry, ML on rasters | `geotoolz` | operator families (`gz.NDVI`, `gz.DNToReflectance`, `gz.qa.*`, `gz.learn.*`, …) |
-| write COG / GeoTIFF / Zarr | `geotoolz` | `gz.WriteCOG`, `gz.WriteGeoTIFF`, `gz.WriteZarr` |
+| band math, masks, radiometry, ML on rasters | `geoops` | operator families (`gz.NDVI`, `gz.DNToReflectance`, `gz.qa.*`, `gz.learn.*`, …) |
+| write COG / GeoTIFF / Zarr | `geoops` | `gz.WriteCOG`, `gz.WriteGeoTIFF`, `gz.WriteZarr` |
 | write a validated COG to disk or a bucket from code | `geotoolz-cloud` | `geocloud.cog.write_cog` |
 | s3:// gs:// az:// https:// reads, COG windows | `geotoolz-cloud` | `geocloud.store.get_obstore`, `geocloud.cog.CogSource` |
 | list, download, upload, copy, sync, sign objects | `geotoolz-cloud` | `geocloud.files` (`ls`, `download`, `upload`, `copy`, `sync`, `sign`) |
@@ -70,12 +70,12 @@ import pandas as pd
 from georeader.geotensor import GeoTensor
 
 import geopatcher as gp
-import geotoolz as gz
+import geoops as gz
 from geocatalog import GeoSlice
 from geocatalog.build import build_raster_catalog
 from geocatalog.patch import field_for
 from geocatalog.staging import stage
-from geotoolz.patch_ops import ApplyToChips, GridSampler, MergePatches
+from geoops.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 # 1. Index once — local paths or s3:// / gs:// / https:// URIs.
 catalog = build_raster_catalog(
@@ -176,14 +176,14 @@ pipeline.
 - **Masks.** `True` means drop the pixel; this is what `gz.ApplyMask`
   expects.
 
-`geotoolz.carrier` holds the helpers the built-in operators use to keep these
+`geoops.carrier` holds the helpers the built-in operators use to keep these
 rules, so your step keeps them the same way:
 
 ```python
 import numpy as np
 from pipekit import Operator
 
-from geotoolz.carrier import mask_invalid_to_nan, over_frames, wrap_like
+from geoops.carrier import mask_invalid_to_nan, over_frames, wrap_like
 
 
 class ZScore(Operator):
@@ -204,7 +204,7 @@ Check a new step with the same checks geotoolz runs on its own operators. It
 fails naming the first broken rule:
 
 ```python
-from geotoolz.testing import check_operator
+from geoops.testing import check_operator
 
 
 def test_zscore(scene):  # scene: GeoTensor (4, H, W) with band_names and a few nodata pixels
@@ -222,7 +222,7 @@ def test_zscore(scene):  # scene: GeoTensor (4, H, W) with band_names and a few 
 | `os.environ[...] = ` credentials, SAS-in-URL helpers, per-cloud config factories | `geocloud.credentials.set_credentials` / `load_credentials`, then plain URIs; `gdal_access` for rasterio |
 | boto3 / s3fs / obstore client code, upload / download / copy loops | `geocloud.files` (URI verbs on the pooled client), `geocloud.store.get_obstore`, or `geocatalog.staging.stage` |
 | band arithmetic on raw arrays (`(nir - red) / (nir + red)`) | the operator (`gz.NDVI`, `gz.spectral.BandRatio`, …) — it handles nodata, dtype and georeferencing |
-| manual nodata masks or rebuilding a `GeoTensor` by hand | the operators carry `fill_value_default` through; in your own step, `geotoolz.carrier` (`wrap_like`, `mask_invalid_to_nan`, `resolve_band`, `require_grid_match`) |
+| manual nodata masks or rebuilding a `GeoTensor` by hand | the operators carry `fill_value_default` through; in your own step, `geoops.carrier` (`wrap_like`, `mask_invalid_to_nan`, `resolve_band`, `require_grid_match`) |
 | retry loops, `try` / `except` fallbacks, memo dicts or thread pools around steps | `pipekit` `Retry`, `Try` / `Coalesce`, `Cache`, `ThreadMap` / `BatchedMap` |
 | a parser for GOES / Himawari files | `geoproducts.goes`, `geoproducts.himawari` |
 

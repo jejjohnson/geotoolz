@@ -193,7 +193,7 @@ from datetime import datetime
 from georeader.geotensor import GeoTensor
 
 import geoproducts
-import geotoolz as gz
+import geoops as gz
 from geoproducts import himawari
 from geoproducts.himawari import aws
 

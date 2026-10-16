@@ -34,7 +34,7 @@ plugins:
       handlers:
         python:
           paths:
-            - packages/geotoolz/src
+            - packages/geotoolz-ops/src
             - packages/geotoolz-patcher/src
             - packages/geotoolz-catalog/src
             - packages/geotoolz-cloud/src

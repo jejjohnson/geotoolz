@@ -16,6 +16,7 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 geotoolz = { workspace = true }
+geotoolz-ops = { workspace = true }
 geotoolz-patcher = { workspace = true }
 geotoolz-catalog = { workspace = true }
 geotoolz-products = { workspace = true }
@@ -51,7 +52,7 @@ dev = [
     # round-trips, xvec point extraction, netCDF4 / zarr I/O, obstore
     # pooling) come with them, so a plain `uv sync` runs the same fast
     # tier as CI's `--all-extras`.
-    "geotoolz[hydra,vector-cube,netcdf,zarr]",
+    "geotoolz-ops[hydra,vector-cube,netcdf,zarr]",
     # Reference solar geometry for radiometry.ComputeSZA (no geotoolz
     # extra declares it).
     "pysolar>=0.11",
@@ -68,7 +69,7 @@ typecheck = [
 ]
 docs = [
     # mkdocstrings imports the packages to render API pages.
-    "geotoolz",
+    "geotoolz-ops",
     "geotoolz-patcher",
     "geotoolz-catalog",
     "geotoolz-products",
@@ -111,7 +112,7 @@ combine-as-imports = true
 lines-after-imports = 2
 # The workspace sources live under packages/*/src, so root-level files
 # (docs notebooks) need the first-party classification made explicit.
-known-first-party = ["geotoolz", "geopatcher", "geocatalog"]
+known-first-party = ["geotoolz", "geoops", "geopatcher", "geocatalog"]
 
 [tool.ty.environment]
 python-version = "3.12"

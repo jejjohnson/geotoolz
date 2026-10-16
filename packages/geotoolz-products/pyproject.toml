@@ -39,7 +39,7 @@ dependencies = [
 # Sensor presets (``<sensor>.presets``): geotoolz operators bound to a
 # product's band names. geotoolz never depends on this package, so the
 # extra adds no cycle.
-operators = ["geotoolz"]
+operators = ["geotoolz-ops"]
 # Carbon Mapper reader (``geoproducts.carbonmapper``): the STAC + plume
 # catalogue API client (requests), the typed plume record (pydantic), and
 # the plume / source vector geometry (shapely, geopandas, pandas — also
@@ -105,7 +105,7 @@ ignore = ["E402", "E721", "E731", "E741"]
 # packages are used through their public API, and object-store clients
 # come from the one pool in geocloud.store.
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"geotoolz._src".msg = "private to geotoolz: import its public API (docs/capabilities.md), or make the helper public there first"
+"geoops._src".msg = "private to geoops: import its public API (docs/capabilities.md), or make the helper public there first"
 "geopatcher._src".msg = "private to geopatcher: import its public API (docs/capabilities.md), or make the helper public there first"
 "geocatalog._src".msg = "private to geocatalog: import its public API (docs/capabilities.md), or make the helper public there first"
 "geocloud._src".msg = "private to geocloud: import its public API (docs/capabilities.md), or make the helper public there first"

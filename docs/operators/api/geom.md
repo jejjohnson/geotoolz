@@ -20,7 +20,7 @@ multi-source matchups live in the `geom.coregister` subnamespace
 - `ResampleLike` is the same grid-matching surface for resolution/alignment work where the CRS is already compatible.
 - `CropToBounds` delegates to `georeader.read.read_from_bounds(..., boundless=False)`: the pixel window is rounded outward, so every pixel the bounds touch (even partially) is kept, and the result is clipped to the carrier.
 
-::: geotoolz.geom
+::: geoops.geom
 
 ## Coregistration
 
@@ -29,4 +29,4 @@ coregistration callables for `geopatcher.matched.MatchedField`:
 `RasterToRasterLike`, `RasterToPoints` / `PointsToRaster` (`[vector-cube]`
 extra), `RasterToPointCloud` / `PointCloudToRaster`, `VectorToRasterAgg`.
 
-::: geotoolz.geom.coregister
+::: geoops.geom.coregister

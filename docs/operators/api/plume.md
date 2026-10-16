@@ -18,4 +18,4 @@ kwargs (see [Multi-input operators](../concepts.md#multi-input-operators)):
 `PlumeFootprint()(mask, kg_m2)`, `SBMP()(scene, reference_scene)`,
 `PlumeColumnStats()(labels, column)`, `PlumeQNDFeatures()(labels, column, albedo)`.
 
-::: geotoolz.plume
+::: geoops.plume

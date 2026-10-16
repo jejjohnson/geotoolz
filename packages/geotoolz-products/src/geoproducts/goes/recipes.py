@@ -8,7 +8,7 @@ outputs): reflectance factor (0-1) for C01-C06, brightness temperature
 (K) for C07-C16, i.e. ``calibration="reflectance"`` /
 ``"brightness_temperature"`` L1b reads or MCMIP / CMIP imagery.
 
-``goes.presets`` turns a recipe into a ``geotoolz.viz.RGBRecipe``
+``goes.presets`` turns a recipe into a ``geoops.viz.RGBRecipe``
 operator; the recipes themselves need no extra.
 """
 

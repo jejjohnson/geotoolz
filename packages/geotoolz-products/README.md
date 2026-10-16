@@ -46,7 +46,7 @@ pip install 'geotoolz-products[carbonmapper]'    # Carbon Mapper plume catalogue
 | Extra | Pulls in | Needed for |
 |---|---|---|
 | *(base)* | georeader, numpy, rasterio | `ProductReader`, `toy_sensor` |
-| `[operators]` | `geotoolz` | per-sensor `presets` (e.g. `toy_sensor.presets.NDVI`) |
+| `[operators]` | `geotoolz-ops` | per-sensor `presets` (e.g. `toy_sensor.presets.NDVI`) |
 | `[goes]` | geotoolz-cloud with h5py | `geoproducts.goes.Reader` (local or `s3://`, ranged reads), the `goes.aws` bucket helpers |
 | `[himawari]` | h5py, geotoolz-cloud | `geoproducts.himawari.L2Reader`, the `himawari.aws` bucket helpers (the HSD `Reader` needs no extra) |
 | `[carbonmapper]` | requests, pydantic, shapely, geopandas, pandas | `geoproducts.carbonmapper` |

@@ -15,4 +15,4 @@ atmospheric correction.
 - **Tier-A primitives:** `dn_to_radiance`, `radiance_to_dn`, `dn_to_reflectance`, `bt_from_radiance`,
   `dos1`, `min_max_normalize`, `percentile_clip`, `gamma_correct`
 
-::: geotoolz.radiometry
+::: geoops.radiometry

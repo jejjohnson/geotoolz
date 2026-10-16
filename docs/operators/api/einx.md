@@ -1,6 +1,6 @@
 # Einx
 
-`geotoolz.einx` wraps [einx](https://github.com/fferflo/einx) — universal
+`geoops.einx` wraps [einx](https://github.com/fferflo/einx) — universal
 einstein-notation tensor ops — as carrier-aware Operators. einx is a core
 dependency: the same notation also powers the internal linear algebra of
 the Tier-A primitives (covariance products, matched-filter scoring, PCA
@@ -28,7 +28,7 @@ All presets broadcast over leading axes, so `(T, C, H, W)` time stacks
 work too.
 
 ```python
-import geotoolz as gz
+import geoops as gz
 
 mean_map = gz.Einx(op="mean", pattern="c y x -> y x")     # GeoTensor -> GeoTensor
 band_stats = gz.PerBandReduce(reduce="std")               # GeoTensor -> (C,) ndarray
@@ -37,20 +37,20 @@ coarse = gz.SpatialPool(reduce="mean", factor=4)          # transform rescaled
 pooled = gz.Einx(op="mean", pattern="c (y py) (x px) -> c y x", op_kwargs={"py": 2, "px": 2})
 ```
 
-::: geotoolz.einx.Einx
+::: geoops.einx.Einx
 
-::: geotoolz.einx.CHWtoHWC
+::: geoops.einx.CHWtoHWC
 
-::: geotoolz.einx.HWCtoCHW
+::: geoops.einx.HWCtoCHW
 
-::: geotoolz.einx.PerBandReduce
+::: geoops.einx.PerBandReduce
 
-::: geotoolz.einx.SpatialPool
+::: geoops.einx.SpatialPool
 
 ## Pattern analysis
 
 These helpers are pure string processing over pattern text.
 
-::: geotoolz.einx.spatial_survives
+::: geoops.einx.spatial_survives
 
-::: geotoolz.einx.output_axes
+::: geoops.einx.output_axes
