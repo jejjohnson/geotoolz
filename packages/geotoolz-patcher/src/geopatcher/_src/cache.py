@@ -62,6 +62,7 @@ from typing import Any
 
 import numpy as np
 
+from geopatcher._src._digest import array_digest
 from geopatcher._src.journal import _anchor_key
 from geopatcher._src.patch import Patch
 
@@ -592,7 +593,7 @@ def _domain_signature(field: Any) -> dict[str, Any] | None:
         sig["shape"] = [int(d) for d in shape]
     coords = getattr(domain, "coords", None)
     if isinstance(coords, dict):
-        sig["coords"] = {str(name): _array_digest(v) for name, v in coords.items()}
+        sig["coords"] = {str(name): array_digest(v) for name, v in coords.items()}
     dtype = getattr(domain, "dtype", None)
     if dtype is None:
         for attr in _SOURCE_ATTRS:
@@ -626,7 +627,7 @@ def _read_signature(field: Any) -> dict[str, Any]:
             # ``open_rasterio(p).sel(band=1)`` and ``.sel(band=2)`` differ
             # only in a (scalar or non-spatial) coordinate.
             sig["coords"] = {
-                str(name): _array_digest(coord.values)
+                str(name): array_digest(coord.values)
                 for name, coord in data.coords.items()
             }
             # Two views of one file can differ only in metadata the chips
@@ -649,20 +650,9 @@ def _metadata_digest(*parts: Any) -> str:
             h.update(repr(key).encode("utf-8"))
             value = part[key]
             if isinstance(value, np.ndarray):
-                h.update(_array_digest(value).encode())
+                h.update(array_digest(value).encode())
             else:
                 h.update(repr(value).encode("utf-8"))
-    return h.hexdigest()
-
-
-def _array_digest(values: Any) -> str:
-    """sha256 of an array's dtype, shape and bytes (object dtype via ``repr``)."""
-    arr = np.asarray(values)
-    h = hashlib.sha256(f"{arr.dtype.str}{arr.shape}".encode())
-    if arr.dtype.hasobject:
-        h.update(repr(arr.tolist()).encode("utf-8"))
-    else:
-        h.update(np.ascontiguousarray(arr).tobytes())
     return h.hexdigest()
 
 

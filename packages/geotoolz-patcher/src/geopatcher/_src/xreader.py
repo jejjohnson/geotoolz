@@ -54,15 +54,13 @@ from typing import Any
 
 import numpy as np
 
+from geopatcher._src._extras import missing_extra
+
 
 try:
     import xarray
 except ImportError as _e:  # pragma: no cover - exercised when [train] is missing
-    raise ImportError(
-        "geopatcher's windowed-Zarr reader requires xarray. Install the [train]"
-        " extra with `uv sync --extra train`"
-        " (or `uv pip install 'geotoolz-patcher[train]'`)."
-    ) from _e
+    raise missing_extra("geopatcher's windowed-Zarr reader", "train") from _e
 
 
 PyTree = Any
@@ -353,6 +351,30 @@ def _window_shuffle_cls(grain: Any) -> Any:
     return shuffle.WindowShuffleIterDataset
 
 
+def check_shards(shard_index: Any, shard_count: Any) -> None:
+    """Reject anything but ``0 <= shard_index < shard_count`` integers.
+
+    A sequence slice ``[shard_index::shard_count]`` silently accepts an
+    out-of-range or negative index (it overlaps or reverses other shards),
+    so the host-shard meaning has to be checked up front.
+
+    Raises:
+        ValueError: Only one of the two is set, either is not an integer,
+            ``shard_count < 1`` or ``shard_index`` is outside
+            ``[0, shard_count)``.
+    """
+    if shard_index is None or shard_count is None:
+        raise ValueError("must set both or neither of shard_index and shard_count")
+    for name, value in (("shard_index", shard_index), ("shard_count", shard_count)):
+        if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+            raise ValueError(f"{name} must be an integer; got {value!r}")
+    if shard_count < 1 or not 0 <= shard_index < shard_count:
+        raise ValueError(
+            f"need 0 <= shard_index < shard_count with shard_count >= 1; got "
+            f"shard_index={shard_index}, shard_count={shard_count}"
+        )
+
+
 def training_iterator(
     source: dict[str, xarray.Dataset],
     stencils: dict[str, Any],
@@ -365,12 +387,14 @@ def training_iterator(
     shard_index: int | None = None,
     shard_count: int | None = None,
     seed: int = 0,
-) -> Any:
+) -> tuple[Any, _PytreeSource]:
     """Block-coalesced, window-shuffled, shardable iterator of sample trees.
 
     Yields ``{name: xarray.Dataset}`` examples in randomly shuffled order. The
     caller is responsible for collation + batching (e.g. via
-    ``XarrayWindowDataset.build_batch_iter``).
+    ``XarrayWindowDataset.build_batch_iter``) and for calling
+    ``close()`` on the returned block source to release its loader pools.
+    An empty ``sample_origins`` gives an empty iterator.
 
     ``source`` must already be prepared (see ``_prepare_xarray_source``).
 
@@ -384,6 +408,13 @@ def training_iterator(
         buffer_diversity: blocks represented in the buffer (>= batch size).
         shard_index, shard_count: multi-host sharding; set both or neither.
         seed: RNG seed.
+
+    Returns:
+        ``(dataset, block_source)``: the Grain iter dataset, and the
+        `_PytreeSource` of block readers it draws from.
+
+    Raises:
+        ValueError: The shard arguments are invalid (see `check_shards`).
     """
     import grain
 
@@ -391,8 +422,7 @@ def training_iterator(
 
     if shard_index is None and shard_count is None:
         shard_index, shard_count = 0, 1
-    if shard_index is None or shard_count is None:
-        raise ValueError("must set both or neither of shard_index and shard_count")
+    check_shards(shard_index, shard_count)
 
     bytes_per_example = _example_nbytes(source, stencils, sample_dim)
     shuffle_window = round(buffer_size_in_bytes / bytes_per_example)
@@ -402,10 +432,16 @@ def training_iterator(
 
     def _build_block_source(name: str) -> _XarrayBlockSource:
         ds = source[name]
-        slices = build_sampling_slices(
-            source_points=ds[sample_dim].values,
-            sample_origins=sample_origins,
-            stencil=stencils[name],
+        # A guard band can empty a split; build_sampling_slices indexes
+        # sample_origins[0], so an empty split reads no blocks.
+        slices = (
+            build_sampling_slices(
+                source_points=ds[sample_dim].values,
+                sample_origins=sample_origins,
+                stencil=stencils[name],
+            )
+            if len(sample_origins)
+            else []
         )
         return _XarrayBlockSource(ds, group_slices(slices, group_size), sample_dim)
 
@@ -444,4 +480,4 @@ def training_iterator(
             dataset, window_size=shuffle_window, seed=window_seed
         )
 
-    return dataset
+    return dataset, grain_source

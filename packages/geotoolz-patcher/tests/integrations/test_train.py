@@ -352,10 +352,76 @@ def test_object_dtype_origins_hash_by_value():
     """Object-typed origins (e.g. cftime) must hash by value, not pointer."""
     import datetime
 
-    from geopatcher.integrations.train import _sha
+    from geopatcher._src._digest import array_digest
 
     a = np.array([datetime.datetime(2020, 1, 1), datetime.datetime(2020, 1, 2)], object)
     b = np.array([datetime.datetime(2020, 1, 1), datetime.datetime(2020, 1, 2)], object)
     c = np.array([datetime.datetime(2020, 1, 1), datetime.datetime(2020, 1, 3)], object)
-    assert _sha(a) == _sha(b)  # equal values, distinct objects → equal hash
-    assert _sha(a) != _sha(c)  # different value → different hash
+    assert array_digest(a) == array_digest(b)  # equal values → equal hash
+    assert array_digest(a) != array_digest(c)  # different value → different hash
+
+
+# --- Construction validation, block-reader edge cases, shard discovery ----
+
+
+def test_source_keys_must_be_input_and_target():
+    ds = _store()
+    with pytest.raises(ValueError, match="exactly the keys"):
+        XarrayWindowDataset(
+            source={"x": ds[["t2m"]], "y": ds[["t2m"]]},
+            stencils={"x": _stencils()["input"], "y": _stencils()["target"]},
+            store_version="v1",
+        )
+
+
+@pytest.mark.parametrize("guard", [-1, 1.5, True])
+def test_split_guard_must_be_a_non_negative_integer(guard):
+    with pytest.raises(ValueError, match="split_guard"):
+        _dataset(split_guard=guard)
+
+
+@pytest.mark.parametrize(
+    ("shard_index", "shard_count"), [(2, 2), (-1, 2), (0, 0), (0, -1)]
+)
+def test_invalid_shards_are_rejected(shard_index, shard_count):
+    with pytest.raises(ValueError, match="shard"):
+        _dataset(block_reader=True, shard_index=shard_index, shard_count=shard_count)
+
+
+def test_block_reader_handles_an_empty_split():
+    """A guard band that empties a split gives an empty block iterator."""
+    pytest.importorskip("grain")
+    d = _dataset(split="val", split_guard=999, block_reader=True)
+    assert len(d) == 0
+    with pytest.raises(StopIteration):
+        next(d.build_batch_iter(2, 0))
+
+
+def test_close_releases_block_reader_pools():
+    pytest.importorskip("grain")
+    d = _dataset(block_reader=True, buffer_size_in_bytes=5e3, buffer_diversity=4)
+    next(d.build_batch_iter(2, 0))
+    [block_source] = d._block_sources
+    loaders = [leaf.__dict__.get("loader") for leaf in block_source.sources.values()]
+    assert all(loader is not None for loader in loaders)  # pools were created
+    d.close()
+    assert all(loader._executor._shutdown for loader in loaders)
+    assert all("loader" not in leaf.__dict__ for leaf in block_source.sources.values())
+
+
+def test_shards_fall_back_to_one_host_without_jax(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "jax", None)  # import jax raises ImportError
+    assert _dataset(block_reader=True)._resolve_shards() == (0, 1)
+
+
+def test_jax_process_discovery_errors_propagate(monkeypatch):
+    jax = pytest.importorskip("jax")
+
+    def broken() -> int:
+        raise RuntimeError("distributed backend not initialised")
+
+    monkeypatch.setattr(jax, "process_index", broken)
+    with pytest.raises(RuntimeError, match="not initialised"):
+        _dataset(block_reader=True)._resolve_shards()

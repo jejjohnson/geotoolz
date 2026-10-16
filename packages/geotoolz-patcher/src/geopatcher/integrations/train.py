@@ -31,19 +31,17 @@ from typing import Any, ClassVar
 
 import numpy as np
 
+from geopatcher._src._extras import missing_extra
+
 
 try:
     import xarray
-    from pipekit.hashing import sha256_hex
     from pipekit_train.dataset import Split, TrainingDataset, hash_config
 except ImportError as _e:  # pragma: no cover - exercised when [train] is missing
-    raise ImportError(
-        "geopatcher.integrations.train requires pipekit-train and xarray. "
-        "Install the [train] extra with `uv sync --extra train` "
-        "(or `uv pip install 'geotoolz-patcher[train]'`)."
-    ) from _e
+    raise missing_extra("geopatcher.integrations.train", "train") from _e
 
 from geopatcher._src import xreader as _xreader
+from geopatcher._src._digest import array_digest
 from geopatcher.temporal.stencils import build_sampling_slices, valid_origin_points
 
 
@@ -52,24 +50,14 @@ __all__ = ["XarrayWindowDataset"]
 
 # Split → (start_tenth, stop_tenth) over a tenths denominator, mirroring
 # SimulationDataset so the integer split sizes are exact (80 / 10 / 10).
+#: The two source leaves every dataset pairs up, as ``(input, target)``.
+_LEAVES = frozenset({"input", "target"})
+
 _SPLIT_TENTHS: dict[Split, tuple[int, int]] = {
     "train": (0, 8),
     "val": (8, 9),
     "test": (9, 10),
 }
-
-
-def _sha(array: np.typing.ArrayLike) -> str:
-    """Stable sha256 of an array's values + dtype (no data read involved)."""
-    arr = np.ascontiguousarray(array)
-    if arr.dtype == object:
-        # Object dtype (e.g. cftime calendars, caller-supplied object origins):
-        # tobytes() would hash PyObject* pointers, which vary across processes
-        # and break the stable-identity promise. Hash a value-stable repr.
-        payload: bytes | str = repr(arr.tolist())
-    else:
-        payload = arr.tobytes()
-    return sha256_hex(str(arr.dtype), payload)
 
 
 def _intersect_valid_origins(
@@ -196,6 +184,22 @@ class XarrayWindowDataset(TrainingDataset):
                 "source and stencils must have matching keys; got "
                 f"{sorted(source)} vs {sorted(stencils)}."
             )
+        if set(source) != _LEAVES:
+            raise ValueError(
+                "source and stencils must have exactly the keys "
+                f"{sorted(_LEAVES)}; got {sorted(source)}."
+            )
+        if split_guard is not None and (
+            isinstance(split_guard, bool)
+            or not isinstance(split_guard, (int, np.integer))
+            or split_guard < 0
+        ):
+            raise ValueError(
+                f"split_guard must be a non-negative integer or None; got "
+                f"{split_guard!r}."
+            )
+        if shard_index is not None or shard_count is not None:
+            _xreader.check_shards(shard_index, shard_count)
         # Prepare each leaf (drop static vars + lead with sample_dim). The
         # resulting data_vars order is the channel order we collate + hash.
         self.source = {
@@ -211,6 +215,9 @@ class XarrayWindowDataset(TrainingDataset):
         self.buffer_diversity = buffer_diversity
         self.shard_index = shard_index
         self.shard_count = shard_count
+        # Block-reader sources handed out by build_batch_iter; close() shuts
+        # their loader pools down too.
+        self._block_sources: list[_xreader._PytreeSource] = []
 
         if sample_origins is not None:
             self._all_origins = np.asarray(sample_origins)
@@ -263,10 +270,12 @@ class XarrayWindowDataset(TrainingDataset):
             raise ValueError("set both or neither of shard_index and shard_count")
         try:  # auto-detect a multi-host JAX setup
             import jax
-
-            return jax.process_index(), jax.process_count()
-        except Exception:
+        except ImportError:  # no JAX: a single host reads everything
             return 0, 1
+        # A JAX that is installed but fails to report its processes is a
+        # broken distributed setup; let it raise rather than have every host
+        # read the full dataset.
+        return jax.process_index(), jax.process_count()
 
     # --- indexable contract → rides the adapter's Grain path ---------------
 
@@ -293,7 +302,7 @@ class XarrayWindowDataset(TrainingDataset):
         if not self.block_reader:
             return None
         shard_index, shard_count = self._resolve_shards()
-        iter_ds = _xreader.training_iterator(
+        iter_ds, block_source = _xreader.training_iterator(
             self.source,
             self.stencils,
             self.sample_origins,
@@ -305,6 +314,7 @@ class XarrayWindowDataset(TrainingDataset):
             shard_count=shard_count,
             seed=seed,
         )
+        self._block_sources.append(block_source)
         iter_ds = iter_ds.map(self._collate_pair).batch(batch_size, drop_remainder=True)
         return iter(iter_ds)
 
@@ -324,6 +334,7 @@ class XarrayWindowDataset(TrainingDataset):
             self._all_origins, split, self._split_guard
         )
         clone._grain_source = clone._build_grain_source()
+        clone._block_sources = []
         return clone
 
     def close(self) -> None:
@@ -331,10 +342,14 @@ class XarrayWindowDataset(TrainingDataset):
 
         Each reader source lazily creates a large `ThreadPoolExecutor` on
         first read; without an explicit close those threads are only
-        reclaimed by the garbage collector. Safe to call repeatedly; the
-        pools are rebuilt on the next read if the dataset is used again.
+        reclaimed by the garbage collector. This covers the per-example
+        source and every block-reader source `build_batch_iter` handed
+        out. Safe to call repeatedly; the pools are rebuilt on the next
+        read if the dataset is used again.
         """
         self._grain_source.close()
+        for source in self._block_sources:
+            source.close()
 
     # --- reproducibility ----------------------------------------------------
 
@@ -347,7 +362,7 @@ class XarrayWindowDataset(TrainingDataset):
                 "store_version": self.store_version,
                 "stencils": {k: s.get_config() for k, s in self.stencils.items()},
                 "var_order": self.var_order,
-                "origins_sha": _sha(self.sample_origins),
+                "origins_sha": array_digest(self.sample_origins),
                 "sample_dim": self.sample_dim,
                 "seed": self.seed,
                 "split": self.split,
