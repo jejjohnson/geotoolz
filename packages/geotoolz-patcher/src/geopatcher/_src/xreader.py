@@ -118,6 +118,16 @@ def _prepare_xarray_source(source: xarray.Dataset, sample_dim: str) -> xarray.Da
             f"source does not include variables with a {sample_dim!r} "
             f"dimension:\n{source}"
         )
+    if sample_dim not in source.xindexes:
+        # Origins and windows are computed from the sample coordinate when the
+        # dataset is built; an index keeps it in memory, so building one never
+        # reads the store. Without it (`create_default_indexes=False`) that
+        # read would hit a remote Zarr at construction.
+        raise ValueError(
+            f"the {sample_dim!r} coordinate must have an in-memory index; "
+            f"open the store with default indexes (the xarray default) or "
+            f"call `set_xindex({sample_dim!r})` first"
+        )
     source = _drop_static_vars(source, sample_dim)
     source = source.transpose(sample_dim, ...)
     return source
@@ -289,22 +299,36 @@ def group_slices(
     sub-slices preserve each window's original ``step`` so a strided stencil
     (e.g. 3-hourly windows on hourly data) yields the same points as the
     per-example ``isel`` path rather than every point in the span.
+
+    A group holds at most ``group_size`` examples **and** its block spans at
+    most ``group_size`` windows' worth of points. Dense origins fill a group
+    by count; sparse origins (gaps between windows) end it early, so a block
+    never reads the timesteps between two far-apart windows.
     """
-    groups = []
-    for i in range(0, len(slices), group_size):
-        slices_to_consolidate = slices[i : i + group_size]
-
-        block_start = slices_to_consolidate[0].start
-        block_stop = slices_to_consolidate[-1].stop
-        block = slice(block_start, block_stop)
-
-        sub_slices = [
-            slice(s.start - block_start, s.stop - block_start, s.step)
-            for s in slices_to_consolidate
-        ]
-        groups.append((block, sub_slices))
-
+    if not slices:
+        return []
+    window = max(s.stop - s.start for s in slices)
+    max_span = group_size * window
+    groups: list[tuple[slice, list[slice]]] = []
+    members: list[slice] = []
+    for s in slices:
+        if members and (
+            len(members) == group_size or s.stop - members[0].start > max_span
+        ):
+            groups.append(_group(members))
+            members = []
+        members.append(s)
+    groups.append(_group(members))
     return groups
+
+
+def _group(members: list[slice]) -> tuple[slice, list[slice]]:
+    block_start = members[0].start
+    block = slice(block_start, members[-1].stop)
+    sub_slices = [
+        slice(s.start - block_start, s.stop - block_start, s.step) for s in members
+    ]
+    return block, sub_slices
 
 
 def _split_block(
@@ -424,11 +448,21 @@ def training_iterator(
         shard_index, shard_count = 0, 1
     check_shards(shard_index, shard_count)
 
+    n_examples = len(sample_origins)
+    if 0 < n_examples < shard_count:
+        raise ValueError(
+            f"{n_examples} examples cannot feed {shard_count} shards: some hosts "
+            f"would get none and wait forever while the others train"
+        )
     bytes_per_example = _example_nbytes(source, stencils, sample_dim)
     shuffle_window = round(buffer_size_in_bytes / bytes_per_example)
     group_size = max(
         round((buffer_size_in_bytes / buffer_diversity) / bytes_per_example), 1
     )
+    # Shards take whole blocks, so there must be at least one block per
+    # shard: a short split with a large buffer would otherwise leave hosts
+    # with an empty (never-yielding) shard.
+    group_size = min(group_size, max(n_examples // shard_count, 1))
 
     def _build_block_source(name: str) -> _XarrayBlockSource:
         ds = source[name]

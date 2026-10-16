@@ -42,7 +42,12 @@ except ImportError as _e:  # pragma: no cover - exercised when [train] is missin
 
 from geopatcher._src import xreader as _xreader
 from geopatcher._src._digest import array_digest
-from geopatcher.temporal.stencils import build_sampling_slices, valid_origin_points
+from geopatcher.temporal.stencils import (
+    build_sampling_slices,
+    coord_step,
+    stencil_offsets,
+    valid_origin_points,
+)
 
 
 __all__ = ["XarrayWindowDataset"]
@@ -86,22 +91,42 @@ def _default_guard(
     Dropping this many origins on the interior side of each split boundary
     guarantees no window straddles a train/val/test boundary, since origins sit
     at source resolution. The reach is the furthest a window extends from its
-    origin in *either* direction — ``max(|points[0]|, |points[-1]|)`` — not the
-    span ``points[-1] - points[0]``: a single-point offset stencil (e.g. a
-    target at ``+24h``) has zero span but reaches 24 steps across the boundary.
+    origin in *either* direction, not its span: a single-point offset stencil
+    (e.g. a target at ``+24h``) has zero span but reaches 24 steps across the
+    boundary.
+
+    The step and the window offsets come from `coord_step` and
+    `stencil_offsets`, the same conversions `build_sampling_slices` uses, so
+    the guard and the sampled windows cannot disagree.
     """
     guard = 0
     for name, ds in source.items():
-        points = stencils[name].points
-        if points.size == 0:
+        points = ds[sample_dim].values
+        if len(points) < 2:  # no step to measure; no window can straddle
             continue
-        reach = max(abs(points[0]), abs(points[-1]))
-        steps = np.diff(ds[sample_dim].values)
-        if steps.size == 0:
-            continue
-        source_step = steps[0]
-        guard = max(guard, int(np.ceil(reach / source_step)))
+        lo, hi, _ = stencil_offsets(stencils[name], coord_step(points))
+        # A window at origin index i covers indices [i + lo, i + hi).
+        guard = max(guard, abs(lo), abs(hi - 1))
     return guard
+
+
+def _source_view(ds: xarray.Dataset, sample_dim: str) -> dict[str, Any]:
+    """What a leaf's examples look like beyond the store token and the origins.
+
+    Two views of one store version (``ds.isel(x=slice(...))``, a spatial
+    transpose) share variable names, stencils and origins but return
+    different values or shapes. Dimension order, sizes and the index
+    coordinates (in memory, so no store read) tell them apart.
+    """
+    return {
+        "dims": {str(name): list(map(str, var.dims)) for name, var in ds.items()},
+        "sizes": {str(dim): int(size) for dim, size in ds.sizes.items()},
+        "coords": {
+            str(name): array_digest(ds[name].values)
+            for name in ds.xindexes
+            if name != sample_dim
+        },
+    }
 
 
 def _split_origins(origins: np.ndarray, split: Split, guard: int) -> np.ndarray:
@@ -362,6 +387,10 @@ class XarrayWindowDataset(TrainingDataset):
                 "store_version": self.store_version,
                 "stencils": {k: s.get_config() for k, s in self.stencils.items()},
                 "var_order": self.var_order,
+                "views": {
+                    name: _source_view(ds, self.sample_dim)
+                    for name, ds in self.source.items()
+                },
                 "origins_sha": array_digest(self.sample_origins),
                 "sample_dim": self.sample_dim,
                 "seed": self.seed,

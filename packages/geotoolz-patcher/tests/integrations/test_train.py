@@ -425,3 +425,69 @@ def test_jax_process_discovery_errors_propagate(monkeypatch):
     monkeypatch.setattr(jax, "process_index", broken)
     with pytest.raises(RuntimeError, match="not initialised"):
         _dataset(block_reader=True)._resolve_shards()
+
+
+def test_sample_dim_needs_an_in_memory_index():
+    """Without an index the sample coord would be read from the store."""
+    ds = _store().drop_indexes("time")
+    with pytest.raises(ValueError, match="in-memory index"):
+        XarrayWindowDataset(
+            source={"input": ds[["t2m"]], "target": ds[["t2m"]]},
+            stencils=_stencils(),
+            store_version="v1",
+        )
+
+
+def test_hash_changes_with_source_view():
+    """Two views of one store version must not share a content hash."""
+    ds = _store(n_x=3)
+
+    def build(view):
+        return XarrayWindowDataset(
+            source={"input": view[["t2m"]], "target": view[["t2m"]]},
+            stencils=_stencils(),
+            store_version="era5-test.1",
+        ).content_hash()
+
+    full = build(ds)
+    assert build(ds.isel(x=slice(0, 2))) != full  # spatial subset
+    assert build(ds.assign_coords(x=[10, 11, 12])) != full  # other locations
+    assert build(ds) == full
+
+
+def test_every_shard_gets_a_block():
+    """A short split with the default large buffer still feeds every host."""
+    pytest.importorskip("grain")
+    from geopatcher._src import xreader
+
+    d = _dataset(split="val")
+    n = len(d.sample_origins)
+    assert n >= 3
+    _, block_source = xreader.training_iterator(
+        d.source, d.stencils, d.sample_origins, shard_index=0, shard_count=3
+    )
+    assert len(block_source) >= 3
+
+
+def test_fewer_examples_than_shards_raise():
+    pytest.importorskip("grain")
+    from geopatcher._src import xreader
+
+    d = _dataset(split="val")
+    with pytest.raises(ValueError, match="cannot feed"):
+        xreader.training_iterator(
+            d.source,
+            d.stencils,
+            d.sample_origins,
+            shard_index=0,
+            shard_count=len(d.sample_origins) + 1,
+        )
+
+
+def test_group_slices_ends_a_block_at_a_gap():
+    """Sparse origins must not coalesce into one read spanning the gap."""
+    from geopatcher._src.xreader import group_slices
+
+    groups = group_slices([slice(0, 4), slice(1, 5), slice(1000, 1004)], 10)
+    assert [block for block, _ in groups] == [slice(0, 5), slice(1000, 1004)]
+    assert groups[1][1] == [slice(0, 4, None)]
