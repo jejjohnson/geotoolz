@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geotoolz/main/docs/assets/packages/geotoolz-patcher/logo-dark.svg">
+    <img alt="geopatcher" src="https://raw.githubusercontent.com/jejjohnson/geotoolz/main/docs/assets/packages/geotoolz-patcher/logo-light.svg" width="388">
+  </picture>
+</p>
+
 # geopatcher
 > Part of the [geotoolz monorepo](https://github.com/jejjohnson/geotoolz) — ships as the `geotoolz-patcher` distribution; the import name is unchanged.
 

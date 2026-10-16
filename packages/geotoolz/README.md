@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geotoolz/main/docs/assets/packages/geotoolz/logo-dark.svg">
+    <img alt="geotoolz" src="https://raw.githubusercontent.com/jejjohnson/geotoolz/main/docs/assets/packages/geotoolz/logo-light.svg" width="333">
+  </picture>
+</p>
+
 # geotoolz
 
 [![Tests](https://github.com/jejjohnson/geotoolz/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/ci.yml)
