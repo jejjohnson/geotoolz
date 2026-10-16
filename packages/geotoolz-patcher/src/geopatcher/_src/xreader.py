@@ -375,8 +375,10 @@ def _window_shuffle_cls(grain: Any) -> Any:
     return shuffle.WindowShuffleIterDataset
 
 
-def check_shards(shard_index: Any, shard_count: Any) -> None:
-    """Reject anything but ``0 <= shard_index < shard_count`` integers.
+def check_shards(shard_index: Any, shard_count: Any) -> tuple[int, int]:
+    """Validate and return ``(shard_index, shard_count)`` as plain ints.
+
+    Rejects anything but ``0 <= shard_index < shard_count`` integers.
 
     A sequence slice ``[shard_index::shard_count]`` silently accepts an
     out-of-range or negative index (it overlaps or reverses other shards),
@@ -397,6 +399,7 @@ def check_shards(shard_index: Any, shard_count: Any) -> None:
             f"need 0 <= shard_index < shard_count with shard_count >= 1; got "
             f"shard_index={shard_index}, shard_count={shard_count}"
         )
+    return int(shard_index), int(shard_count)
 
 
 def training_iterator(
@@ -446,7 +449,7 @@ def training_iterator(
 
     if shard_index is None and shard_count is None:
         shard_index, shard_count = 0, 1
-    check_shards(shard_index, shard_count)
+    shard_index, shard_count = check_shards(shard_index, shard_count)
 
     n_examples = len(sample_origins)
     if 0 < n_examples < shard_count:
