@@ -176,12 +176,19 @@ jobs:
           for module in (
               "xarray", "rioxarray", "xvec", "zarr", "dask", "jax",
               "geocloud", "obstore", "async_tiff", "async_geotiff", "pipekit",
+              "pipekit_train",
           ):
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 
-          # Every module imports on a base install.
+          # Every module imports on a base install, but the bridges whose whole
+          # job is an extra ([pipekit], and [train] with its reader).
+          bridges = {
+              "geopatcher.integrations.pipekit",
+              "geopatcher.integrations.train",
+              "geopatcher._src.xreader",
+          }
           for info in pkgutil.walk_packages(gp.__path__, "geopatcher."):
-              if info.name != "geopatcher.integrations.pipekit":
+              if info.name not in bridges:
                   importlib.import_module(info.name)
 
           values = np.arange(2 * 16 * 16, dtype="float32").reshape(2, 16, 16)
@@ -210,6 +217,12 @@ jobs:
               assert "geotoolz-patcher[cog]" in str(exc), exc
           else:
               raise AssertionError("CogField opened without geotoolz-cloud")
+          try:
+              importlib.import_module("geopatcher.integrations.train")
+          except ImportError as exc:
+              assert "geotoolz-patcher[train]" in str(exc), exc
+          else:
+              raise AssertionError("integrations.train imported without [train]")
           print("geotoolz-patcher base install OK", gp.__version__)
           PY
       # Coverage is off: most extras-gated code is unreachable here, so the
