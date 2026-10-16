@@ -491,3 +491,69 @@ def test_group_slices_ends_a_block_at_a_gap():
     groups = group_slices([slice(0, 4), slice(1, 5), slice(1000, 1004)], 10)
     assert [block for block, _ in groups] == [slice(0, 5), slice(1000, 1004)]
     assert groups[1][1] == [slice(0, 4, None)]
+
+
+def test_block_reader_pairs_leaves_with_sparse_origins():
+    """Leaves with different window widths must share block boundaries.
+
+    Origins every 3 steps: the 4-point input stencil and 1-point target
+    stencil would hit their span limits at different examples if each leaf
+    were grouped on its own, mis-pairing inputs and targets.
+    """
+    pytest.importorskip("grain")
+    from geopatcher._src import xreader
+
+    ds = _store()
+    d = XarrayWindowDataset(
+        source={"input": ds[["t2m", "u10", "v10"]], "target": ds[["t2m"]]},
+        stencils=_stencils(),
+        sample_origins=ds.time.values[3:-1:3],
+        store_version="v1",
+        split_guard=0,
+    )
+    per_example = sorted(np.concatenate([x.ravel(), y.ravel()]).tobytes() for x, y in d)
+    bytes_per_example = xreader._example_nbytes(d.source, d.stencils, "time")
+    it, block_source = xreader.training_iterator(
+        d.source,
+        d.stencils,
+        d.sample_origins,
+        num_epochs=1,
+        buffer_size_in_bytes=4 * bytes_per_example,  # group_size 4 by count
+        buffer_diversity=1,
+    )
+    groups = {name: leaf.groups for name, leaf in block_source.sources.items()}
+    assert [len(subs) for _, subs in groups["input"]] == [
+        len(subs) for _, subs in groups["target"]
+    ]
+    blocked = sorted(
+        np.concatenate([x.ravel(), y.ravel()]).tobytes()
+        for x, y in map(d._collate_pair, it)
+    )
+    assert blocked == per_example
+
+
+def test_leaf_with_only_static_variables_is_rejected():
+    ds = _store()
+    static = ds[["t2m"]].isel(time=0, drop=True).assign_coords(time=ds.time)
+    with pytest.raises(ValueError, match="no data variables along"):
+        XarrayWindowDataset(
+            source={"input": ds[["t2m"]], "target": static},
+            stencils=_stencils(),
+            store_version="v1",
+        )
+
+
+def test_caller_origins_are_snapshotted():
+    ds = _store()
+    origins = ds.time.values[3:-1].copy()
+    d = XarrayWindowDataset(
+        source={"input": ds[["t2m"]], "target": ds[["t2m"]]},
+        stencils=_stencils(),
+        sample_origins=origins,
+        store_version="v1",
+    )
+    before = (d.content_hash(), d.sample_origins.copy())
+    origins[:] = origins[::-1]  # the caller reuses their buffer
+    assert d.content_hash() == before[0]
+    np.testing.assert_array_equal(d.sample_origins, before[1])
+    assert not d.sample_origins.flags.writeable

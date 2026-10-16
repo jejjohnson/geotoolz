@@ -245,11 +245,15 @@ class XarrayWindowDataset(TrainingDataset):
         self._block_sources: list[_xreader._PytreeSource] = []
 
         if sample_origins is not None:
-            self._all_origins = np.asarray(sample_origins)
+            # A private copy: a caller mutating their array later must not
+            # change the origins, the hash or the block reader's slices out
+            # from under the per-example slices already built.
+            self._all_origins = np.array(sample_origins, copy=True)
         else:
             self._all_origins = _intersect_valid_origins(
                 self.source, stencils, sample_dim
             )
+        self._all_origins.flags.writeable = False
         self._split_guard = (
             split_guard
             if split_guard is not None

@@ -129,6 +129,11 @@ def _prepare_xarray_source(source: xarray.Dataset, sample_dim: str) -> xarray.Da
             f"call `set_xindex({sample_dim!r})` first"
         )
     source = _drop_static_vars(source, sample_dim)
+    if not source.data_vars:
+        raise ValueError(
+            f"source has no data variables along {sample_dim!r} (all of them "
+            f"are static), so there is nothing to sample:\n{source}"
+        )
     source = source.transpose(sample_dim, ...)
     return source
 
@@ -288,8 +293,35 @@ class _PytreeSource:
 # ---------------------------------------------------------------------
 
 
+def group_starts(leaf_slices: list[list[slice]], group_size: int) -> list[int]:
+    """Example index at which each block starts, shared by every leaf.
+
+    A block holds at most ``group_size`` examples, and in **every** leaf its
+    span is at most ``group_size`` of that leaf's windows. Dense origins fill
+    a block by count; sparse origins (gaps between windows) end it early, so
+    a block never reads the timesteps between two far-apart windows. The
+    boundaries are decided once across all leaves: grouping each leaf on its
+    own would split leaves of different window widths at different examples
+    and pair the wrong inputs and targets.
+    """
+    if not leaf_slices or not leaf_slices[0]:
+        return []
+    max_spans = [
+        group_size * max(s.stop - s.start for s in slices) for slices in leaf_slices
+    ]
+    starts = [0]
+    for i in range(1, len(leaf_slices[0])):
+        first = starts[-1]
+        if i - first == group_size or any(
+            slices[i].stop - slices[first].start > max_span
+            for slices, max_span in zip(leaf_slices, max_spans, strict=True)
+        ):
+            starts.append(i)
+    return starts
+
+
 def group_slices(
-    slices: list[slice], group_size: int
+    slices: list[slice], group_size: int, starts: list[int] | None = None
 ) -> list[tuple[slice, list[slice]]]:
     """Partition a list of slices into groups for reading in parallel.
 
@@ -300,26 +332,16 @@ def group_slices(
     (e.g. 3-hourly windows on hourly data) yields the same points as the
     per-example ``isel`` path rather than every point in the span.
 
-    A group holds at most ``group_size`` examples **and** its block spans at
-    most ``group_size`` windows' worth of points. Dense origins fill a group
-    by count; sparse origins (gaps between windows) end it early, so a block
-    never reads the timesteps between two far-apart windows.
+    ``starts`` are the block boundaries from `group_starts`; pass the ones
+    computed across every leaf so all leaves group identically. Without
+    them the boundaries come from ``slices`` alone.
     """
     if not slices:
         return []
-    window = max(s.stop - s.start for s in slices)
-    max_span = group_size * window
-    groups: list[tuple[slice, list[slice]]] = []
-    members: list[slice] = []
-    for s in slices:
-        if members and (
-            len(members) == group_size or s.stop - members[0].start > max_span
-        ):
-            groups.append(_group(members))
-            members = []
-        members.append(s)
-    groups.append(_group(members))
-    return groups
+    if starts is None:
+        starts = group_starts([slices], group_size)
+    ends = [*starts[1:], len(slices)]
+    return [_group(slices[a:b]) for a, b in zip(starts, ends, strict=True)]
 
 
 def _group(members: list[slice]) -> tuple[slice, list[slice]]:
@@ -467,11 +489,10 @@ def training_iterator(
     # with an empty (never-yielding) shard.
     group_size = min(group_size, max(n_examples // shard_count, 1))
 
-    def _build_block_source(name: str) -> _XarrayBlockSource:
-        ds = source[name]
-        # A guard band can empty a split; build_sampling_slices indexes
-        # sample_origins[0], so an empty split reads no blocks.
-        slices = (
+    # A guard band can empty a split; build_sampling_slices indexes
+    # sample_origins[0], so an empty split reads no blocks.
+    leaf_slices = {
+        name: (
             build_sampling_slices(
                 source_points=ds[sample_dim].values,
                 sample_origins=sample_origins,
@@ -480,9 +501,17 @@ def training_iterator(
             if len(sample_origins)
             else []
         )
-        return _XarrayBlockSource(ds, group_slices(slices, group_size), sample_dim)
-
-    grain_source = _PytreeSource({name: _build_block_source(name) for name in source})
+        for name, ds in source.items()
+    }
+    starts = group_starts(list(leaf_slices.values()), group_size)
+    grain_source = _PytreeSource(
+        {
+            name: _XarrayBlockSource(
+                source[name], group_slices(slices, group_size, starts), sample_dim
+            )
+            for name, slices in leaf_slices.items()
+        }
+    )
 
     # The source already uses many threads internally, so Grain's own
     # read concurrency is kept minimal.
