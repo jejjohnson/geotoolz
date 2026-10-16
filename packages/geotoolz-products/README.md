@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geotoolz/main/docs/assets/packages/geotoolz-products/logo-dark.svg">
+    <img alt="geoproducts" src="https://raw.githubusercontent.com/jejjohnson/geotoolz/main/docs/assets/packages/geotoolz-products/logo-light.svg" width="416">
+  </picture>
+</p>
+
 # geoproducts
 > Part of the [geotoolz monorepo](https://github.com/jejjohnson/geotoolz) — ships as the `geotoolz-products` distribution; the import name is `geoproducts`.
 

@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geotoolz/main/docs/assets/packages/geotoolz-cloud/logo-dark.svg">
+    <img alt="geocloud" src="https://raw.githubusercontent.com/jejjohnson/geotoolz/main/docs/assets/packages/geotoolz-cloud/logo-light.svg" width="333">
+  </picture>
+</p>
+
 # geotoolz-cloud
 
 Cloud object storage for the geotoolz stack (import name `geocloud`): one
