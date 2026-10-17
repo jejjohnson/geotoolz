@@ -1,14 +1,14 @@
 [project]
 name = "geotoolz-products"
 version = "0.5.0"
-description = "Readers for Earth-observation data products — each mission or provider product as a georeader GeoData / GeoTensor."
+description = "Readers for Earth-observation data products — each mission or provider product as a lazy geoarray RasterSource read into GeoArray."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]
 license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
-keywords = ["remote-sensing", "geospatial", "readers", "earth-observation", "georeader"]
+keywords = ["remote-sensing", "geospatial", "readers", "earth-observation", "geoarray"]
 requires-python = ">=3.12"
 classifiers = [
     "Topic :: Scientific/Engineering",
@@ -21,16 +21,23 @@ classifiers = [
     "Development Status :: 2 - Pre-Alpha",
 ]
 dependencies = [
-    # GeoTensor and the GeoData protocol every reader implements; >=2.1 for
-    # the numpy-subclass GeoTensor.
+    # The carrier: every reader is a `geoarray.RasterSource` whose reads
+    # return a `geoarray.GeoArray`. The [georeader] extra brings the adapter
+    # (`from_georeader` / `source_to_georeader` / `source_from_georeader`)
+    # used at the engine boundary below.
+    "geotoolz-array[georeader]>=0.1",
+    # The internal engine only, never in the public API: `georeader.read`
+    # (map-coordinate windows, reprojection in `stack`), `RasterioReader`
+    # (Carbon Mapper GeoTIFFs) and `georeader.rasterize`; >=2.1 for the
+    # numpy-subclass GeoTensor.
     "georeader-spaceml>=2.1",
     "numpy>=1.26",
     # `georeader.geotensor` imports `Self` from typing_extensions without
     # declaring it (upstream packaging bug in >=2.1).
     "typing-extensions>=4.0",
-    # rasterio windows / transforms and affine are imported at module top
-    # level by the reader base class; declared directly rather than relying
-    # on georeader-spaceml pulling them in.
+    # rasterio (resampling names in `stack`, Carbon Mapper rasterisation)
+    # and affine (reader transforms) are imported directly; declared rather
+    # than relied on through georeader-spaceml.
     "rasterio>=1.3",
     "affine>=2.4",
 ]
@@ -109,6 +116,7 @@ ignore = ["E402", "E721", "E731", "E741"]
 "geopatcher._src".msg = "private to geopatcher: import its public API (docs/capabilities.md), or make the helper public there first"
 "geocatalog._src".msg = "private to geocatalog: import its public API (docs/capabilities.md), or make the helper public there first"
 "geocloud._src".msg = "private to geocloud: import its public API (docs/capabilities.md), or make the helper public there first"
+"geoarray._src".msg = "private to geoarray: import its public API (docs/capabilities.md), or make the helper public there first"
 "obstore.store.S3Store".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
 "obstore.store.GCSStore".msg = "take the client from geocloud.store.get_obstore (one pool per process)"
 "obstore.store.AzureStore".msg = "take the client from geocloud.store.get_obstore (one pool per process)"

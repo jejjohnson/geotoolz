@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from _goes_abi import l2_name
-from rasterio.windows import Window
+from geoarray import PixelWindow, RasterSource
 
 import geoproducts
 from geoproducts import goes
@@ -99,9 +99,11 @@ class TestClearSkyMask:
         assert reader.product == "ACM"
         assert reader.bands == ("BCM", "ACM")
         assert reader.dtype == np.uint8
-        assert reader.fill_value_default == 255
+        assert reader.fill_value == 255
+        assert isinstance(reader, RasterSource)
         out = reader.load()
         assert out.shape == (2, *SHAPE)
+        assert out.fill_value == 255
         assert np.asarray(out)[0, 0, :3].tolist() == [1, 1, 1]
         assert np.asarray(out)[1, 1, 0] == constants.ACM_PROBABLY_CLEAR
         assert out.attrs["product"] == "ACM"
@@ -285,7 +287,9 @@ class TestErrors:
 
 def test_windowed_read_and_repr(l2_file) -> None:
     reader = goes.L2Reader(_acm(l2_file))
-    chip = np.asarray(reader.read_from_window(Window(4, 2, 4, 3)))
+    chip = np.asarray(
+        reader.read_window(PixelWindow(col_off=4, row_off=2, width=4, height=3))
+    )
     assert chip.shape == (2, 3, 4)
     assert (chip[:, :, 2:] == 255).all()  # past the right edge: fill
     assert "product='ACM'" in repr(reader)

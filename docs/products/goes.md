@@ -78,7 +78,7 @@ path: Path = aws.download(files[0], "data/goes")     # ranged reads to .part, th
 from datetime import datetime
 from pathlib import Path
 
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geoproducts import goes
 from geoproducts.goes import aws
@@ -91,8 +91,8 @@ path: Path = aws.download(item, "data/goes")
 reader: goes.Reader = goes.Reader(path, calibration="brightness_temperature")  # (1, 1500, 2500) · 2004 m
 
 aoi: tuple[float, float, float, float] = (-100.0, 30.0, -95.0, 35.0)  # lon/lat box over east Texas
-bt: GeoTensor = reader.read_from_bounds(aoi, crs_bounds="EPSG:4326")            # (1, 219, 266) float32 · K
-flags: GeoTensor = reader.quality.read_from_bounds(aoi, crs_bounds="EPSG:4326")  # (1, 219, 266) uint8 · DQF
+bt: GeoArray = reader.read_from_bounds(aoi, crs_bounds="EPSG:4326")             # (1, 219, 266) float32 · K
+flags: GeoArray = reader.quality.read_from_bounds(aoi, crs_bounds="EPSG:4326")   # (1, 219, 266) uint8 · DQF
 ```
 
 Every coefficient comes from the file being read:
@@ -156,7 +156,7 @@ different resolutions — or L1b and L2 — on one grid:
 ```python
 from datetime import datetime
 
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geoproducts
 from geoproducts import goes
@@ -173,7 +173,7 @@ channels: list[goes.Reader] = [
     )
     for c in (1, 2, 3)                                # 1 km, 0.5 km, 1 km
 ]
-rgb_in: GeoTensor = geoproducts.stack(
+rgb_in: GeoArray = geoproducts.stack(
     channels, bounds=(-100.0, 30.0, -95.0, 35.0), crs_bounds="EPSG:4326"
 )                                                     # (3, 437, 530) float32 · C02 averaged to 1 km
 ```
@@ -188,7 +188,7 @@ each preset is a [`gz.viz.RGBRecipe`](../operators/api/viz.md) (see
 from datetime import datetime
 
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geoproducts
 import geoops as gz
@@ -206,19 +206,19 @@ def m1(product: str) -> goes.L2Reader:
 
 
 cmi: goes.L2Reader = m1("ABI-L2-MCMIPM")
-scene: GeoTensor = geoproducts.stack([cmi, m1("ABI-L2-ACMM"), m1("ABI-L2-ACHAM")])  # (19, 500, 500) float32
+scene: GeoArray = geoproducts.stack([cmi, m1("ABI-L2-ACMM"), m1("ABI-L2-ACHAM")])   # (19, 500, 500) float32
 
-true_color: GeoTensor = goes.TrueColor()(scene)       # (19, 500, 500) → (3, 500, 500) float32 in [0, 1]
-cloudy: GeoTensor = goes.MaskClouds()(scene)          # (19, 500, 500) → (500, 500) bool · BCM cloudy
+true_color: GeoArray = goes.TrueColor()(scene)        # (19, 500, 500) → (3, 500, 500) float32 in [0, 1]
+cloudy: GeoArray = goes.MaskClouds()(scene)           # (19, 500, 500) → (500, 500) bool · BCM cloudy
 # HT is NaN under clear sky: mask only the imagery, or every clear pixel becomes nodata.
-imagery: GeoTensor = gz.spectral.SelectBands(bands=[*goes.constants.CHANNELS, "BCM"])(scene)  # → (17, 500, 500)
-clear_sky: GeoTensor = gz.mask.ApplyMask(mask=goes.MaskClouds())(imagery)  # (17, 500, 500) · clouds → NaN
+imagery: GeoArray = gz.spectral.SelectBands(bands=[*goes.constants.CHANNELS, "BCM"])(scene)   # → (17, 500, 500)
+clear_sky: GeoArray = gz.mask.ApplyMask(mask=goes.MaskClouds())(imagery)   # (17, 500, 500) · clouds → NaN
 
 # Parallax: move cloud tops back over the ground they sit above.
-lonlat: GeoTensor = gz.geom.Reproject(dst_crs="EPSG:4326", resolution=(0.02, 0.02))(scene)  # → (19, 535, 624)
-bt: GeoTensor = gz.spectral.SelectBands(bands=["C13"])(lonlat)      # (19, 535, 624) → (1, 535, 624)
-height: GeoTensor = gz.spectral.SelectBands(bands=["HT"])(lonlat)   # (19, 535, 624) → (1, 535, 624) m · NaN = clear
-moved: GeoTensor = goes.ParallaxCorrect(
+lonlat: GeoArray = gz.geom.Reproject(dst_crs="EPSG:4326", resolution=(0.02, 0.02))(scene)   # → (19, 535, 624)
+bt: GeoArray = gz.spectral.SelectBands(bands=["C13"])(lonlat)       # (19, 535, 624) → (1, 535, 624)
+height: GeoArray = gz.spectral.SelectBands(bands=["HT"])(lonlat)    # (19, 535, 624) → (1, 535, 624) m · NaN = clear
+moved: GeoArray = goes.ParallaxCorrect(
     satellite_lon_deg=cmi.satellite_lon_deg,                        # -75.2 for GOES-East
     target_height_m=np.nan_to_num(np.asarray(height)[0]),           # clear sky → height 0
 )(bt)                                                               # (1, 535, 624) float32

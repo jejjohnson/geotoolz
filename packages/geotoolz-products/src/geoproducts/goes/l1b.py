@@ -26,8 +26,8 @@ class Reader(ABIFile):
     """GOES-R ABI L1b radiance reader (one channel, one scan).
 
     The grid is the file's ``+proj=geos`` fixed grid; ``load`` /
-    ``read_from_window`` / ``read_from_bounds`` return a ``(1, H, W)``
-    ``GeoTensor`` whose band is named after the channel (``"C13"``).
+    ``read_window`` / ``read_from_bounds`` return a ``(1, H, W)``
+    ``GeoArray`` whose band is named after the channel (``"C13"``).
     Off-Earth-disk and missing pixels hold the fill: ``NaN`` for every
     calibrated output, the file's own count fill for ``"counts"``.
 
@@ -60,7 +60,8 @@ class Reader(ABIFile):
 
             reader = goes.Reader(path, calibration="brightness_temperature")
             reader.channel, reader.shape  # ('C13', (1, 1500, 2500))
-            bt = reader.read_from_window(Window(0, 0, 512, 512))  # (1, 512, 512) K
+            window = PixelWindow(col_off=0, row_off=0, width=512, height=512)
+            bt = reader.read_window(window)  # (1, 512, 512) float32 K
     """
 
     def __init__(

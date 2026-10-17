@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import georeader.rasterio_reader as rio_reader
 import numpy as np
 import pytest
 import rasterio
 import requests as _requests
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray, Grid, RasterSource
 from georeader.rasterio_reader import RasterioReader
 from rasterio.transform import from_bounds as t_from_bounds
 from shapely.geometry import box
 
-from geoproducts.carbonmapper import rasters as _rasters
 from geoproducts.carbonmapper.api_queries import (
     CMSceneNotPublished,
     CMTileItem,
@@ -96,8 +96,18 @@ class TestCMImageRasterFromLocal:
 class TestCMImageRasterLazyAccess:
     def test_band_returns_rasterio_reader(self, tmp_path):
         ir = CMImageRaster.from_local(_make_l2b_dir(tmp_path))
-        assert isinstance(ir.cmf, RasterioReader)
-        assert isinstance(ir.rgb, RasterioReader)
+        assert isinstance(ir.cmf, RasterSource)
+        assert isinstance(ir.rgb, RasterSource)
+        assert ir.cmf.load().grid == ir.cmf.grid == ir.grid
+        assert isinstance(ir.cmf.load(), GeoArray)
+
+    def test_scene_metadata_comes_from_the_cmf_grid(self, tmp_path):
+        ir = CMImageRaster.from_local(_make_l2b_dir(tmp_path))
+        assert isinstance(ir.grid, Grid)
+        assert ir.crs == "EPSG:32613"
+        assert ir.transform == ir.grid.affine
+        assert ir.shape == ir.grid.shape
+        assert ir.bounds == ir.grid.bounds
 
     def test_cached(self, tmp_path):
         ir = CMImageRaster.from_local(_make_l2b_dir(tmp_path))
@@ -127,11 +137,12 @@ class TestCMImageRasterReadHelpers:
         )
         assert set(crops) == {"cmf", "rgb"}
         for v in crops.values():
-            # read_from_polygon returns a windowed reader (lazy);
-            # materialise via .load() to a GeoTensor.
-            assert isinstance(v, RasterioReader)
+            # read_from_polygon returns a windowed source (lazy);
+            # materialise via .load() to a GeoArray.
+            assert isinstance(v, RasterSource)
             loaded = v.load()
-            assert isinstance(loaded, GeoTensor)
+            assert isinstance(loaded, GeoArray)
+            assert loaded.grid == v.grid
 
     def test_read_polygon_skips_missing_band(self, tmp_path):
         ir = CMImageRaster.from_local(
@@ -142,9 +153,9 @@ class TestCMImageRasterReadHelpers:
             crs_polygon="EPSG:32613",
         )
         assert crops["artifact-mask"] is None
-        assert isinstance(crops["cmf"], RasterioReader)
+        assert isinstance(crops["cmf"], RasterSource)
 
-    def test_read_window_to_crs_returns_geotensors(self, tmp_path):
+    def test_read_window_to_crs_returns_geoarrays(self, tmp_path):
         ir = CMImageRaster.from_local(_make_l2b_dir(tmp_path))
         # Reproject scene-CRS bounds via the WGS-84 entry point — bounds
         # transformed to a small lon/lat box that overlaps the scene.
@@ -156,7 +167,7 @@ class TestCMImageRasterReadHelpers:
         # May be None if the synthetic scene's bounds don't overlap that
         # lon/lat box — accept either, just verify the type contract.
         if crops["cmf"] is not None:
-            assert isinstance(crops["cmf"], GeoTensor)
+            assert isinstance(crops["cmf"], GeoArray)
 
     def test_read_window_uses_bbox(self, tmp_path):
         ir = CMImageRaster.from_local(_make_l2b_dir(tmp_path))
@@ -316,7 +327,7 @@ class TestCMImageRasterUnorthoAndUas:
         for band in ("cmf", "cmf-unortho", "uncertainty"):
             _write_synthetic_band(d / f"{band}.tif")
         ir = CMImageRaster.from_local(d)
-        assert isinstance(ir.cmf_unortho, RasterioReader)
+        assert isinstance(ir.cmf_unortho, RasterSource)
 
     def test_cmf_unortho_returns_none_when_absent(self, tmp_path):
         # Older mfm-v1-style scene with only orthorectified rasters
@@ -332,7 +343,7 @@ class TestCMImageRasterUnorthoAndUas:
         for band in ("cmf", "uncertainty", "uncertainty-unortho"):
             _write_synthetic_band(d / f"{band}.tif")
         ir = CMImageRaster.from_local(d)
-        assert isinstance(ir.uncertainty_unortho, RasterioReader)
+        assert isinstance(ir.uncertainty_unortho, RasterSource)
 
     def test_uas_property_reads_sidecar_text(self, tmp_path):
         d = tmp_path / "scene"
@@ -961,17 +972,20 @@ class TestSpecCandidates:
 
 
 def _fake_reader_factory(tmp_path, absent_status: int = 404):
-    """RasterioReader stand-in: local paths open for real; the
-    ``https://cm/...artifact-mask.tif`` URL fails like GDAL's vsicurl."""
+    """RasterioReader stand-in (patched into ``georeader.rasterio_reader``):
+    local paths open for real; the ``https://cm/...artifact-mask.tif`` URL
+    fails like GDAL's vsicurl."""
     from rasterio.errors import RasterioIOError
 
     calls: list[dict] = []
 
     def factory(path, **kw):
         calls.append({"path": path, **kw})
-        if path.startswith("https://"):
+        if isinstance(path, str) and path.startswith("https://"):
             raise RasterioIOError(f"HTTP response code: {absent_status}")
-        return RasterioReader(path, overview_level=kw.get("overview_level"))
+        # georeader itself builds windowed readers (from a list of paths)
+        # through the same, patched, name.
+        return RasterioReader(path, **kw)
 
     return factory, calls
 
@@ -988,14 +1002,14 @@ class TestOptionalBandsAbsent:
 
     def test_artifact_mask_404_is_none(self, tmp_path, monkeypatch):
         factory, _ = _fake_reader_factory(tmp_path, 404)
-        monkeypatch.setattr(_rasters, "RasterioReader", factory)
+        monkeypatch.setattr(rio_reader, "RasterioReader", factory)
         assert self._raster(tmp_path).artifact_mask is None
 
     def test_read_window_default_bands_survives_absent_mask(
         self, tmp_path, monkeypatch
     ):
         factory, _ = _fake_reader_factory(tmp_path, 404)
-        monkeypatch.setattr(_rasters, "RasterioReader", factory)
+        monkeypatch.setattr(rio_reader, "RasterioReader", factory)
         ir = self._raster(tmp_path)
         crops = ir.read_polygon(
             box(510_000, 3_510_000, 520_000, 3_520_000),
@@ -1008,7 +1022,7 @@ class TestOptionalBandsAbsent:
         from rasterio.errors import RasterioIOError
 
         factory, _ = _fake_reader_factory(tmp_path, 401)
-        monkeypatch.setattr(_rasters, "RasterioReader", factory)
+        monkeypatch.setattr(rio_reader, "RasterioReader", factory)
         with pytest.raises(RasterioIOError, match="401"):
             _ = self._raster(tmp_path).artifact_mask
 
@@ -1020,7 +1034,7 @@ class TestTokenScoping:
     def test_remote_open_gets_scoped_bearer_header(self, monkeypatch):
         seen: list[dict] = []
         monkeypatch.setattr(
-            _rasters,
+            rio_reader,
             "RasterioReader",
             lambda path, **kw: seen.append(kw) or MagicMock(),
         )
@@ -1040,7 +1054,7 @@ class TestTokenScoping:
     def test_local_or_tokenless_open_uses_defaults(self, tmp_path, monkeypatch):
         seen: list[dict] = []
         monkeypatch.setattr(
-            _rasters,
+            rio_reader,
             "RasterioReader",
             lambda path, **kw: seen.append(kw) or MagicMock(),
         )

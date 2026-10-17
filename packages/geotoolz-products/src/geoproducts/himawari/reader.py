@@ -23,8 +23,8 @@ from typing import Any, Literal, get_args
 
 import numpy as np
 from affine import Affine
+from geoarray import PixelWindow
 from rasterio.crs import CRS
-from rasterio.windows import Window
 
 from geoproducts._src.base import ProductReader, Track
 from geoproducts._src.geostationary import FixedGrid
@@ -56,8 +56,8 @@ _SHARED = (
 class Reader(ProductReader):
     """Himawari-8 / -9 AHI L1b reader (one band, one scan, any segments).
 
-    ``load`` / ``read_from_window`` / ``read_from_bounds`` return a
-    ``(1, H, W)`` ``GeoTensor`` on the observation area's grid, the band
+    ``load`` / ``read_window`` / ``read_from_bounds`` return a
+    ``(1, H, W)`` ``GeoArray`` on the observation area's grid, the band
     named ``"B01"`` … ``"B16"``. Pixels in segments that were not given,
     outside the scan, flagged as errors or — for calibrated outputs — off
     the Earth's disk hold the fill: ``NaN`` for every calibrated output,
@@ -298,7 +298,7 @@ class Reader(ProductReader):
             self._cache = (index, whole)
         return self._cache[1][rows, cols]
 
-    def _read_window(self, window: Window) -> np.ndarray:
+    def _read_window(self, window: PixelWindow) -> np.ndarray:
         def read(rows: slice, cols: slice) -> np.ndarray:
             # Each segment is calibrated with its own header's coefficients.
             out = np.full(

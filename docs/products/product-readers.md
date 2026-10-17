@@ -36,11 +36,55 @@ Subclass `geoproducts.ProductReader` and implement:
 - the metadata properties `_crs`, `_transform`, `_shape`, `_dtype`,
   `_bands`, `_fill_value` and `_track` (`"A"` for an affine grid, `"B"`
   for irregular geolocation);
-- `_read_window(window)` — usually one line over
-  `self._read_boundless(window, read)`, which pads windows past the grid
-  with the fill so `read(rows, cols)` only sees in-grid slices;
+- `_read_window(window: PixelWindow) -> np.ndarray` — usually one line
+  over `self._read_boundless(window, read)`, which pads windows past the
+  grid with the fill so `read(rows, cols)` only sees in-grid slices;
 - `_band_attrs()` (optional) to add per-band `attrs` (`units`,
   `wavelengths` in nm) to every read.
+
+The base class turns these into the `geoarray.RasterSource` surface
+(`grid`, `shape`, `dtype`, `fill_value`, `attrs`, `read_window`, `load`)
+plus `read_from_bounds` / `read_from_center_coords`, every read a
+`geoarray.GeoArray`. georeader may serve as an internal engine (window
+maths, reprojection), converting at the boundary with
+`geoarray.interop.georeader`; no `GeoTensor` / `GeoData` appears in a
+reader's public API, and one passed in is refused with a `TypeError`
+(`geoproducts._src.carrier.reject_georeader`).
+
+```python
+import numpy as np
+from affine import Affine
+from geoarray import GeoArray, PixelWindow
+
+from geoproducts import ProductReader
+
+
+class Reader(ProductReader):
+    """A ``(2, H, W)`` float32 product held in memory."""
+
+    def __init__(self, data: np.ndarray) -> None:
+        self._data = data                                # (2, H, W) float32
+
+    _crs = "EPSG:32631"
+    _transform = Affine(30.0, 0.0, 500_000.0, 0.0, -30.0, 4_000_000.0)
+    _dtype = np.dtype("float32")
+    _bands = ("vis", "nir")
+    _fill_value = np.nan
+    _track = "A"
+
+    @property
+    def _shape(self) -> tuple[int, ...]:
+        return self._data.shape
+
+    def _read_window(self, window: PixelWindow) -> np.ndarray:
+        return self._read_boundless(window, lambda rows, cols: self._data[:, rows, cols])
+
+
+reader = Reader(np.ones((2, 64, 64), np.float32))
+tile: GeoArray = reader.read_window(
+    PixelWindow(col_off=-8, row_off=0, width=16, height=16)
+)                                                        # (2, 16, 16) float32 · NaN left of the grid
+```
 
 Calibrate with the file's own coefficients and document the units and
 equation in the docstring. Register the subpackage in
@@ -71,6 +115,7 @@ add it here first.
 | Module | Use it for | Used by |
 |---|---|---|
 | `_src.base` | `ProductReader`, `Track`, `_read_boundless`, `_band_attrs`, `resolve_fill_value` | every reader |
+| `_src.carrier` | `reject_georeader` / `require_source` — refuse a georeader `GeoTensor` / `GeoData` at a public boundary, naming `from_georeader` / `source_from_georeader` | `stack`, `toy_sensor`, `carbonmapper` |
 | `_src.hdf` | `PackedGridReader` — bands that are CF-packed 2-D variables of one HDF5 / NetCDF-4 file (integer masks, CF flag tables, chunked window reads), from a local path or any URI with ranged reads. The decoding (`PackedVariable`, `attr`, `scalar`, `time_attr`, `unpacked`, `grid_variables`, `open_hdf5`) is geotoolz-cloud's [`geocloud.hdf`](../cloud/how-to/hdf.md); call it as `hdf.attr(...)` so a reader still imports on a base install | `goes`, `himawari.l2` |
 | `_src.geostationary` | `FixedGrid` — the affine `+proj=geos` grid from a CF grid mapping and scan angles; `geos_crs`, `scan_angle_transform`, `on_earth` | `goes`, `himawari` (MTG, SEVIRI next) |
 | `_src.stack` | `geoproducts.stack` — any readers onto one reference grid | public |
