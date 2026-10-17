@@ -4,7 +4,8 @@ V2.3. These metrics compare full distributions rather than point
 estimates:
 
 - :func:`crps_ensemble` for ensemble-vs-deterministic-truth (delegates
-  to :mod:`xskillscore`).
+  to :mod:`xskillscore`; a one-member ensemble scores as the absolute
+  error).
 - :func:`energy_distance` for two-sample distribution comparison
   (pure :mod:`numpy`).
 - :func:`wasserstein_1` for 1-D distribution comparison via
@@ -28,15 +29,21 @@ from scipy.stats import energy_distance as _scipy_energy_distance, wasserstein_d
 from xrcore import Operator
 
 
-def _check_member_dim(da: xr.DataArray, dim: str) -> None:
+def _check_member_dim(da: xr.DataArray, dim: str, *, min_size: int = 2) -> None:
+    """Require ``dim`` on ``da`` with at least ``min_size`` entries.
+
+    The two-sample distances need two samples per side; CRPS is defined
+    for a single member, so it passes ``min_size=1``.
+    """
     if dim not in da.dims:
         raise ValueError(
             f"Variable is missing ensemble/sample dim {dim!r}; "
             f"got dims={tuple(da.dims)}."
         )
-    if da.sizes[dim] < 2:
+    if da.sizes[dim] < min_size:
         raise ValueError(
-            f"Ensemble/sample dim {dim!r} has size {da.sizes[dim]}; need at least 2."
+            f"Ensemble/sample dim {dim!r} has size {da.sizes[dim]}; "
+            f"need at least {min_size}."
         )
 
 
@@ -52,25 +59,84 @@ def crps_ensemble(
 ) -> xr.DataArray:
     """Continuous Ranked Probability Score (ensemble vs deterministic truth).
 
-    Delegates to :func:`xskillscore.crps_ensemble`.
+    The ensemble estimator of the CRPS of members ``x_1 … x_M`` against a
+    reference ``y`` is::
+
+        CRPS = (1/M) Σ_i |x_i - y| - (1/(2 M²)) Σ_i Σ_j |x_i - x_j|
+
+    With two or more members this delegates to
+    :func:`xskillscore.crps_ensemble`. A single member (``M = 1``) is a
+    point forecast: the spread term vanishes and the score is exactly the
+    absolute error ``|x_1 - y|``, computed directly rather than through
+    xskillscore so the identity holds bit for bit. Both paths broadcast,
+    order dims and drop attrs the same way, and both treat NaN as
+    xskillscore does: a NaN reference gives a NaN score, NaN members are
+    skipped, and a pixel whose members are all NaN (with one member: the
+    member is NaN) scores NaN. Averaging over ``dims`` is the same
+    NaN-skipping mean on both paths.
 
     Args:
-        ensemble: Ensemble forecast DataArray with an ``ensemble_dim`` axis.
+        ensemble: Ensemble forecast DataArray with an ``ensemble_dim`` axis
+            of size ≥ 1.
         ref: Deterministic reference DataArray.
         ensemble_dim: Name of the ensemble member dimension. Default
             ``"member"``.
         dims: Optional dims to average over after the per-pixel CRPS
             (e.g. ``("time", "lat", "lon")``); ``None`` keeps full
             shape.
+
+    Returns:
+        The per-pixel CRPS (float64, attrs dropped), averaged over
+        ``dims`` when given.
+
+    Raises:
+        ValueError: If ``ensemble`` has no ``ensemble_dim`` or it is empty.
+
+    Example:
+        >>> import numpy as np
+        >>> import xarray as xr
+        >>> ens = xr.DataArray([[1.0, 4.0]], dims=("member", "x"))
+        >>> ref = xr.DataArray([3.0, 2.0], dims=("x",))
+        >>> crps_ensemble(ens, ref).values  # one member: |x - y|
+        array([2., 2.])
     """
-    _check_member_dim(ensemble, ensemble_dim)
-    crps = cast(
-        xr.DataArray,
-        xs.crps_ensemble(ref, ensemble, member_dim=ensemble_dim, dim=[]),
-    )
+    _check_member_dim(ensemble, ensemble_dim, min_size=1)
+    if ensemble.sizes[ensemble_dim] == 1:
+        crps = _crps_single_member(ensemble, ref, ensemble_dim)
+    else:
+        crps = cast(
+            xr.DataArray,
+            xs.crps_ensemble(ref, ensemble, member_dim=ensemble_dim, dim=[]),
+        )
     if dims:
         crps = crps.mean(dim=list(dims))
     return crps
+
+
+def _crps_single_member(
+    ensemble: xr.DataArray, ref: xr.DataArray, ensemble_dim: str
+) -> xr.DataArray:
+    """CRPS of a one-member ensemble: the absolute error ``|x - y|``.
+
+    Mirrors :func:`xskillscore.crps_ensemble` around the arithmetic: the
+    reference is broadcast against the member slice first (so the output
+    dims follow the same order), the member dim and its coordinate are
+    dropped, attrs are dropped, and the result is float64.
+    """
+    member = ensemble.isel({ensemble_dim: 0}, drop=True)
+    ref_b = ref.broadcast_like(member)
+    member = member.broadcast_like(ref_b)
+    out: xr.DataArray = xr.apply_ufunc(
+        lambda y, x: np.abs(
+            np.asarray(x, dtype=np.float64) - np.asarray(y, dtype=np.float64)
+        ),
+        ref_b,
+        member,
+        dask="parallelized",
+        output_dtypes=[np.float64],
+        keep_attrs=False,
+    )
+    return out
 
 
 # ---------- Energy distance ----------------------------------------------
@@ -220,7 +286,9 @@ class CRPS(_DistributionalOp):
     """Two-input CRPS operator.
 
     Inputs: ``(ds_ensemble, ds_reference)`` where ``ds_ensemble`` has
-    an ``ensemble_dim`` axis and ``ds_reference`` is deterministic.
+    an ``ensemble_dim`` axis (one or more members) and ``ds_reference``
+    is deterministic. A one-member ensemble scores as the absolute error
+    ``|x - y|``; see :func:`crps_ensemble`.
     """
 
     def _apply(self, ds_ensemble: xr.Dataset, ds_ref: xr.Dataset) -> xr.DataArray:
