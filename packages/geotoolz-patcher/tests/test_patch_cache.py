@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 import rasterio
 from _helpers import make_raster_field
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 from geopatcher import Patch, RasterField, SpatialPatcher, spatial
@@ -102,10 +102,8 @@ class TestHitMiss:
 
         for anchor, ref in reference.items():
             got = cached[anchor]
-            np.testing.assert_array_equal(
-                np.asarray(got.data.values), np.asarray(ref.data.values)
-            )
-            assert got.data.transform == ref.data.transform
+            np.testing.assert_array_equal(np.asarray(got.data), np.asarray(ref.data))
+            assert got.data.grid.affine == ref.data.grid.affine
             assert str(got.data.crs) == str(ref.data.crs)
             np.testing.assert_array_equal(
                 np.asarray(got.weights), np.asarray(ref.weights)
@@ -115,7 +113,7 @@ class TestHitMiss:
 
 class TestFieldIdentity:
     def test_in_memory_field_without_id_raises(self, tmp_path) -> None:
-        base = make_raster_field(16)  # RasterField(GeoTensor): no path/url
+        base = make_raster_field(16)  # RasterField(GeoArray): no path/url
         cache = PatchCache(tmp_path)
         with pytest.raises(ValueError, match="field_id"):
             list(_patcher().split(base, cache=cache))
@@ -193,7 +191,7 @@ class TestConcurrency:
         base = make_raster_field(32)
         cache = PatchCache(tmp_path, field_id="scene")
         patcher = _patcher()
-        reference = {p.anchor: np.asarray(p.data.values) for p in patcher.split(base)}
+        reference = {p.anchor: np.asarray(p.data) for p in patcher.split(base)}
 
         errors: list[Exception] = []
 
@@ -201,7 +199,7 @@ class TestConcurrency:
             try:
                 for p in patcher.split(base, cache=cache):
                     np.testing.assert_array_equal(
-                        np.asarray(p.data.values), reference[p.anchor]
+                        np.asarray(p.data), reference[p.anchor]
                     )
             except Exception as exc:
                 errors.append(exc)
@@ -318,6 +316,7 @@ def test_corrupt_entry_is_repaired(tmp_path, damage: str) -> None:
 
 
 def test_band_subset_and_reprojection_keys_differ(tmp_path) -> None:
+    from geoarray.interop.georeader import source_from_georeader
     from georeader.rasterio_reader import RasterioReader
 
     from geopatcher.fields import ReprojectingRasterField
@@ -330,16 +329,17 @@ def test_band_subset_and_reprojection_keys_differ(tmp_path) -> None:
     patcher = _patcher()
 
     # Band subset: `indexes=[2]` must not be served the 3-band chips.
-    list(patcher.split(RasterField(RasterioReader(str(tif))), cache=cache))
+    full = source_from_georeader(RasterioReader(str(tif)))
+    list(patcher.split(RasterField(full), cache=cache))
     hits = cache.stats()["hits"]
-    band2 = RasterField(RasterioReader(str(tif), indexes=[2]))
+    band2 = RasterField(source_from_georeader(RasterioReader(str(tif), indexes=[2])))
     got = list(patcher.split(band2, cache=cache))
     assert cache.stats()["hits"] == hits  # all misses
     assert all(p.data.shape == (1, 8, 8) for p in got)
     _assert_patches_equal(got, list(patcher.split(band2)))
 
     # Reprojection: dst_crs and resampling are both part of the key.
-    reader = RasterioReader(str(tif))
+    reader = source_from_georeader(RasterioReader(str(tif)))
     utm = ReprojectingRasterField(reader, dst_crs="EPSG:32630", resampling="nearest")
     wgs = ReprojectingRasterField(reader, dst_crs="EPSG:4326", resampling="nearest")
     bil = ReprojectingRasterField(reader, dst_crs="EPSG:32630", resampling="bilinear")
@@ -464,20 +464,20 @@ def _assert_same_carrier(got: Any, ref: Any) -> None:
         return
     np.testing.assert_array_equal(np.asarray(got), np.asarray(ref))
     assert got.dtype == ref.dtype
-    assert got.transform == ref.transform
+    assert got.grid.affine == ref.grid.affine
     assert got.crs == ref.crs
     assert str(got.crs) == str(ref.crs)
-    assert got.fill_value_default == ref.fill_value_default
-    assert type(got.fill_value_default) is type(ref.fill_value_default)
+    assert got.fill_value == ref.fill_value
+    assert type(got.fill_value) is type(ref.fill_value)
     _assert_same_attrs(got.attrs, ref.attrs)
 
 
-def _geotensor_field(tmp_path: Path) -> tuple[Any, PatchCache, SpatialPatcher]:
-    gt = GeoTensor(
-        values=np.arange(2 * 16 * 16, dtype=np.int16).reshape(2, 16, 16),
+def _geoarray_field(tmp_path: Path) -> tuple[Any, PatchCache, SpatialPatcher]:
+    gt = GeoArray(
+        data=np.arange(2 * 16 * 16, dtype=np.int16).reshape(2, 16, 16),
         transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_160.0),
         crs=rasterio.crs.CRS.from_epsg(32630),
-        fill_value_default=-9999,
+        fill_value=-9999,
         attrs={
             "sensor": "toy",
             "wavelengths": np.array([665.0, 842.0]),
@@ -531,8 +531,8 @@ def _xarray_field(tmp_path: Path) -> tuple[Any, PatchCache, SpatialPatcher]:
 
 @pytest.mark.parametrize(
     "make_field",
-    [_geotensor_field, _rio_field, _xarray_field],
-    ids=["geotensor", "rioxarray", "xarray"],
+    [_geoarray_field, _rio_field, _xarray_field],
+    ids=["geoarray", "rioxarray", "xarray"],
 )
 def test_hit_preserves_fill_and_carrier(tmp_path, make_field) -> None:
     field, cache, patcher = make_field(tmp_path)
@@ -549,9 +549,10 @@ def test_hit_preserves_fill_and_carrier(tmp_path, make_field) -> None:
 
 
 def test_unroundtrippable_carrier_is_refused(tmp_path) -> None:
-    field, cache, patcher = _geotensor_field(tmp_path)
-    field.reader.attrs["acquired"] = datetime.datetime(2024, 1, 1)
-    with pytest.raises(TypeError, match=r"cannot store GeoTensor\.attrs"):
+    field, cache, patcher = _geoarray_field(tmp_path)
+    acquired = datetime.datetime(2024, 1, 1)
+    field = RasterField(field.reader.with_attrs(acquired=acquired))
+    with pytest.raises(TypeError, match=r"cannot store GeoArray\.attrs"):
         list(patcher.split(field, cache=cache))
     assert cache.stats()["entries"] == 0
 
@@ -754,9 +755,12 @@ def test_variables_of_one_file_have_distinct_keys(tmp_path) -> None:
 
 
 def test_structured_dtype_metadata_is_refused(tmp_path) -> None:
-    field, cache, patcher = _geotensor_field(tmp_path)
+    # A GeoArray freezes a numpy record into a plain tuple (which
+    # round-trips), so the structured-dtype guard is reached through a
+    # DataArray's attrs.
+    field, cache, patcher = _xarray_field(tmp_path)
     record = np.zeros(1, dtype=[("a", "<i4"), ("b", "<f4")])[0]
-    field.reader.attrs["record"] = record
+    field.da.attrs["record"] = record
     with pytest.raises(TypeError, match="structured or void dtype"):
         list(patcher.split(field, cache=cache))
     assert cache.stats()["entries"] == 0

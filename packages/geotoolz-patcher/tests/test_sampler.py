@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from scipy.spatial.distance import pdist
 
 from geopatcher import spatial
@@ -13,9 +13,9 @@ from geopatcher.fields import GridDomain
 
 
 @pytest.fixture
-def raster_domain() -> GeoTensor:
-    return GeoTensor(
-        values=np.zeros((1, 64, 64), dtype=np.float32),
+def raster_domain() -> GeoArray:
+    return GeoArray(
+        data=np.zeros((1, 64, 64), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
     )
@@ -28,7 +28,7 @@ def rect() -> spatial.geometry.Rectangular:
 
 class TestSpatialRegularStride:
     def test_raster_anchor_count(
-        self, raster_domain: GeoTensor, rect: spatial.geometry.Rectangular
+        self, raster_domain: GeoArray, rect: spatial.geometry.Rectangular
     ) -> None:
         s = spatial.sampler.RegularStride(step=16)
         anchors = list(s.anchors(raster_domain, rect))
@@ -53,7 +53,7 @@ class TestSpatialRegularStride:
 
 class TestSpatialJitteredStride:
     def test_reproducible_seed(
-        self, raster_domain: GeoTensor, rect: spatial.geometry.Rectangular
+        self, raster_domain: GeoArray, rect: spatial.geometry.Rectangular
     ) -> None:
         s1 = spatial.sampler.JitteredStride(step=16, jitter=0.5, seed=0)
         s2 = spatial.sampler.JitteredStride(step=16, jitter=0.5, seed=0)
@@ -69,8 +69,8 @@ class TestSpatialJitteredStride:
         if grid:
             domain: object = GridDomain(coords={"a": np.arange(n), "b": np.arange(n)})
         else:
-            domain = GeoTensor(
-                values=np.zeros((n, n), dtype=np.uint8),
+            domain = GeoArray(
+                data=np.zeros((n, n), dtype=np.uint8),
                 transform=rasterio.Affine.identity(),
                 crs="EPSG:32630",
             )
@@ -97,7 +97,7 @@ class TestSpatialJitteredStride:
 
 class TestSpatialRandom:
     def test_count_matches_request(
-        self, raster_domain: GeoTensor, rect: spatial.geometry.Rectangular
+        self, raster_domain: GeoArray, rect: spatial.geometry.Rectangular
     ) -> None:
         s = spatial.sampler.Random(n_samples=7, seed=42)
         anchors = list(s.anchors(raster_domain, rect))
@@ -115,7 +115,7 @@ class TestSpatialRandom:
 
 class TestSpatialPoissonDisk:
     def test_min_distance_invariant(
-        self, raster_domain: GeoTensor, rect: spatial.geometry.Rectangular
+        self, raster_domain: GeoArray, rect: spatial.geometry.Rectangular
     ) -> None:
         s = spatial.sampler.PoissonDisk(min_dist=8.0, seed=0)
         anchors = np.asarray(list(s.anchors(raster_domain, rect)), dtype=float)
@@ -127,8 +127,8 @@ class TestSpatialPoissonDisk:
     @pytest.mark.parametrize("min_dist", [1.0, 2.0, 2.5, 8.0])
     @pytest.mark.parametrize("seed", range(10))
     def test_poisson_disk_min_distance_exact(self, min_dist: float, seed: int) -> None:
-        domain = GeoTensor(
-            values=np.zeros((40, 40), dtype=np.float32),
+        domain = GeoArray(
+            data=np.zeros((40, 40), dtype=np.float32),
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
         )
@@ -170,7 +170,7 @@ class TestSpatialPoissonDisk:
 
 class TestSpatialExplicit:
     def test_yields_supplied(
-        self, raster_domain: GeoTensor, rect: spatial.geometry.Rectangular
+        self, raster_domain: GeoArray, rect: spatial.geometry.Rectangular
     ) -> None:
         anchors = [(0, 0), (10, 5), (32, 16)]
         s = spatial.sampler.Explicit(anchors_=anchors)
@@ -181,7 +181,7 @@ class TestCheckFullScan:
     """`spatial.sampler.RegularStride(check_full_scan=True)` raises on partial tiles."""
 
     def test_raster_exact_tiling_passes(
-        self, raster_domain: GeoTensor, rect: spatial.geometry.Rectangular
+        self, raster_domain: GeoArray, rect: spatial.geometry.Rectangular
     ) -> None:
         # 64 / 16 = 4 — exact, both axes.
         s = spatial.sampler.RegularStride(step=16, check_full_scan=True)
@@ -189,7 +189,7 @@ class TestCheckFullScan:
         assert len(anchors) == 16
 
     def test_raster_partial_tile_raises(
-        self, raster_domain: GeoTensor, rect: spatial.geometry.Rectangular
+        self, raster_domain: GeoArray, rect: spatial.geometry.Rectangular
     ) -> None:
         from geopatcher.spatial.sampler import IncompleteScanConfiguration
 
@@ -227,7 +227,7 @@ class TestCheckFullScan:
             list(s.anchors(grid, rect))
 
     def test_default_off_preserves_silent_truncation(
-        self, raster_domain: GeoTensor, rect: spatial.geometry.Rectangular
+        self, raster_domain: GeoArray, rect: spatial.geometry.Rectangular
     ) -> None:
         # No flag → same behaviour as before: partial tile silently dropped.
         s = spatial.sampler.RegularStride(step=20)
@@ -241,7 +241,7 @@ class TestCheckFullScan:
 
 
 class TestSpatialAlongTrack:
-    def test_vertices_used_when_no_spacing(self, raster_domain: GeoTensor) -> None:
+    def test_vertices_used_when_no_spacing(self, raster_domain: GeoArray) -> None:
 
         track = np.array([[8.5, 8.5], [24.5, 8.5], [40.5, 8.5]])
         s = spatial.sampler.AlongTrack(track=track)
@@ -252,7 +252,7 @@ class TestSpatialAlongTrack:
         assert anchors == [(6, 6), (6, 22), (6, 38)]
 
     def test_spacing_resamples_to_monotonic_distances(
-        self, raster_domain: GeoTensor
+        self, raster_domain: GeoArray
     ) -> None:
 
         # Straight track of length 40, spacing 10 -> s = 0, 10, 20, 30, 40.
@@ -264,7 +264,7 @@ class TestSpatialAlongTrack:
         np.testing.assert_allclose(d, 10.0)
         np.testing.assert_allclose(np.diff(pts[:, 0]), 10.0)  # monotonic
 
-    def test_out_of_domain_points_skipped(self, raster_domain: GeoTensor) -> None:
+    def test_out_of_domain_points_skipped(self, raster_domain: GeoArray) -> None:
 
         track = np.array([[-5.0, 8.0], [8.0, 8.0], [200.0, 8.0]])
         s = spatial.sampler.AlongTrack(track=track)
@@ -318,7 +318,7 @@ class TestSpatialAlongTrack:
         }
 
     def test_non_drop_boundary_preserves_centered_overflow(
-        self, raster_domain: GeoTensor
+        self, raster_domain: GeoArray
     ) -> None:
 
         # Track point in pixel (0, 0): centring a 4x4 patch needs anchor
@@ -361,7 +361,7 @@ class TestCentredAnchorConvention:
     @pytest.mark.parametrize("size", [3, 4, 5, 16])
     @pytest.mark.parametrize("frac", [0.01, 0.5, 0.99])
     def test_pixel_lands_at_chip_centre_index(
-        self, raster_domain: GeoTensor, size: int, frac: float
+        self, raster_domain: GeoArray, size: int, frac: float
     ) -> None:
 
         row, col = 30, 21

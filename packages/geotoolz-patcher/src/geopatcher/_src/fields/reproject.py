@@ -6,8 +6,10 @@ domain. Every existing sampler / geometry / aggregation then works on the
 target grid unchanged, and each `select` warps the source into the chip.
 
 The heavy lifting is georeader's ``read_reproject`` / the
-``calculate_transform_window`` grid computation — geopatcher only wires
-the destination window back to source pixels per chip.
+``calculate_transform_window`` grid computation, used as an internal engine
+behind `geoarray.interop.georeader` (``source_to_georeader`` in,
+``from_georeader`` out) — geopatcher only wires the destination window back
+to source pixels per chip. Chips and merged outputs are `geoarray.GeoArray`.
 """
 
 from __future__ import annotations
@@ -17,11 +19,12 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from georeader.abstract_reader import GeoData
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray, Grid, RasterSource
+from geoarray.interop.georeader import from_georeader, source_to_georeader
 
 from geopatcher._src.fields.raster import (
     _pack_reader_state,
+    _require_source,
     _rewrap,
     _unpack_reader_state,
 )
@@ -29,38 +32,32 @@ from geopatcher._src.fields.raster import (
 
 @dataclass(frozen=True)
 class _ReprojectedDomain:
-    """`GeoDataBase`-shaped view of the destination grid."""
+    """The destination grid as a `RasterDomain`: ``grid`` plus full ``shape``."""
 
-    crs: Any
-    transform: Any
+    grid: Grid
     shape: tuple[int, ...]
 
     @property
-    def bounds(self) -> tuple[float, float, float, float]:
-        from rasterio.windows import Window, bounds
+    def crs(self) -> Any:
+        return self.grid.crs
 
-        return bounds(
-            Window(
-                col_off=0,
-                row_off=0,
-                width=int(self.shape[-1]),
-                height=int(self.shape[-2]),
-            ),
-            self.transform,
-        )
+    @property
+    def bounds(self) -> tuple[float, float, float, float]:
+        return self.grid.bounds
 
 
 @dataclass(eq=False)
 class ReprojectingRasterField:
-    """Wrap a georeader reader, presenting a reprojected destination grid.
+    """Wrap a `geoarray.RasterSource`, presenting a reprojected destination grid.
 
     The domain reports the *destination* CRS / transform / shape, so
     samplers place anchors on the reprojected grid; each `select` warps
     the corresponding source pixels into that chip.
 
     Args:
-        reader: Any georeader `GeoData` (a `RasterioReader`, a
-            `GeoTensor`, …) in the source CRS.
+        reader: Any `geoarray.RasterSource` (a `GeoArray`, a lazy reader,
+            …) in the source CRS. A georeader reader crosses with
+            ``geoarray.interop.georeader.source_from_georeader``.
         dst_crs: Destination CRS the domain (and every chip) is expressed
             in — ``"EPSG:3857"``, a CRS object, or WKT.
         resolution: Destination pixel size in ``dst_crs`` units. ``None``
@@ -86,11 +83,14 @@ class ReprojectingRasterField:
         resampling, differences stay below one ramp step on a
         unit-increment ramp). The source crop itself does not change the
         result: a chip is identical to warping the uncropped source onto
-        the same chip grid. Use a single ``georeader.read.read_reproject``
-        call when bit-exactness against a full warp matters.
+        the same chip grid. Warp the whole source once (``geoops.geom``'s
+        reprojection) when bit-exactness against a full warp matters.
+
+    Raises:
+        TypeError: ``reader`` is a georeader object or not a `RasterSource`.
     """
 
-    reader: GeoData
+    reader: RasterSource
     dst_crs: Any
     resolution: float | tuple[float, float] | None = None
     resampling: str = "bilinear"
@@ -98,8 +98,9 @@ class ReprojectingRasterField:
     def __post_init__(self) -> None:
         from georeader.read import calculate_transform_window
 
+        _require_source(self.reader, "ReprojectingRasterField", RasterSource)
         window_data, dst_transform = calculate_transform_window(
-            self.reader, self.dst_crs, self.resolution
+            self._engine, self.dst_crs, self.resolution
         )
         # `frozen`-friendly private state on an `eq=False` dataclass.
         object.__setattr__(self, "_transform", dst_transform)
@@ -113,6 +114,16 @@ class ReprojectingRasterField:
             ),
         )
         object.__setattr__(self, "_resampling", _resampling_enum(self.resampling))
+        object.__setattr__(
+            self,
+            "_grid",
+            Grid.from_affine(dst_transform, self.dst_crs, self._shape[-2:]),
+        )
+
+    @property
+    def _engine(self) -> Any:
+        """The source as a georeader ``GeoData``, for georeader's ``read``."""
+        return source_to_georeader(self.reader)
 
     def __getstate__(self) -> dict[str, Any]:
         return _pack_reader_state(self.__dict__)
@@ -122,11 +133,15 @@ class ReprojectingRasterField:
 
     @property
     def domain(self) -> _ReprojectedDomain:
-        return _ReprojectedDomain(
-            crs=self.dst_crs, transform=self._transform, shape=self._shape
-        )
+        return _ReprojectedDomain(grid=self._grid, shape=self._shape)
 
-    def select(self, window: Any) -> GeoTensor:
+    def select(self, window: Any) -> GeoArray:
+        """Warp the source into ``window`` of the destination grid.
+
+        Returns:
+            ``(..., window.height, window.width)`` on the window's grid in
+            ``dst_crs``.
+        """
         from georeader.read import read_reproject
         from rasterio.windows import Window, transform as window_transform
 
@@ -134,21 +149,22 @@ class ReprojectingRasterField:
         out = Window(
             col_off=0, row_off=0, width=int(window.width), height=int(window.height)
         )
-        return read_reproject(
+        warped = read_reproject(
             self._crop_source(out, chip_transform),
             dst_crs=self.dst_crs,
             dst_transform=chip_transform,
             window_out=out,
             resampling=self._resampling,
         )
+        return from_georeader(warped)
 
     def _crop_source(self, out: Any, chip_transform: Any) -> Any:
         """Source pixels covering the chip footprint, plus a kernel margin.
 
-        ``read_reproject`` only crops lazy readers (and never a
-        `GeoTensor`), so without this each chip would warp the whole
-        source. The chip polygon is densified before being mapped into
-        the source CRS so curved edges of the reprojected footprint are
+        ``read_reproject`` only crops lazy readers (and never an in-memory
+        carrier), so without this each chip would warp the whole source.
+        The chip polygon is densified before being mapped into the source
+        CRS so curved edges of the reprojected footprint are
         covered; the margin is `_CROP_MARGIN` source pixels, scaled by
         the downsampling factor (GDAL widens the kernel when the
         destination is coarser). Returns the reader unchanged when the
@@ -162,15 +178,14 @@ class ReprojectingRasterField:
         footprint = window_utils.window_polygon(out, chip_transform)
         step = max(footprint.length / 64.0, 1e-12)
         footprint = footprint.segmentize(step)
-        src_window = window_from_polygon(
-            self.reader, footprint, crs_polygon=self.dst_crs
-        )
+        engine = self._engine
+        src_window = window_from_polygon(engine, footprint, crs_polygon=self.dst_crs)
         extent = (src_window.col_off, src_window.row_off)
         extent += (src_window.width, src_window.height)
         if not all(math.isfinite(float(v)) for v in extent):
             # Footprint not representable in the source CRS — let
             # `read_reproject` handle the full source.
-            return self.reader
+            return engine
         scale = max(
             float(src_window.width) / max(float(out.width), 1.0),
             float(src_window.height) / max(float(out.height), 1.0),
@@ -181,9 +196,9 @@ class ReprojectingRasterField:
             window_utils.pad_window(src_window, (pad, pad))
         )
         cropped = read_from_window(
-            self.reader, src_window, trigger_load=True, boundless=False
+            engine, src_window, trigger_load=True, boundless=False
         )
-        return self.reader if cropped is None else cropped
+        return engine if cropped is None else cropped
 
     def cache_id(self) -> str:
         """`PatchCache` identity: the source plus the warp parameters.
@@ -194,10 +209,10 @@ class ReprojectingRasterField:
         reprojections of one source never share cache entries.
 
         Examples:
-            >>> f = ReprojectingRasterField(RasterioReader("a.tif"), "EPSG:3857")
-            >>> f.cache_id()
+            >>> reader = source_from_georeader(RasterioReader("a.tif"))
+            >>> ReprojectingRasterField(reader, "EPSG:3857").cache_id()
             '{"dst_crs": "EPSG:3857", "resampling": "bilinear", ...}'
-            >>> ReprojectingRasterField(geotensor, "EPSG:3857").cache_id()
+            >>> ReprojectingRasterField(scene, "EPSG:3857").cache_id()
             '{"dst_crs": "EPSG:3857", ..., "source": null}'
         """
         from geopatcher._src.cache import _crs_text, _source_id
@@ -217,8 +232,9 @@ class ReprojectingRasterField:
             sort_keys=True,
         )
 
-    def with_data(self, array: Any) -> GeoTensor:
-        return _rewrap(self.reader, array, self._transform, self.dst_crs)
+    def with_data(self, array: Any) -> GeoArray:
+        """``array`` (``(..., H, W)`` on the destination grid) as a `GeoArray`."""
+        return _rewrap(self.reader, array, self._grid)
 
 
 # Source pixels kept around each chip footprint before warping — enough

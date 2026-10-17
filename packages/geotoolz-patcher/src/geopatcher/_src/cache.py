@@ -20,9 +20,9 @@ metadata.
   one anchor share an entry.
 
 Each entry is one ``<hash>.npz`` holding ``values``, the carrier
-``kind`` (``"geotensor"``, ``"dataarray"`` or ``"ndarray"``), a JSON
+``kind`` (``"geoarray"``, ``"dataarray"`` or ``"ndarray"``), a JSON
 ``meta`` record with everything needed to rebuild the carrier exactly
-(`GeoTensor` transform / CRS / ``fill_value_default`` / ``attrs``;
+(`geoarray.GeoArray` transform / CRS / ``fill_value`` / ``attrs``;
 `DataArray` dims / coords / attrs / encoding, which carry the rioxarray
 transform, CRS and nodata), and ``weights`` when present. A hit is
 therefore bit-identical to an uncached read. A carrier that cannot be
@@ -61,8 +61,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from geoarray import GeoArray
 
 from geopatcher._src._digest import array_digest
+from geopatcher._src.carrier import raster_grid
 from geopatcher._src.journal import _anchor_key
 from geopatcher._src.patch import Patch
 
@@ -90,7 +92,7 @@ class PatchCache:
             construction), so with several writers the cap is per
             writer. ``None`` (default) is unbounded.
         field_id: Explicit source identity for in-memory fields that
-            have none (a bare `GeoTensor`-backed `RasterField`). Leave
+            have none (a `RasterField` over an in-memory `GeoArray`). Leave
             ``None`` for path- or URL-backed fields, whose identity is
             derived automatically. It replaces only the *source* part of
             the key: the domain, band selection and the adapter's
@@ -162,7 +164,7 @@ class PatchCache:
           `ReprojectingRasterField`'s ``dst_crs`` / ``resolution`` /
           ``resampling``), the domain (CRS, transform, shape, dtype, or
           a digest of the grid coordinates) and the reader's band
-          selection (``indexes``) and boundless ``fill_value_default``.
+          selection (``indexes``) and boundless ``fill_value``.
 
         ``cache_id()`` is trusted as-is: it must return a non-empty
         ``str`` (anything else raises `TypeError`) that changes whenever
@@ -584,10 +586,14 @@ def _domain_signature(field: Any) -> dict[str, Any] | None:
     domain = getattr(field, "domain", None)
     if domain is None:
         return None
-    sig: dict[str, Any] = {"crs": _crs_text(getattr(domain, "crs", None))}
-    transform = getattr(domain, "transform", None)
-    if transform is not None and not callable(transform):
-        sig["transform"] = [float(v) for v in tuple(transform)[:6]]
+    grid = raster_grid(domain)
+    if grid is not None:
+        sig: dict[str, Any] = {
+            "crs": _crs_text(grid.crs),
+            "transform": [float(v) for v in grid.transform],
+        }
+    else:
+        sig = {"crs": _crs_text(getattr(domain, "crs", None))}
     shape = getattr(domain, "shape", None)
     if shape is not None:
         sig["shape"] = [int(d) for d in shape]
@@ -612,12 +618,16 @@ def _read_signature(field: Any) -> dict[str, Any]:
     if reader is None:
         reader = getattr(field, "domain", None)
     sig: dict[str, Any] = {}
-    indexes = getattr(reader, "indexes", None)
-    if indexes is not None:
-        sig["indexes"] = np.asarray(indexes).tolist()
-    fill = getattr(reader, "fill_value_default", None)
+    # A georeader reader behind `source_from_georeader` keeps its band
+    # selection on the wrapped reader.
+    for owner in (reader, getattr(reader, "reader", None)):
+        indexes = getattr(owner, "indexes", None)
+        if indexes is not None:
+            sig["indexes"] = np.asarray(indexes).tolist()
+            break
+    fill = getattr(reader, "fill_value", None)
     if fill is not None:
-        sig["fill"] = _to_json(fill, what="fill_value_default")
+        sig["fill"] = _to_json(fill, what="fill_value")
     # Two variables of one file share ``encoding["source"]``, dims, coords,
     # shape and dtype; only the variable name tells them apart.
     for attr in ("da", "array"):
@@ -683,25 +693,21 @@ def _encode_patch(patch: Patch) -> dict[str, Any]:
     """Arrays + JSON metadata that rebuild ``patch.data`` exactly.
 
     Raises:
-        TypeError: The carrier is not a `GeoTensor`, an xarray
+        TypeError: The carrier is not a `GeoArray`, an xarray
             `DataArray` or a plain ndarray, or holds a value (object
             dtype, an attribute with no lossless JSON form) that cannot
             round-trip.
     """
-    from georeader.geotensor import GeoTensor
-
     data = patch.data
     arrays: dict[str, Any] = {"format": np.array(_FORMAT)}
-    if isinstance(data, GeoTensor):
-        kind = "geotensor"
+    if isinstance(data, GeoArray) and not data.batch_shape:
+        kind = "geoarray"
         values = np.asarray(data)
         meta: dict[str, Any] = {
-            "transform": [float(v) for v in tuple(data.transform)[:6]],
+            "transform": [float(v) for v in data.grid.transform],
             "crs": _encode_crs(data.crs),
-            "fill_value_default": _to_json(
-                data.fill_value_default, what="GeoTensor.fill_value_default"
-            ),
-            "attrs": _to_json(data.attrs, what="GeoTensor.attrs"),
+            "fill_value": _to_json(data.fill_value, what="GeoArray.fill_value"),
+            "attrs": _to_json(data.attrs.to_dict(), what="GeoArray.attrs"),
         }
     elif _is_dataarray(data):
         kind = "dataarray"
@@ -714,7 +720,7 @@ def _encode_patch(patch: Patch) -> dict[str, Any]:
     else:
         raise TypeError(
             f"PatchCache cannot store a {type(data).__module__}."
-            f"{type(data).__qualname__} patch: only GeoTensor, xarray.DataArray "
+            f"{type(data).__qualname__} patch: only GeoArray, xarray.DataArray "
             f"and numpy.ndarray carriers round-trip bit-identically. Drop "
             f"cache= for this field."
         )
@@ -734,15 +740,15 @@ def _decode_carrier(payload: dict[str, Any]) -> Any:
     kind = payload["kind"]
     meta = payload["meta"]
     values = payload["values"]
-    if kind == "geotensor":
-        from georeader.geotensor import GeoTensor
-        from rasterio import Affine
-
-        return GeoTensor(
-            values=values,
-            transform=Affine(*meta["transform"]),
-            crs=_decode_crs(meta["crs"]),
-            fill_value_default=_from_json(meta["fill_value_default"]),
+    if kind in ("geoarray", "geotensor"):
+        # "geotensor" entries (written before the switch to GeoArray) hold
+        # the same pixels and metadata under georeader's fill name.
+        fill_key = "fill_value" if kind == "geoarray" else "fill_value_default"
+        return GeoArray(
+            values,
+            tuple(meta["transform"]),
+            _decode_crs(meta["crs"]),
+            fill_value=_from_json(meta[fill_key]),
             attrs=_from_json(meta["attrs"]),
         )
     if kind == "dataarray":
@@ -854,7 +860,9 @@ def _encode_crs(crs: Any) -> Any:
     except ImportError:  # pragma: no cover - pyproj ships with rasterio stacks
         pyproj = None  # type: ignore[assignment]
     if pyproj is not None and isinstance(crs, pyproj.CRS):
-        return {"pyproj": crs.to_wkt()}
+        # ``srs`` is what the CRS was built from ("EPSG:32630", or WKT):
+        # compact, and it rebuilds the same CRS (``str`` included).
+        return {"pyproj": crs.srs}
     raise TypeError(
         f"PatchCache cannot store a CRS of type {type(crs).__qualname__}; "
         f"use a str, rasterio.crs.CRS or pyproj.CRS."
@@ -872,7 +880,7 @@ def _decode_crs(encoded: Any) -> Any:
         return CRS.from_wkt(encoded["rasterio"])
     import pyproj
 
-    return pyproj.CRS.from_wkt(encoded["pyproj"])
+    return pyproj.CRS.from_user_input(encoded["pyproj"])
 
 
 def _to_json(value: Any, *, what: str) -> Any:

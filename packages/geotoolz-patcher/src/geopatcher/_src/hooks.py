@@ -158,12 +158,12 @@ def _nbytes(value: Any) -> int:
     """Best-effort byte count for patch data and aggregation outputs.
 
     Pure attribute probing — never materialises a lazy carrier: direct
-    ``.nbytes`` first (NumPy, `GeoTensor`, dask arrays and xarray objects,
-    all sized from dtype x shape without computing anything), then
-    ``.data.nbytes`` for wrappers that expose their backing array under
-    ``data``, and only then ``.values.nbytes`` (e.g. a pandas frame). The
-    ``.values`` probe comes last because on a lazy xarray object it would
-    compute the chunk graph — those always answer ``.nbytes`` first.
+    ``.nbytes`` first (NumPy, dask arrays and xarray objects, all sized
+    from dtype x shape without computing anything), then ``.data.nbytes``
+    for wrappers that expose their backing array under ``data`` (a
+    `GeoArray`), and only then ``.values.nbytes`` (e.g. a pandas frame).
+    The ``.values`` probe comes last because on a lazy xarray object it
+    would compute the chunk graph — those always answer ``.nbytes`` first.
 
     A mapping (a `MatchedField` read's ``{source: data}``, a per-source
     merge result) or a list / tuple counts the sum of its values, so the

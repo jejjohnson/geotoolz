@@ -10,13 +10,13 @@ field's `domain` metadata, never the pixels.
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 from geopatcher.run import IndexedPatchView, PatchCache
 
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.random.default_rng(0).random((1, 256, 256), dtype=np.float32),  # (1, 256, 256) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",
@@ -65,7 +65,7 @@ that can change.
 
 ## Pitfalls
 
-- **In-memory fields** (`GeoTensor`- or `DataArray`-backed) have no stable
+- **In-memory fields** (`GeoArray`- or `DataArray`-backed) have no stable
   identity: pass `field_id=`, or the split raises `ValueError`. Do the
   same for a file-backed `DataArray` you changed in memory.
 - **Objects overwritten in place.** A plain `url` carries no version.
@@ -73,7 +73,7 @@ that can change.
   last-modified); for other URL fields, put a version in `cache_id()` or
   call `cache.clear()`.
 - **Some carriers cannot be cached.** Hits are bit-identical: a
-  `GeoTensor` comes back with its transform, CRS, fill and attrs, a
+  `GeoArray` comes back with its transform, CRS, fill and attrs, a
   `DataArray` with its dims, coords, attrs and encoding. A carrier that
   cannot round-trip (a `GeoDataFrame`, an object array, a `datetime`
   attribute) raises `TypeError`; drop `cache=` for that field.
@@ -85,3 +85,8 @@ that can change.
 - **Format changes orphan entries.** Keys include a cache format version;
   after an upgrade that bumps it, old entries are never hit again. Call
   `cache.clear()` to reclaim the space.
+- **Entries from before the switch to GeoArray** (written with georeader
+  `GeoTensor` chips) still decode, as `GeoArray`. A field whose key
+  changed with the switch (a georeader reader now behind
+  `source_from_georeader`, whose CRS text differs) misses once and is
+  rewritten.

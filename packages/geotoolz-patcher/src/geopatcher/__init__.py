@@ -7,8 +7,9 @@ The root holds what every patching job touches:
   patches, ``merge`` processed patches back into one field.
 - **Carriers** — `Patch`, `TemporalPatch`, `SpatioTemporalPatch`.
 - **Fields** — the `Field` / `AsyncField` / `Domain` protocols and
-  `RasterField`, the adapter for any georeader reader (a GeoTIFF, a COG
-  through rasterio, an in-memory `GeoTensor`).
+  `RasterField`, the adapter for any `geoarray.RasterSource` (an in-memory
+  `geoarray.GeoArray`, a lazy file or product reader, a COG). Patches of a
+  raster field are `GeoArray` chips.
 
 Everything else lives in one sub-namespace per task:
 
@@ -36,7 +37,7 @@ patcher = SpatialPatcher(
     window=spatial.window.Hann(),
     aggregation=spatial.aggregation.OverlapAdd(),
 )
-field = RasterField(reader)
+field = RasterField(scene)  # a geoarray.GeoArray or any RasterSource
 outputs = [p.with_data(model(p.data)) for p in patcher.split(field)]
 merged = patcher.merge(outputs, field.domain)
 ```

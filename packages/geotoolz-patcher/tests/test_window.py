@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geopatcher import RasterField, SpatialPatcher, spatial
 
@@ -160,8 +160,8 @@ _C = 3.25
 
 def _constant_field(n: int) -> RasterField:
     return RasterField(
-        GeoTensor(
-            values=np.full((n, n), _C, dtype=np.float64),
+        GeoArray(
+            data=np.full((n, n), _C, dtype=np.float64),
             transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
             crs="EPSG:32630",
         )
@@ -171,7 +171,7 @@ def _constant_field(n: int) -> RasterField:
 def _merge_identity(patcher: SpatialPatcher, field: RasterField) -> np.ndarray:
     patches = [
         type(p)(
-            data=np.asarray(p.data.values),
+            data=np.asarray(p.data),
             anchor=p.anchor,
             indices=p.indices,
             weights=p.weights,

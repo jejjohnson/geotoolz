@@ -31,8 +31,10 @@ from threading import BoundedSemaphore, Condition, Event
 from typing import Any
 
 import numpy as np
+from geoarray import GeoArray
 
 from geopatcher._src._serialize import patcher_config
+from geopatcher._src.carrier import as_pixel_window, pad_carrier, raster_grid
 from geopatcher._src.domains import GridDomain
 from geopatcher._src.hooks import (
     PatcherHook,
@@ -486,9 +488,9 @@ class SpatialPatcher(_SpatialPatcherBase):
         `merge` returns the aggregation's raw output (see ADR-007 in
         ``docs/patcher/decisions.md``); this wraps it back onto the
         field's grid so the transform, CRS, nodata
-        (``fill_value_default`` / ``rio.nodata``) and attrs of the source
+        (``fill_value`` / ``rio.nodata``) and attrs of the source
         survive. What comes back is the adapter's ``with_data`` result: a
-        `GeoTensor` for `RasterField`, a `RioXarrayField` / `XarrayField`
+        `geoarray.GeoArray` for `RasterField`, a `RioXarrayField` / `XarrayField`
         wrapping the rebuilt ``DataArray`` (``.da``) for the xarray
         adapters.
 
@@ -498,7 +500,7 @@ class SpatialPatcher(_SpatialPatcherBase):
 
         On a raster field the patches may carry a different band count
         than the source — a per-patch operator that turns four bands into
-        one index merges into a ``(1, H, W)`` `GeoTensor` on the source
+        one index merges into a ``(1, H, W)`` `GeoArray` on the source
         grid, with the stale per-band ``attrs`` dropped and a NaN fill for
         the new float quantity. The xarray adapters keep their dims and
         coords, so they need the domain's own shape.
@@ -521,10 +523,10 @@ class SpatialPatcher(_SpatialPatcherBase):
                 the domain's, or — on an xarray field — any axis does).
 
         Examples:
-            Stitch Hann-weighted chips back into a `GeoTensor`::
+            Stitch Hann-weighted chips back into a `GeoArray`::
 
                 out = patcher.merge_to_field(patcher.split(field), field)
-                out.transform == field.reader.transform  # True
+                out.grid == field.reader.grid  # True
 
             Keep the raw array instead::
 
@@ -1157,20 +1159,19 @@ def _source_dtype(field: Any) -> np.dtype | None:
 
 
 def on_domain_grid(merged: Any, aggregation: SpatialAggregation, domain: Any) -> Any:
-    """A dense merge result as a `GeoTensor` on a georeferenced domain's grid.
+    """A dense merge result as a `GeoArray` on a raster domain's grid.
 
     The pipekit ``MergePatches`` operator's counterpart of `merge_to_field` when
-    only the domain is at hand: a ``numpy`` array merged onto a domain
-    with a ``transform`` and a ``crs`` is rewrapped like a raster field's
-    ``with_data`` (`_rewrap`), any band count included. Anything else —
-    a ``dict``, a streaming zarr array, a domain without georeferencing —
-    is returned unchanged.
+    only the domain is at hand: a ``numpy`` array merged onto a raster
+    domain (a `geoarray.Grid`, or anything with a ``grid``, see
+    `RasterDomain`) is rewrapped like a raster field's ``with_data``
+    (`_rewrap`), any band count included. Anything else — a ``dict``, a
+    streaming zarr array, a non-raster domain — is returned unchanged.
     """
     from geopatcher._src.fields.raster import _rewrap
 
-    if not isinstance(merged, np.ndarray) or not all(
-        hasattr(domain, attr) for attr in ("transform", "crs")
-    ):
+    grid = raster_grid(domain)
+    if not isinstance(merged, np.ndarray) or grid is None:
         return merged
     values = _field_values(
         merged,
@@ -1187,7 +1188,7 @@ def on_domain_grid(merged: Any, aggregation: SpatialAggregation, domain: Any) ->
         dtype=_source_dtype(domain),
         source_fill=_source_fill(domain),
     )
-    return _with_nodata(_rewrap(domain, values, domain.transform, domain.crs), fill)
+    return _with_nodata(_rewrap(domain, values, grid), fill)
 
 
 def _merge_nodata(
@@ -1210,7 +1211,7 @@ def _merge_nodata(
       aggregation left in its gaps is rewritten to it (NaN only ever
       marks a missing cell).
     * Anything else is a new quantity, NaN-filled. Its per-patch operator
-      marks nodata as NaN (the `GeoTensor` contract), so NaN is the one
+      marks nodata as NaN (the carrier contract), so NaN is the one
       missing value it holds.
 
     Returns:
@@ -1234,28 +1235,31 @@ def _merge_nodata(
 
 
 def _with_nodata(out: Any, fill: Any) -> Any:
-    """Declare ``fill`` as the nodata of a `GeoTensor` ``out`` (others unchanged)."""
-    from georeader.geotensor import GeoTensor
-
-    if isinstance(out, GeoTensor):
-        out.fill_value_default = fill
+    """``out`` declaring ``fill`` as its nodata, if a `GeoArray` (others unchanged)."""
+    if isinstance(out, GeoArray):
+        return out.replace(fill_value=fill)
     return out
 
 
 def _source_fill(field: Any) -> Any:
-    """The source's nodata: ``fill_value_default`` of the field, reader or domain."""
+    """The source's nodata: ``fill_value`` of the field, reader or domain."""
     for owner in (
         field,
         getattr(field, "reader", None),
         getattr(field, "domain", None),
     ):
-        if owner is not None and hasattr(owner, "fill_value_default"):
-            return owner.fill_value_default
+        if owner is not None and not _is_xarray(owner) and hasattr(owner, "fill_value"):
+            return owner.fill_value
     return None
 
 
+def _is_xarray(obj: Any) -> bool:
+    """An xarray object, whose attribute lookup also reaches its ``attrs``."""
+    return hasattr(obj, "dims") and hasattr(obj, "coords")
+
+
 def _is_raster_field(field: Any) -> bool:
-    """Whether ``field.with_data`` rebuilds a `GeoTensor`, of any band count.
+    """Whether ``field.with_data`` rebuilds a `GeoArray`, of any band count.
 
     The xarray-backed adapters (``.da`` / ``.array``) keep their dims and
     coords, so they can only take values of the domain's own shape.
@@ -1365,8 +1369,8 @@ def _safe_base_weights(
 def _measure_bytes(patch: Any, limit: int) -> int:
     """Byte size of ``patch.data`` checked against ``limit``.
 
-    Uses `_nbytes` attribute probing (``.nbytes`` on NumPy / dask / xarray /
-    GeoTensor payloads, then ``.data.nbytes``) so a lazy carrier is sized
+    Uses `_nbytes` attribute probing (``.nbytes`` on NumPy / dask / xarray
+    payloads, then ``.data.nbytes`` — a `GeoArray`) so a lazy carrier is sized
     from its dtype and shape without computing a single chunk.
     """
     nbytes = _nbytes(patch.data)
@@ -1672,30 +1676,23 @@ def _placeholder_carrier(
 
     A field's own ``placeholder(indexer, data)`` decides when it has one
     (the xarray adapters return a `DataArray`); otherwise a raster window
-    on a domain with ``transform`` and ``crs`` gives a NaN-filled
-    `GeoTensor` on the window's grid; anything else stays a bare array.
+    on a georeferenced raster domain (a grid with a CRS) gives a NaN-filled
+    `GeoArray` on the window's grid; anything else stays a bare array.
     Never reads the field.
     """
     window = _unwrap_for_select(indices)
     placeholder = getattr(field, "placeholder", None)
     if placeholder is not None:
         return placeholder(window, data)
-    from rasterio.windows import Window, transform as window_transform
+    from rasterio.windows import Window
 
-    transform = getattr(domain, "transform", None)
-    crs = getattr(domain, "crs", None)
-    if not isinstance(window, Window) or transform is None or crs is None:
+    grid = raster_grid(domain)
+    if not isinstance(window, Window) or grid is None or grid.crs is None:
         return data
     if not 2 <= data.ndim <= 4:
         return data
-    from georeader.geotensor import GeoTensor
-
-    return GeoTensor(
-        data,
-        transform=window_transform(window, transform),
-        crs=crs,
-        fill_value_default=np.nan,
-    )
+    chip = grid.crop(as_pixel_window(window))
+    return GeoArray(data, chip.transform, chip.crs, fill_value=np.nan)
 
 
 def _indices_hw(indices: Any) -> tuple[int, int]:
@@ -1934,9 +1931,8 @@ def _pad_request(indices: Any, domain: Any) -> _PadRequest | None:
 
 def _carrier_nodata(data: Any) -> Any:
     """Best-effort nodata / fill value for a selected patch carrier."""
-    fill = getattr(data, "fill_value_default", None)
-    if fill is not None:
-        return fill
+    if isinstance(data, GeoArray) and data.fill_value is not None:
+        return data.fill_value
     rio = getattr(data, "rio", None) if _is_rio_dataarray(data) else None
     if rio is not None and getattr(rio, "nodata", None) is not None:
         return rio.nodata
@@ -1977,9 +1973,7 @@ def _is_rio_dataarray(data: Any) -> bool:
     """True for an `xarray.DataArray` carrying a rioxarray ``.rio`` accessor.
 
     Checked structurally (``dims`` + ``rio``) so xarray stays an optional
-    import. Tested before the `GeoTensor` branch because xarray exposes
-    ``attrs`` keys as attributes — a DataArray with a ``transform`` attr
-    would otherwise look like a GeoTensor.
+    import.
     """
     return hasattr(data, "dims") and hasattr(data, "coords") and hasattr(data, "rio")
 
@@ -1990,8 +1984,8 @@ def _pad_carrier(
     """Pad a selected carrier up to full size, preserving georeferencing.
 
     Handles a rioxarray `DataArray` (coords rebuilt from the shifted
-    affine, transform written), a georeader `GeoTensor` (whose ``pad``
-    shifts the transform), and a plain ndarray.
+    affine, transform written), a `GeoArray` (transform shifted, its own
+    fill kept: `pad_carrier`), and a plain ndarray.
     """
     pt, pb, pl, pr = pads
     if pt == pb == pl == pr == 0:
@@ -2000,9 +1994,8 @@ def _pad_carrier(
         from geopatcher._src.fields.rio_xarray import pad_dataarray
 
         return pad_dataarray(data, pads, mode=mode, fill=fill)
-    const = {"constant_values": fill} if mode == "constant" else {}
-    if hasattr(data, "pad") and hasattr(data, "transform"):
-        return data.pad({"y": (pt, pb), "x": (pl, pr)}, mode=mode, **const)
+    if isinstance(data, GeoArray):
+        return pad_carrier(data, pads, mode, fill)
     arr = np.asarray(data)
     pad_width = [(0, 0)] * (arr.ndim - 2) + [(pt, pb), (pl, pr)]
     if mode == "constant":
@@ -2026,8 +2019,8 @@ def _crop_carrier(data: Any, rows: slice, cols: slice) -> Any:
             height=sub.sizes[y_dim],
         )
         return _georeference(sub, window_transform(window, data.rio.transform()))
-    if hasattr(data, "isel") and hasattr(data, "transform"):
-        return data.isel({"y": rows, "x": cols})
+    if isinstance(data, GeoArray):
+        return data[..., rows, cols]
     return np.asarray(data)[..., rows, cols]
 
 

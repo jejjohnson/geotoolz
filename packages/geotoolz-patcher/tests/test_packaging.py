@@ -35,6 +35,7 @@ SRC = PACKAGE_ROOT / "src" / "geopatcher"
 PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
 
 IMPORT_TO_DIST = {
+    "geoarray": "geotoolz-array",
     "geocloud": "geotoolz-cloud",
     "georeader": "georeader-spaceml",
     "typing_extensions": "typing-extensions",
@@ -165,10 +166,12 @@ def _used_distributions() -> set[str]:
 def test_scanner_sees_known_imports() -> None:
     # Guard against a scanner bug silently making the tests vacuous.
     module_scope = _module_scope_sites()
-    for expected in ("numpy", "georeader", "rasterio"):
+    for expected in ("numpy", "geoarray", "rasterio"):
         assert expected in module_scope, expected
     used = _used_distributions()
-    for lazy in ("xarray", "zarr", "jax", "geotoolz-cloud", "pipekit", "pyproj"):
+    # georeader is an internal engine, imported only where it runs.
+    lazy_dists = ("xarray", "zarr", "jax", "geotoolz-cloud", "pipekit", "pyproj")
+    for lazy in (*lazy_dists, "georeader-spaceml"):
         assert lazy in used, lazy
         assert lazy not in {_dist(r) for r in module_scope}, lazy
 

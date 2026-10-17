@@ -255,10 +255,10 @@ def test_select_many_with_pad(raster_field_factory, boundary: str) -> None:
     assert [p.anchor for p in out] == [p.anchor for p in expected]
     for got, want in zip(out, expected, strict=True):
         assert got.data.shape == (4, 4)
-        np.testing.assert_array_equal(got.data.values, want.data.values)
-        assert got.data.transform == want.data.transform
+        np.testing.assert_array_equal(np.asarray(got.data), np.asarray(want.data))
+        assert got.data.grid.affine == want.data.grid.affine
     merged = patcher.merge(out, field.domain)
-    np.testing.assert_array_equal(merged, np.asarray(field.reader.values))
+    np.testing.assert_array_equal(merged, np.asarray(field.reader))
 
 
 @dataclass

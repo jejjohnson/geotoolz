@@ -322,16 +322,16 @@ class TestMatchedTemporalPatchInvariants:
 
 def _raster_series(values: np.ndarray, fill: Any = np.nan) -> Any:
     import rasterio
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
     from geopatcher._src.fields.raster import RasterField
 
     return RasterField(
-        GeoTensor(
-            values=values,
+        GeoArray(
+            data=values,
             transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
             crs="EPSG:32629",
-            fill_value_default=fill,
+            fill_value=fill,
         )
     )
 
@@ -412,7 +412,7 @@ def test_n_anchors_and_anchors_read_the_primary_only() -> None:
 
 def test_valid_mask_uses_source_nodata() -> None:
     # int16 series with nodata 0: the members are bare ndarray slices,
-    # but the mask still honours the source carrier's fill_value_default.
+    # but the mask still honours the source carrier's fill_value.
     values = np.ones((15, 2, 2), dtype=np.int16)
     values[10] = 0
     mf = MatchedField(primary=_raster_series(values, fill=0))

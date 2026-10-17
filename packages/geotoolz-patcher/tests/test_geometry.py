@@ -1,8 +1,8 @@
 """Tests for `spatial.geometry.Geometry` subclasses.
 
-We use georeader's `GeoTensor` as the concrete raster domain (it
-satisfies `GeoDataBase`), and synthetic Grid/Point/Vector domains for
-the others.
+We use a `geoarray.GeoArray` as the concrete raster domain (it satisfies
+`RasterDomain`: a ``grid`` plus a ``shape``), and synthetic Grid/Point/Vector
+domains for the others.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import pandas as pd
 import pytest
 import rasterio
 import shapely
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio import features
 from rasterio.windows import Window, transform as window_transform
 from scipy.spatial import cKDTree
@@ -25,9 +25,9 @@ from geopatcher.fields import GridDomain, PointDomain
 
 
 @pytest.fixture
-def raster_domain() -> GeoTensor:
-    return GeoTensor(
-        values=np.zeros((1, 100, 100), dtype=np.float32),
+def raster_domain() -> GeoArray:
+    return GeoArray(
+        data=np.zeros((1, 100, 100), dtype=np.float32),
         transform=rasterio.Affine.translation(0, 100) * rasterio.Affine.scale(1, -1),
         crs="EPSG:32630",
     )
@@ -47,7 +47,7 @@ def point_domain() -> PointDomain:
 
 
 class TestSpatialRectangular:
-    def test_raster_neighborhood(self, raster_domain: GeoTensor) -> None:
+    def test_raster_neighborhood(self, raster_domain: GeoArray) -> None:
         g = spatial.geometry.Rectangular(size=(8, 8))
         win = g.neighborhood(raster_domain, anchor=(10, 20))
         assert int(win.row_off) == 10
@@ -128,10 +128,10 @@ class TestSpatialSphericalCap:
         assert patches
         for p in patches:
             assert p.weights.shape == p.data.shape
-            centre_lat = da["lat"].values[p.anchor["lat"]]
-            centre_lon = da["lon"].values[p.anchor["lon"]]
-            lat = p.data["lat"].values[None, None, :]
-            lon = p.data["lon"].values[None, :, None]
+            centre_lat = np.asarray(da["lat"])[p.anchor["lat"]]
+            centre_lon = np.asarray(da["lon"])[p.anchor["lon"]]
+            lat = np.asarray(p.data["lat"])[None, None, :]
+            lon = np.asarray(p.data["lon"])[None, :, None]
             inside = _haversine_km(centre_lat, centre_lon, lat, lon) <= 15.0
             np.testing.assert_array_equal(
                 p.weights, np.broadcast_to(inside, p.data.shape)
@@ -239,7 +239,7 @@ _NON_ALIGNED_POLYGONS: list[tuple[str, Any, tuple[int, int, int, int]]] = [
 
 def _poly_raster_field() -> RasterField:
     arr = np.arange(_POLY_H * _POLY_W, dtype=np.float32).reshape(_POLY_H, _POLY_W)
-    return RasterField(GeoTensor(values=arr, transform=_POLY_T, crs="EPSG:32630"))
+    return RasterField(GeoArray(data=arr, transform=_POLY_T, crs="EPSG:32630"))
 
 
 def _poly_patcher(polys: list[Any]) -> SpatialPatcher:
@@ -283,9 +283,9 @@ class TestSpatialPolygonIntersectionRaster:
         rs, cs = window.toslices()
         # The chip is exactly the read of the rounded, in-domain window.
         np.testing.assert_array_equal(
-            np.asarray(patch.data.values), field.reader.values[rs, cs]
+            np.asarray(patch.data), np.asarray(field.reader)[rs, cs]
         )
-        assert patch.data.transform == window_transform(window, _POLY_T)
+        assert patch.data.grid.affine == window_transform(window, _POLY_T)
         # Mask cells are the raster's pixels: centre membership, sliced.
         assert patch.weights.shape == (window.height, window.width)
         np.testing.assert_array_equal(patch.weights, _centre_membership(poly)[rs, cs])
@@ -311,7 +311,7 @@ class TestSpatialPolygonIntersectionRaster:
         merged = np.asarray(patcher.merge(patcher.split(field), field.domain))
 
         covered = np.logical_or.reduce([_centre_membership(p) for p in polys])
-        source = field.reader.values
+        source = np.asarray(field.reader)
         assert merged.shape == source.shape
         # Every pixel whose centre lies in some polygon is reconstructed
         # exactly (overlaps average identical values); every other pixel

@@ -13,12 +13,12 @@ Feed the merge a generator, so only one patch is alive at a time.
 import numpy as np
 import rasterio
 import zarr
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.outer(np.linspace(0, 1, 256), np.linspace(0, 1, 256)).astype(np.float32)[None],  # (1, 256, 256) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",
@@ -58,12 +58,12 @@ then converts it block by block into a tiled COG with overviews and
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.ones((1, 512, 512), dtype=np.float32),       # (1, 512, 512) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",
@@ -96,12 +96,12 @@ merge writes tiles to disk. This is a recipe, not a class.
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.random.default_rng(0).random((1, 2048, 2048), dtype=np.float32),  # (1, 2048, 2048) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",
@@ -128,7 +128,7 @@ def model(chip: np.ndarray) -> np.ndarray:
     return chip * 2.0                                   # (1, 256, 256) float32 → (1, 256, 256) float32
 
 
-def run_inner(tile: GeoTensor) -> np.ndarray:
+def run_inner(tile: GeoArray) -> np.ndarray:
     """Patch one super-tile with the inner patcher and stitch it in RAM."""
     sub: gp.RasterField = gp.RasterField(tile)          # (1, 1024, 1024) float32
     chips = (p.with_data(model(np.asarray(p.data))) for p in inner.split(sub))
@@ -152,12 +152,12 @@ runs ahead of the operator.
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.zeros((1, 512, 512), dtype=np.float32),      # (1, 512, 512) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",

@@ -35,7 +35,7 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.enums import Resampling
 
 from geopatcher import spatial
@@ -54,13 +54,13 @@ from geopatcher._src.spatial.patcher import SpatialPatcher
 # ---------------------------------------------------------------------------
 
 
-def _gt(values: np.ndarray) -> GeoTensor:
-    """10m-pixel UTM 29N GeoTensor."""
-    return GeoTensor(
-        values=values,
+def _gt(values: np.ndarray) -> GeoArray:
+    """10m-pixel UTM 29N GeoArray."""
+    return GeoArray(
+        data=values,
         transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
         crs="EPSG:32629",
-        fill_value_default=np.nan,
+        fill_value=np.nan,
     )
 
 
@@ -86,7 +86,7 @@ class TestIdentityCoregFullPipeline:
     unchanged; after split/merge we expect both members to match
     their source field bit-for-bit."""
 
-    def _build(self) -> tuple[MatchedSpatialPatcher, MatchedField, GeoTensor]:
+    def _build(self) -> tuple[MatchedSpatialPatcher, MatchedField, GeoArray]:
         primary_tensor = _gt(_checkerboard((16, 16)))
         secondary_tensor = _gt(_checkerboard((16, 16)) + 1000.0)
         mf = MatchedField(
@@ -414,9 +414,13 @@ class TestRoundTripIdentity:
 
 def _reproject_like(raw: Any, like: Any) -> Any:
     """`RasterToRasterLike`-style coreg: warp ``raw`` onto ``like``'s grid."""
+    from geoarray.interop.georeader import from_georeader, to_georeader
     from georeader.read import read_reproject_like
 
-    return read_reproject_like(raw, like, resampling=Resampling.average)
+    warped = read_reproject_like(
+        to_georeader(raw), to_georeader(like), resampling=Resampling.average
+    )
+    return from_georeader(warped)
 
 
 def _tiled_patcher(size: int) -> SpatialPatcher:
@@ -435,11 +439,11 @@ class TestHeterogeneousGrids:
         # primary grid recovers the block value exactly: the aligned
         # secondary equals ``primary + 1000`` pixel-for-pixel.
         primary_values = _checkerboard((16, 16))
-        secondary = GeoTensor(
-            values=np.kron(primary_values + 1000.0, np.ones((2, 2), np.float32)),
+        secondary = GeoArray(
+            data=np.kron(primary_values + 1000.0, np.ones((2, 2), np.float32)),
             transform=rasterio.Affine(5.0, 0.0, 500_000.0, 0.0, -5.0, 4_000_000.0),
             crs="EPSG:32629",
-            fill_value_default=np.nan,
+            fill_value=np.nan,
         )
         mf = MatchedField(
             primary=RasterField(_gt(primary_values)),
@@ -466,11 +470,11 @@ class TestHeterogeneousGrids:
         primary = _gt(_checkerboard((16, 16)))
         lon = np.linspace(-12.0, -6.0, 600, dtype=np.float32)
         lat = np.linspace(39.0, 33.0, 600, dtype=np.float32)
-        secondary = GeoTensor(
-            values=(lon[None, :] * 10.0 + lat[:, None]).astype(np.float32),
+        secondary = GeoArray(
+            data=(lon[None, :] * 10.0 + lat[:, None]).astype(np.float32),
             transform=rasterio.Affine(0.01, 0.0, -12.0, 0.0, -0.01, 39.0),
             crs="EPSG:4326",
-            fill_value_default=np.nan,
+            fill_value=np.nan,
         )
         mf = MatchedField(
             primary=RasterField(primary),
@@ -518,7 +522,7 @@ class TestHeterogeneousGrids:
         seen: list[Any] = []
 
         class _Recording(RasterField):
-            def select(self, window: Any) -> GeoTensor:
+            def select(self, window: Any) -> GeoArray:
                 seen.append(window)
                 return super().select(window)
 
@@ -534,16 +538,16 @@ class TestHeterogeneousGrids:
 
 
 class TestValidMaskNodata:
-    def test_valid_mask_uses_fill_value_default(self) -> None:
+    def test_valid_mask_uses_fill_value(self) -> None:
         # int16 carriers declaring nodata 0: zero cells are invalid even
         # though they are finite.
         values = np.zeros((4, 4), dtype=np.int16)
         values[0, :] = 7
-        tensor = GeoTensor(
-            values=values,
+        tensor = GeoArray(
+            data=values,
             transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
             crs="EPSG:32629",
-            fill_value_default=0,
+            fill_value=0,
         )
         mf = MatchedField(
             primary=RasterField(tensor),
@@ -552,7 +556,7 @@ class TestValidMaskNodata:
         )
         (mp,) = MatchedSpatialPatcher(primary=_tiled_patcher(4)).split(mf)
         assert mp.valid_mask is not None
-        expected = np.asarray(tensor.validmask())
+        expected = np.asarray(tensor.valid_mask())
         for name in (PRIMARY_KEY, "s"):
             np.testing.assert_array_equal(mp.valid_mask[name], expected)
         assert mp.valid_mask[PRIMARY_KEY].sum() == 4

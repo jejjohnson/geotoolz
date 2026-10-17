@@ -40,6 +40,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from geoarray import GeoArray
 from rasterio.windows import Window
 
 from geopatcher._src._serialize import patcher_config
@@ -80,8 +81,8 @@ def _compute_valid_mask(data: Any, nodata: Any = None) -> np.ndarray | None:
     """Best-effort validity mask for ``data`` (True = valid).
 
     A cell is invalid when it equals the carrier's declared nodata —
-    a `GeoTensor`'s ``fill_value_default`` (exactly what its
-    ``validmask()`` tests) or a rioxarray `DataArray`'s ``rio.nodata``
+    a `GeoArray`'s ``fill_value`` (exactly what its
+    ``valid_mask()`` tests) or a rioxarray `DataArray`'s ``rio.nodata``
     — and, for floating / complex data, when it is NaN or ±inf. Integer
     nodata (the norm for L1/L2 products, and what a reproject-like coreg
     pads with) is therefore masked; a bare ndarray carries no nodata, so
@@ -122,7 +123,9 @@ def _declared_nodata(data: Any) -> Any:
 
     if _is_rio_dataarray(data):
         return getattr(data.rio, "nodata", None)
-    return getattr(data, "fill_value_default", None)
+    if isinstance(data, GeoArray):
+        return data.fill_value
+    return None
 
 
 def _validate_aggregator_names(
@@ -208,9 +211,16 @@ def _unpack_matched(
     data = patch.data
     if getattr(patch, "masked", False) and isinstance(mfield, MatchedField):
         names = (PRIMARY_KEY, *mfield.secondaries)
-        return {name: data.copy() for name in names}, True
+        return {name: _copy_carrier(data) for name in names}, True
     _check_matched_dict(data, cls_name, expects)
     return data, False
+
+
+def _copy_carrier(data: Any) -> Any:
+    """An independent copy of a placeholder carrier (`GeoArray` or array)."""
+    if isinstance(data, GeoArray):
+        return data.with_data(np.array(data.data, copy=True))
+    return data.copy()
 
 
 def _compute_member_masks(
@@ -627,7 +637,7 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
         Per-source ``valid_mask`` arrays are computed when
         ``mfield.valid_mask`` is True (the default): for numeric
         array-coercible data a cell is invalid where it equals the
-        carrier's declared nodata (``fill_value_default`` /
+        carrier's declared nodata (``fill_value`` /
         ``rio.nodata``) or, for float data, is NaN / ±inf. Non-array
         members are simply omitted from the mask dict (and the dict
         drops to ``None`` if no member produced a mask).

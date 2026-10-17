@@ -53,14 +53,14 @@ double each patch and stitch the result with Hann-feathered seams.
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 
-# 1. Wrap any GeoTensor (or lazy georeader reader) as a Field.
+# 1. Wrap a GeoArray (or any lazy geoarray.RasterSource) as a Field.
 arr: np.ndarray = np.outer(np.linspace(0, 1, 512), np.linspace(0, 1, 512)).astype(np.float32)[None]  # (1, 512, 512) float32
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(arr, transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000), crs="EPSG:32611")
+    GeoArray(arr, rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000), "EPSG:32611")
 )
 
 # 2. Compose the four axes.
@@ -72,14 +72,14 @@ patcher: gp.SpatialPatcher = gp.SpatialPatcher(
 )
 
 # 3. Split → operate per patch → merge.
-patches: list[gp.Patch] = list(patcher.split(field))               # 25 × (1, 128, 128) float32
+patches: list[gp.Patch] = list(patcher.split(field))               # 25 × GeoArray (1, 128, 128) float32
 out: list[gp.Patch] = [p.with_data(np.asarray(p.data) * 2.0) for p in patches]  # 25 × (1, 128, 128) float32
 stitched: np.ndarray = patcher.merge(out, field.domain)             # (1, 512, 512) float64
 ```
 
 `patch.anchor` is the patch origin in pixels (`(0, 0)`, `(0, 96)`, …).
 `merge` returns a bare array; `patcher.merge_to_field(out, field)` returns
-a `GeoTensor` with the source's transform and CRS. The Hann taper never
+a `GeoArray` with the source's transform and CRS. The Hann taper never
 reaches zero, so every covered pixel — the scene's edges included — comes
 back as data; see [Window convention](patching.md#window-convention).
 
@@ -118,18 +118,18 @@ The `[pipekit]` bridge makes *split → operate → merge* one more
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 import geoops as gz
 from geoops.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 rng: np.random.Generator = np.random.default_rng(0)
-scene: GeoTensor = GeoTensor(
+scene: GeoArray = GeoArray(
     rng.integers(1, 10_000, size=(4, 512, 512), dtype=np.uint16),  # (4, 512, 512) uint16
     transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
     crs="EPSG:32611",
-    fill_value_default=0,
+    fill_value=0,
     attrs={"band_names": ["blue", "green", "red", "nir"]},
 )
 field: gp.RasterField = gp.RasterField(scene)
@@ -146,7 +146,7 @@ tiled: gz.Sequential = gz.Sequential([
     ApplyToChips(operator=ndvi),           # (4, 128, 128) uint16 → (128, 128) float64
     MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-ndvi_map: GeoTensor = tiled(field)         # (512, 512) float64 · NaN = no data
+ndvi_map: GeoArray = tiled(field)          # (512, 512) float64 · NaN = no data
 ```
 
 The domain fixes the grid and the patches fix the bands, so NDVI's
