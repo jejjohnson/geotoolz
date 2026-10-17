@@ -119,7 +119,7 @@ def resolve_axes(
 def _canonical_axis_order(ndim: int) -> tuple[str, ...]:
     if ndim < 2:
         raise ValueError(
-            "GeoTensorEstimator expects at least 2 dimensions ((H, W), "
+            "GeoArrayEstimator expects at least 2 dimensions ((H, W), "
             f"(C, H, W) or (T, C, H, W)); got a {ndim}-D input"
         )
     if ndim == 2:

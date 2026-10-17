@@ -59,12 +59,12 @@ class TestModelValidation:
             ModelOp(model=_SklearnLike(), method="decision_function")
 
     def test_output_is_not_rewrapped(self) -> None:
-        from _helpers import toy_geotensor
-        from georeader.geotensor import GeoTensor
+        from _helpers import toy_geoarray
+        from geoarray import GeoArray
 
-        out = ModelOp(model=_Doubler())(toy_geotensor(np.ones((2, 3, 3))))
+        out = ModelOp(model=_Doubler())(toy_geoarray(np.ones((2, 3, 3))))
         assert type(out) is np.ndarray
-        assert not isinstance(out, GeoTensor)
+        assert not isinstance(out, GeoArray)
 
 
 class TestBatching:

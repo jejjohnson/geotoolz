@@ -4,7 +4,7 @@ Band-space operators — selection, math, spectral response, continuum removal �
 and multispectral cubes.
 
 - **Band selection:** `SelectBands`, `ReorderBands`, `SplitBands`, `StackBands` — by index or
-  name (`StackBands` requires every input on the same grid with the same `fill_value_default`)
+  name (`StackBands` requires every input on the same grid with the same `fill_value`)
 - **Band math:** `BandMath` (restricted arithmetic expression over named bands), `BandRatio`
 - **Spectral resampling:** `SpectralBinning`, `SpectralSmoothing`
 - **Continuum removal:** `ContinuumRemoval`

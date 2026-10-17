@@ -1,6 +1,6 @@
 """Shared shape-normalisation primitives.
 
-georeader's ``GeoTensor`` is 2-D to 4-D with dims
+A `geoarray.GeoArray` is 2-D to 4-D with dims
 ``("time", "band", "y", "x")[-ndim:]``: the spatial axes are always the
 trailing two and the band axis, when there is one, is always ``-3``
 (never ``0`` -- on a ``(T, C, H, W)`` stack axis ``0`` is time). The
@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterable
 from typing import Any, Final
 
 import numpy as np
+from geoarray import GeoArray
 from jaxtyping import Shaped
 
 
@@ -147,9 +148,8 @@ def keep_band_axis(out: Any, ref: Any) -> Any:
 
 
 def _frame(x: Any, t: int) -> Any:
-    isel = getattr(x, "isel", None)
-    if isel is not None and getattr(x, "dims", None) == ("time", "band", "y", "x"):
-        return isel({"time": t})
+    if isinstance(x, GeoArray) and x.dims == ("time", "band", "y", "x"):
+        return x[t]
     return np.asarray(x)[t]
 
 
@@ -164,16 +164,15 @@ def map_frames(fn: Callable[[Any], Any], x: Any, *, name: str) -> Any:
 
     Args:
         fn: Function of one ``(C, H, W)`` frame returning an ``(H, W)`` or
-            ``(C', H', W')`` carrier (GeoTensor or ndarray).
+            ``(C', H', W')`` carrier (GeoArray or ndarray).
         x: The input. Only a 4-D input is split; anything else is passed to
             ``fn`` unchanged.
         name: Operator name for error messages.
 
     Returns:
-        The ``(T, C', H', W')`` restacked result, a GeoTensor (georeferenced
-        like the first frame's result, with a copy of its attrs and its
-        fill value) when the per-frame results are GeoTensors, else an
-        ndarray.
+        The ``(T, C', H', W')`` restacked result, a GeoArray (georeferenced
+        like the first frame's result, with its attrs and fill value) when
+        the per-frame results are GeoArrays, else an ndarray.
 
     Raises:
         ValueError: If a per-frame result is not a 2-D / 3-D array, or the
@@ -184,7 +183,7 @@ def map_frames(fn: Callable[[Any], Any], x: Any, *, name: str) -> Any:
     outs = [fn(_frame(x, t)) for t in range(np.shape(x)[0])]
     arrays = []
     for out in outs:
-        if not isinstance(out, np.ndarray) or out.ndim not in (2, 3):
+        if not isinstance(out, np.ndarray | GeoArray) or out.ndim not in (2, 3):
             raise ValueError(
                 f"{name} returns {type(out).__name__} per frame, which cannot be "
                 "restacked into a (T, C, H, W) time series; apply it to each "
@@ -194,7 +193,11 @@ def map_frames(fn: Callable[[Any], Any], x: Any, *, name: str) -> Any:
         arrays.append(arr[None] if arr.ndim == 2 else arr)
     first = outs[0]
     if len({a.shape for a in arrays}) != 1 or any(
-        getattr(o, "transform", None) != getattr(first, "transform", None)
+        isinstance(o, GeoArray) != isinstance(first, GeoArray)
+        or (
+            isinstance(o, GeoArray)
+            and not np.array_equal(np.asarray(o.transform), np.asarray(first.transform))
+        )
         for o in outs[1:]
     ):
         raise ValueError(
@@ -202,17 +205,9 @@ def map_frames(fn: Callable[[Any], Any], x: Any, *, name: str) -> Any:
             "be restacked into a (T, C, H, W) time series"
         )
     stacked = np.stack(arrays)
-    if not hasattr(first, "transform"):
+    if not isinstance(first, GeoArray):
         return stacked
-    from georeader.geotensor import GeoTensor
-
-    return GeoTensor(
-        stacked,
-        transform=first.transform,
-        crs=first.crs,
-        fill_value_default=first.fill_value_default,
-        attrs=dict(first.attrs or {}),
-    )
+    return first.with_data(stacked, attrs=first.attrs)
 
 
 def over_frames(apply: Callable[..., Any]) -> Callable[..., Any]:

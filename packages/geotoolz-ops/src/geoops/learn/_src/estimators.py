@@ -1,4 +1,4 @@
-"""scikit-learn estimator marshalling for GeoTensor inputs."""
+"""scikit-learn estimator marshalling for GeoArray inputs."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from geoops.learn._src.array import (
 
 
 if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
 
 NanStrategy = Literal[
@@ -49,8 +49,8 @@ Task = Literal[
 _IMPUTE_STRATEGIES = {"impute_simple", "impute_knn", "impute_iterative"}
 
 
-class GeoTensorEstimator:
-    """Marshall a scikit-learn estimator to and from GeoTensor-shaped data.
+class GeoArrayEstimator:
+    """Marshall a scikit-learn estimator to and from GeoArray-shaped data.
 
     scikit-learn works on 2-D ``(n_samples, n_features)`` matrices while
     remote-sensing cubes are channel-first rasters. This class owns the
@@ -83,26 +83,26 @@ class GeoTensorEstimator:
     stay channel-first.
 
     Nodata: a sample row is *invalid* when any of its elements is
-    non-finite or equals the carrier's ``fill_value_default`` (see
+    non-finite or equals the carrier's ``fill_value`` (see
     :mod:`geoops._src.valid`; plain ndarrays have no fill, so only
     non-finite values count). The ``nan_*`` strategies apply to every
     invalid row, not only NaN ones, and invalid elements are handed to
     NaN-tolerant estimators and imputers as ``NaN``. Following georeader,
-    a carrier with ``fill_value_default=0`` treats ``0`` as nodata; pass
-    ``fill_value_default=None`` (or ``NaN``) on the input when ``0`` is
+    a carrier with ``fill_value=0`` treats ``0`` as nodata; pass
+    ``fill_value=None`` (or ``NaN``) on the input when ``0`` is
     real data.
 
     Output fill values: rows that were not handed to the estimator are
-    written back as nodata, and every GeoTensor output declares an
-    explicit ``fill_value_default`` that matches its dtype -- ``NaN`` for
+    written back as nodata, and every GeoArray output declares an
+    explicit ``fill_value`` that matches its dtype -- ``NaN`` for
     floating-point outputs (scores, projections, probabilities),
     ``label_fill_value`` (default ``-1``) for integer outputs such as
     cluster-label maps (the dtype is kept), ``False`` for boolean outputs.
 
-    Carrier behavior: every method accepts a ``GeoTensor`` or a plain
+    Carrier behavior: every method accepts a ``GeoArray`` or a plain
     ``np.ndarray``. When the unflattened output's trailing two axes still
     match the input's spatial ``(H, W)``, the result is rewrapped to
-    match the input carrier (GeoTensor in -> GeoTensor out with a fresh
+    match the input carrier (GeoArray in -> GeoArray out with a fresh
     ``attrs`` copy; ndarray in -> ndarray out). Otherwise a bare ndarray is
     returned (e.g. sample-only outputs from ``mode="custom"`` or
     ``mode="spectral"``, or ``nan_transform="drop"`` with invalid rows).
@@ -118,7 +118,7 @@ class GeoTensorEstimator:
         impute_knn_n_neighbors: Neighbour count passed to ``KNNImputer``.
         impute_iterative_max_iter: Iteration cap passed to ``IterativeImputer``.
         out_band_names: Names of the output bands, written to
-            ``attrs["band_names"]`` of GeoTensor outputs (one per output
+            ``attrs["band_names"]`` of GeoArray outputs (one per output
             band; a mismatch raises ``ValueError``). ``None`` keeps the
             input's band keys when the band count is unchanged and drops
             them otherwise.
@@ -142,7 +142,7 @@ class GeoTensorEstimator:
 
     Examples:
         >>> from sklearn.decomposition import PCA
-        >>> est = GeoTensorEstimator(PCA(n_components=2), mode="pixel")
+        >>> est = GeoArrayEstimator(PCA(n_components=2), mode="pixel")
         >>> projected = est.fit(scene).transform(scene)
     """
 
@@ -181,11 +181,11 @@ class GeoTensorEstimator:
         _validate_nan_strategy(nan_transform)
         if mode == "custom" and (sample_axes is None or feature_axes is None):
             raise ValueError(
-                "GeoTensorEstimator requires sample_axes and feature_axes "
+                "GeoArrayEstimator requires sample_axes and feature_axes "
                 'when mode="custom"'
             )
 
-    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+    def fit(self, gt: GeoArray | np.ndarray) -> Self:
         """Fit the wrapped estimator on the flattened sample matrix.
 
         The cube is reshaped to ``(n_samples, n_features)`` according to
@@ -194,7 +194,7 @@ class GeoTensorEstimator:
         is handed to ``estimator.fit``.
 
         Args:
-            gt: Input cube — a ``GeoTensor`` or plain ``np.ndarray``.
+            gt: Input cube — a ``GeoArray`` or plain ``np.ndarray``.
 
         Returns:
             This estimator, for chaining.
@@ -207,7 +207,7 @@ class GeoTensorEstimator:
         self.fit_n_samples = int(x_fit.shape[0])
         return self
 
-    def partial_fit(self, gt: GeoTensor | np.ndarray) -> Self:
+    def partial_fit(self, gt: GeoArray | np.ndarray) -> Self:
         """Incrementally fit the wrapped estimator on one flattened batch.
 
         Same ``(n_samples, n_features)`` marshalling and ``nan_fit``
@@ -218,7 +218,7 @@ class GeoTensorEstimator:
         later batch, so no batch re-derives the imputation statistics.
 
         Args:
-            gt: Input cube — a ``GeoTensor`` or plain ``np.ndarray``.
+            gt: Input cube — a ``GeoArray`` or plain ``np.ndarray``.
 
         Returns:
             This estimator, for chaining.
@@ -238,7 +238,7 @@ class GeoTensorEstimator:
         self.fit_n_samples = int(x_fit.shape[0])
         return self
 
-    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def transform(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Apply ``estimator.transform`` and unflatten the result.
 
         The cube is flattened to ``(n_samples, n_features)`` per
@@ -248,7 +248,7 @@ class GeoTensorEstimator:
         axis — ``"pixel"`` mode maps ``(C, H, W)`` input to ``(k, H, W)``
         output).
 
-        Returns a carrier matching the input (GeoTensor in -> GeoTensor
+        Returns a carrier matching the input (GeoArray in -> GeoArray
         out, ndarray in -> ndarray out) when the output's trailing axes
         match the input's spatial ``(H, W)`` shape; otherwise returns a
         bare :class:`numpy.ndarray` (e.g. for sample-only outputs from
@@ -256,35 +256,35 @@ class GeoTensorEstimator:
         """
         return self._apply_task(gt, "transform")
 
-    def predict(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def predict(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Apply ``estimator.predict`` and unflatten the result.
 
         See :meth:`transform` for the reshaping and carrier contract.
         """
         return self._apply_task(gt, "predict")
 
-    def predict_proba(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def predict_proba(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Apply ``estimator.predict_proba`` and unflatten the result.
 
         See :meth:`transform` for the reshaping and carrier contract.
         """
         return self._apply_task(gt, "predict_proba")
 
-    def decision_function(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def decision_function(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Apply ``estimator.decision_function`` and unflatten the result.
 
         See :meth:`transform` for the reshaping and carrier contract.
         """
         return self._apply_task(gt, "decision_function")
 
-    def inverse_transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def inverse_transform(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Apply ``estimator.inverse_transform`` and unflatten the result.
 
         See :meth:`transform` for the reshaping and carrier contract.
         """
         return self._apply_task(gt, "inverse_transform")
 
-    def fit_predict(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def fit_predict(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Apply ``estimator.fit_predict`` and unflatten the result.
 
         Fitting uses the ``nan_fit`` strategy (like :meth:`fit`); see
@@ -360,7 +360,7 @@ class GeoTensorEstimator:
         n_samples = state.get("fit_n_samples")
         self.fit_n_samples = None if n_samples is None else int(n_samples)
 
-    def _flatten(self, gt: GeoTensor | np.ndarray) -> _FlatGeoTensor:
+    def _flatten(self, gt: GeoArray | np.ndarray) -> _FlatGeoArray:
         arr = np.asarray(gt)
         axes = resolve_axes(arr.ndim, self.mode, self.sample_axes, self.feature_axes)
         x, layout = cube_to_samples(
@@ -376,16 +376,16 @@ class GeoTensorEstimator:
             # (``propagate_raw``) recognise them as missing.
             x = as_float(x).copy()
             x[invalid] = np.nan
-        return _FlatGeoTensor(x=x, valid=~invalid.any(axis=1), layout=layout)
+        return _FlatGeoArray(x=x, valid=~invalid.any(axis=1), layout=layout)
 
     def _prepare_fit(
-        self, flat: _FlatGeoTensor, *, reuse_imputer: bool = False
+        self, flat: _FlatGeoArray, *, reuse_imputer: bool = False
     ) -> tuple[Num[np.ndarray, "m c"], Bool[np.ndarray, " n"]]:
         strategy = self.nan_fit
         x, valid = flat.x, flat.valid
         if strategy == "error" and not valid.all():
             raise ValueError(
-                "GeoTensorEstimator.fit received NaN / non-finite / fill values"
+                "GeoArrayEstimator.fit received NaN / non-finite / fill values"
             )
         if strategy == "error":
             return x, valid
@@ -406,7 +406,7 @@ class GeoTensorEstimator:
         return self.imputer.fit_transform(x), np.ones(x.shape[0], dtype=bool)
 
     def _prepare_transform(
-        self, flat: _FlatGeoTensor
+        self, flat: _FlatGeoArray
     ) -> tuple[Num[np.ndarray, "m c"], Bool[np.ndarray, " n"]]:
         """Apply ``nan_transform`` strategy to apply-time input.
 
@@ -427,7 +427,7 @@ class GeoTensorEstimator:
         x, valid = flat.x, flat.valid
         if strategy == "error" and not valid.all():
             raise ValueError(
-                "GeoTensorEstimator.transform received NaN / non-finite / fill values"
+                "GeoArrayEstimator.transform received NaN / non-finite / fill values"
             )
         if strategy == "error":
             return x, valid
@@ -452,8 +452,8 @@ class GeoTensorEstimator:
         return self.imputer.transform(x), np.ones(x.shape[0], dtype=bool)
 
     def _apply_task(
-        self, gt: GeoTensor | np.ndarray, task: Task
-    ) -> GeoTensor | np.ndarray:
+        self, gt: GeoArray | np.ndarray, task: Task
+    ) -> GeoArray | np.ndarray:
         if not hasattr(self.estimator, task):
             raise TypeError(f"{type(self.estimator).__name__} does not support {task}")
         flat = self._flatten(gt)
@@ -469,11 +469,11 @@ class GeoTensorEstimator:
 
     def _unflatten_apply_result(
         self,
-        gt: GeoTensor | np.ndarray,
-        flat: _FlatGeoTensor,
+        gt: GeoArray | np.ndarray,
+        flat: _FlatGeoArray,
         y_apply: Shaped[np.ndarray, " m"] | Shaped[np.ndarray, "m k"],
         valid: Bool[np.ndarray, " n"],
-    ) -> GeoTensor | np.ndarray:
+    ) -> GeoArray | np.ndarray:
         y = np.asarray(y_apply)
         fill_value = output_fill_value(y.dtype, self.label_fill_value)
         if valid.all():
@@ -493,7 +493,7 @@ class GeoTensorEstimator:
             dense[valid] = y
         out = _restore_shape(dense, flat)
         # When the trailing axes do not match the input spatial (H, W),
-        # ``GeoTensor.array_as_geotensor`` cannot attach CRS/transform
+        # ``GeoArray.array_as_geotensor`` cannot attach CRS/transform
         # meaningfully (e.g. sample-only outputs from ``mode="custom"`` or
         # ``mode="spectral"``). Return a bare ndarray in that case; callers
         # / wrappers are responsible for re-attaching geo metadata.
@@ -502,12 +502,12 @@ class GeoTensorEstimator:
         return wrap_like(
             gt,
             out,
-            fill_value_default=np.nan if fill_value is None else fill_value,
+            fill_value=np.nan if fill_value is None else fill_value,
             band_names=self.out_band_names,
         )
 
 
-class _FlatGeoTensor:
+class _FlatGeoArray:
     def __init__(
         self,
         *,
@@ -522,7 +522,7 @@ class _FlatGeoTensor:
 
 def _restore_shape(
     y: Shaped[np.ndarray, " n"] | Shaped[np.ndarray, "n k"],
-    flat: _FlatGeoTensor,
+    flat: _FlatGeoArray,
 ) -> np.ndarray:
     # Sample axes return to their input order; a 2-D output's features
     # become one channel axis at the first feature axis (or in front when

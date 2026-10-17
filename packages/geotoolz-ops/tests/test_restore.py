@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _helpers import fill_pixel_mask, toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import fill_pixel_mask, toy_geoarray
+from geoarray import GeoArray
 from scipy import ndimage
 
 import geoops as gz
@@ -66,11 +66,11 @@ def test_despeckle_lee_reduces_multiplicative_speckle_variance() -> None:
 
 def test_despeckle_operator_preserves_metadata() -> None:
     rng = np.random.default_rng(1)
-    gt = toy_geotensor(rng.random((2, 8, 8)).astype(np.float32))
+    gt = toy_geoarray(rng.random((2, 8, 8)).astype(np.float32))
     out = DespeckleLee(window=3)(gt)
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
     assert out.shape == gt.shape
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert str(out.crs) == "EPSG:32629"
     assert DespeckleFrost(window=3)(gt).shape == gt.shape
     assert DespeckleRefinedLee(window=3)(gt).shape == gt.shape
@@ -86,18 +86,18 @@ def test_destripe_column_recovers_flat_image() -> None:
 
 
 def test_destripe_operator_preserves_metadata() -> None:
-    gt = toy_geotensor(np.ones((2, 8, 8), dtype=np.float32))
+    gt = toy_geoarray(np.ones((2, 8, 8), dtype=np.float32))
     out = DestripeColumn()(gt)
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
     assert out.shape == gt.shape
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert MomentMatching(window=3)(gt).shape == gt.shape
 
 
 def test_mnf_inverse_with_all_components_is_identity() -> None:
     rng = np.random.default_rng(2)
     arr = rng.normal(size=(4, 10, 10)).astype(np.float32)
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
     forward = MNF(n_components=4)
     scores = forward(gt)
     restored = forward.inverse(scores)
@@ -112,10 +112,10 @@ def test_mnf_inverse_with_all_components_is_identity() -> None:
 def test_denoise_pca_reconstructs_original_shape() -> None:
     rng = np.random.default_rng(3)
     arr = rng.normal(size=(3, 6, 6)).astype(np.float32)
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
     out = DenoisePCA(n_components=2)(gt)
     assert out.shape == gt.shape
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
 
 
 def test_pca_denoise_raises_on_all_nan_band() -> None:
@@ -143,17 +143,17 @@ def test_gap_fill_laplacian_uses_local_not_periodic_neighbours() -> None:
 def test_gaussian_denoise_preserves_nan_mask_and_metadata() -> None:
     arr = np.arange(25, dtype=float).reshape(5, 5)
     arr[2, 2] = np.nan
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
     out = GaussianDenoise(sigma=1.0)(gt)
     # The NaN pixel is nodata: it holds the carrier's fill value.
-    assert np.asarray(out)[2, 2] == gt.fill_value_default
+    assert np.asarray(out)[2, 2] == gt.fill_value
     assert np.isnan(np.asarray(GaussianDenoise(sigma=1.0)(arr))[2, 2])
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
 
 
 def test_single_band_denoisers_run_and_preserve_shape() -> None:
     arr = np.arange(25, dtype=float).reshape(5, 5)
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
     for op in [
         MedianDenoise(window=3),
         BilateralDenoise(sigma_color=10.0, sigma_space=1.0),
@@ -161,7 +161,7 @@ def test_single_band_denoisers_run_and_preserve_shape() -> None:
     ]:
         out = op(gt)
         assert out.shape == gt.shape
-        assert out.transform == gt.transform
+        assert out.grid == gt.grid
     assert median_denoise(arr, window=3).shape == arr.shape
     assert bilateral_denoise(arr, sigma_color=10.0, sigma_space=1.0).shape == arr.shape
     assert nl_means(arr, window=3, search_radius=3, h=10.0).shape == arr.shape
@@ -170,7 +170,7 @@ def test_single_band_denoisers_run_and_preserve_shape() -> None:
 def test_gap_fill_biharmonic_preserves_non_nan_pixels() -> None:
     arr = np.arange(25, dtype=float).reshape(5, 5)
     arr[2, 2] = np.nan
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
     out = GapFillInpaintBiharmonic()(gt)
     assert np.isfinite(np.asarray(out)[2, 2])
     np.testing.assert_array_equal(
@@ -181,7 +181,7 @@ def test_gap_fill_biharmonic_preserves_non_nan_pixels() -> None:
 def test_gap_fill_laplacian_fills_nan() -> None:
     arr = np.arange(25, dtype=float).reshape(5, 5)
     arr[2, 2] = np.nan
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
     out = GapFillLaplacian()(gt)
     assert np.isfinite(np.asarray(out)[2, 2])
     assert np.isfinite(gap_fill_laplacian(arr)[2, 2])
@@ -197,7 +197,7 @@ def test_gap_fill_nearest_and_idw_fill_missing_pixel() -> None:
 
 def test_gap_fill_idw_high_power_matches_nearest_operator() -> None:
     arr = np.array([[1.0, 2.0], [3.0, np.nan]])
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
     nearest = GapFillNearest(max_distance=2)(gt)
     idw = GapFillIDW(power=128.0, radius=2)(gt)
     boundary = GapFillIDW(power=64.0, radius=2)(gt)
@@ -215,7 +215,7 @@ def test_outlier_mask_and_replacement() -> None:
     arr[3, 4] = -8.0
     mask = outlier_mask(arr, method="mad", k=3.0)
     assert int(mask.sum()) == 2
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
     op_mask = OutlierMask(method="mad", k=3.0)(gt)
     np.testing.assert_array_equal(np.asarray(op_mask), mask)
     replaced = ReplaceOutliers(method="mad", k=3.0, strategy="median")(gt)
@@ -231,7 +231,7 @@ def test_outlier_mask_and_replacement() -> None:
 def test_gap_fill_methods_recover_isolated_nan() -> None:
     arr = np.ones((5, 5), dtype=float)
     arr[2, 2] = np.nan
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
     for op in [
         GapFillNearest(),
         GapFillIDW(power=2.0, radius=2),
@@ -250,7 +250,7 @@ def test_gap_fill_biharmonic_does_not_double_apply() -> None:
     arr = np.linspace(0.0, 1.0, 25, dtype=float).reshape(5, 5)
     arr_with_nan = arr.copy()
     arr_with_nan[2, 2] = np.nan
-    gt = toy_geotensor(arr_with_nan)
+    gt = toy_geoarray(arr_with_nan)
     out = np.asarray(GapFillInpaintBiharmonic()(gt))
     finite_mask = np.isfinite(arr_with_nan)
     np.testing.assert_array_equal(out[finite_mask], arr_with_nan[finite_mask])
@@ -266,7 +266,7 @@ def test_bilateral_preserves_strong_edge() -> None:
     rng = np.random.default_rng(7)
     image = np.where(np.arange(32)[None, :] < 16, 0.0, 1.0) * np.ones((32, 32))
     noisy = image + 0.02 * rng.standard_normal(image.shape)
-    gt = toy_geotensor(noisy)
+    gt = toy_geoarray(noisy)
     gauss = np.asarray(GaussianDenoise(sigma=2.0)(gt))
     bilateral = np.asarray(BilateralDenoise(sigma_color=0.05, sigma_space=2.0)(gt))
     edge_col = 15
@@ -282,8 +282,8 @@ def test_destripe_column_propagates_window_to_moment_matching() -> None:
     arr = rng.standard_normal((24, 24))
     op_default = DestripeColumn(method="moment_matching")
     op_wide = DestripeColumn(method="moment_matching", window=11)
-    out_default = np.asarray(op_default(toy_geotensor(arr.copy())))
-    out_wide = np.asarray(op_wide(toy_geotensor(arr.copy())))
+    out_default = np.asarray(op_default(toy_geoarray(arr.copy())))
+    out_wide = np.asarray(op_wide(toy_geoarray(arr.copy())))
     # Different smoothing windows must produce different outputs.
     assert not np.allclose(out_default, out_wide)
 
@@ -291,7 +291,7 @@ def test_destripe_column_propagates_window_to_moment_matching() -> None:
 def test_outlier_mask_operator_returns_bool_dtype() -> None:
     arr = np.ones((4, 4), dtype=float)
     arr[0, 0] = 100.0
-    out = OutlierMask(method="mad", k=3.0)(toy_geotensor(arr))
+    out = OutlierMask(method="mad", k=3.0)(toy_geoarray(arr))
     assert np.asarray(out).dtype == np.dtype(bool)
 
 
@@ -330,7 +330,7 @@ def test_operator_configs_are_json_safe() -> None:
 # ----------------------------------------------------------------------------
 # numpy-compat contract: every restore primitive is metadata-independent
 # per-pixel/window math, so the operators must accept a plain np.ndarray
-# and return a plain np.ndarray with the same values as the GeoTensor path.
+# and return a plain np.ndarray with the same values as the GeoArray path.
 # ----------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "make_op",
@@ -357,8 +357,8 @@ def test_operators_accept_plain_ndarray(make_op) -> None:
     out_arr = make_op()(arr)
     assert type(out_arr) is np.ndarray
     # NaN fill so nodata pixels hold NaN on both carriers.
-    out_gt = make_op()(toy_geotensor(arr, fill_value_default=np.nan))
-    assert isinstance(out_gt, GeoTensor)
+    out_gt = make_op()(toy_geoarray(arr, fill_value=np.nan))
+    assert isinstance(out_gt, GeoArray)
     np.testing.assert_array_equal(out_arr, np.asarray(out_gt))
 
 
@@ -376,11 +376,11 @@ def test_mnf_round_trip_accepts_plain_ndarray() -> None:
 # ----------------------------------------------------------------------------
 # Nodata (fill pixels) handling
 # ----------------------------------------------------------------------------
-def _fill_scene() -> tuple[GeoTensor, np.ndarray, np.ndarray]:
+def _fill_scene() -> tuple[GeoArray, np.ndarray, np.ndarray]:
     """(3, 6, 7) positive scene with -9999 fill pixels, clean values, fill mask."""
     rng = np.random.default_rng(11)
     values = rng.uniform(1.0, 2.0, size=(3, 6, 7))
-    gt = toy_geotensor(values, fill_value_default=-9999, with_fill_pixels=True)
+    gt = toy_geoarray(values, fill_value=-9999, with_fill_pixels=True)
     return gt, values, fill_pixel_mask(values.shape)
 
 
@@ -421,10 +421,10 @@ def test_fill_pixels_are_excluded(make_op) -> None:
 
     if isinstance(op, MNF):
         # Component scores are a new quantity: NaN nodata (#146).
-        assert np.isnan(result.fill_value_default)
+        assert np.isnan(result.fill_value)
         assert np.isnan(out[:, fill]).all()
     else:
-        assert result.fill_value_default == -9999
+        assert result.fill_value == -9999
         assert np.all(out[:, fill] == -9999)
     expected = np.asarray(make_op()(_nan_at(values, fill)))
     np.testing.assert_allclose(out[:, ~fill], expected[:, ~fill])
@@ -455,7 +455,7 @@ def test_fill_pixels_are_gaps_for_gap_fill(make_op) -> None:
 
 def test_gap_fill_unfilled_gaps_hold_fill_value() -> None:
     values = np.ones((1, 6, 6))
-    gt = toy_geotensor(values, fill_value_default=-9999, with_fill_pixels=True)
+    gt = toy_geoarray(values, fill_value=-9999, with_fill_pixels=True)
     out = np.asarray(GapFillNearest(max_distance=0)(gt))
     fill = fill_pixel_mask(values.shape)
     assert np.all(out[:, fill] == -9999)
@@ -468,7 +468,7 @@ def test_fill_pixels_are_excluded_from_masks_and_pca_fit() -> None:
     outliers = OutlierMask(method="zscore", k=3.0)(gt)
     assert not np.asarray(outliers).any()
     # A boolean flag declares False, not the input's -9999 (#146).
-    assert outliers.fill_value_default is False
+    assert outliers.fill_value is False
 
     # MNF: fitted on valid pixels only; the scores' NaN nodata carries
     # through the inverse.
@@ -498,9 +498,9 @@ def test_4d_time_stack() -> None:
     np.testing.assert_allclose(np.asarray(denoised), np.asarray(stack))
     # Rows of a 2-D map are never treated as bands.
     with pytest.raises(ValueError, match="DenoisePCA accepts 3-D"):
-        DenoisePCA(n_components=1)(toy_geotensor(np.ones((4, 4))))
+        DenoisePCA(n_components=1)(toy_geoarray(np.ones((4, 4))))
     with pytest.raises(ValueError, match="MNF accepts 3-D"):
-        MNF(n_components=1)(toy_geotensor(np.ones((4, 4))))
+        MNF(n_components=1)(toy_geoarray(np.ones((4, 4))))
 
 
 # ----------------------------------------------------------------------------

@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from affine import Affine
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geoops.geom._src.coregister import array as coreg_array
 from geoops.geom.coregister import (
@@ -27,12 +27,12 @@ _XY = np.array([[3.0, 27.0], [14.0, 12.0], [26.0, 21.0], [38.5, 3.5], [55.0, 15.
 _VALUES = np.array([1.0, -2.0, 4.0, 0.5, 3.0])
 
 
-def _raster() -> GeoTensor:
-    return GeoTensor(
+def _raster() -> GeoArray:
+    return GeoArray(
         np.arange(24, dtype=np.float64).reshape(2, 3, 4) ** 1.5,
         transform=_TRANSFORM,
         crs="EPSG:32630",
-        fill_value_default=-1.0,
+        fill_value=-1.0,
     )
 
 
@@ -222,14 +222,14 @@ def test_raster_to_point_cloud_primitive_empty_cloud_keeps_dtype() -> None:
 
 
 def test_raster_to_point_cloud_rejects_4d_raster_by_name() -> None:
-    raster = GeoTensor(np.zeros((1, 2, 3, 4)), transform=_TRANSFORM, crs="EPSG:32630")
+    raster = GeoArray(np.zeros((1, 2, 3, 4)), transform=_TRANSFORM, crs="EPSG:32630")
     with pytest.raises(ValueError, match=r"^RasterToPointCloud accepts"):
         RasterToPointCloud()(raster, _XY)
 
 
 def test_raster_to_point_cloud_bilinear_errors_name_the_operator() -> None:
     rotated = Affine(8.66, 5.0, 0.0, -5.0, 8.66, 0.0)
-    raster = GeoTensor(np.zeros((3, 4)), transform=rotated, crs="EPSG:32630")
+    raster = GeoArray(np.zeros((3, 4)), transform=rotated, crs="EPSG:32630")
     with pytest.raises(ValueError, match=r"^RasterToPointCloud requires"):
         RasterToPointCloud(method="bilinear")(raster, _XY)
 
@@ -255,17 +255,17 @@ def test_points_to_raster_idw_primitive_empty_cloud_is_all_nan() -> None:
 def test_reproject_like_primitive_matches_reproject_like_operator() -> None:
     from geoops.geom import ReprojectLike
 
-    src = GeoTensor(
+    src = GeoArray(
         np.arange(2 * 8 * 8, dtype=np.float64).reshape(2, 8, 8),
         transform=Affine(5.0, 0.0, 0.0, 0.0, -5.0, 40.0),
         crs="EPSG:32630",
-        fill_value_default=np.nan,
+        fill_value=np.nan,
     )
-    like = GeoTensor(
+    like = GeoArray(
         np.zeros((3, 4)),
         transform=_TRANSFORM,
         crs="EPSG:32630",
-        fill_value_default=np.nan,
+        fill_value=np.nan,
     )
     out = coreg_array.reproject_like(
         np.asarray(src),

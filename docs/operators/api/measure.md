@@ -1,7 +1,7 @@
 # Measure
 
 `geoops.measure` wraps `skimage.measure` for region properties and contour extraction. Outputs are
-either label `GeoTensor`s or `GeoDataFrame`s with geometries in the input CRS.
+either label `GeoArray`s or `GeoDataFrame`s with geometries in the input CRS.
 
 - `LabelConnectedComponents` — component labelling with `connectivity=4|8` (skimage's `1|2`
   spelling is not accepted) and an optional `min_area_px` filter

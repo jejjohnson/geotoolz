@@ -2,8 +2,8 @@
 
 Each Operator wraps a primitive in :mod:`geoops.restore._src.array`
 and rewraps the result to match the input carrier via
-:func:`geoops._src.wrap.wrap_like`: a ``GeoTensor`` input round-trips
-its ``transform`` / ``crs`` / ``fill_value_default``, while a plain
+:func:`geoops._src.wrap.wrap_like`: a ``GeoArray`` input round-trips
+its ``transform`` / ``crs`` / ``fill_value``, while a plain
 ``np.ndarray`` input returns a plain ``np.ndarray``. All restoration
 primitives are metadata-independent per-pixel/window math, so every
 operator here supports both carriers transparently. All constructor
@@ -12,12 +12,12 @@ round-trips. :class:`MNF` is a fitted operator (``fit`` / ``transform``
 / ``inverse``); its fitted basis is never part of ``get_config()``.
 
 Nodata: a pixel is invalid when any band is non-finite or equals the
-carrier's ``fill_value_default`` (see :mod:`geoops._src.valid`; per
+carrier's ``fill_value`` (see :mod:`geoops._src.valid`; per
 frame for ``(T, C, H, W)``, and per pixel across the band ``axis`` for
 the PCA / MNF operators). Filters, fits and outlier statistics are
 computed from valid pixels only -- invalid pixels never leak into their
 neighbours -- and invalid pixels hold the output's fill value. Outputs
-that carry the input's values keep its ``fill_value_default`` when the
+that carry the input's values keep its ``fill_value`` when the
 input is floating point and switch to ``NaN`` when an integer input is
 promoted to float (see :func:`geoops._src.valid.carried_fill`); the
 :class:`MNF` scores always use ``NaN``. The
@@ -25,7 +25,7 @@ exceptions are the ``GapFill*`` operators, which treat every invalid
 *element* as a gap and replace it with the interpolated value (only
 gaps they cannot fill hold the fill value), and the boolean
 :class:`OutlierMask`, which reports ``False`` at invalid pixels and
-declares ``fill_value_default=False`` (saturation flags live in
+declares ``fill_value=False`` (saturation flags live in
 :class:`geoops.qa.MaskSaturated`, with the same nodata rule).
 """
 
@@ -70,7 +70,7 @@ from geoops.restore._src.array import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
 
 def _valid(gt: Any) -> np.ndarray:
@@ -93,7 +93,7 @@ def _masked(gt: Any) -> tuple[np.ndarray, np.ndarray]:
 def _rewrap(gt: Any, out: np.ndarray, valid: np.ndarray) -> Any:
     """Write the carried output fill into invalid pixels and rewrap like ``gt``."""
     fill = carried_fill(gt, np.asarray(out).dtype)
-    return wrap_filled(gt, out, fill_value_default=fill, valid=valid)
+    return wrap_filled(gt, out, fill_value=fill, valid=valid)
 
 
 def _filter(gt: Any, fn: Callable[[np.ndarray], np.ndarray]) -> Any:
@@ -152,7 +152,7 @@ class DespeckleLee(Operator):
         self.window = window
         self.cu = cu
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _filter(gt, lambda a: despeckle_lee(a, window=self.window, cu=self.cu))
 
 
@@ -180,7 +180,7 @@ class DespeckleFrost(Operator):
         self.window = window
         self.damping = damping
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _filter(
             gt, lambda a: despeckle_frost(a, window=self.window, damping=self.damping)
         )
@@ -205,7 +205,7 @@ class DespeckleRefinedLee(Operator):
     def __init__(self, *, window: int = 7) -> None:
         self.window = window
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _filter(gt, lambda a: despeckle_refined_lee(a, window=self.window))
 
 
@@ -247,7 +247,7 @@ class DestripeColumn(Operator):
         self.direction = direction
         self.window = window
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _filter(
             gt,
             lambda a: destripe_column(
@@ -275,7 +275,7 @@ class MomentMatching(Operator):
     def __init__(self, *, window: int | None = 21) -> None:
         self.window = window
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _filter(
             gt,
             lambda a: destripe_column(
@@ -313,7 +313,7 @@ class DenoisePCA(Operator):
         self.n_components = n_components
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         require_ndim(gt, (3, 4), type(self).__name__)
         out = pca_denoise(
             _band_masked(gt, self.axis), n_components=self.n_components, axis=self.axis
@@ -384,7 +384,7 @@ class MNF(Operator):
         self.eigenvalues_: np.ndarray | None = None
         self.snr_: np.ndarray | None = None
 
-    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+    def fit(self, gt: GeoArray | np.ndarray) -> Self:
         """Learn the MNF basis from the valid pixels of ``gt``.
 
         Returns:
@@ -417,7 +417,7 @@ class MNF(Operator):
             raise ValueError("MNF must be fitted (fit() or a first call) first")
         return state
 
-    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def transform(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Project ``gt`` onto the fitted MNF basis.
 
         Raises:
@@ -434,14 +434,14 @@ class MNF(Operator):
         )
         # Scores are a new quantity: NaN marks nodata, never the input fill.
         return wrap_filled(
-            gt, scores, fill_value_default=np.nan, valid=np.isfinite(scores)
+            gt, scores, fill_value=np.nan, valid=np.isfinite(scores)
         )
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         fit_once(self, gt, lambda: self.state_ is not None)
         return self.transform(gt)
 
-    def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def inverse(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Reconstruct band space from MNF scores (``x̂ = Σ_N·A_k·y + x̄``).
 
         With all components the reconstruction is exact; with fewer it
@@ -488,7 +488,7 @@ class GaussianDenoise(Operator):
     def __init__(self, *, sigma: float = 1.0) -> None:
         self.sigma = sigma
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _filter(gt, lambda a: gaussian_denoise(a, sigma=self.sigma))
 
 
@@ -510,7 +510,7 @@ class MedianDenoise(Operator):
     def __init__(self, *, window: int = 3) -> None:
         self.window = window
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _filter(gt, lambda a: median_denoise(a, window=self.window))
 
 
@@ -535,7 +535,7 @@ class BilateralDenoise(Operator):
         self.sigma_color = sigma_color
         self.sigma_space = sigma_space
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _filter(
             gt,
             lambda a: bilateral_denoise(
@@ -569,7 +569,7 @@ class NLMeans(Operator):
         self.search_radius = search_radius
         self.h = h
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _filter(
             gt,
             lambda a: nl_means(
@@ -603,7 +603,7 @@ class GapFillIDW(Operator):
         self.power = power
         self.radius = radius
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _gap_fill(
             gt, lambda a: gap_fill_idw(a, power=self.power, radius=self.radius)
         )
@@ -627,7 +627,7 @@ class GapFillInpaintBiharmonic(Operator):
         >>> gz.restore.GapFillInpaintBiharmonic()(scene)
     """
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _gap_fill(gt, gap_fill_biharmonic)
 
 
@@ -652,7 +652,7 @@ class GapFillLaplacian(Operator):
     def __init__(self, *, iterations: int = 200) -> None:
         self.iterations = iterations
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _gap_fill(
             gt, lambda a: gap_fill_laplacian(a, iterations=self.iterations)
         )
@@ -679,7 +679,7 @@ class GapFillNearest(Operator):
     def __init__(self, *, max_distance: int | None = None) -> None:
         self.max_distance = max_distance
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _gap_fill(
             gt, lambda a: gap_fill_nearest(a, max_distance=self.max_distance)
         )
@@ -707,10 +707,10 @@ class OutlierMask(Operator):
         self.method = method
         self.k = k
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr, valid = _masked(gt)
         mask = outlier_mask(arr, method=self.method, k=self.k).astype(bool)
-        return wrap_filled(gt, mask, fill_value_default=False, valid=valid)
+        return wrap_filled(gt, mask, fill_value=False, valid=valid)
 
 
 class ReplaceOutliers(Operator):
@@ -741,7 +741,7 @@ class ReplaceOutliers(Operator):
         self.k = k
         self.strategy = strategy
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr, valid = _masked(gt)
         out = replace_outliers(
             arr, method=self.method, k=self.k, strategy=self.strategy

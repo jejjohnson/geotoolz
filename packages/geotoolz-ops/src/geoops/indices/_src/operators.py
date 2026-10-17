@@ -6,12 +6,12 @@ Each Operator here:
    configs are unambiguous.
 2. Calls into the matching primitive in ``array.py`` for the math.
 3. Rewraps the result to match the input carrier via
-   `geoops._src.wrap.wrap_like`: a ``GeoTensor`` input comes back as
-   a ``GeoTensor`` (``transform``, ``crs`` and a
-   copy of ``attrs`` propagated, ``fill_value_default=NaN``, with per-band keys such as
+   `geoops._src.wrap.wrap_like`: a ``GeoArray`` input comes back as
+   a ``GeoArray`` (``transform``, ``crs`` and a
+   copy of ``attrs`` propagated, ``fill_value=NaN``, with per-band keys such as
    ``band_names`` dropped because the band axis collapsed); a plain ``np.ndarray``
    comes back as a plain ndarray. Named-band references (``red="B04"``)
-   need carrier metadata and therefore require a GeoTensor input;
+   need carrier metadata and therefore require a GeoArray input;
    integer band indices work on both carriers.
 4. Returns its config via ``get_config()`` so the Operator round-trips
    through ``hydra_zen.builds``.
@@ -80,24 +80,24 @@ from geoops.indices._src.array import (
 
 
 if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
 
 def _wrap_index(
-    gt: GeoTensor | np.ndarray,
+    gt: GeoArray | np.ndarray,
     out: np.ndarray,
     *,
     axis: int,
     bands: tuple[BandRef, ...],
-) -> GeoTensor | np.ndarray:
+) -> GeoArray | np.ndarray:
     """Rewrap an index result, writing ``NaN`` into nodata pixels.
 
     A pixel is nodata when *any band the index reads* (``bands``) is
-    non-finite or equals ``gt.fill_value_default`` (see
+    non-finite or equals ``gt.fill_value`` (see
     :mod:`geoops._src.valid`); its index value is meaningless (e.g. NDVI
     of ``-9999 / -9999``), so it is replaced by ``NaN``. An index is a new
     quantity -- the input's fill (``0`` especially) can be a real index
-    value -- so the output always declares ``fill_value_default=NaN``.
+    value -- so the output always declares ``fill_value=NaN``.
     Bands the index does not read do not affect validity.
 
     On a ``(T, C, H, W)`` stack the ``(T, H, W)`` result keeps a singleton
@@ -107,7 +107,7 @@ def _wrap_index(
     used = np.take(np.asarray(gt), idx, axis=axis)
     valid = ~invalid_values(used, fill_value=carrier_fill_value(gt)).any(axis=axis)
     out = keep_band_axis(out, gt)
-    return wrap_filled(gt, out, fill_value_default=np.nan, valid=valid)
+    return wrap_filled(gt, out, fill_value=np.nan, valid=valid)
 
 
 class NormalizedDifference(Operator):
@@ -121,12 +121,12 @@ class NormalizedDifference(Operator):
     ``geoops.NormalizedDifference``). Bands ``a`` / ``b`` are each an
     integer position or a band name resolved against ``gt.attrs`` by the
     package-wide resolver (:func:`geoops._src.bands.resolve_band`). Names
-    need a GeoTensor carrying band-name attrs; on a plain ``np.ndarray``
+    need a GeoArray carrying band-name attrs; on a plain ``np.ndarray``
     a name raises ``TypeError`` and integer positions work.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``. On a ``(T, C, H, W)`` stack the result is
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``. On a ``(T, C, H, W)`` stack the result is
     ``(T, 1, H, W)``.
 
     Args:
@@ -158,7 +158,7 @@ class NormalizedDifference(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = normalized_difference(
             np.asarray(gt),
             _resolve_band(gt, self.a),
@@ -177,7 +177,7 @@ class NDVI(Operator):
         \mathrm{NDVI} \;=\; \frac{\rho_{\mathrm{NIR}} - \rho_{\mathrm{Red}}}
                                 {\rho_{\mathrm{NIR}} + \rho_{\mathrm{Red}} + \varepsilon}
 
-    Returns a single-channel ``GeoTensor`` of NDVI values in
+    Returns a single-channel ``GeoArray`` of NDVI values in
     ``[-1, +1]``. See :func:`~geoops.indices._src.array.ndvi` for the
     physics; this Operator just plumbs the primitive through carriers.
 
@@ -188,8 +188,8 @@ class NDVI(Operator):
     (B5 NIR, B4 Red).
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         nir: NIR band: an integer position or a band name. Default ``3``.
@@ -200,7 +200,7 @@ class NDVI(Operator):
     Examples:
         >>> from geoops.indices import NDVI
         >>> ndvi_op = NDVI(nir=7, red=3)         # Sentinel-2 band order
-        >>> ndvi_map = ndvi_op(reflectance_geotensor)    # GeoTensor (H, W)
+        >>> ndvi_map = ndvi_op(reflectance_geotensor)    # GeoArray (H, W)
         >>>
         >>> # Chain with reflectance conversion:
         >>> import geoops as gz
@@ -224,7 +224,7 @@ class NDVI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = ndvi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
@@ -249,8 +249,8 @@ class NDWI(Operator):
     for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         green: Green band: an integer position or a band name. Default ``1``.
@@ -278,7 +278,7 @@ class NDWI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = ndwi_mcfeeters(
             np.asarray(gt),
             _resolve_band(gt, self.green),
@@ -302,8 +302,8 @@ class NDBI(Operator):
     :func:`~geoops.indices._src.array.ndbi` for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         swir: SWIR-1 band: an integer position or a band name. Default ``5``.
@@ -337,7 +337,7 @@ class NDBI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = ndbi(
             np.asarray(gt),
             _resolve_band(gt, self.swir),
@@ -362,8 +362,8 @@ class NBR(Operator):
     :func:`~geoops.indices._src.array.nbr` for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         nir: NIR band: an integer position or a band name. Default ``3``.
@@ -396,7 +396,7 @@ class NBR(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = nbr(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
@@ -424,8 +424,8 @@ class SAVI(Operator):
     See :func:`~geoops.indices._src.array.savi` for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         nir: NIR band: an integer position or a band name. Default ``3``.
@@ -458,7 +458,7 @@ class SAVI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = savi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
@@ -487,8 +487,8 @@ class EVI(Operator):
     See :func:`~geoops.indices._src.array.evi` for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         nir: NIR band: an integer position or a band name. Default ``3``.
@@ -533,7 +533,7 @@ class EVI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = evi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
@@ -567,8 +567,8 @@ class EVI2(Operator):
     types. See :func:`~geoops.indices._src.array.evi2` for physics.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         red: Red band: an integer position or a band name. Default ``2``.
@@ -600,7 +600,7 @@ class EVI2(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = evi2(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
@@ -627,8 +627,8 @@ class ARVI(Operator):
     standard value derived from MODIS Rayleigh-scattering simulations.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         blue: Blue band: an integer position or a band name. Default ``0``.
@@ -667,7 +667,7 @@ class ARVI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = arvi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
@@ -695,8 +695,8 @@ class GCI(Operator):
     crops and forests where NDVI plateaus.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         green: Green band: an integer position or a band name. Default ``1``.
@@ -729,7 +729,7 @@ class GCI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = gci(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
@@ -753,8 +753,8 @@ class kNDVI(Operator):
     most cover types.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         red: Red band: an integer position or a band name. Default ``2``.
@@ -786,7 +786,7 @@ class kNDVI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = kndvi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
@@ -815,8 +815,8 @@ class MNDWI(Operator):
     are interpreted differently.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         green: Green band: an integer position or a band name. Default ``1``.
@@ -849,7 +849,7 @@ class MNDWI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = mndwi(
             np.asarray(gt),
             _resolve_band(gt, self.green),
@@ -875,8 +875,8 @@ class NDMI(Operator):
     the McFeeters surface-water ``NDWI`` distinct.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         nir: NIR band: an integer position or a band name. Default ``3``.
@@ -908,7 +908,7 @@ class NDMI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = ndmi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
@@ -935,8 +935,8 @@ class NDSI(Operator):
     arithmetic form of MNDWI — same formula, different physics target.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         green: Green band: an integer position or a band name. Default ``1``.
@@ -969,7 +969,7 @@ class NDSI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = ndsi(
             np.asarray(gt),
             _resolve_band(gt, self.green),
@@ -994,8 +994,8 @@ class NBR2(Operator):
     part of the Landsat Analysis-Ready burn-severity stack.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         swir1: SWIR-1 band: an integer position or a band name. Default ``5``.
@@ -1022,7 +1022,7 @@ class NBR2(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = nbr2(
             np.asarray(gt),
             _resolve_band(gt, self.swir1),
@@ -1058,8 +1058,8 @@ class BAIS2(Operator):
     conventions, pass explicit indices or named bands.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         red: Red band: an integer position or a band name. Default ``2``.
@@ -1099,7 +1099,7 @@ class BAIS2(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = bais2(
             np.asarray(gt),
             _resolve_band(gt, self.red),
@@ -1135,7 +1135,7 @@ class dNBR(Operator):
     Standard quantitative burn-severity index. Pre- and post-fire NBR
     rasters must share grid (shape, transform, CRS) — co-register
     upstream (e.g. with `geoops.geom.ReprojectLike`)
-    before passing them in. The output `GeoTensor` inherits the
+    before passing them in. The output `GeoArray` inherits the
     pre-fire raster's spatial metadata. Plain ``np.ndarray`` inputs are
     also accepted (only shapes can be checked then) and return a plain
     ndarray.
@@ -1144,8 +1144,8 @@ class dNBR(Operator):
     low severity, 0.44–0.66 moderate, > 0.66 high severity.
 
     Nodata pixels (non-finite, or equal to that raster's
-    ``fill_value_default``, in either input) hold ``NaN`` in the output,
-    which declares ``fill_value_default=NaN``.
+    ``fill_value``, in either input) hold ``NaN`` in the output,
+    which declares ``fill_value=NaN``.
 
     Examples:
         >>> from geoops.indices import NBR, dNBR
@@ -1161,14 +1161,14 @@ class dNBR(Operator):
     """
 
     def _apply(
-        self, pre: GeoTensor | np.ndarray, post: GeoTensor | np.ndarray
-    ) -> GeoTensor | np.ndarray:
+        self, pre: GeoArray | np.ndarray, post: GeoArray | np.ndarray
+    ) -> GeoArray | np.ndarray:
         if not grid_matches(pre, post):
             raise ValueError("dNBR inputs must share shape, transform, and CRS.")
         out = np.asarray(pre) - np.asarray(post)
         valid = ~(invalid_values(pre) | invalid_values(post))
         out = restore_fill(out.astype(np.result_type(out, np.float32)), valid, np.nan)
-        return wrap_like(pre, out, fill_value_default=np.nan)
+        return wrap_like(pre, out, fill_value=np.nan)
 
 
 class BSI(Operator):
@@ -1189,8 +1189,8 @@ class BSI(Operator):
     in the literature exist — pick deliberately if comparing studies.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         blue: Blue band: an integer position or a band name. Default ``0``.
@@ -1229,7 +1229,7 @@ class BSI(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = bsi(
             np.asarray(gt),
             _resolve_band(gt, self.blue),
@@ -1261,8 +1261,8 @@ class IronOxide(Operator):
     iron-oxide-rich soils, weathered surfaces, and lateritic crusts.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         red: Red band: an integer position or a band name. Default ``2``.
@@ -1294,7 +1294,7 @@ class IronOxide(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = iron_oxide(
             np.asarray(gt),
             _resolve_band(gt, self.red),
@@ -1320,8 +1320,8 @@ class ClayMinerals(Operator):
     clay-rich exposures and near unity elsewhere.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         swir1: SWIR-1 band: an integer position or a band name. Default ``5``.
@@ -1355,7 +1355,7 @@ class ClayMinerals(Operator):
         self.axis = axis
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = clay_minerals(
             np.asarray(gt),
             _resolve_band(gt, self.swir1),
@@ -1385,8 +1385,8 @@ class CIRI(Operator):
     ``B01, B02, B03, B04, B05, B06, B07, B08, B8A, B10, B11, B12``.
 
     Nodata pixels (any band it reads non-finite or equal to the input's
-    ``fill_value_default``) hold ``NaN`` in the output, which declares
-    ``fill_value_default=NaN``.
+    ``fill_value``) hold ``NaN`` in the output, which declares
+    ``fill_value=NaN``.
 
     Args:
         cirrus: cirrus band: an integer position or a band name. Default ``9``.
@@ -1407,7 +1407,7 @@ class CIRI(Operator):
         self.cirrus = cirrus
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = ciri(np.asarray(gt), _resolve_band(gt, self.cirrus), axis=self.axis)
         return _wrap_index(gt, out, axis=self.axis, bands=(self.cirrus,))
 
@@ -1429,7 +1429,7 @@ class AppendIndex(Operator):
 
     Args:
         index_op: An index operator (e.g. ``NDVI()``, ``EVI()``). Must
-            return a `GeoTensor` whose band-axis is collapsed.
+            return a `GeoArray` whose band-axis is collapsed.
         axis: Position of the band axis. Default ``-3``. Must match the
             ``axis`` configured on ``index_op``.
 
@@ -1443,7 +1443,7 @@ class AppendIndex(Operator):
         self.index_op = index_op
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         index = self.index_op(gt)
         index_arr = np.asarray(index)
         # Expand back to (..., 1, ..., H, W) along the configured axis so
@@ -1470,7 +1470,7 @@ class AppendIndex(Operator):
         return wrap_filled(
             gt,
             stacked,
-            fill_value_default=carried_fill(gt, stacked.dtype),
+            fill_value=carried_fill(gt, stacked.dtype),
             attrs=attrs,
         )
 

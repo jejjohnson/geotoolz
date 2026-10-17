@@ -1,6 +1,6 @@
 # Segment
 
-`geoops.segment` wraps `skimage.segmentation`. Outputs are integer-labelled `GeoTensor`s with the
+`geoops.segment` wraps `skimage.segmentation`. Outputs are integer-labelled `GeoArray`s with the
 input CRS / transform preserved.
 
 - **Thresholding:** `Threshold` — absolute, Otsu or `"percentile:<p>"` global threshold to a

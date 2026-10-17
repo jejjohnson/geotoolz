@@ -22,7 +22,7 @@ Pick the generic decoders (`MaskClouds`, `MaskCloudShadow`, `MaskCirrus`, `MaskS
 | `LandsatQA_PIXEL` (sensor=`l7`) | Landsat 4-7 C2 `QA_PIXEL` (no cirrus bit) | cloud (bit 3), cloud shadow (bit 4) | USGS LSDS-1618 |
 | `MODISStateQA` | MODIS `state_1km` / `state_500m` | cloud (bits [0,1] field, values 1,2) + cloud shadow (bit 2) | MOD09 User's Guide, Table 12 |
 
-All QA mask operators return boolean masks matching the input carrier: GeoTensor in (CRS/transform preserved, `fill_value_default=False`), plain `np.ndarray` in, plain boolean array out. The convention is **`True` means "mask this pixel out"** (see [Mask polarity](../concepts.md#mask-polarity)).
+All QA mask operators return boolean masks matching the input carrier: GeoArray in (CRS/transform preserved, `fill_value=False`), plain `np.ndarray` in, plain boolean array out. The convention is **`True` means "mask this pixel out"** (see [Mask polarity](../concepts.md#mask-polarity)).
 
 ### MODIS bit-field semantics
 

@@ -3,10 +3,10 @@
 The image segmenters (SLIC, Felzenszwalb, Quickshift, Watershed, ChanVese,
 RandomWalker) judge nodata with :func:`geoops._src.valid.valid_pixels`
 -- a pixel is invalid when any band is non-finite or equals the carrier's
-``fill_value_default``. Invalid pixels are median-filled (from valid pixels
+``fill_value``. Invalid pixels are median-filled (from valid pixels
 only) before the skimage call, kept out of it where the algorithm takes a
 mask, and always carry the "no segment" label ``0`` in the output (whose
-``fill_value_default`` is ``0``).
+``fill_value`` is ``0``).
 
 A ``(T, C, H, W)`` time stack is segmented frame by frame: the output is
 the per-frame label maps (or boundary images) stacked as
@@ -54,7 +54,7 @@ from geoops.segment._src.array import (
 
 
 if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor as GeoTensorType
+    from geoarray import GeoArray as GeoArrayType
 
 
 def _as_mask(
@@ -78,22 +78,22 @@ def _check_input_grid(gt: Any, other: Any, op_name: str, arg: str) -> None:
 
 
 def _labels(
-    gt: GeoTensorType | np.ndarray,
+    gt: GeoArrayType | np.ndarray,
     labels: np.ndarray,
     mask: np.ndarray | None = None,
-) -> GeoTensorType | np.ndarray:
+) -> GeoArrayType | np.ndarray:
     out = np.asarray(labels, dtype=np.int32)
     if mask is not None:
         out = np.where(mask, out, 0).astype(np.int32, copy=False)
-    return wrap_like(gt, out, fill_value_default=0)
+    return wrap_like(gt, out, fill_value=0)
 
 
 class SLIC(Operator):
     """SLIC superpixels via :func:`skimage.segmentation.slic`.
 
-    Nodata pixels (non-finite or ``fill_value_default`` in any band) are
+    Nodata pixels (non-finite or ``fill_value`` in any band) are
     median-filled, excluded from clustering and forced to label ``0`` in
-    the output. Accepts a ``GeoTensor`` or a plain
+    the output. Accepts a ``GeoArray`` or a plain
     ``np.ndarray`` (channel-first) and returns an ``int32`` label map in
     the same carrier kind.
 
@@ -132,9 +132,9 @@ class SLIC(Operator):
     @over_frames
     def _apply(
         self,
-        gt: GeoTensorType | np.ndarray,
-        mask: GeoTensorType | np.ndarray | None = None,
-    ) -> GeoTensorType | np.ndarray:
+        gt: GeoArrayType | np.ndarray,
+        mask: GeoArrayType | np.ndarray | None = None,
+    ) -> GeoArrayType | np.ndarray:
         _check_input_grid(gt, mask, "SLIC", "mask")
         valid = valid_pixels(gt)
         image = fill_invalid(np.asarray(gt), valid)
@@ -158,10 +158,10 @@ class SLIC(Operator):
 class Felzenszwalb(Operator):
     """Graph-based segmentation via :func:`skimage.segmentation.felzenszwalb`.
 
-    Nodata pixels (non-finite or ``fill_value_default`` in any band) are
+    Nodata pixels (non-finite or ``fill_value`` in any band) are
     median-filled before segmentation and forced to label ``0`` in the
     output; valid segments are labelled from ``1``.
-    Accepts a ``GeoTensor`` or a plain
+    Accepts a ``GeoArray`` or a plain
     ``np.ndarray`` (channel-first) and returns an ``int32`` label map in
     the same carrier kind.
 
@@ -197,9 +197,9 @@ class Felzenszwalb(Operator):
     @over_frames
     def _apply(
         self,
-        gt: GeoTensorType | np.ndarray,
-        mask: GeoTensorType | np.ndarray | None = None,
-    ) -> GeoTensorType | np.ndarray:
+        gt: GeoArrayType | np.ndarray,
+        mask: GeoArrayType | np.ndarray | None = None,
+    ) -> GeoArrayType | np.ndarray:
         _check_input_grid(gt, mask, "Felzenszwalb", "mask")
         valid = valid_pixels(gt)
         image = fill_invalid(np.asarray(gt), valid)
@@ -221,10 +221,10 @@ class Felzenszwalb(Operator):
 class Quickshift(Operator):
     """Mode-seeking superpixels via :func:`skimage.segmentation.quickshift`.
 
-    Nodata pixels (non-finite or ``fill_value_default`` in any band) are
+    Nodata pixels (non-finite or ``fill_value`` in any band) are
     median-filled before segmentation and forced to label ``0`` in the
     output; valid segments are labelled from ``1``.
-    Accepts a ``GeoTensor`` or a plain
+    Accepts a ``GeoArray`` or a plain
     ``np.ndarray`` (channel-first) and returns an ``int32`` label map in
     the same carrier kind.
 
@@ -272,9 +272,9 @@ class Quickshift(Operator):
     @over_frames
     def _apply(
         self,
-        gt: GeoTensorType | np.ndarray,
-        mask: GeoTensorType | np.ndarray | None = None,
-    ) -> GeoTensorType | np.ndarray:
+        gt: GeoArrayType | np.ndarray,
+        mask: GeoArrayType | np.ndarray | None = None,
+    ) -> GeoArrayType | np.ndarray:
         _check_input_grid(gt, mask, "Quickshift", "mask")
         valid = valid_pixels(gt)
         image = fill_invalid(np.asarray(gt), valid)
@@ -299,9 +299,9 @@ class Watershed(Operator):
     """Watershed segmentation via :func:`skimage.segmentation.watershed`.
 
     Expects a single-band ``(H, W)`` or ``(1, H, W)`` image. Nodata pixels
-    (non-finite or ``fill_value_default``) are median-filled, masked out of
+    (non-finite or ``fill_value``) are median-filled, masked out of
     the flooding and forced to label ``0`` in the output. Accepts a
-    ``GeoTensor`` or a plain ``np.ndarray`` and returns an ``int32`` label
+    ``GeoArray`` or a plain ``np.ndarray`` and returns an ``int32`` label
     map in the same carrier kind.
 
     Called as ``op(image, markers=None, mask=None)``, both optional
@@ -336,10 +336,10 @@ class Watershed(Operator):
     @over_frames
     def _apply(
         self,
-        gt: GeoTensorType | np.ndarray,
-        markers: GeoTensorType | np.ndarray | None = None,
-        mask: GeoTensorType | np.ndarray | None = None,
-    ) -> GeoTensorType | np.ndarray:
+        gt: GeoArrayType | np.ndarray,
+        markers: GeoArrayType | np.ndarray | None = None,
+        mask: GeoArrayType | np.ndarray | None = None,
+    ) -> GeoArrayType | np.ndarray:
         _check_input_grid(gt, markers, "Watershed", "markers")
         _check_input_grid(gt, mask, "Watershed", "mask")
         valid = valid_pixels(gt)
@@ -365,9 +365,9 @@ class ChanVese(Operator):
     """Active-contour segmentation via :func:`skimage.segmentation.chan_vese`.
 
     Expects a single-band ``(H, W)`` or ``(1, H, W)`` image. Nodata pixels
-    (non-finite or ``fill_value_default``) are median-filled before
+    (non-finite or ``fill_value``) are median-filled before
     evolution and forced to label ``0`` in the output. Accepts a
-    ``GeoTensor`` or a plain ``np.ndarray`` and returns an ``int32`` label
+    ``GeoArray`` or a plain ``np.ndarray`` and returns an ``int32`` label
     map (0 = outside, 1 = inside) in the same carrier kind.
 
     Args:
@@ -395,7 +395,7 @@ class ChanVese(Operator):
         self.max_num_iter = max_num_iter
 
     @over_frames
-    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+    def _apply(self, gt: GeoArrayType | np.ndarray) -> GeoArrayType | np.ndarray:
         valid = valid_pixels(gt)
         labels = chan_vese(
             single_band(fill_invalid(np.asarray(gt), valid), name="ChanVese"),
@@ -412,9 +412,9 @@ class RandomWalker(Operator):
     """Seeded segmentation via :func:`skimage.segmentation.random_walker`.
 
     Expects a single-band ``(H, W)`` or ``(1, H, W)`` image. Nodata pixels
-    (non-finite or ``fill_value_default``) are median-filled, marked
+    (non-finite or ``fill_value``) are median-filled, marked
     inactive (removed from the diffusion graph) and labelled ``0`` in the
-    output. Accepts a ``GeoTensor``
+    output. Accepts a ``GeoArray``
     or a plain ``np.ndarray`` and returns an ``int32`` label map in the
     same carrier kind.
 
@@ -442,8 +442,8 @@ class RandomWalker(Operator):
 
     @over_frames
     def _apply(
-        self, gt: GeoTensorType | np.ndarray, markers: GeoTensorType | np.ndarray
-    ) -> GeoTensorType | np.ndarray:
+        self, gt: GeoArrayType | np.ndarray, markers: GeoArrayType | np.ndarray
+    ) -> GeoArrayType | np.ndarray:
         _check_input_grid(gt, markers, "RandomWalker", "markers")
         valid = valid_pixels(gt)
         seeds = single_band(markers, name="RandomWalker markers").astype(
@@ -473,8 +473,8 @@ class Threshold(Operator):
 
     Nodata pixels (non-finite or equal to the input's fill value, in any
     band) are excluded from the Otsu / percentile statistic and are always
-    ``False``; the output declares ``fill_value_default=False``. Accepts a
-    ``GeoTensor`` or a plain ``np.ndarray`` and returns a boolean mask of
+    ``False``; the output declares ``fill_value=False``. Accepts a
+    ``GeoArray`` or a plain ``np.ndarray`` and returns a boolean mask of
     the input's shape in the same carrier kind.
 
     :class:`geoops.plume.PlumeMask` is this thresholding followed by a
@@ -508,9 +508,9 @@ class Threshold(Operator):
         self.nbins = nbins
 
     @over_frames
-    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+    def _apply(self, gt: GeoArrayType | np.ndarray) -> GeoArrayType | np.ndarray:
         mask = threshold_mask(mask_invalid_to_nan(gt), self.threshold, nbins=self.nbins)
-        return wrap_like(gt, mask, fill_value_default=False)
+        return wrap_like(gt, mask, fill_value=False)
 
 
 class ExpandLabels(Operator):
@@ -518,7 +518,7 @@ class ExpandLabels(Operator):
 
     Wraps :func:`skimage.segmentation.expand_labels`. Expects a
     single-band ``(H, W)`` or ``(1, H, W)`` integer label map. Accepts a
-    ``GeoTensor`` or a plain ``np.ndarray`` and returns an ``int32``
+    ``GeoArray`` or a plain ``np.ndarray`` and returns an ``int32``
     label map in the same carrier kind.
 
     Args:
@@ -530,7 +530,7 @@ class ExpandLabels(Operator):
         self.distance = distance
 
     @over_frames
-    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+    def _apply(self, gt: GeoArrayType | np.ndarray) -> GeoArrayType | np.ndarray:
         labels = expand_labels(
             single_band(np.asarray(gt), name="ExpandLabels").astype(
                 np.int32, copy=False
@@ -567,9 +567,9 @@ class MergeNearbyInstances(Operator):
             merge.
         start_label: Starting integer label for the relabeled output.
 
-    Accepts a single-band ``GeoTensor`` or a plain ``np.ndarray`` label
+    Accepts a single-band ``GeoArray`` or a plain ``np.ndarray`` label
     map and returns an ``int32`` label map in the same carrier kind, with
-    ``fill_value_default=0``; nodata input pixels are ``0``.
+    ``fill_value=0``; nodata input pixels are ``0``.
     """
 
     def __init__(
@@ -594,7 +594,7 @@ class MergeNearbyInstances(Operator):
         self.start_label = int(start_label)
 
     @over_frames
-    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+    def _apply(self, gt: GeoArrayType | np.ndarray) -> GeoArrayType | np.ndarray:
         labels_in = single_band(np.asarray(gt), name="MergeNearbyInstances")
         merged = merge_nearby_instances(
             labels_in,
@@ -639,9 +639,9 @@ class MaskNMS(Operator):
             None, instances are ranked by pixel area (largest first).
         start_label: Starting integer label for the renumbered output.
 
-    Accepts a ``GeoTensor`` or a plain ``np.ndarray`` mask stack and
+    Accepts a ``GeoArray`` or a plain ``np.ndarray`` mask stack and
     returns an ``int32`` label map in the same carrier kind, with
-    ``fill_value_default=0``; pixels that are nodata in any plane are ``0``.
+    ``fill_value=0``; pixels that are nodata in any plane are ``0``.
     """
 
     def __init__(
@@ -660,7 +660,7 @@ class MaskNMS(Operator):
         self.start_label = int(start_label)
 
     @over_frames
-    def _apply(self, gt: GeoTensorType | np.ndarray) -> GeoTensorType | np.ndarray:
+    def _apply(self, gt: GeoArrayType | np.ndarray) -> GeoArrayType | np.ndarray:
         masks = np.asarray(gt)
         out = mask_nms(
             masks,
@@ -685,7 +685,7 @@ class MarkBoundaries(Operator):
     single-band ``(H, W)`` / ``(1, H, W)`` image or a 3-band ``(3, H, W)``
     RGB image; channel-first inputs are moved to channel-last for skimage
     and back afterwards. The output is always a ``(3, H, W)`` RGB overlay.
-    Any other band count raises ``ValueError``. Accepts a ``GeoTensor``
+    Any other band count raises ``ValueError``. Accepts a ``GeoArray``
     or a plain ``np.ndarray`` and returns the overlay in the same carrier
     kind.
 
@@ -710,8 +710,8 @@ class MarkBoundaries(Operator):
 
     @over_frames
     def _apply(
-        self, gt: GeoTensorType | np.ndarray, label_img: GeoTensorType | np.ndarray
-    ) -> GeoTensorType | np.ndarray:
+        self, gt: GeoArrayType | np.ndarray, label_img: GeoArrayType | np.ndarray
+    ) -> GeoArrayType | np.ndarray:
         _check_input_grid(gt, label_img, "MarkBoundaries", "label_img")
         image = np.asarray(gt)
         if image.ndim == 3:
@@ -735,5 +735,5 @@ class MarkBoundaries(Operator):
         if marked.ndim == 3:
             marked = einx.id("h w c -> c h w", marked)
         return wrap_filled(
-            gt, marked, fill_value_default=carried_fill(gt, np.asarray(marked).dtype)
+            gt, marked, fill_value=carried_fill(gt, np.asarray(marked).dtype)
         )

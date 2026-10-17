@@ -44,7 +44,7 @@ Product readers (``ProductReader`` and the per-sensor / per-provider
 subpackages) live in the
 [`geotoolz-products`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-products)
 workspace package (import name `geoproducts`); their output is a
-`GeoTensor` every operator here accepts.
+`GeoArray` every operator here accepts.
 """
 
 from __future__ import annotations
@@ -208,7 +208,7 @@ from geoops.io import (
     WriteZarr,
 )
 from geoops.learn import (
-    GeoTensorEstimator,
+    GeoArrayEstimator,
     ModelOp,
     PixelwiseGMM,
     PixelwiseIPCA,
@@ -523,7 +523,7 @@ __all__ = [
     "GapFillNearest",
     "GaussianDenoise",
     "GaussianNoise",
-    "GeoTensorEstimator",
+    "GeoArrayEstimator",
     "Georeference",
     "GeostationaryParallaxCorrect",
     "Graph",

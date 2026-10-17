@@ -18,11 +18,11 @@ downstream of :mod:`geoops.radiometry` (``PercentileClip``,
 and add the (rounded) byte cast.
 
 Per-pixel display ops (composites by integer index, stretch, gamma,
-colormaps, overlay blending) accept either a ``GeoTensor`` or a plain
+colormaps, overlay blending) accept either a ``GeoArray`` or a plain
 ``np.ndarray`` and return the same carrier kind. Ops that need the
 geotransform / CRS to be meaningful (``Hillshade`` without explicit
 resolutions, ``ShadedRelief``, ``AnnotatePolygons``, ``AnnotatePoints``)
-require a georeferenced GeoTensor and raise ``TypeError`` otherwise.
+require a georeferenced GeoArray and raise ``TypeError`` otherwise.
 
 Time stacks: composites select along the band axis (``-3`` by default),
 so a ``(T, C, H, W)`` stack gives a ``(T, 3, H, W)`` composite;
@@ -30,18 +30,19 @@ colormaps and terrain shading render each frame (``(T, 4, H, W)`` RGBA,
 ``(T, 1, H, W)`` hillshade).
 
 Nodata: a pixel is invalid when any band is non-finite or equals the
-carrier's ``fill_value_default`` (:mod:`geoops._src.valid`). Stretches
+carrier's ``fill_value`` (:mod:`geoops._src.valid`). Stretches
 and colormaps compute their percentiles / ranges over valid pixels only;
-their ``uint8`` outputs carry ``fill_value_default=0`` and write ``0``
+their ``uint8`` outputs carry ``fill_value=0`` and write ``0``
 (RGBA: fully transparent, alpha ``0``) into invalid pixels.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
+from geoarray import GeoArray
 from pipekit import Operator
 
 from geoops._src.bands import BandRef, band_names
@@ -50,9 +51,11 @@ from geoops._src.config import (
     mapping_from_pairs,
     mapping_to_pairs,
 )
+from geoops._src.engine import to_engine
 from geoops._src.geo import (
+    affine_of,
     ground_pixel_size,
-    require_geotensor,
+    require_geoarray,
     require_projected_crs,
 )
 from geoops._src.optional import import_optional
@@ -79,10 +82,6 @@ from geoops.viz._src.array import (
     rgba_from_categories,
     rgba_from_scalar,
 )
-
-
-if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
 
 
 class Composite(SelectBands):
@@ -246,9 +245,9 @@ class StretchToUint8(Operator):
     plain arrays.
 
     Nodata pixels (any band non-finite or equal to the carrier's
-    ``fill_value_default``) are excluded from the percentiles, so a
+    ``fill_value``) are excluded from the percentiles, so a
     ``-9999`` fill cannot dominate the stretch, and are written as ``0``
-    -- the output's ``fill_value_default``.
+    -- the output's ``fill_value``.
 
     Args:
         lower: Lower percentile. Default ``2.0``.
@@ -278,12 +277,12 @@ class StretchToUint8(Operator):
         self.upper = upper
         self.reduce_axes = as_tuple(reduce_axes)
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         # Nodata comes back NaN from PercentileClip and casts to the 0 fill.
         stretched = PercentileClip(
             lower=self.lower, upper=self.upper, reduce_axes=self.reduce_axes
         )(gt)
-        return wrap_like(gt, _unit_to_uint8(stretched), fill_value_default=0)
+        return wrap_like(gt, _unit_to_uint8(stretched), fill_value=0)
 
 
 class GammaCorrect(Operator):
@@ -321,13 +320,13 @@ class GammaCorrect(Operator):
         self.gamma = gamma
         self.inplace_norm = inplace_norm
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = gamma_correct_display(
             np.asarray(gt), gamma=self.gamma, inplace_norm=self.inplace_norm
         )
         valid = ~invalid_values(gt)
         fill = carried_fill(gt, np.asarray(out).dtype)
-        return wrap_like(gt, restore_fill(out, valid, fill), fill_value_default=fill)
+        return wrap_like(gt, restore_fill(out, valid, fill), fill_value=fill)
 
 
 class RGBRecipe(Operator):
@@ -402,7 +401,7 @@ class RGBRecipe(Operator):
             raise ValueError(f"gamma must be positive; got {self.gamma}.")
 
     @over_frames
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr = np.asarray(gt)
         work = np.where(invalid_values(gt), np.nan, arr.astype(np.float32))
         names = band_names(gt) or []
@@ -421,7 +420,7 @@ class RGBRecipe(Operator):
         return wrap_like(
             gt,
             np.moveaxis(out, 0, self.axis) if arr.ndim > 2 else out,
-            fill_value_default=np.nan,
+            fill_value=np.nan,
             attrs={"band_names": ("red", "green", "blue")},
         )
 
@@ -466,7 +465,7 @@ def _per_channel(value: float | Sequence[float], name: str) -> tuple[float, ...]
 
 
 class ApplyColormap(Operator):
-    """Map a single-band raster to a four-band RGBA GeoTensor.
+    """Map a single-band raster to a four-band RGBA GeoArray.
 
     Looks up ``name`` in matplotlib's registry (or in cmocean if the
     name is prefixed with ``"cmocean."``). The colormap is referenced
@@ -483,7 +482,7 @@ class ApplyColormap(Operator):
         vmax: Optional explicit upper bound. ``None`` auto-detects.
         nan_color: RGBA tuple in ``[0, 1]`` to paint nodata pixels
             (non-finite, or equal to the carrier's
-            ``fill_value_default``). Default fully transparent, i.e. the
+            ``fill_value``). Default fully transparent, i.e. the
             output fill ``0``. Nodata pixels never enter the auto-detected
             ``vmin`` / ``vmax``.
 
@@ -509,7 +508,7 @@ class ApplyColormap(Operator):
         self.nan_color = nan_color
 
     @over_frames
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         cmap = _get_colormap(self.name)
         valid = valid_pixels(gt)
         out = rgba_from_scalar(
@@ -519,7 +518,7 @@ class ApplyColormap(Operator):
             vmax=self.vmax,
             nan_color=self.nan_color,
         )
-        return wrap_like(gt, out, fill_value_default=0)
+        return wrap_like(gt, out, fill_value=0)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -531,12 +530,12 @@ class ApplyColormap(Operator):
 
 
 class ApplyDiscreteColormap(Operator):
-    """Map integer categories to a four-band RGBA GeoTensor.
+    """Map integer categories to a four-band RGBA GeoArray.
 
     Classic categorical-label visualisation (land-cover classes, cloud
     masks, etc). Unmapped pixels render fully transparent. Pixels not
     in the mapping fall back to that default colour. Nodata pixels
-    (equal to the carrier's ``fill_value_default``) render fully
+    (equal to the carrier's ``fill_value``) render fully
     transparent (``0``) even if the fill value appears in ``mapping``.
     Metadata-independent: plain ``np.ndarray`` carriers pass through
     as plain arrays.
@@ -565,10 +564,10 @@ class ApplyDiscreteColormap(Operator):
         self.mapping = {int(k): tuple(v) for k, v in pairs.items()}
 
     @over_frames
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = rgba_from_categories(np.asarray(gt), self.mapping)
         out = restore_fill(out, valid_pixels(gt), 0)
-        return wrap_like(gt, out, fill_value_default=0)
+        return wrap_like(gt, out, fill_value=0)
 
     def get_config(self) -> dict[str, Any]:
         return {"mapping": mapping_to_pairs(self.mapping)}
@@ -590,7 +589,7 @@ class Hillshade(Operator):
     Geo-dependent by default: plain ``np.ndarray`` DEMs are accepted
     only when ``x_resolution`` and ``y_resolution`` are given
     explicitly; otherwise a ``TypeError`` is raised. Nodata DEM pixels
-    (non-finite or equal to ``fill_value_default``) do not leak into
+    (non-finite or equal to ``fill_value``) do not leak into
     their neighbours' slope and are written as ``0`` (the output fill).
 
     Args:
@@ -625,11 +624,11 @@ class Hillshade(Operator):
         self.y_resolution = y_resolution
 
     @over_frames
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         x_resolution = self.x_resolution
         y_resolution = self.y_resolution
         if x_resolution is None or y_resolution is None:
-            transform = require_geotensor(
+            transform = require_geoarray(
                 gt,
                 "Hillshade",
                 hint="Pass x_resolution/y_resolution explicitly to hillshade "
@@ -650,7 +649,7 @@ class Hillshade(Operator):
             z_factor=self.z_factor,
             valid=valid_pixels(gt),
         )
-        return wrap_like(gt, out, fill_value_default=0)
+        return wrap_like(gt, out, fill_value=0)
 
 
 class ShadedRelief(Operator):
@@ -662,7 +661,7 @@ class ShadedRelief(Operator):
     Alpha channel is preserved from the colormap, so nodata DEM pixels
     stay fully transparent (see `ApplyColormap` / `Hillshade`). Geo-dependent: the
     hillshade pixel size comes from the carrier's ``transform``, so a
-    georeferenced GeoTensor input in a projected CRS is required (a
+    georeferenced GeoArray input in a projected CRS is required (a
     geographic CRS raises ``ValueError``; see `Hillshade`).
 
     Args:
@@ -692,8 +691,8 @@ class ShadedRelief(Operator):
         self.z_factor = z_factor
 
     @over_frames
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        require_geotensor(gt, "ShadedRelief")
+    def _apply(self, gt: GeoArray) -> GeoArray:
+        require_geoarray(gt, "ShadedRelief")
         rgba = np.asarray(ApplyColormap(name=self.colormap)(gt)).copy()
         shade = (
             np.asarray(
@@ -707,11 +706,11 @@ class ShadedRelief(Operator):
             / 255.0
         )
         rgba[:3] = np.rint(rgba[:3].astype(np.float32) * shade).astype(np.uint8)
-        return wrap_like(gt, rgba, fill_value_default=0)
+        return wrap_like(gt, rgba, fill_value=0)
 
 
 class Overlay(Operator):
-    """Blend background and foreground GeoTensors on the same grid.
+    """Blend background and foreground GeoArrays on the same grid.
 
     Two-input Operator: ``Overlay()(background, foreground)``. When
     both carriers are georeferenced they must share ``transform`` and
@@ -738,16 +737,16 @@ class Overlay(Operator):
 
     def _apply(
         self,
-        background: GeoTensor | np.ndarray,
-        foreground: GeoTensor | np.ndarray,
-    ) -> GeoTensor | np.ndarray:
-        bg_transform = getattr(background, "transform", None)
-        fg_transform = getattr(foreground, "transform", None)
+        background: GeoArray | np.ndarray,
+        foreground: GeoArray | np.ndarray,
+    ) -> GeoArray | np.ndarray:
         if (
-            bg_transform is not None
-            and fg_transform is not None
+            isinstance(background, GeoArray)
+            and isinstance(foreground, GeoArray)
             and (
-                bg_transform != fg_transform
+                not np.array_equal(
+                    np.asarray(background.transform), np.asarray(foreground.transform)
+                )
                 or str(background.crs) != str(foreground.crs)
             )
         ):
@@ -755,7 +754,7 @@ class Overlay(Operator):
         if self.alpha == 0.0:
             # Consistency: always return RGBA, even when no blending occurs.
             return wrap_like(
-                background, ensure_rgba(np.asarray(background)), fill_value_default=0
+                background, ensure_rgba(np.asarray(background)), fill_value=0
             )
         out = blend_rgba(
             np.asarray(background),
@@ -763,11 +762,11 @@ class Overlay(Operator):
             alpha=self.alpha,
             mode=self.mode,
         )
-        return wrap_like(background, out, fill_value_default=0)
+        return wrap_like(background, out, fill_value=0)
 
 
 class AnnotatePolygons(Operator):
-    """Rasterize polygon outlines into a display GeoTensor.
+    """Rasterize polygon outlines into a display GeoArray.
 
     Burn polygon boundaries (buffered by ``width`` pixels) into the
     RGBA carrier. The geometries are reprojected into the carrier's
@@ -775,7 +774,7 @@ class AnnotatePolygons(Operator):
     ``forbid_in_yaml = True`` because the geometries themselves are
     runtime objects and don't round-trip through YAML. Geo-dependent:
     rasterisation needs the carrier's ``transform`` / ``crs``, so a
-    georeferenced GeoTensor input is required. A ``(T, C, H, W)`` stack
+    georeferenced GeoArray input is required. A ``(T, C, H, W)`` stack
     is annotated frame by frame.
 
     Args:
@@ -804,16 +803,17 @@ class AnnotatePolygons(Operator):
         self.width = width
 
     @over_frames
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoArray) -> GeoArray:
         import geopandas as gpd
         from georeader.rasterize import rasterize_geopandas_like
 
-        require_geotensor(gt, "AnnotatePolygons")
+        require_geoarray(gt, "AnnotatePolygons")
         rgba = ensure_rgba(np.asarray(gt), name="AnnotatePolygons")
         geometries = _iter_geometries(self.geometries, dst_crs=gt.crs)
         if not geometries or self.width <= 0:
-            return wrap_like(gt, rgba, fill_value_default=0)
-        pixel_size = max(abs(float(gt.transform.a)), abs(float(gt.transform.e)))
+            return wrap_like(gt, rgba, fill_value=0)
+        transform = affine_of(gt)
+        pixel_size = max(abs(float(transform.a)), abs(float(transform.e)))
         half_width = self.width * pixel_size / 2.0
         # Buffer in the carrier's CRS (pixel-width outlines), then burn
         # through georeader onto the carrier's grid.
@@ -824,11 +824,16 @@ class AnnotatePolygons(Operator):
         )
         mask = np.asarray(
             rasterize_geopandas_like(
-                outlines, gt, "burn", fill=0, all_touched=True, return_only_data=True
+                outlines,
+                to_engine(gt),
+                "burn",
+                fill=0,
+                all_touched=True,
+                return_only_data=True,
             )
         ).astype(bool)
         rgba[:, mask] = _color_to_uint8(self.color)[:, None]
-        return wrap_like(gt, rgba, fill_value_default=0)
+        return wrap_like(gt, rgba, fill_value=0)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -839,14 +844,14 @@ class AnnotatePolygons(Operator):
 
 
 class AnnotatePoints(Operator):
-    """Draw circular point markers into a display GeoTensor.
+    """Draw circular point markers into a display GeoArray.
 
     Renders disk-shaped markers at the supplied points into the RGBA
     carrier. Accepts either an ``(N, 2)`` array of ``(x, y)`` map
     coordinates or a GeoDataFrame (which is reprojected when it carries
     a CRS). Flagged ``forbid_in_yaml = True`` because the points are
     runtime objects. Geo-dependent: locating the markers needs the
-    carrier's ``transform`` / ``crs``, so a georeferenced GeoTensor
+    carrier's ``transform`` / ``crs``, so a georeferenced GeoArray
     input is required. A ``(T, C, H, W)`` stack is annotated frame by
     frame.
 
@@ -879,22 +884,22 @@ class AnnotatePoints(Operator):
         self.color = color
 
     @over_frames
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
+    def _apply(self, gt: GeoArray) -> GeoArray:
         from rasterio.transform import rowcol
 
-        require_geotensor(gt, "AnnotatePoints")
+        require_geoarray(gt, "AnnotatePoints")
         rgba = ensure_rgba(np.asarray(gt), name="AnnotatePoints")
         coords = _point_coords(self.points, dst_crs=gt.crs)
         if coords.size == 0:
-            return wrap_like(gt, rgba, fill_value_default=0)
-        rows, cols = rowcol(gt.transform, coords[:, 0], coords[:, 1])
+            return wrap_like(gt, rgba, fill_value=0)
+        rows, cols = rowcol(affine_of(gt), coords[:, 0], coords[:, 1])
         yy, xx = np.ogrid[: rgba.shape[-2], : rgba.shape[-1]]
         marker = np.zeros(rgba.shape[-2:], dtype=bool)
         radius = max(int(self.radius), 0)
         for row, col in zip(rows, cols, strict=True):
             marker |= (yy - row) ** 2 + (xx - col) ** 2 <= radius**2
         rgba[:, marker] = _color_to_uint8(self.color)[:, None]
-        return wrap_like(gt, rgba, fill_value_default=0)
+        return wrap_like(gt, rgba, fill_value=0)
 
     def get_config(self) -> dict[str, Any]:
         return {

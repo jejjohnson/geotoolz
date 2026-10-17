@@ -1,4 +1,4 @@
-"""Normalization operators for remote-sensing GeoTensors."""
+"""Normalization operators for remote-sensing GeoArrays."""
 
 from __future__ import annotations
 

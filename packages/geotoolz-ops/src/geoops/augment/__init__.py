@@ -1,6 +1,6 @@
 """Remote-sensing-safe data augmentations.
 
-The operators in this module preserve ``GeoTensor`` metadata, avoid
+The operators in this module preserve ``GeoArray`` metadata, avoid
 band-channel shuffling by default, and centralise per-operator plus
 per-call seed handling for reproducible training pipelines.
 """

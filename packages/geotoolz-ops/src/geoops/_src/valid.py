@@ -1,11 +1,9 @@
 """Shared notion of an *invalid* (nodata) pixel.
 
-georeader marks nodata through ``GeoTensor.fill_value_default``:
-``GeoTensor.validmask()`` is ``values != fill_value_default``. That
-comparison never matches a ``NaN`` fill (``NaN != NaN`` is ``True``), so a
-NaN-filled raster reports every pixel valid, and it ignores non-finite
-values under a numeric fill. The helpers here are the one definition
-every operator family uses instead:
+A `geoarray.GeoArray` marks nodata through its ``fill_value``. The
+helpers here are the one definition of an invalid pixel every operator
+family uses (the same rule as ``GeoArray.valid_mask``, also for plain
+arrays and an explicit fill):
 
 * An **element** is invalid when it is non-finite (``NaN`` / ``±inf``)
   or equals the carrier's fill value (``NaN`` fills matched with
@@ -24,7 +22,7 @@ output), then write the output's fill value back into them with
 The output's fill value follows its dtype and meaning, never blindly the
 input's (see :func:`carried_fill` and :func:`wrap_filled`):
 
-* boolean masks use ``False`` (as georeader's own comparison operators do);
+* boolean masks use ``False``;
 * label / count maps use ``0``;
 * float *products* whose values mean something new (indices, scores,
   features, masses, binned statistics) use ``NaN``;
@@ -42,6 +40,7 @@ from typing import Any
 import numpy as np
 from jaxtyping import Bool, Float
 
+from geoops._src.geo import reject_geotensor
 from geoops._src.wrap import INHERIT, FillValue, wrap_like
 
 
@@ -61,16 +60,20 @@ def carrier_fill_value(x: Any, fill_value: FillValue = INHERIT) -> Any:
     """Resolve the fill value that marks nodata in ``x``.
 
     Args:
-        x: A carrier (GeoTensor or plain array).
+        x: A carrier (GeoArray or plain array).
         fill_value: :data:`~geoops._src.wrap.INHERIT` (default) reads
-            ``x.fill_value_default`` (``None`` for plain arrays); anything
+            ``x.fill_value`` (``None`` for plain arrays); anything
             else is returned verbatim.
+
+    Raises:
+        TypeError: ``x`` is a georeader ``GeoTensor``.
 
     Returns:
         The fill value, or ``None`` when ``x`` declares none.
     """
+    reject_geotensor(x)
     if fill_value is INHERIT:
-        return getattr(x, "fill_value_default", None)
+        return getattr(x, "fill_value", None)
     return fill_value
 
 
@@ -110,9 +113,9 @@ def invalid_values(
     """Elementwise invalid mask: non-finite, or equal to the fill value.
 
     Args:
-        x: A carrier (GeoTensor or plain array) of any shape.
+        x: A carrier (GeoArray or plain array) of any shape.
         fill_value: Fill value to match. :data:`~geoops._src.wrap.INHERIT`
-            (default) uses ``x.fill_value_default`` (none for plain
+            (default) uses ``x.fill_value`` (none for plain
             arrays); pass one explicitly to override it.
 
     Returns:
@@ -132,13 +135,13 @@ def valid_pixels(
 
     A pixel is valid when *every* band at that location is finite and
     differs from the fill value (see the module docstring for why "any
-    band invalid" invalidates the pixel). Unlike ``GeoTensor.validmask()``
+    band invalid" invalidates the pixel). Like ``GeoArray.valid_mask``,
     this recognises ``NaN`` fills and non-finite values.
 
     Args:
         x: ``(H, W)``, ``(C, H, W)`` or ``(T, C, H, W)`` carrier.
         fill_value: Fill value override; defaults to
-            ``x.fill_value_default`` (none for plain arrays).
+            ``x.fill_value`` (none for plain arrays).
         keep_time: For a 4-D input, return a per-frame ``(T, H, W)`` mask
             instead of reducing over time as well. Ignored for 2-D / 3-D.
 
@@ -187,7 +190,7 @@ def mask_invalid_to_nan(
     so fill pixels never enter a statistic.
 
     Args:
-        x: A carrier (GeoTensor or plain array) with >= 2 dims.
+        x: A carrier (GeoArray or plain array) with >= 2 dims.
         fill_value: Fill value override (see :func:`valid_pixels`).
         valid: Precomputed validity mask -- ``(H, W)``, per-frame
             ``(T, H, W)`` for 4-D input, or ``x``'s full shape. Computed
@@ -301,19 +304,19 @@ def wrap_filled(
     ref: Any,
     out: Any,
     *,
-    fill_value_default: Any,
+    fill_value: Any,
     valid: np.ndarray | None = None,
     **wrap_kwargs: Any,
 ) -> Any:
     """Write an explicit fill into ``ref``'s invalid pixels and rewrap ``out``.
 
     The one-call form of ``restore_fill`` + ``wrap_like`` that keeps the
-    declared ``fill_value_default`` in step with the values written.
+    declared ``fill_value`` in step with the values written.
 
     Args:
         ref: The operator's input carrier.
         out: The computed output, on ``ref``'s grid.
-        fill_value_default: The output's fill value (``None`` writes ``NaN``
+        fill_value: The output's fill value (``None`` writes ``NaN``
             into a float output, and nothing is declared).
         valid: Validity mask (see :func:`restore_fill`); defaults to
             ``valid_pixels(ref)`` (per frame for 4-D input).
@@ -321,9 +324,9 @@ def wrap_filled(
             (``attrs``, ``band_names``, ``transform``).
 
     Returns:
-        ``out`` rewrapped like ``ref`` with ``fill_value_default`` declared.
+        ``out`` rewrapped like ``ref`` with ``fill_value`` declared.
     """
     if valid is None:
         valid = valid_pixels(ref, keep_time=np.ndim(out) == 4)
-    filled = restore_fill(out, valid, fill_value_default)
-    return wrap_like(ref, filled, fill_value_default=fill_value_default, **wrap_kwargs)
+    filled = restore_fill(out, valid, fill_value)
+    return wrap_like(ref, filled, fill_value=fill_value, **wrap_kwargs)

@@ -1,15 +1,16 @@
 """Carrier rewrap discipline shared by every operator family.
 
-`georeader.GeoTensor` (>=2.0) is an ``np.ndarray`` subclass, so the
-Tier-A primitives accept it transparently via ``np.asarray``. The one
-carrier-aware step left in each ``_apply`` is the *rewrap*: a GeoTensor
-input should come back as a GeoTensor (georeferencing and metadata
-propagated from the input), while a plain ndarray input should come back
-as a plain ndarray. :func:`wrap_like` centralises that duck-typed
-dispatch so operators support both carriers with a single call, and owns
-the metadata rules every output follows:
+The Tier-A primitives take plain arrays: ``np.asarray(g)`` is a
+`geoarray.GeoArray`'s data (a host copy for JAX data). The one
+carrier-aware step left in each ``_apply`` is the *rewrap*: a GeoArray
+input comes back as a GeoArray (georeferencing and metadata propagated
+from the input), while a plain ndarray input comes back as a plain
+ndarray. :func:`wrap_like` centralises that dispatch so operators support
+both carriers with a single call, refuses a georeader ``GeoTensor``
+(naming ``from_georeader``), and owns the metadata rules every output
+follows:
 
-* ``attrs`` is always a fresh (shallow-copied) dict, never the input's.
+* ``attrs`` is derived from the input's (immutable `FrozenAttrs`).
 * Per-band metadata (:data:`~geoops._src.bands.PER_BAND_KEYS`) is
   dropped when the band axis changes size, unless new ``band_names`` are
   supplied, in which case they are written under
@@ -33,9 +34,14 @@ from geoops._src.bands import (
 )
 
 
+from geoarray import FrozenAttrs, GeoArray
+
+from geoops._src.engine import from_engine
+from geoops._src.geo import reject_geotensor
+
+
 if TYPE_CHECKING:
     from affine import Affine
-    from georeader.geotensor import GeoTensor
 
 __all__ = ["INHERIT", "Inherit", "adopt_attrs", "rewrap_attrs", "wrap_like"]
 
@@ -49,8 +55,8 @@ class Inherit(enum.Enum):
         return "INHERIT"
 
 
-#: Default for :func:`wrap_like`'s ``fill_value_default``: inherit
-#: ``ref.fill_value_default``. Any other value -- including ``None``,
+#: Default for :func:`wrap_like`'s ``fill_value``: inherit
+#: ``ref.fill_value``. Any other value -- including ``None``,
 #: ``NaN``, ``False`` and ``0`` -- is used verbatim.
 INHERIT: Final = Inherit.INHERIT
 
@@ -66,8 +72,7 @@ def rewrap_attrs(
 ) -> dict[str, Any]:
     """Derive an output ``attrs`` dict from an input's ``attrs``.
 
-    Always returns a new dict (a shallow copy), so mutating the output's
-    attrs never leaks back into the input.
+    Returns a new dict, which the caller freezes into the output's attrs.
 
     Args:
         ref_attrs: The input carrier's ``attrs`` (``None`` means empty).
@@ -108,110 +113,98 @@ def rewrap_attrs(
 
 
 def adopt_attrs(
-    ref: GeoTensor | np.ndarray,
+    ref: GeoArray | np.ndarray,
     result: Any,
     *,
     attrs: Mapping[str, Any] | None = None,
     band_names: Sequence[str] | None = None,
 ) -> Any:
-    """Give a GeoTensor built by a georeader call fresh attrs derived from ``ref``.
+    """Give a raster on a new grid the attrs derived from ``ref``.
 
-    georeader methods that move a raster onto a new grid
-    (``read_from_window``, ``pad``, ``isel``, ``resize``, ``read_reproject``,
-    ...) either alias the input's ``attrs`` dict or drop it. This keeps
-    ``result``'s grid (``transform``, ``crs``, ``fill_value_default``) and
-    pixel values (a view, not a copy) and replaces its attrs following the
-    same rules as :func:`wrap_like`. A new GeoTensor is always returned,
-    so ``result`` -- which georeader sometimes returns as ``ref`` itself --
-    is never mutated.
+    For results that come back from a grid-changing step (a georeader
+    engine call such as ``read_reproject``, a geoarray ``read_window`` /
+    ``pad``, ...): keeps ``result``'s grid (``transform``, ``crs``,
+    ``fill_value``) and pixel values (no copy) and derives its attrs from
+    ``ref`` following the same rules as :func:`wrap_like`. A georeader
+    ``GeoTensor`` result is converted with ``from_georeader`` first.
 
     Args:
         ref: The operator's input carrier.
-        result: The georeader output. Anything without a ``transform``
-            (a plain array) is returned unchanged.
+        result: The new raster. Anything that is neither a `GeoArray` nor
+            a ``GeoTensor`` (a plain array) is returned unchanged.
         attrs: Explicit attrs, as in :func:`wrap_like`. ``None`` derives
             them from ``ref.attrs``.
         band_names: New band names, as in :func:`wrap_like`.
 
     Returns:
-        A GeoTensor on ``result``'s grid with fresh attrs, or ``result``
-        unchanged when it is not GeoTensor-like.
+        A GeoArray on ``result``'s grid with attrs derived from ``ref``, or
+        ``result`` unchanged when it is not a raster carrier.
     """
-    if getattr(result, "transform", None) is None:
+    result = from_engine(result)
+    if not isinstance(result, GeoArray):
         return result
-
-    from georeader.geotensor import GeoTensor
-
-    values = np.asarray(result)
-    out_bands = band_count(values.shape)
+    out_bands = band_count(tuple(result.shape))
     new_attrs = rewrap_attrs(
         getattr(ref, "attrs", None) if attrs is None else attrs,
         in_bands=band_count(tuple(np.shape(ref))) if attrs is None else out_bands,
         out_bands=out_bands,
         band_names=band_names,
     )
-    return GeoTensor(
-        values,
-        transform=result.transform,
-        crs=result.crs,
-        fill_value_default=result.fill_value_default,
-        attrs=new_attrs,
-    )
+    return result.replace(attrs=FrozenAttrs(new_attrs))
 
 
 def wrap_like(
-    ref: GeoTensor | np.ndarray,
+    ref: GeoArray | np.ndarray,
     out: np.ndarray,
     *,
-    fill_value_default: FillValue = INHERIT,
+    fill_value: FillValue = INHERIT,
     attrs: Mapping[str, Any] | None = None,
-    transform: Affine | None = None,
+    transform: Affine | Any | None = None,
     band_names: Sequence[str] | None = None,
-) -> GeoTensor | np.ndarray:
+) -> GeoArray | np.ndarray:
     """Rewrap a computed array to match the carrier of ``ref``.
 
     Args:
-        ref: The operator's input carrier -- a ``GeoTensor`` or any plain
-            array-like. Dispatch is duck-typed on the presence of
-            ``array_as_geotensor`` rather than an isinstance check, so
-            GeoTensor-compatible carriers from other libraries also work.
+        ref: The operator's input carrier -- a `geoarray.GeoArray` or any
+            plain array-like. A georeader ``GeoTensor`` raises.
         out: The result array produced by a Tier-A primitive. Unless
             ``transform`` is given, its trailing two (spatial) dims must
-            match ``ref``'s when ``ref`` is a GeoTensor.
-        fill_value_default: Fill value for the returned GeoTensor. The
-            default, :data:`INHERIT`, propagates ``ref.fill_value_default``;
-            any other value is used verbatim, so ``None`` means "no fill
-            value" and ``NaN`` / ``False`` / ``0`` are explicit fills.
-            Ignored for plain-array carriers.
+            match ``ref``'s when ``ref`` is a GeoArray.
+        fill_value: Fill value for the returned GeoArray. The default,
+            :data:`INHERIT`, propagates ``ref.fill_value``; any other value
+            is used verbatim, so ``None`` means "no fill value" and
+            ``NaN`` / ``False`` / ``0`` are explicit fills. Ignored for
+            plain-array carriers.
         attrs: Attributes for the output. ``None`` (default) derives them
-            from ``ref.attrs`` via :func:`rewrap_attrs`: a shallow copy with
-            per-band keys dropped when the band count changes. An explicit
-            mapping is shallow-copied and used as-is (the caller owns its
-            band keys); ``band_names`` is still written into it.
-        transform: Affine transform for the output. ``None`` (default)
-            keeps ``ref.transform`` and requires ``out`` to share ``ref``'s
-            spatial shape; pass one for outputs on a new grid (crops,
-            resampling) -- the spatial-shape check is then skipped.
+            from ``ref.attrs`` via :func:`rewrap_attrs`: per-band keys
+            dropped when the band count changes. An explicit mapping is
+            used as-is (the caller owns its band keys); ``band_names`` is
+            still written into it.
+        transform: Transform for the output (an ``Affine``, six numbers or
+            a ``(6,)`` array). ``None`` (default) keeps ``ref.transform``
+            and requires ``out`` to share ``ref``'s spatial shape; pass one
+            for outputs on a new grid (crops, resampling) -- the
+            spatial-shape check is then skipped.
         band_names: Names of the output bands, written under
             ``attrs["band_names"]``. Must have one entry per output band
             (``out.shape[-3]`` for 3-D / 4-D outputs, 1 for 2-D).
 
     Returns:
-        A new GeoTensor with ``ref``'s CRS when ``ref`` is GeoTensor-like,
+        A new GeoArray with ``ref``'s CRS when ``ref`` is a GeoArray,
         otherwise ``out`` as a plain ``np.ndarray``.
 
     Raises:
+        TypeError: ``ref`` is a georeader ``GeoTensor``.
         ValueError: If ``transform`` is ``None`` and the spatial shape of
             ``out`` differs from ``ref``'s, or if ``band_names`` has the
             wrong length.
     """
-    if getattr(ref, "array_as_geotensor", None) is None:
+    reject_geotensor(ref)
+    if not isinstance(ref, GeoArray):
         return np.asarray(out)
 
-    from georeader.geotensor import GeoTensor
-
     values = np.asarray(out)
-    ref_shape = tuple(np.shape(ref))
+    ref_shape = tuple(ref.shape)
     if transform is None:
         if values.shape[-2:] != ref_shape[-2:]:
             raise ValueError(
@@ -219,11 +212,11 @@ def wrap_like(
                 f"{ref_shape[-2:]} -> {values.shape[-2:]}; pass transform= "
                 "for outputs on a new grid."
             )
-        transform = ref.transform
+        transform = np.asarray(ref.transform)
     out_bands = band_count(values.shape)
     if attrs is None:
         new_attrs = rewrap_attrs(
-            getattr(ref, "attrs", None),
+            ref.attrs,
             in_bands=band_count(ref_shape),
             out_bands=out_bands,
             band_names=band_names,
@@ -232,12 +225,12 @@ def wrap_like(
         new_attrs = rewrap_attrs(
             attrs, in_bands=out_bands, out_bands=out_bands, band_names=band_names
         )
-    if fill_value_default is INHERIT:
-        fill_value_default = ref.fill_value_default
-    return GeoTensor(
+    if fill_value is INHERIT:
+        fill_value = ref.fill_value
+    return GeoArray(
         values,
-        transform=transform,
-        crs=ref.crs,
-        fill_value_default=fill_value_default,
-        attrs=new_attrs,
+        transform,
+        ref.crs,
+        fill_value=fill_value,
+        attrs=FrozenAttrs(new_attrs),
     )

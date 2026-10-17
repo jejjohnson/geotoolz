@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 import numpy as np
 import pandas as pd
 import pytest
-from _helpers import toy_geotensor, uint16_dn_cube
-from georeader.geotensor import GeoTensor
+from _helpers import toy_geoarray, uint16_dn_cube
+from geoarray import GeoArray
 
 from geoops.radiometry import (
     DOS1,
@@ -51,19 +51,19 @@ from geoops.radiometry._src.solar import (
 # ---------------------------------------------------------------------------
 
 
-def _toy_geotensor(values: np.ndarray) -> GeoTensor:
-    # Shared factory, but with fill_value_default=0 — the fill-value
+def _toy_geoarray(values: np.ndarray) -> GeoArray:
+    # Shared factory, but with fill_value=0 — the fill-value
     # propagation tests below rely on 0 marking fill pixels.
-    return toy_geotensor(values, fill_value_default=0)
+    return toy_geoarray(values, fill_value=0)
 
 
 @pytest.fixture
-def dn_4band() -> GeoTensor:
+def dn_4band() -> GeoArray:
     """4-band uint16 DN raster mimicking Sentinel-2 L1C."""
     rng = np.random.default_rng(0)
     # DN start at 1: 0 is this raster's fill value (nodata).
     arr = rng.integers(1, 12_000, size=(4, 8, 8), dtype=np.uint16)
-    return _toy_geotensor(arr)
+    return _toy_geoarray(arr)
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +142,7 @@ def test_min_max_uint16_int_bounds() -> None:
     np.testing.assert_allclose(out_unclipped, [-0.5, 0.0, 1.0])
 
     cube = uint16_dn_cube(2)
-    via_op = MinMaxStretch(vmin=1500, vmax=2500, clip=False)(toy_geotensor(cube))
+    via_op = MinMaxStretch(vmin=1500, vmax=2500, clip=False)(toy_geoarray(cube))
     np.testing.assert_allclose(
         np.asarray(via_op), (cube.astype(np.float64) - 1500) / 1000
     )
@@ -266,29 +266,29 @@ def test_dos1_subtracts_dark_percentile() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tier-B — Operator + GeoTensor round-trip
+# Tier-B — Operator + GeoArray round-trip
 # ---------------------------------------------------------------------------
 
 
-def test_to_float32(dn_4band: GeoTensor) -> None:
+def test_to_float32(dn_4band: GeoArray) -> None:
     op = ToFloat32()
     out = op(dn_4band)
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
     assert out.dtype == np.float32
-    assert out.transform == dn_4band.transform
+    assert out.grid == dn_4band.grid
     assert str(out.crs) == "EPSG:32629"
 
 
-def test_dn_to_reflectance_operator_preserves_metadata(dn_4band: GeoTensor) -> None:
+def test_dn_to_reflectance_operator_preserves_metadata(dn_4band: GeoArray) -> None:
     op = DNToReflectance(scale=1e-4)
     out = op(dn_4band)
-    assert isinstance(out, GeoTensor)
-    assert out.transform == dn_4band.transform
+    assert isinstance(out, GeoArray)
+    assert out.grid == dn_4band.grid
     assert out.shape == dn_4band.shape
     np.testing.assert_allclose(np.asarray(out), 1e-4 * np.asarray(dn_4band))
 
 
-def test_dn_to_radiance_per_band(dn_4band: GeoTensor) -> None:
+def test_dn_to_radiance_per_band(dn_4band: GeoArray) -> None:
     gains = np.array([0.01, 0.02, 0.015, 0.012])
     offsets = np.array([-1.0, -2.0, -1.5, -1.2])
     op = DNToRadiance(gain=gains, offset=offsets)
@@ -299,7 +299,7 @@ def test_dn_to_radiance_per_band(dn_4band: GeoTensor) -> None:
         np.testing.assert_allclose(arr[b], gains[b] * dn[b] + offsets[b])
 
 
-def test_radiance_to_dn_operator_inverts_dn_to_radiance(dn_4band: GeoTensor) -> None:
+def test_radiance_to_dn_operator_inverts_dn_to_radiance(dn_4band: GeoArray) -> None:
     gains = np.array([0.01, 0.02, 0.015, 0.012])
     offsets = np.array([-1.0, -2.0, -1.5, -1.2])
     radiance = DNToRadiance(gain=gains, offset=offsets, scale=2.0)(dn_4band)
@@ -307,38 +307,38 @@ def test_radiance_to_dn_operator_inverts_dn_to_radiance(dn_4band: GeoTensor) -> 
     np.testing.assert_allclose(np.asarray(out), np.asarray(dn_4band))
 
 
-def test_dn_to_radiance_rejects_wrong_band_count(dn_4band: GeoTensor) -> None:
+def test_dn_to_radiance_rejects_wrong_band_count(dn_4band: GeoArray) -> None:
     op = DNToRadiance(gain=np.array([0.01, 0.02]))  # only 2 entries, need 4
     with pytest.raises(ValueError, match="doesn't match"):
         op(dn_4band)
 
 
-def test_min_max_operator(dn_4band: GeoTensor) -> None:
+def test_min_max_operator(dn_4band: GeoArray) -> None:
     rho = DNToReflectance(scale=1e-4)(dn_4band)
     out = MinMaxStretch(vmin=0.0, vmax=1.0)(rho)
     assert np.all(np.asarray(out) <= 1.0)
     assert np.all(np.asarray(out) >= 0.0)
-    assert out.transform == rho.transform
+    assert out.grid == rho.grid
 
 
-def test_percentile_clip_operator(dn_4band: GeoTensor) -> None:
+def test_percentile_clip_operator(dn_4band: GeoArray) -> None:
     rho = DNToReflectance(scale=1e-4)(dn_4band)
     op = PercentileClip(lower=2.0, upper=98.0)
     out = op(rho)
     assert out.shape == rho.shape
     assert np.all(np.asarray(out) >= 0.0)
     assert np.all(np.asarray(out) <= 1.0)
-    assert out.transform == rho.transform
+    assert out.grid == rho.grid
 
 
-def test_gamma_operator(dn_4band: GeoTensor) -> None:
+def test_gamma_operator(dn_4band: GeoArray) -> None:
     rho = DNToReflectance(scale=1e-4)(dn_4band)
     out = Gamma(gamma=1.2)(rho)
     assert out.shape == rho.shape
-    assert out.transform == rho.transform
+    assert out.grid == rho.grid
 
 
-def test_radiometry_pipeline_composes(dn_4band: GeoTensor) -> None:
+def test_radiometry_pipeline_composes(dn_4band: GeoArray) -> None:
     """The README's display pipeline should work as a single Sequential."""
     pipe = (
         ToFloat32()
@@ -347,7 +347,7 @@ def test_radiometry_pipeline_composes(dn_4band: GeoTensor) -> None:
         | Gamma(gamma=1.2)
     )
     out = pipe(dn_4band)
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
     assert out.shape == dn_4band.shape
     assert np.all(np.asarray(out) >= 0.0)
     assert np.all(np.asarray(out) <= 1.0)
@@ -357,11 +357,11 @@ def test_integer_dn_promoted_to_float_declares_nan_fill() -> None:
     """A 0 fill on uint16 DN would collide with real float values (#146)."""
     from _helpers import fill_pixel_mask
 
-    gt = toy_geotensor(uint16_dn_cube(2), fill_value_default=0, with_fill_pixels=True)
+    gt = toy_geoarray(uint16_dn_cube(2), fill_value=0, with_fill_pixels=True)
     fill = fill_pixel_mask(gt.shape)
     for op in (ToFloat32(), DNToReflectance(scale=1e-4), DNToRadiance(gain=0.1)):
         out = op(gt)
-        assert np.isnan(out.fill_value_default)
+        assert np.isnan(out.fill_value)
         assert np.isnan(np.asarray(out)[:, fill]).all()
         assert np.isfinite(np.asarray(out)[:, ~fill]).all()
 
@@ -372,11 +372,11 @@ def test_float_unit_conversions_keep_and_write_the_fill() -> None:
     from _helpers import fill_pixel_mask
 
     values = np.full((2, 4, 4), 1000.0)
-    gt = toy_geotensor(values, fill_value_default=-9999, with_fill_pixels=True)
+    gt = toy_geoarray(values, fill_value=-9999, with_fill_pixels=True)
     fill = fill_pixel_mask(gt.shape)
     for op in (DNToReflectance(scale=1e-4), DNToRadiance(gain=0.1)):
         out = op(gt)
-        assert out.fill_value_default == -9999
+        assert out.fill_value == -9999
         np.testing.assert_array_equal(np.asarray(out)[:, fill], -9999)
 
 
@@ -385,11 +385,11 @@ def test_display_stretches_declare_nan_fill() -> None:
     from _helpers import fill_pixel_mask
 
     values = np.random.default_rng(0).uniform(0.1, 0.9, (2, 4, 4))
-    gt = toy_geotensor(values, fill_value_default=0.0, with_fill_pixels=True)
+    gt = toy_geoarray(values, fill_value=0.0, with_fill_pixels=True)
     fill = fill_pixel_mask(gt.shape)
     for op in (MinMaxStretch(vmin=0.0, vmax=1.0), PercentileClip(), Gamma()):
         out = op(gt)
-        assert np.isnan(out.fill_value_default)
+        assert np.isnan(out.fill_value)
         assert np.isnan(np.asarray(out)[:, fill]).all()
     # The fill pixels no longer drag the percentiles down to 0.
     clipped = np.asarray(PercentileClip(lower=0.0, upper=100.0)(gt))
@@ -398,7 +398,7 @@ def test_display_stretches_declare_nan_fill() -> None:
 
 
 def test_radiance_reflectance_roundtrip_preserves_metadata() -> None:
-    radiance = _toy_geotensor(
+    radiance = _toy_geoarray(
         np.array(
             [
                 [[10.0, 12.0], [14.0, 16.0]],
@@ -421,13 +421,13 @@ def test_radiance_reflectance_roundtrip_preserves_metadata() -> None:
     )
     out = to_radiance(to_reflectance(radiance))
     np.testing.assert_allclose(np.asarray(out), np.asarray(radiance), rtol=1e-12)
-    assert out.transform == radiance.transform
+    assert out.grid == radiance.grid
 
 
 def test_radiance_reflectance_keep_attrs() -> None:
     """georeader rebuilds these without attrs; the operators restore a copy (#144)."""
     attrs = {"band_names": ["B1", "B2"], "sensor": "toy"}
-    radiance = toy_geotensor(np.full((2, 2, 2), 10.0), attrs=dict(attrs))
+    radiance = toy_geoarray(np.full((2, 2, 2), 10.0), attrs=dict(attrs))
     kwargs = {
         "solar_irradiance": np.array([1.95, 1.85]),
         "acquisition_date": datetime(2024, 7, 14, 11, 32),
@@ -449,28 +449,28 @@ def test_earth_sun_distance_correction_operator() -> None:
 
 
 def test_bt_from_radiance_operator_preserves_fill() -> None:
-    radiance = _toy_geotensor(np.array([[[10.0, 0.0], [12.0, 14.0]]]))
+    radiance = _toy_geoarray(np.array([[[10.0, 0.0], [12.0, 14.0]]]))
     op = BTFromRadiance(K1=774.8853, K2=1321.0789)
     out = op(radiance)
-    assert np.asarray(out)[0, 0, 1] == radiance.fill_value_default
+    assert np.asarray(out)[0, 0, 1] == radiance.fill_value
     expected = 1321.0789 / np.log((774.8853 / 10.0) + 1.0)
     np.testing.assert_allclose(np.asarray(out)[0, 0, 0], expected)
 
 
 def test_dos1_operator_preserves_fill() -> None:
-    reflectance = _toy_geotensor(np.array([[[0.02, 0.0], [0.10, 0.20]]]))
+    reflectance = _toy_geoarray(np.array([[[0.02, 0.0], [0.10, 0.20]]]))
     out = DOS1(dark_percentile=0.0)(reflectance)
     np.testing.assert_allclose(np.asarray(out), [[[0.0, 0.0], [0.08, 0.18]]])
 
 
 def test_simple_atmospheric_correction_dos1() -> None:
-    reflectance = _toy_geotensor(np.array([[[0.02, 0.10], [0.20, 0.30]]]))
+    reflectance = _toy_geoarray(np.array([[[0.02, 0.10], [0.20, 0.30]]]))
     out = SimpleAtmosphericCorrection(method="dos1", dark_percentile=0.0)(reflectance)
     np.testing.assert_allclose(np.asarray(out), [[[0.0, 0.08], [0.18, 0.28]]])
 
 
 def test_apply_srf_flat_spectrum_preserves_flat_signal() -> None:
-    hyperspectral = _toy_geotensor(np.ones((5, 2, 2), dtype=np.float32) * 7.0)
+    hyperspectral = _toy_geoarray(np.ones((5, 2, 2), dtype=np.float32) * 7.0)
     out = ApplySRF(
         target_center_wavelengths=[500.0, 520.0],
         target_fwhm=[20.0, 20.0],
@@ -494,8 +494,8 @@ def test_apply_srf_preserves_per_band_validity_under_partial_fill() -> None:
     # Pixel (0, 0) is fill in source band 1 (550 nm) only. This band
     # has zero SRF weight on both target bands (450 and 750), so both
     # target outputs at (0, 0) must remain non-fill.
-    values[1, 0, 0] = 0.0  # fill_value_default for this fixture is 0
-    hyperspectral = _toy_geotensor(values)
+    values[1, 0, 0] = 0.0  # fill_value for this fixture is 0
+    hyperspectral = _toy_geoarray(values)
     out = ApplySRF(
         target_center_wavelengths=[450.0, 750.0],
         target_fwhm=[10.0, 10.0],
@@ -530,7 +530,7 @@ def test_apply_srf_propagates_fill_on_contributing_source_band() -> None:
     # target 0 at (1, 1) must become fill. Target 1 (750 nm) is
     # unaffected and must stay finite.
     values[0, 1, 1] = 0.0
-    hyperspectral = _toy_geotensor(values)
+    hyperspectral = _toy_geoarray(values)
     out = ApplySRF(
         target_center_wavelengths=[450.0, 750.0],
         target_fwhm=[10.0, 10.0],
@@ -567,7 +567,7 @@ def test_apply_srf_matches_radiometry() -> None:
     """The merged ApplySRF reproduces the old radiometry numbers exactly.
 
     ``radiometry.ApplySRF`` is the single SRF implementation (#153). It
-    now hands the GeoTensor to georeader's ``transform_to_srf`` for the
+    now hands the GeoArray to georeader's ``transform_to_srf`` for the
     fill bookkeeping instead of re-deriving each target's source-band
     support, with bit-identical values. The removed
     ``spectral.ApplySRF`` sampled the Gaussian only at the source
@@ -585,14 +585,14 @@ def test_apply_srf_matches_radiometry() -> None:
     dirty = values.copy()
     dirty[5, 0, 0] = -9999.0  # 450 nm: read by the 490 nm target only
     dirty[30, 1, 1] = np.nan  # 700 nm: read by the 665 / 705 / 842 nm targets
-    gt = toy_geotensor(dirty, fill_value_default=-9999.0)
+    gt = toy_geoarray(dirty, fill_value=-9999.0)
     out = ApplySRF(
         target_center_wavelengths=centers, target_fwhm=fwhm, source_wavelengths=source
     )(gt)
 
     arr = np.asarray(out)
     assert arr.dtype == np.float32
-    assert out.fill_value_default == -9999.0
+    assert out.fill_value == -9999.0
     fill = np.zeros(arr.shape, dtype=bool)
     fill[0, 0, 0] = True
     fill[[2, 3, 4], 1, 1] = True
@@ -609,7 +609,7 @@ def test_apply_srf_matches_radiometry() -> None:
 def test_apply_srf_reads_source_wavelengths_and_writes_band_attrs() -> None:
     """``source_wavelengths=None`` reads attrs; names / centres are written."""
     source = [490.0, 560.0, 665.0, 842.0]
-    gt = toy_geotensor(
+    gt = toy_geoarray(
         np.ones((4, 2, 2), dtype=np.float32),
         attrs={"band_names": ["B2", "B3", "B4", "B8"], "wavelengths": source, "k": 1},
     )
@@ -642,7 +642,7 @@ def test_apply_srf_narrow_fwhm_reads_nearest_source_band() -> None:
     """FWHM far below the source spacing picks the nearest band (no zero SRF)."""
     source = np.array([490.0, 560.0, 665.0])
     values = np.arange(3 * 2 * 2, dtype=np.float32).reshape(3, 2, 2)
-    gt = toy_geotensor(values)
+    gt = toy_geoarray(values)
 
     out = ApplySRF(
         target_center_wavelengths=[490.0, 600.0, 665.0],
@@ -675,7 +675,7 @@ def test_apply_srf_rejects_unrepresentable_targets(
         "source_wavelengths": [480.0, 490.0, 500.0, 510.0, 520.0],
         **kwargs,
     }
-    gt = toy_geotensor(np.ones((5, 2, 2), dtype=np.float32))
+    gt = toy_geoarray(np.ones((5, 2, 2), dtype=np.float32))
 
     with pytest.raises(ValueError, match=match):
         ApplySRF(**config)(gt)  # type: ignore[arg-type]
@@ -692,7 +692,7 @@ def test_apply_srf_integer_dn_fill_becomes_nan() -> None:
     """Integer DN with fill 0: nodata carries as NaN in the float output."""
     values = np.full((3, 2, 2), 100, dtype=np.uint16)
     values[1, 0, 0] = 0
-    gt = toy_geotensor(values, fill_value_default=0)
+    gt = toy_geoarray(values, fill_value=0)
 
     out = ApplySRF(
         target_center_wavelengths=[500.0],
@@ -700,7 +700,7 @@ def test_apply_srf_integer_dn_fill_becomes_nan() -> None:
         source_wavelengths=[480.0, 500.0, 520.0],
     )(gt)
 
-    assert np.isnan(out.fill_value_default)
+    assert np.isnan(out.fill_value)
     arr = np.asarray(out)
     assert np.isnan(arr[0, 0, 0])
     np.testing.assert_allclose(arr[0, 1:, :], 100.0, rtol=1e-6)
@@ -730,9 +730,10 @@ def test_radiance_to_reflectance_parity_with_georeader() -> None:
     would mean the wrapper is double-applying a correction (a class of
     bug we explicitly want to rule out).
     """
+    from geoarray.interop.georeader import to_georeader
     from georeader.reflectance import radiance_to_reflectance as g_r2r
 
-    radiance = _toy_geotensor(
+    radiance = _toy_geoarray(
         np.array(
             [
                 [[10.0, 12.0], [14.0, 16.0]],
@@ -747,7 +748,7 @@ def test_radiance_to_reflectance_parity_with_georeader() -> None:
     # the comparison is hermetic.
     obs_factor = observation_date_correction_factor(date, sza_deg=sza_deg)
     expected = g_r2r(
-        radiance,
+        to_georeader(radiance),
         solar_irradiance=solar,
         observation_date_corr_factor=obs_factor,
         units="W/m2/sr/nm",
@@ -760,7 +761,7 @@ def test_radiance_to_reflectance_parity_with_georeader() -> None:
     )
     out = op(radiance)
     np.testing.assert_allclose(np.asarray(out), np.asarray(expected), rtol=1e-12)
-    assert out.transform == radiance.transform
+    assert out.grid == radiance.grid
     assert str(out.crs) == str(radiance.crs)
 
 
@@ -770,7 +771,7 @@ def test_radiance_to_reflectance_accepts_iso_string_for_yaml_roundtrip() -> None
     serialisers.
     """
     date = datetime(2024, 7, 14, 11, 32)
-    radiance = _toy_geotensor(np.ones((2, 2, 2)) * 5.0)
+    radiance = _toy_geoarray(np.ones((2, 2, 2)) * 5.0)
     solar = np.array([1.95, 1.85])
     out_dt = RadianceToReflectance(
         solar_irradiance=solar,
@@ -848,13 +849,13 @@ def test_dn_to_reflectance_parity_with_georeader_scalar_path() -> None:
     ids=lambda op: type(op).__name__,
 )
 def test_operators_accept_plain_ndarray(op: object) -> None:
-    """Plain ndarray in -> plain ndarray out, values equal to the GeoTensor path."""
-    # Strictly positive so fill_value_default=0 on the GeoTensor side
+    """Plain ndarray in -> plain ndarray out, values equal to the GeoArray path."""
+    # Strictly positive so fill_value=0 on the GeoArray side
     # marks no pixel as fill and both paths compute identical values.
     arr = np.linspace(1.0, 9.0, 3 * 4 * 4).reshape(3, 4, 4)
     out = op(arr)  # type: ignore[operator]
     assert type(out) is np.ndarray
-    gt_out = op(_toy_geotensor(arr))  # type: ignore[operator]
+    gt_out = op(_toy_geoarray(arr))  # type: ignore[operator]
     np.testing.assert_allclose(out, np.asarray(gt_out), rtol=1e-6)
 
 
@@ -868,19 +869,19 @@ def test_apply_srf_accepts_plain_ndarray() -> None:
     arr = np.full((5, 2, 2), 7.0, dtype=np.float32)
     out = op(arr)
     assert type(out) is np.ndarray
-    np.testing.assert_allclose(out, np.asarray(op(_toy_geotensor(arr))))
+    np.testing.assert_allclose(out, np.asarray(op(_toy_geoarray(arr))))
 
 
-def test_solar_geometry_ops_require_geotensor_for_footprint_derivation() -> None:
+def test_solar_geometry_ops_require_geoarray_for_footprint_derivation() -> None:
     """Without sza_deg / center_coords the footprint supplies the solar
     geometry, so a plain array must raise a clear TypeError.
     """
     arr = np.ones((2, 4, 4))
     solar = [1.95, 1.85]
     date = datetime(2024, 6, 21)
-    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+    with pytest.raises(TypeError, match="georeferenced GeoArray"):
         RadianceToReflectance(solar_irradiance=solar, acquisition_date=date)(arr)
-    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+    with pytest.raises(TypeError, match="georeferenced GeoArray"):
         ReflectanceToRadiance(solar_irradiance=solar, acquisition_date=date)(arr)
 
 
@@ -970,5 +971,5 @@ def test_4d_time_stack() -> None:
     expected = np.asarray(stack) * np.array([1.0, 2.0, 3.0])[:, None, None]
     np.testing.assert_allclose(np.asarray(out), expected)
     # A 2-D map is a single band: a length-1 coefficient still applies.
-    flat = DNToRadiance(gain=[2.0])(toy_geotensor(np.ones((4, 4))))
+    flat = DNToRadiance(gain=[2.0])(toy_geoarray(np.ones((4, 4))))
     np.testing.assert_allclose(np.asarray(flat), 2.0)

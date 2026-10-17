@@ -7,8 +7,8 @@ from typing import Any
 
 import numpy as np
 import pytest
-from _helpers import toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import toy_geoarray
+from geoarray import GeoArray
 
 import geoops as gz
 from geoops._src.bands import (
@@ -26,13 +26,13 @@ NAMES = ["B02", "B03", "B04", "B08"]
 DESCRIPTIONS = ["B08", "B04", "B03", "B02"]
 
 
-def _conflicting() -> GeoTensor:
+def _conflicting() -> GeoArray:
     """A tensor whose ``band_names`` and ``descriptions`` disagree."""
     rng = np.random.default_rng(0)
     values = rng.integers(1, 1000, size=(4, 5, 5)).astype(np.uint16)
-    return toy_geotensor(
+    return toy_geoarray(
         values,
-        fill_value_default=0,
+        fill_value=0,
         attrs={"band_names": list(NAMES), "descriptions": list(DESCRIPTIONS)},
     )
 
@@ -112,7 +112,7 @@ def test_default_key_order() -> None:
 
 
 def test_resolve_band_falls_through_keys() -> None:
-    gt = toy_geotensor(
+    gt = toy_geoarray(
         np.ones((3, 2, 2), dtype=np.float32),
         attrs={"band_names": ["a", "b", "c"], "bands": ["x", "y", "z"]},
     )
@@ -134,7 +134,7 @@ def test_resolve_band_accepts_numpy_integers_and_rejects_others() -> None:
 
 
 def test_resolve_band_mapping_form() -> None:
-    gt = toy_geotensor(
+    gt = toy_geoarray(
         np.ones((2, 2, 2), dtype=np.uint16),
         attrs={"band_names": {"QA60": 1, "B04": 0}},
     )
@@ -158,15 +158,15 @@ def test_string_ref_on_plain_array() -> None:
 def test_band_names_helper() -> None:
     assert band_names(_conflicting()) == NAMES
     assert band_names(np.ones((2, 2, 2))) is None
-    assert band_names(toy_geotensor(np.ones((2, 2, 2)), attrs={})) is None
-    only_desc = toy_geotensor(np.ones((2, 2, 2)), attrs={"descriptions": ("r", "n")})
+    assert band_names(toy_geoarray(np.ones((2, 2, 2)), attrs={})) is None
+    only_desc = toy_geoarray(np.ones((2, 2, 2)), attrs={"descriptions": ("r", "n")})
     assert band_names(only_desc) == ["r", "n"]
 
 
 def test_sparse_mapping_keeps_declared_positions() -> None:
     """``{"red": 1, "nir": 2}`` must not compact to band 0 / band 1."""
     values = np.stack([np.full((2, 2), v, dtype=np.float32) for v in (10, 20, 30, 40)])
-    gt = toy_geotensor(values, attrs={"band_names": {"red": 1, "nir": 2}})
+    gt = toy_geoarray(values, attrs={"band_names": {"red": 1, "nir": 2}})
     assert band_names(gt) == [None, "red", "nir", None]
 
     out = gz.spectral.BandMath(expression="nir - red")(gt)
@@ -175,5 +175,5 @@ def test_sparse_mapping_keeps_declared_positions() -> None:
     parts = gz.spectral.SplitBands()(gt)
     assert len(parts) == 4
 
-    aliases = toy_geotensor(values, attrs={"band_names": {"red": 1, "B04": 1}})
+    aliases = toy_geoarray(values, attrs={"band_names": {"red": 1, "B04": 1}})
     assert band_names(aliases) == [None, "red", None, None]

@@ -1,6 +1,6 @@
 # geotoolz-ops (`geoops`) — agent rules
 
-Operator families on `georeader.GeoTensor`, composed with `pipekit`
+Operator families on `geoarray.GeoArray`, composed with `pipekit`
 (`Operator`, `Sequential`, `Graph`). The root [`AGENTS.md`](../../AGENTS.md)
 applies too; this file adds what is specific to `geoops`.
 
@@ -14,7 +14,7 @@ geoops/<family>/
 ├── __init__.py         # re-exports only — no def / class
 └── _src/
     ├── array.py        # Tier A: pure numpy primitives, jaxtyping-annotated,
-    │                   # no GeoTensor / metadata / operator state
+    │                   # no GeoArray / metadata / operator state
     ├── operators.py    # Tier B: every pipekit.Operator of the family; judges
     │                   # nodata, calls Tier A, rewraps via wrap_like
     └── <topic>.py      # optional: constants / lookup tables / non-Operator
@@ -43,12 +43,13 @@ Anything two or more families need lives in `geoops/_src/`:
 
 | Module | What it gives you |
 |---|---|
-| `wrap.py` | `wrap_like` / `rewrap_attrs` / `adopt_attrs` — the one way to turn a result back into a `GeoTensor` with the input's georeferencing |
+| `wrap.py` | `wrap_like` / `rewrap_attrs` / `adopt_attrs` — the one way to turn a result back into a `GeoArray` with the input's georeferencing (and the place a georeader `GeoTensor` is refused) |
+| `engine.py` | `to_engine` / `from_engine` — the one boundary to georeader's functions (reprojection, mosaics, rasterize / vectorize, windowed reads, solar geometry); no `GeoTensor` crosses into or out of an operator |
 | `valid.py` | the nodata model: `invalid_values`, `valid_pixels`, `mask_invalid_to_nan`, `restore_fill`, `wrap_filled` |
 | `bands.py` | `resolve_band` / `resolve_bands` (index or name), `band_names`, `resolve_wavelengths`, band-attr bookkeeping |
 | `shape.py` | `band_axis`, `require_ndim`, `map_frames` / `over_frames` for 2-D…4-D carriers |
 | `dtype.py` | `as_float` — promote integer DNs before arithmetic |
-| `geo.py` | `require_geotensor`, `require_projected_crs`, `ground_pixel_size`, `require_grid_match`, `pixel_xy` |
+| `geo.py` | `require_geoarray`, `reject_geotensor`, `affine_of`, `as_pixel_window`, `require_projected_crs`, `ground_pixel_size`, `require_grid_match`, `pixel_xy` |
 | `labels.py` | connected components, holes, skeleton length, region properties |
 | `samples.py` | `(c, h, w)` cube ↔ `(n, c)` samples for per-pixel estimators |
 | `stretch.py` | the NaN-aware percentile stretch |
@@ -72,7 +73,7 @@ family:
 | Orientation | `direction` | `"column"` / `"row"` (`restore.DestripeColumn`), `"scan"` / `"sample"` (`geom.SegmentStitch`). |
 | One band | one `BandRef` name per band (`red`, `nir`, `swir1`, `qa_band`, `band`, …) | Integer position *or* band name; no `*_idx` twins. Tier-A primitives take integer `*_idx` positions. |
 | Several bands | `bands` | List of `BandRef` (`spectral.SelectBands`, `viz.Composite`). `io` readers keep rasterio's 1-based file `indexes`. |
-| Value written into pixels | `fill_value` | The carrier attribute stays georeader's `fill_value_default`; a strategy string is `strategy` (`restore.ReplaceOutliers`). |
+| Value written into pixels | `fill_value` | Also the carrier attribute (`GeoArray.fill_value`) and `wrap_like`'s keyword; a strategy string is `strategy` (`restore.ReplaceOutliers`). |
 | RNG seed | `seed` | |
 | Neighbourhood side length | `window` | Pixels (odd int, or `(h, w)`): despeckle, destripe, `MedianDenoise`, `NLMeans`, `CLAHE`, `AdaptiveWindowBackground`, `SpectralSmoothing`. |
 | Neighbourhood half-width / distance | `radius`, `search_radius` | Not a window (radius `r` ≈ window `2r + 1`): `mask.BufferMask` (with `unit`), `restore.GapFillIDW`, `restore.NLMeans`, `viz.AnnotatePoints`. |
@@ -93,7 +94,7 @@ spellings.
 ## Tests
 
 - Every operator must pass `tests/test_operator_contract.py`, which
-  enforces the pipekit `Operator` and `GeoTensor` contracts in the root
+  enforces the pipekit `Operator` and `GeoArray` contracts in the root
   `AGENTS.md`. The test walks every class on its own; register a new
   operator's constructor arguments in `CTOR_KWARGS` / `RUNTIME_CTOR_KWARGS`
   when it needs any.

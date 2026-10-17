@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _helpers import fill_pixel_mask, toy_geotensor
+from _helpers import fill_pixel_mask, toy_geoarray
 
 from geoops._src.valid import (
     carried_fill,
@@ -29,7 +29,7 @@ def test_is_fill_numeric_nan_and_none():
 
 
 def test_carrier_fill_value():
-    gt = toy_geotensor(np.zeros((2, 2)), fill_value_default=-1)
+    gt = toy_geoarray(np.zeros((2, 2)), fill_value=-1)
     assert carrier_fill_value(gt) == -1
     assert carrier_fill_value(gt, 5) == 5
     assert carrier_fill_value(np.zeros((2, 2))) is None
@@ -37,22 +37,30 @@ def test_carrier_fill_value():
 
 
 def test_invalid_values_includes_non_finite_under_numeric_fill():
-    gt = toy_geotensor(np.array([[1.0, np.inf], [np.nan, -9999.0]]))
+    gt = toy_geoarray(np.array([[1.0, np.inf], [np.nan, -9999.0]]))
     assert invalid_values(gt).tolist() == [[False, True], [True, True]]
 
 
-def test_valid_pixels_handles_nan_fill_that_validmask_misses():
+def test_valid_pixels_handles_a_nan_fill():
     vals = np.ones((2, 3, 3), dtype=np.float32)
-    gt = toy_geotensor(vals, fill_value_default=np.nan, with_fill_pixels=True)
-    # georeader's validmask compares with != and never matches a NaN fill.
-    assert np.asarray(gt.validmask()).all()
+    gt = toy_geoarray(vals, fill_value=np.nan, with_fill_pixels=True)
+    # A NaN fill matches NaN (a plain != comparison never would).
     np.testing.assert_array_equal(valid_pixels(gt), ~fill_pixel_mask(gt.shape))
+    np.testing.assert_array_equal(valid_pixels(gt), gt.valid_mask())
+
+
+def test_valid_pixels_refuses_a_geotensor():
+    from geoarray.interop.georeader import to_georeader
+
+    gt = to_georeader(toy_geoarray(np.ones((2, 3, 3))))
+    with pytest.raises(TypeError, match="from_georeader"):
+        valid_pixels(gt)
 
 
 def test_valid_pixels_any_band_invalidates_the_pixel():
     vals = np.ones((3, 2, 2), dtype=np.int16)
     vals[1, 0, 1] = -9999
-    gt = toy_geotensor(vals)
+    gt = toy_geoarray(vals)
     assert valid_pixels(gt).tolist() == [[True, False], [True, True]]
 
 
@@ -80,7 +88,7 @@ def test_valid_pixels_rejects_1d():
 def test_mask_invalid_to_nan_promotes_and_masks_all_bands():
     vals = np.arange(8, dtype=np.int16).reshape(2, 2, 2)
     vals[0, 1, 1] = -9999
-    out = mask_invalid_to_nan(toy_geotensor(vals))
+    out = mask_invalid_to_nan(toy_geoarray(vals))
     assert out.dtype == np.float32
     assert np.isnan(out[:, 1, 1]).all()
     assert np.isfinite(out[:, 0, 0]).all()
@@ -126,19 +134,19 @@ def test_restore_fill_rejects_unrepresentable_fill():
     assert restore_fill(out, valid, 0)[0, 1] == 0
 
 
-def test_toy_geotensor_with_fill_pixels_copies_values():
+def test_toy_geoarray_with_fill_pixels_copies_values():
     vals = np.ones((2, 3, 3))
-    gt = toy_geotensor(vals, with_fill_pixels=True)
+    gt = toy_geoarray(vals, with_fill_pixels=True)
     assert (np.asarray(gt)[:, 0, 0] == -9999).all()
     assert (np.asarray(gt)[:, -1, -1] == -9999).all()
     assert (vals == 1).all()
-    with pytest.raises(ValueError, match="fill_value_default"):
-        toy_geotensor(vals, fill_value_default=None, with_fill_pixels=True)
+    with pytest.raises(ValueError, match="fill_value"):
+        toy_geoarray(vals, fill_value=None, with_fill_pixels=True)
 
 
 def test_carried_fill_follows_the_output_dtype():
-    f64 = toy_geotensor(np.zeros((2, 2)), fill_value_default=-9999)
-    u16 = toy_geotensor(np.zeros((2, 2), dtype=np.uint16), fill_value_default=0)
+    f64 = toy_geoarray(np.zeros((2, 2)), fill_value=-9999)
+    u16 = toy_geoarray(np.zeros((2, 2), dtype=np.uint16), fill_value=0)
     # Booleans are always False.
     assert carried_fill(f64, bool) is False
     # Float -> float keeps the fill; integer -> float switches to NaN.
@@ -150,7 +158,7 @@ def test_carried_fill_follows_the_output_dtype():
     assert carried_fill(f64, np.uint8) is None
     assert (
         carried_fill(
-            toy_geotensor(np.zeros((2, 2)), fill_value_default=np.nan), np.int32
+            toy_geoarray(np.zeros((2, 2)), fill_value=np.nan), np.int32
         )
         is None
     )
@@ -159,27 +167,27 @@ def test_carried_fill_follows_the_output_dtype():
 
 
 def test_wrap_filled_writes_and_declares_the_fill():
-    gt = toy_geotensor(np.ones((2, 3, 3)), with_fill_pixels=True)
+    gt = toy_geoarray(np.ones((2, 3, 3)), with_fill_pixels=True)
     fill = fill_pixel_mask(gt.shape)
 
-    out = wrap_filled(gt, np.full((3, 3), 5.0), fill_value_default=np.nan)
-    assert np.isnan(out.fill_value_default)
+    out = wrap_filled(gt, np.full((3, 3), 5.0), fill_value=np.nan)
+    assert np.isnan(out.fill_value)
     assert np.isnan(np.asarray(out)[fill]).all()
     assert (np.asarray(out)[~fill] == 5.0).all()
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
 
-    mask = wrap_filled(gt, np.ones((3, 3), dtype=bool), fill_value_default=False)
-    assert mask.fill_value_default is False
+    mask = wrap_filled(gt, np.ones((3, 3), dtype=bool), fill_value=False)
+    assert mask.fill_value is False
     assert not np.asarray(mask)[fill].any()
 
     # An explicit validity mask overrides the input's.
     valid = np.ones((3, 3), dtype=bool)
-    out = wrap_filled(gt, np.zeros((3, 3)), fill_value_default=np.nan, valid=valid)
+    out = wrap_filled(gt, np.zeros((3, 3)), fill_value=np.nan, valid=valid)
     assert not np.isnan(np.asarray(out)).any()
 
     # Plain arrays come back plain, NaN at non-finite pixels.
     arr = np.ones((3, 3))
     arr[0, 0] = np.nan
-    plain = wrap_filled(arr, np.zeros((3, 3)), fill_value_default=np.nan)
+    plain = wrap_filled(arr, np.zeros((3, 3)), fill_value=np.nan)
     assert type(plain) is np.ndarray
     assert np.isnan(plain[0, 0]) and plain[1, 1] == 0.0

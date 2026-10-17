@@ -13,7 +13,7 @@ import paths. They put the four-axis Patcher framework inside a
     ])
 
 ``MergePatches`` merges patches into a field; `geoops.geom.Stitch` (also
-top-level ``geoops.Stitch``) mosaics georeferenced GeoTensor tiles.
+top-level ``geoops.Stitch``) mosaics georeferenced GeoArray tiles.
 
 geotoolz's own additions:
 
@@ -39,11 +39,12 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from pipekit import Operator
 from rasterio.windows import Window
 
 from geoops._src.blending import triangular_weights
+from geoops._src.geo import reject_geotensor
 
 
 try:
@@ -113,9 +114,10 @@ class TriangularWindow(spatial.window.Window):
         return config_from_fields(self)
 
 
-def _labels_2d(labels: Any) -> np.ndarray:
-    """Coerce a label carrier into a 2-D ``(H, W)`` numpy array."""
-    arr = np.asarray(getattr(labels, "values", labels))
+def _labels_2d(labels: Any, op_name: str = "patch_ops") -> np.ndarray:
+    """Coerce a label carrier (`GeoArray` or array) into a 2-D ``(H, W)`` array."""
+    reject_geotensor(labels, op_name)
+    arr = np.asarray(labels)
     while arr.ndim > 2 and arr.shape[0] == 1:
         arr = arr[0]
     if arr.ndim != 2:
@@ -127,8 +129,9 @@ def _labels_2d(labels: Any) -> np.ndarray:
 
 def _chip(scene: Any, r: int, c: int, ph: int, pw: int) -> Any:
     """Slice a ``(ph, pw)`` chip out of a scene, carrier-preserving."""
-    if isinstance(scene, GeoTensor):
-        return scene.isel({"y": slice(r, r + ph), "x": slice(c, c + pw)})
+    if isinstance(scene, GeoArray):
+        # Slicing a GeoArray moves its transform to the chip origin.
+        return scene[..., r : r + ph, c : c + pw]
     return np.asarray(scene)[..., r : r + ph, c : c + pw]
 
 
@@ -179,7 +182,7 @@ def _extract_patches(
     scene: Any, anchors: list[tuple[int, int]], size: tuple[int, int]
 ) -> list[Patch]:
     ph, pw = size
-    h, w = np.asarray(getattr(scene, "values", scene)).shape[-2:]
+    h, w = np.shape(scene)[-2:]
     out: list[Patch] = []
     for r, c in anchors:
         if not (0 <= r <= h - ph and 0 <= c <= w - pw):
@@ -221,10 +224,10 @@ class StratifiedSample(Operator):
 
     The output is a ``list[Patch]`` — the same carrier `GridSampler`
     emits — so it composes with `ApplyToChips` downstream. For a
-    `GeoTensor` scene each chip keeps a correctly shifted transform.
+    `GeoArray` scene each chip keeps a correctly shifted transform.
 
     Args:
-        labels: Single-band label raster (`GeoTensor` or ``(H, W)``
+        labels: Single-band label raster (`GeoArray` or ``(H, W)``
             array) on the same pixel grid as the scenes this operator
             will be applied to.
         target_proportions: ``{class_value: proportion}``; proportions
@@ -263,7 +266,10 @@ class StratifiedSample(Operator):
         self.seed = seed
 
     def _apply(self, scene: Any) -> list[Patch]:
-        centers = _center_labels(_labels_2d(self.labels), self.size)
+        reject_geotensor(scene, type(self).__name__)
+        centers = _center_labels(
+            _labels_2d(self.labels, type(self).__name__), self.size
+        )
         counts = _largest_remainder(self.target_proportions, self.n_samples)
         rng = np.random.default_rng(self.seed)
         anchors = _draw_anchors(centers, counts, rng, type(self).__name__)
@@ -290,7 +296,7 @@ class BalancedSampler(Operator):
     positions contribute what they have, with a warning.
 
     Args:
-        labels: Single-band label raster (`GeoTensor` or ``(H, W)``
+        labels: Single-band label raster (`GeoArray` or ``(H, W)``
             array) on the same pixel grid as the scenes this operator
             will be applied to.
         n_per_class: Number of chips to draw per class.
@@ -320,7 +326,10 @@ class BalancedSampler(Operator):
         self.seed = seed
 
     def _apply(self, scene: Any) -> list[Patch]:
-        centers = _center_labels(_labels_2d(self.labels), self.size)
+        reject_geotensor(scene, type(self).__name__)
+        centers = _center_labels(
+            _labels_2d(self.labels, type(self).__name__), self.size
+        )
         if self.classes is None:
             present = np.unique(centers)
             classes = [int(c) for c in present[np.isfinite(present)]]

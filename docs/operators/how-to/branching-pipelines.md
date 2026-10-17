@@ -15,7 +15,7 @@ on the result marks the burn scar.
 
 ```python
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geoops as gz
@@ -23,8 +23,8 @@ import geoops as gz
 rng: np.random.Generator = np.random.default_rng(0)
 grid: dict = {"transform": from_origin(750_000, 4_350_000, 10, 10), "crs": "EPSG:32610"}
 names: dict = {"band_names": ["B4", "B8", "B12"]}
-pre: GeoTensor = GeoTensor(rng.uniform(0.05, 0.4, (3, 32, 32)), **grid, fill_value_default=np.nan, attrs=names)   # (3, 32, 32) float64
-post: GeoTensor = GeoTensor(rng.uniform(0.05, 0.4, (3, 32, 32)), **grid, fill_value_default=np.nan, attrs=names)  # (3, 32, 32) float64
+pre: GeoArray = GeoArray(rng.uniform(0.05, 0.4, (3, 32, 32)), **grid, fill_value=np.nan, attrs=names)   # (3, 32, 32) float64
+post: GeoArray = GeoArray(rng.uniform(0.05, 0.4, (3, 32, 32)), **grid, fill_value=np.nan, attrs=names)  # (3, 32, 32) float64
 
 before: gz.Input = gz.Input("pre")
 after: gz.Input = gz.Input("post")
@@ -34,7 +34,7 @@ dnbr: gz.Node = gz.dNBR()(nbr_pre, nbr_post)                   # (H, W), (H, W) 
 burn: gz.Node = gz.Threshold(threshold=0.27)(dnbr)             # (H, W) float64 → (H, W) bool
 
 graph: gz.Graph = gz.Graph(inputs={"pre": before, "post": after}, outputs={"dnbr": dnbr, "burn": burn})
-out: dict[str, GeoTensor] = graph(pre=pre, post=post)          # {"dnbr": (32, 32) float64, "burn": (32, 32) bool}
+out: dict[str, GeoArray] = graph(pre=pre, post=post)          # {"dnbr": (32, 32) float64, "burn": (32, 32) bool}
 ```
 
 The graph checks for cycles and unreachable inputs when you build it.
@@ -77,7 +77,7 @@ that holds near-infrared depends on the platform written in `attrs`.
 
 ```python
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geoops as gz
@@ -91,12 +91,12 @@ ndvi_by_sensor: gz.Switch = gz.Switch(
 )
 
 rng: np.random.Generator = np.random.default_rng(0)
-grid: dict = {"transform": from_origin(750_000, 4_350_000, 30, 30), "crs": "EPSG:32610", "fill_value_default": np.nan}
-s2: GeoTensor = GeoTensor(rng.random((2, 16, 16)), **grid, attrs={"platform": "sentinel-2", "band_names": ["B4", "B8"]})  # (2, 16, 16) float64
-l8: GeoTensor = GeoTensor(rng.random((2, 16, 16)), **grid, attrs={"platform": "landsat-8", "band_names": ["B4", "B5"]})   # (2, 16, 16) float64
+grid: dict = {"transform": from_origin(750_000, 4_350_000, 30, 30), "crs": "EPSG:32610", "fill_value": np.nan}
+s2: GeoArray = GeoArray(rng.random((2, 16, 16)), **grid, attrs={"platform": "sentinel-2", "band_names": ["B4", "B8"]})  # (2, 16, 16) float64
+l8: GeoArray = GeoArray(rng.random((2, 16, 16)), **grid, attrs={"platform": "landsat-8", "band_names": ["B4", "B5"]})   # (2, 16, 16) float64
 
-ndvi_s2: GeoTensor = ndvi_by_sensor(s2)                       # (2, 16, 16) float64 → (16, 16) float64
-ndvi_l8: GeoTensor = ndvi_by_sensor(l8)                       # (2, 16, 16) float64 → (16, 16) float64
+ndvi_s2: GeoArray = ndvi_by_sensor(s2)                       # (2, 16, 16) float64 → (16, 16) float64
+ndvi_l8: GeoArray = ndvi_by_sensor(l8)                       # (2, 16, 16) float64 → (16, 16) float64
 ```
 
 An unknown key runs `default`, which is `Identity()` when omitted. Pass
@@ -109,16 +109,16 @@ It is shorthand for a single-input `Graph`.
 
 ```python
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geoops as gz
 
 rng: np.random.Generator = np.random.default_rng(0)
-scene: GeoTensor = GeoTensor(
+scene: GeoArray = GeoArray(
     rng.uniform(0.02, 0.5, (4, 16, 16)),                       # (4, 16, 16) float64
     transform=from_origin(750_000, 4_350_000, 10, 10), crs="EPSG:32610",
-    fill_value_default=np.nan, attrs={"band_names": ["B3", "B4", "B8", "B12"]},
+    fill_value=np.nan, attrs={"band_names": ["B3", "B4", "B8", "B12"]},
 )
 
 products: gz.Fanout = gz.Fanout({
@@ -126,7 +126,7 @@ products: gz.Fanout = gz.Fanout({
     "ndwi": gz.NDWI(green="B3", nir="B8"),
     "nbr": gz.NBR(nir="B8", swir2="B12"),
 })
-out: dict[str, GeoTensor] = products(scene)                   # {"ndvi", "ndwi", "nbr"}: (16, 16) float64 each
+out: dict[str, GeoArray] = products(scene)                   # {"ndvi", "ndwi", "nbr"}: (16, 16) float64 each
 ```
 
 ## Nest a Graph in a Sequential

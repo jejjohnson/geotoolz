@@ -1,7 +1,7 @@
 """Tier-A primitives — pure-numpy spectral-index math.
 
 Every function here is a one-liner over ``numpy.ndarray`` that takes raw
-band indices and returns the index value. No `GeoTensor` knowledge, no
+band indices and returns the index value. No `GeoArray` knowledge, no
 metadata, no operator state — the carrier-aware wrappers in
 `geoops.indices._src.operators` provide all that.
 

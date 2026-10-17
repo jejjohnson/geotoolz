@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from georeader.rasterio_reader import RasterioReader
 from pipekit import Identity, Operator, Sequential
 from pyproj import CRS
@@ -22,19 +22,19 @@ from geoops import io
 from geoops.io._src import operators as io_operators
 
 
-def _sample_geotensor() -> GeoTensor:
+def _sample_geotensor() -> GeoArray:
     values = np.arange(2 * 4 * 5, dtype=np.int16).reshape(2, 4, 5)
     transform = from_origin(100.0, 200.0, 10.0, 10.0)
-    return GeoTensor(
-        values, transform=transform, crs="EPSG:32631", fill_value_default=-9999
+    return GeoArray(
+        values, transform=transform, crs="EPSG:32631", fill_value=-9999
     )
 
 
-def _cog_test_geotensor() -> GeoTensor:
+def _cog_test_geotensor() -> GeoArray:
     values = np.arange(64 * 64, dtype=np.int16).reshape(1, 64, 64)
     transform = from_origin(100.0, 740.0, 10.0, 10.0)
-    return GeoTensor(
-        values, transform=transform, crs="EPSG:32631", fill_value_default=-9999
+    return GeoArray(
+        values, transform=transform, crs="EPSG:32631", fill_value=-9999
     )
 
 
@@ -59,7 +59,7 @@ def test_write_geotiff_then_read_bounds_roundtrips(
     assert out.shape == (2, 4, 5)
     assert out.transform == gt.transform
     assert out.crs == gt.crs
-    assert out.fill_value_default == -9999
+    assert out.fill_value == -9999
 
 
 def test_read_bounds_without_indexes_reads_all_bands_in_order(tmp_path: Path) -> None:
@@ -94,7 +94,7 @@ def test_read_hdf5_reads_dataset_indexes_and_metadata(tmp_path: Path) -> None:
     )()
 
     np.testing.assert_array_equal(out.values, values[1:2])
-    assert out.fill_value_default == -9999
+    assert out.fill_value == -9999
     assert out.attrs["metadata"]["metadata"]["sensor"] == "MODIS"
     np.testing.assert_array_equal(
         out.attrs["geolocation"]["latitude"], np.ones((3, 4), dtype=np.float32)
@@ -154,7 +154,7 @@ def test_read_netcdf_decodes_cf_and_recovers_grid_mapping(tmp_path: Path) -> Non
     assert out.crs == CRS.from_epsg(4326)
     assert tuple(out.transform)[:6] == (1.0, 0.0, 10.0, 0.0, -1.0, 20.0)
     # Decoded values are scaled floats, so the fill sentinel is NaN, not -9999.
-    assert np.isnan(out.fill_value_default)
+    assert np.isnan(out.fill_value)
 
 
 def test_read_netcdf_decodes_fill_value_to_nan(tmp_path: Path) -> None:
@@ -356,11 +356,11 @@ def test_write_geotiff_handles_2d_data_profile_and_invalid_shapes(
     tmp_path: Path,
 ) -> None:
     gt = _sample_geotensor()
-    two_dim = GeoTensor(
+    two_dim = GeoArray(
         gt.values[0],
         transform=gt.transform,
         crs=gt.crs,
-        fill_value_default=None,
+        fill_value=None,
     )
     path = tmp_path / "two_dim.tif"
 
@@ -376,7 +376,7 @@ def test_write_geotiff_handles_2d_data_profile_and_invalid_shapes(
         values=np.zeros((1, 1, 1, 1), dtype=np.uint8),
         crs=gt.crs,
         transform=gt.transform,
-        fill_value_default=None,
+        fill_value=None,
     )
     with pytest.raises(io.GeoToolzIOError, match="expects 2D or 3D"):
         io.WriteGeoTIFF(path=tmp_path / "invalid.tif")(invalid)
@@ -634,7 +634,7 @@ _HYDRA_ZEN_OPERATORS: list[gz.Operator] = [
 def test_io_hydra_zen_builds_roundtrip(op: gz.Operator) -> None:
     """Operator config dicts must accept ``hydra_zen.builds`` /
     ``instantiate``. Operators whose config includes runtime objects
-    (STAC items, shapely geometries, GeoTensor references) are excluded
+    (STAC items, shapely geometries, GeoArray references) are excluded
     because their config is intentionally debug-only —
     ``forbid_in_yaml`` documents that contract."""
     cfg = hydra_zen.builds(type(op), **op.get_config())  # type: ignore[attr-defined]
@@ -800,8 +800,8 @@ def test_read_hdf_array_fill_value_scalar(tmp_path: Path) -> None:
 
     out = io.ReadHDF(path=path, dataset="data")()
 
-    assert out.fill_value_default == -9999
-    assert np.ndim(out.fill_value_default) == 0
+    assert out.fill_value == -9999
+    assert np.ndim(out.fill_value) == 0
     np.testing.assert_array_equal(out.validmask().values, values != -9999)
 
 
@@ -823,11 +823,11 @@ def test_read_netcdf_nan_fill_consistent(tmp_path: Path) -> None:
         variable[:] = raw
 
     decoded = io.ReadNetCDF(path=path, variable="values")()
-    assert np.isnan(decoded.fill_value_default)
+    assert np.isnan(decoded.fill_value)
     np.testing.assert_array_equal(np.isnan(decoded.values), raw == -9999)
 
     undecoded = io.ReadNetCDF(path=path, variable="values", decode_cf=False)()
-    assert undecoded.fill_value_default == -9999
+    assert undecoded.fill_value == -9999
     np.testing.assert_array_equal(undecoded.values, raw)
 
 
@@ -878,11 +878,11 @@ def test_write_zarr_two_groups_coexist(tmp_path: Path) -> None:
     zarr = pytest.importorskip("zarr")
     store = str(tmp_path / "out.zarr")
     gt = _sample_geotensor()
-    other = GeoTensor(
+    other = GeoArray(
         gt.values[:1] + 100,
         transform=gt.transform,
         crs=gt.crs,
-        fill_value_default=-1,
+        fill_value=-1,
     )
 
     io.WriteZarr(store=store, group="a")(gt)
@@ -894,19 +894,19 @@ def test_write_zarr_two_groups_coexist(tmp_path: Path) -> None:
     assert root["b/values"].chunks == (1, 2, 2)
     assert root["a"].attrs["crs"] == str(gt.crs)
     assert tuple(root["a"].attrs["transform"]) == tuple(gt.transform)
-    assert root["a"].attrs["fill_value_default"] == -9999
-    assert root["b"].attrs["fill_value_default"] == -1
+    assert root["a"].attrs["fill_value"] == -9999
+    assert root["b"].attrs["fill_value"] == -1
 
 
 def test_write_zarr_overwrites_same_group(tmp_path: Path) -> None:
     zarr = pytest.importorskip("zarr")
     store = str(tmp_path / "out.zarr")
     gt = _sample_geotensor()
-    doubled = GeoTensor(
+    doubled = GeoArray(
         gt.values[:1] * 2,
         transform=gt.transform,
         crs=gt.crs,
-        fill_value_default=np.int16(-1),
+        fill_value=np.int16(-1),
     )
 
     io.WriteZarr(store=store)(gt)
@@ -915,18 +915,18 @@ def test_write_zarr_overwrites_same_group(tmp_path: Path) -> None:
     root = zarr.open_group(store, mode="r")
     np.testing.assert_array_equal(root["values"][...], doubled.values)
     # numpy-scalar fills are stored as JSON scalars.
-    assert root.attrs["fill_value_default"] == -1
+    assert root.attrs["fill_value"] == -1
 
 
 def test_write_zarr_4d(tmp_path: Path) -> None:
     zarr = pytest.importorskip("zarr")
     store = str(tmp_path / "cube.zarr")
     values = np.arange(3 * 2 * 4 * 5, dtype=np.float32).reshape(3, 2, 4, 5)
-    gt = GeoTensor(
+    gt = GeoArray(
         values,
         transform=from_origin(100.0, 200.0, 10.0, 10.0),
         crs="EPSG:32631",
-        fill_value_default=np.nan,
+        fill_value=np.nan,
     )
 
     io.WriteZarr(store=store, chunks={"time": 1, "band": 1, "y": 2})(gt)
@@ -943,7 +943,7 @@ def test_write_zarr_rejects_unsupported_ndim(tmp_path: Path) -> None:
         values=np.zeros((1, 1, 1, 1, 1), dtype=np.uint8),
         crs="EPSG:32631",
         transform=from_origin(0.0, 0.0, 1.0, 1.0),
-        fill_value_default=None,
+        fill_value=None,
     )
 
     with pytest.raises(io.GeoToolzIOError, match="2D to 4D"):

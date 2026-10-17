@@ -10,9 +10,10 @@ import json
 
 import numpy as np
 import pytest
-from _helpers import fill_pixel_mask, toy_geotensor
+from _helpers import fill_pixel_mask, toy_geoarray
 
 import geoops as gz
+from geoops._src.geo import affine_of
 from geoops.einx import (
     CHWtoHWC,
     Einx,
@@ -72,15 +73,15 @@ def test_output_axes_and_errors() -> None:
 def _gt(values: np.ndarray):
     # -9999 fill: these fixtures contain real zeros, and a 0 fill would
     # mark them as nodata (georeader's convention).
-    return toy_geotensor(values, fill_value_default=-9999)
+    return toy_geoarray(values, fill_value=-9999)
 
 
 def test_einx_surviving_pattern_returns_geotensor() -> None:
     gt = _gt(np.arange(24, dtype=float).reshape(2, 3, 4))
     out = Einx(op="mean", pattern="c y x -> y x")(gt)
-    assert type(out).__name__ == "GeoTensor"
+    assert type(out).__name__ == "GeoArray"
     assert out.shape == (3, 4)
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert out.crs == gt.crs
     np.testing.assert_allclose(np.asarray(out), np.asarray(gt).mean(axis=0))
 
@@ -106,16 +107,16 @@ def test_einx_multi_input_dot_keeps_georeferencing() -> None:
     out = op(gt, signatures)
     # The band axis changes (2 -> 3 signatures) but the spatial grid is
     # untouched, so matched-filter-style scores stay georeferenced.
-    assert type(out).__name__ == "GeoTensor"
+    assert type(out).__name__ == "GeoArray"
     assert out.shape == (3, 3, 4)
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     expected = np.einsum("byx,sb->syx", np.asarray(gt), signatures)
     np.testing.assert_allclose(np.asarray(out), expected)
 
 
 def test_input_side_transpose_does_not_survive() -> None:
     # Square tile: the transposed output has the carrier's shape, so the
-    # shape check in `array_as_geotensor` can't catch a stale transform.
+    # shape check in `wrap_like` can't catch a stale transform.
     gt = _gt(np.arange(48, dtype=float).reshape(3, 4, 4))
     out = Einx(op="id", pattern="c x y -> c y x")(gt)
     assert type(out) is np.ndarray
@@ -194,7 +195,7 @@ def test_chw_hwc_roundtrip() -> None:
 
 
 def test_per_band_reduce() -> None:
-    gt = toy_geotensor(np.arange(1, 25, dtype=float).reshape(2, 3, 4))
+    gt = toy_geoarray(np.arange(1, 25, dtype=float).reshape(2, 3, 4))
     out = PerBandReduce(reduce="max")(gt)
     assert type(out) is np.ndarray
     np.testing.assert_allclose(out, np.asarray(gt).max(axis=(1, 2)))
@@ -204,12 +205,12 @@ def test_per_band_reduce() -> None:
 def test_spatial_pool_scales_transform() -> None:
     gt = _gt(np.arange(32, dtype=float).reshape(2, 4, 4))
     out = SpatialPool(reduce="mean", factor=2)(gt)
-    assert type(out).__name__ == "GeoTensor"
+    assert type(out).__name__ == "GeoArray"
     assert out.shape == (2, 2, 2)
-    assert out.transform.a == gt.transform.a * 2  # pixel width doubled
-    assert out.transform.e == gt.transform.e * 2  # pixel height doubled
-    assert out.transform.c == gt.transform.c  # same origin
-    assert out.transform.f == gt.transform.f
+    assert affine_of(out).a == affine_of(gt).a * 2  # pixel width doubled
+    assert affine_of(out).e == affine_of(gt).e * 2  # pixel height doubled
+    assert affine_of(out).c == affine_of(gt).c  # same origin
+    assert affine_of(out).f == affine_of(gt).f
     block = np.asarray(gt)[:, :2, :2]
     np.testing.assert_allclose(np.asarray(out)[:, 0, 0], block.mean(axis=(1, 2)))
 
@@ -275,16 +276,16 @@ def test_spatial_pool_ignores_fill() -> None:
     values[:, 2:, 2:] = -9999.0  # a fully-invalid bottom-right block
     values[1, 0, 3] = np.nan  # a NaN in band 1 invalidates the whole pixel
     values[0, 0, 3] = 5.0
-    gt = toy_geotensor(values, attrs={"band_names": ["a", "b"]})
+    gt = toy_geoarray(values, attrs={"band_names": ["a", "b"]})
     out = SpatialPool(reduce="mean", factor=2)(gt)
     arr = np.asarray(out)
     np.testing.assert_allclose(arr[:, 0, 0], [1.0, 1.0])  # not -2499.0
     np.testing.assert_allclose(arr[:, 0, 1], [1.0, 1.0])  # 5.0 excluded with its NaN
     np.testing.assert_allclose(arr[:, 1, 0], [1.0, 1.0])
     np.testing.assert_array_equal(arr[:, 1, 1], [-9999.0, -9999.0])
-    assert out.fill_value_default == -9999
+    assert out.fill_value == -9999
     assert out.attrs is not gt.attrs
-    assert out.attrs["band_names"] == ["a", "b"]
+    assert out.attrs["band_names"] == ("a", "b")
     # Sum must not turn an all-invalid block into 0.
     summed = np.asarray(SpatialPool(reduce="sum", factor=2)(gt))
     np.testing.assert_array_equal(summed[:, 1, 1], [-9999.0, -9999.0])
@@ -298,41 +299,41 @@ def test_spatial_pool_nan_block_without_fill() -> None:
     out = SpatialPool(reduce="mean", factor=2)(values)
     assert type(out) is np.ndarray
     np.testing.assert_allclose(out[0], [[1.0, 1.0], [np.nan, 1.0]])
-    gt = toy_geotensor(values, fill_value_default=None)
+    gt = toy_geoarray(values, fill_value=None)
     pooled = SpatialPool(factor=2)(gt)
-    assert np.isnan(pooled.fill_value_default)
+    assert np.isnan(pooled.fill_value)
 
 
 def test_spatial_pool_integer_extrema_keep_dtype() -> None:
     values = np.arange(1, 17, dtype=np.uint16).reshape(1, 4, 4)
     values[0, :2, :2] = 0
-    gt = toy_geotensor(values, fill_value_default=0)
+    gt = toy_geoarray(values, fill_value=0)
     out = SpatialPool(reduce="max", factor=2)(gt)
     assert out.dtype == np.uint16
     np.testing.assert_array_equal(np.asarray(out)[0], [[0, 8], [14, 16]])
-    assert out.fill_value_default == 0
+    assert out.fill_value == 0
     mean = SpatialPool(reduce="mean", factor=2)(gt)
     assert mean.dtype == np.float64
 
 
 def test_per_band_reduce_ignores_fill() -> None:
     values = np.stack([np.full((4, 4), 2.0), np.full((4, 4), 3.0)])
-    gt = toy_geotensor(values, with_fill_pixels=True)
+    gt = toy_geoarray(values, with_fill_pixels=True)
     np.testing.assert_allclose(PerBandReduce(reduce="mean")(gt), [2.0, 3.0])
     np.testing.assert_allclose(PerBandReduce(reduce="min")(gt), [2.0, 3.0])
-    nan_gt = toy_geotensor(values.copy(), fill_value_default=None)
+    nan_gt = toy_geoarray(values.copy(), fill_value=None)
     np.asarray(nan_gt)[1, 0, 0] = np.nan
     np.testing.assert_allclose(PerBandReduce(reduce="std")(nan_gt), [0.0, 0.0])
-    empty = toy_geotensor(np.full((2, 2, 2), -9999.0))
+    empty = toy_geoarray(np.full((2, 2, 2), -9999.0))
     np.testing.assert_array_equal(PerBandReduce(reduce="sum")(empty), [np.nan] * 2)
 
 
 def test_einx_value_changing_output_gets_nan_fill() -> None:
     values = np.arange(1, 49, dtype=float).reshape(3, 4, 4)
-    gt = toy_geotensor(values, with_fill_pixels=True)
+    gt = toy_geoarray(values, with_fill_pixels=True)
     out = Einx(op="mean", pattern="c y x -> y x")(gt)
     assert out.dtype == np.float64
-    assert np.isnan(out.fill_value_default)
+    assert np.isnan(out.fill_value)
     arr = np.asarray(out)
     mask = fill_pixel_mask(gt.shape)
     assert np.isnan(arr[mask]).all()
@@ -340,26 +341,26 @@ def test_einx_value_changing_output_gets_nan_fill() -> None:
 
 
 def test_einx_boolean_output_gets_false_fill() -> None:
-    gt = toy_geotensor(np.full((2, 4, 4), 0.9), with_fill_pixels=True)
+    gt = toy_geoarray(np.full((2, 4, 4), 0.9), with_fill_pixels=True)
     out = Einx(op="greater", pattern="c y x, c -> c y x")(gt, np.full(2, 0.5))
     assert out.dtype == np.bool_
-    assert out.fill_value_default is False
+    assert out.fill_value is False
     assert not np.asarray(out)[:, fill_pixel_mask(gt.shape)].any()
     assert np.asarray(out)[:, ~fill_pixel_mask(gt.shape)].all()
 
 
 def test_einx_integer_output_keeps_representable_fill() -> None:
     values = np.arange(1, 33, dtype=np.int32).reshape(2, 4, 4)
-    gt = toy_geotensor(values, fill_value_default=-1, with_fill_pixels=True)
+    gt = toy_geoarray(values, fill_value=-1, with_fill_pixels=True)
     out = Einx(op="sum", pattern="c y x -> y x")(gt)
-    assert out.fill_value_default == -1
+    assert out.fill_value == -1
     np.testing.assert_array_equal(np.asarray(out)[fill_pixel_mask(gt.shape)], -1)
 
 
 def test_einx_id_inherits_fill() -> None:
-    gt = toy_geotensor(np.ones((2, 3, 4, 4)), with_fill_pixels=True)
+    gt = toy_geoarray(np.ones((2, 3, 4, 4)), with_fill_pixels=True)
     out = Einx(op="id", pattern="t c y x -> c t y x")(gt)
-    assert out.fill_value_default == -9999
+    assert out.fill_value == -9999
     np.testing.assert_array_equal(np.asarray(out), np.swapaxes(np.asarray(gt), 0, 1))
 
 
@@ -372,12 +373,12 @@ def test_4d_time_stack() -> None:
     rng = np.random.default_rng(0)
     values = rng.uniform(1.0, 2.0, (2, 3, 4, 4))
     values[1, :, 0, 0] = -9999.0  # fill in frame 1 only
-    gt = toy_geotensor(values, attrs={"band_names": ["a", "b", "c"]})
+    gt = toy_geoarray(values, attrs={"band_names": ["a", "b", "c"]})
 
     pooled = SpatialPool(reduce="mean", factor=2)(gt)
     assert pooled.shape == (2, 3, 2, 2)
-    assert pooled.transform.a == gt.transform.a * 2
-    assert pooled.attrs["band_names"] == ["a", "b", "c"]
+    assert affine_of(pooled).a == affine_of(gt).a * 2
+    assert pooled.attrs["band_names"] == ("a", "b", "c")
     np.testing.assert_allclose(
         np.asarray(pooled)[0, :, 0, 0], values[0, :, :2, :2].mean(axis=(1, 2))
     )
