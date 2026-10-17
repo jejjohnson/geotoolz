@@ -10,7 +10,7 @@ scikit-learn integration. Wraps any sklearn-compatible estimator (`fit` / `predi
     (classifiers / regressors) must be pre-fit out-of-graph and loaded via `state_path=` —
     in-graph supervised fit helpers are not implemented yet.
 
-- **Universal adapter:** `SklearnOp`, `GeoTensorEstimator`
+- **Universal adapter:** `SklearnOp`, `GeoArrayEstimator`
 - **Convenience wrappers** (named algorithm, sensible defaults). Each is prefixed `Pixelwise` so it
   never shadows the scikit-learn class it wraps, and takes that estimator by keyword —
   `gz.learn.PixelwisePCA(estimator=PCA(n_components=3))`:
@@ -22,7 +22,7 @@ scikit-learn integration. Wraps any sklearn-compatible estimator (`fit` / `predi
 
 ## Saved state
 
-`SklearnOp.save_state(path)` (and `GeoTensorEstimator.save_state`) writes one joblib pickle holding
+`SklearnOp.save_state(path)` (and `GeoArrayEstimator.save_state`) writes one joblib pickle holding
 the fitted estimator and imputer. Pass `write_meta=True` to also write a `<path>.meta.json` sidecar
 with the scikit-learn version, fit input shape / sample count and a UTC `fit_timestamp`; it is off
 by default so a save is deterministic and writes a single file.

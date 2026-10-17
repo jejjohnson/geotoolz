@@ -27,7 +27,7 @@ dependencies = [
     # form is a `geoarray.GeoArray`. The [georeader] extra brings the
     # adapter (`source_to_georeader` / `from_georeader`) used at the engine
     # boundary below.
-    "geotoolz-array[georeader]>=0.1",
+    "geotoolz-array[georeader]>=0.1.1",
     # The internal engine only, never in the public API: georeader's
     # `read_reproject` / `calculate_transform_window` / `window_from_polygon`
     # behind `ReprojectingRasterField`, and `compare_crs` in the coordinate

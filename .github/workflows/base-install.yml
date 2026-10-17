@@ -240,7 +240,7 @@ jobs:
         run: uv run --no-sync pytest -q --no-cov
 
   # `pip install geotoolz-products` without extras: every module imports,
-  # the reference reader loads a GeoTensor, extra-backed features fail only
+  # the reference reader loads a GeoArray, extra-backed features fail only
   # when used with a hint naming the `geotoolz-products[...]` extra, and the
   # test suite passes with every extras-gated test skipping cleanly.
   # Crucially, geotoolz itself is absent: readers never depend on it.

@@ -16,7 +16,7 @@ PNG by hand and never draw one in another tool.
   and keep its structure: a `#diagram` root, `_base.css` for the palette and
   type, boxes laid out with CSS.
 - Draw edges with `_connect.js`:
-  `wire("a", "b", { from: "right", to: "left", label: "GeoTensor" })`
+  `wire("a", "b", { from: "right", to: "left", label: "GeoArray" })`
   (`dashed: true` for optional relations, `fromShift` / `toShift` to
   separate parallel wires), then call `ready()`.
 - Use real public names (`geocatalog.patch.field_for`,

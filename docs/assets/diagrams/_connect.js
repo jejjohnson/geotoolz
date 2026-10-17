@@ -1,6 +1,6 @@
 // Draw labelled connectors between elements of a laid-out diagram.
 //
-//   wire("a", "b", { from: "right", to: "left", label: "GeoTensor" });
+//   wire("a", "b", { from: "right", to: "left", label: "GeoArray" });
 //
 // Positions are measured after CSS layout, so a diagram only declares its
 // boxes (HTML/CSS) and the edges between them (this call). Options:

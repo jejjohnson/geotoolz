@@ -14,7 +14,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > **Find the data, read it, cut it to size, compute on it — one composable stack.**
-> A [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) of five
+> A [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) of six
 > packages that interlock end-to-end, with the Operator / Sequential / Graph
 > composition core supplied by [pipekit](https://github.com/jejjohnson/pipekit).
 
@@ -43,9 +43,9 @@ that loop per project, so each step is hard-wired to the next.
 
 The geostack gives each move its own package and one small seam between
 neighbours. A `GeoSlice` (bounds × time × resolution × CRS) is the request
-every catalog answers. A georeader `GeoTensor` is the array every reader
-returns and every operator takes — it keeps its CRS, transform and band
-names through the whole pipeline. A `Patch` is what the patcher hands an
+every catalog answers. A [`geoarray.GeoArray`](packages/geotoolz-array) is the array every reader
+returns and every operator takes — NumPy or JAX data with its CRS,
+transform, fill value and band names, kept through the whole pipeline. A `Patch` is what the patcher hands an
 operator. Because operators are plain `pipekit` objects, the patcher
 itself becomes an operator: *tile → predict → stitch* is one more
 `Sequential`, typed and YAML-serialisable like the rest.
@@ -60,14 +60,15 @@ itself becomes an operator: *tile → predict → stitch* is one more
 | [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher (Geometry × Sampler × Window × Aggregation): split a field into patches, run an operator per patch, stitch back | [Patcher →](https://jejjohnson.github.io/geotoolz/patcher/) |
 | [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files: STAC/CMR discovery → GeoParquet catalog → `GeoSlice` → loaders | [Catalog →](https://jejjohnson.github.io/geotoolz/catalog/) |
 | [`geotoolz-cloud`](packages/geotoolz-cloud) | `geocloud` | Cloud object storage for the stack: one process-wide obstore client pool, file verbs (ls / download / upload / copy / sync / sign), per-bucket credentials, and Cloud-Optimized GeoTIFF reads and validated writes | [Cloud →](https://jejjohnson.github.io/geotoolz/cloud/) |
-| [`geotoolz-products`](packages/geotoolz-products) | `geoproducts` | Readers for Earth-observation data products — the `ProductReader` ABC, mission readers such as GOES-R ABI and Himawari AHI, and provider clients such as Carbon Mapper — each returning a georeader `GeoTensor` | [Products →](https://jejjohnson.github.io/geotoolz/products/) |
+| [`geotoolz-products`](packages/geotoolz-products) | `geoproducts` | Readers for Earth-observation data products — the `ProductReader` ABC, mission readers such as GOES-R ABI and Himawari AHI, and provider clients such as Carbon Mapper — each a `geoarray.RasterSource` that reads `GeoArray`s | [Products →](https://jejjohnson.github.io/geotoolz/products/) |
+| [`geotoolz-array`](packages/geotoolz-array) | `geoarray` | The carrier every package takes and returns: `GeoArray`, NumPy or JAX data with its transform, CRS, fill and attrs (a JAX pytree, so `jit` / `grad` / `vmap` work on it), plus `Grid` / `PixelWindow` geometry, the `RasterSource` protocol for lazy readers, and a zero-copy bridge to georeader | [Array →](https://jejjohnson.github.io/geotoolz/array/) |
 
 Import names are unchanged from the pre-monorepo repos — only the
 distribution names carry the `geotoolz-` prefix. The dependency graph is
 a strict layering: solid arrows are hard dependencies, dotted arrows are
 opt-in extras, and nothing points back up.
 
-<p align="center"><img src="docs/assets/diagrams/stack-layers.png" alt="Dependency layers: the five packages stand on georeader; object storage in geotoolz-cloud; geotoolz-ops on pipekit; cross-package links are opt-in extras" width="100%"></p>
+<p align="center"><img src="docs/assets/diagrams/stack-layers.png" alt="Dependency layers: every package stands on geotoolz-array (the GeoArray carrier); object storage in geotoolz-cloud; geotoolz-ops on pipekit; georeader is an internal engine; cross-package links are opt-in extras" width="100%"></p>
 
 ## Quickstart — catalog → patcher → operators
 
@@ -81,7 +82,7 @@ import numpy as np
 import pandas as pd
 import planetary_computer
 import pystac_client
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geocatalog as gc
 import geopatcher as gp
@@ -112,7 +113,7 @@ bands: dict[str, gc.GeoCatalog] = {
 # 2 · read — mosaic each band onto the AOI grid, stack red + NIR
 red: gp.RasterField = gc.patch.field_for(bands["B04"].query(aoi), aoi)   # (1, 4500, 4000) uint16
 nir: gp.RasterField = gc.patch.field_for(bands["B08"].query(aoi), aoi)   # (1, 4500, 4000) uint16
-scene: GeoTensor = gz.StackBands()([red.reader, nir.reader])         # (2, 4500, 4000) uint16
+scene: GeoArray = gz.StackBands()([red.reader, nir.reader])         # (2, 4500, 4000) uint16
 
 # 3 · cut + compute — 256² tiles, 64 px overlap, Hann-feathered seams
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
@@ -128,12 +129,12 @@ tiled: gz.Sequential = gz.Sequential([
     ApplyToChips(operator=ndvi),                         # list[Patch] → list[Patch] (256, 256) each
     MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-result: GeoTensor = tiled(field)                        # (4500, 4000) float64 · NaN = no data
+result: GeoArray = tiled(field)                        # (4500, 4000) float64 · NaN = no data
 ```
 
 `MergePatches` places the chips on the domain's grid and keeps the band
 axes the chips carry, so NDVI's `(h, w)` chips merge into one `(H, W)`
-`GeoTensor` on the scene's transform and CRS.
+`GeoArray` on the scene's transform and CRS.
 
 The end-to-end Lake Tahoe tutorial runs this flow for real:
 [catalog notebook](https://jejjohnson.github.io/geotoolz/catalog/notebooks/end_to_end_lake_tahoe/) ·
@@ -158,7 +159,7 @@ import pandas as pd
 import planetary_computer
 import pyproj
 import pystac_client
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geocatalog as gc
 import geopatcher as gp
@@ -196,7 +197,7 @@ swir: dict[str, gp.RasterField] = {
     )                                                    # (1, 1675, 1430) uint16 per band
     for band in ("B11", "B12")                           # SWIR-1 ≈ 1610 nm · SWIR-2 ≈ 2190 nm
 }
-scene: GeoTensor = gz.StackBands()([swir["B11"].reader, swir["B12"].reader])  # (2, 1675, 1430) uint16
+scene: GeoArray = gz.StackBands()([swir["B11"].reader, swir["B12"].reader])  # (2, 1675, 1430) uint16
 
 # 3 · patcher + operators — SWIR-ratio methane score, tile by tile
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
@@ -215,10 +216,10 @@ screen: gz.Sequential = gz.Sequential([
     ApplyToChips(operator=enhancement),                  # list[Patch] → list[Patch] (128, 128) each
     MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-score: GeoTensor = screen(field)                        # (1675, 1430) float64, on the scene's grid
+score: GeoArray = screen(field)                        # (1675, 1430) float64, on the scene's grid
 
 # 4 · products again — known sources rasterized onto the same grid as labels
-labels: GeoTensor = cm.rasterize_sources_like(sources, score, buffer_m=150.0)  # (1675, 1430) uint8 {0, 1}
+labels: GeoArray = cm.rasterize_sources_like(sources, score, buffer_m=150.0)  # (1675, 1430) uint8 {0, 1}
 
 pair: tuple[np.ndarray, np.ndarray] = (np.asarray(score), np.asarray(labels))  # aligned pixel-for-pixel
 ```
@@ -243,9 +244,9 @@ for the full tour):
 - **`patch_ops`** — `GridSampler → ApplyToChips → MergePatches` puts the patcher
   inside an operator `Sequential` for tile-predict-stitch inference; the
   label-aware samplers emit the same `Patch` carrier for training draws.
-- **`ProductReader`** — every geoproducts reader is a georeader `GeoData`,
-  so a reader drops into `geopatcher.RasterField` or a geotoolz operator
-  without adapters.
+- **`ProductReader`** — every geoproducts reader is a `geoarray.RasterSource`,
+  so a reader drops into `geopatcher.RasterField` (read window by window)
+  without adapters; `reader.load()` gives the `GeoArray` an operator takes.
 - **Coregistration operators** — `geoops.geom.coregister` ops are the
   intended coreg callables for `geopatcher.matched.MatchedField`, aligning
   multi-source patches found by the catalog's matchup engine.
@@ -258,7 +259,7 @@ for the full tour):
 ## Install
 
 ```bash
-pip install geotoolz                              # the whole stack (all five packages)
+pip install geotoolz                              # the whole stack (all six packages)
 pip install geotoolz-ops                          # operators only (geoops)
 pip install 'geotoolz-ops[patch]'                 # + patcher (geopatcher)
 pip install geotoolz-catalog                      # catalog only
@@ -267,6 +268,7 @@ pip install 'geotoolz-catalog[stac]'              # + STAC searches (from_stac_s
 pip install geotoolz-cloud                        # object storage: pool, file verbs, credentials, COG writes
 pip install 'geotoolz-cloud[cog]'                 # + async COG reads
 pip install geotoolz-products                     # product readers (geoproducts)
+pip install geotoolz-array                        # the GeoArray carrier alone (geoarray; `[jax]` for JAX)
 pip install 'geotoolz-products[goes]'             # + the GOES-R ABI reader
 pip install 'geotoolz-products[himawari]'         # + Himawari L2 cloud products (HSD needs no extra)
 pip install 'geotoolz-products[carbonmapper]'     # + the Carbon Mapper client
@@ -295,7 +297,7 @@ Contributors start from [`AGENTS.md`](AGENTS.md).
 
 ```bash
 make install              # uv sync (all packages, groups, extras) + hooks
-make test                 # fast tier across all five packages
+make test                 # fast tier across all six packages
 make lint                 # ruff check .  (entire repo)
 make format               # ruff format + ruff check --fix
 make typecheck            # ty per package

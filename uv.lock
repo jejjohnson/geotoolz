@@ -1261,6 +1261,7 @@ name = "geotoolz"
 version = "0.11.0"
 source = { editable = "packages/geotoolz" }
 dependencies = [
+    { name = "geotoolz-array" },
     { name = "geotoolz-catalog" },
     { name = "geotoolz-cloud" },
     { name = "geotoolz-ops" },
@@ -1307,6 +1308,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "geotoolz-array", editable = "packages/geotoolz-array" },
     { name = "geotoolz-catalog", editable = "packages/geotoolz-catalog" },
     { name = "geotoolz-cloud", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-ops", editable = "packages/geotoolz-ops" },

@@ -7,7 +7,7 @@ they cannot see, so the stack ships three things that let them find it.
 
 ## The capability index
 
-[Capability index](capabilities.md) lists every public name in the five
+[Capability index](capabilities.md) lists every public name in the six
 packages, once, at its home, with a one-line summary. It is regenerated from
 the code and checked in CI, so it never drifts. Point an agent at it before
 it writes a helper.
@@ -26,7 +26,7 @@ The plugin adds:
 - **`build-geo-pipeline`** (skill) — loads whenever a task involves rasters,
   satellite imagery, STAC or tiling: which package does what, the canonical
   catalog → patcher → operators → write pipeline, the pipekit `Operator` and
-  `GeoTensor` contracts your own steps must keep, and the anti-patterns to
+  `GeoArray` contracts your own steps must keep, and the anti-patterns to
   avoid.
 - **`geostack-reuse-reviewer`** (subagent) — a read-only check of a diff for
   code that re-implements something the installed packages already provide.
@@ -63,14 +63,16 @@ packages' `__all__`, and compose what exists. New processing steps are
     returns a non-raster.
   - Use pipekit's `Retry` / `Try` / `Branch` / `Cache` / `ThreadMap`
     instead of writing your own.
-- **GeoTensor.**
+- **GeoArray.**
   - Bands are on axis -3: `(C, H, W)` or `(T, C, H, W)`.
-  - A GeoTensor in returns a GeoTensor on the same transform and CRS; a
-    plain array in returns a plain array; the input is never mutated.
-  - Every output gets a fresh `attrs` dict, with per-band keys matching
-    the output bands and band names under `band_names`.
-  - `fill_value_default` is nodata: `False` for masks, `0` for labels,
-    `NaN` for new floats.
+  - A GeoArray in returns a GeoArray on the same transform and CRS; a
+    plain array in returns a plain array; the input is never mutated; a
+    georeader `GeoTensor` is refused (convert it with
+    `geoarray.interop.georeader.from_georeader`).
+  - `attrs` are immutable; per-band keys match the output bands, and band
+    names go under `band_names`.
+  - `fill_value` is nodata: `False` for masks, `0` for labels, `NaN` for
+    new floats.
   - Several rasters must share a grid; mask `True` means drop.
 - Keep them with the helpers in `geoops.carrier` (`wrap_like`,
   `mask_invalid_to_nan`, `over_frames`, `resolve_band`, `require_grid_match`),

@@ -27,6 +27,7 @@ dependencies = [
     "geotoolz-catalog>=0.5.1",
     "geotoolz-cloud>=0.4.1",
     "geotoolz-products>=0.4.2",
+    "geotoolz-array>=0.1.1",
 ]
 
 # Extras forward to the package that owns them, so `pip install

@@ -53,7 +53,7 @@
         <div class="lane-head"><span class="verb">read</span><span class="pkg">geotoolz-products</span></div>
         <div class="node" id="reader">
           <div class="name"><code>ProductReader</code></div>
-          <div class="desc">one reader per mission or provider — <code>toy_sensor</code>, <code>carbonmapper</code> — each a georeader <code>GeoData</code></div>
+          <div class="desc">one reader per mission or provider — <code>toy_sensor</code>, <code>carbonmapper</code> — each a <code>RasterSource</code> that reads <code>GeoArray</code>s</div>
         </div>
       </div>
     </div>
@@ -77,7 +77,7 @@
       <div class="node" id="ops">
         <div class="name"><code>Operator</code> · <code>Sequential</code> · <code>Graph</code></div>
         <div class="desc">radiometry · indices · qa · mask · geom · compositing · plume · matched_filter · learn · viz · …</div>
-        <div class="chips"><span class="chip">GeoTensor in → GeoTensor out</span></div>
+        <div class="chips"><span class="chip">GeoArray in → GeoArray out</span></div>
       </div>
     </div>
 
@@ -97,8 +97,8 @@
 
   <div class="base-row">
     <div class="slab">
-      <div class="lib">georeader</div>
-      <div class="what"><code>GeoTensor</code> — the array every reader returns and every operator takes; it carries CRS, transform, band names and fill value end to end.</div>
+      <div class="lib">geotoolz-array</div>
+      <div class="what"><code>GeoArray</code> — the array every reader returns and every operator takes; NumPy or JAX data carrying CRS, transform, band names and fill value end to end.</div>
     </div>
     <div class="slab">
       <div class="lib">pipekit</div>
@@ -110,7 +110,7 @@
 <script>
   wire("slice", "catalog", { from: "bottom", to: "top", bend: 14, color: "#7b6bb5" });
   wire("lane-find", "lane-cut", { toShift: -30, at: 0.42, label: "<span class='t'>stage · field_for</span>", color: "#7b6bb5" });
-  wire("lane-read", "lane-cut", { toShift: 70, at: 0.5, label: "<span class='t'>GeoTensor</span>", color: "#23978a" });
+  wire("lane-read", "lane-cut", { toShift: 70, at: 0.5, label: "<span class='t'>GeoArray</span>", color: "#23978a" });
   wire("field", "split", { from: "bottom", to: "top", bend: 14, color: "#3f6fb5" });
   wire("lane-cut", "lane-compute", { fromShift: 50, label: "<span class='t'>Patch</span><span class='s'>× N</span>", color: "#3f6fb5" });
   wire("lane-compute", "lane-stitch", { label: "<span class='t'>Patch</span><span class='s'>× N</span>", color: "#cf9418" });
