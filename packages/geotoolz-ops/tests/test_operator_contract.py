@@ -1134,7 +1134,9 @@ def _as_geotensor(value: Any) -> Any:
 
 
 @pytest.mark.parametrize("cls", _params("graph_mode"))
-def test_every_operator_refuses_a_geotensor(cls: type) -> None:
+def test_every_operator_refuses_a_geotensor(
+    cls: type, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """GD1: a georeader GeoTensor raises ``TypeError`` naming ``from_georeader``.
 
     A GeoTensor is an ``np.ndarray`` subclass, so an operator that only
@@ -1142,6 +1144,7 @@ def test_every_operator_refuses_a_geotensor(cls: type) -> None:
     georeferencing. Each operator is run on the first toy GeoArray input
     it accepts, then on the same input as a GeoTensor.
     """
+    monkeypatch.chdir(tmp_path)  # sinks write their relative paths here
     op = build(cls, runtime=True)
     if not _single_carrier_in(op):
         pytest.skip("not a single-input operator")
@@ -1161,6 +1164,19 @@ def test_every_operator_refuses_a_geotensor(cls: type) -> None:
             copy.deepcopy(op)(_as_geotensor(scene), *_as_geotensor(list(others)))
         return
     pytest.skip("no toy input is valid for this operator")
+
+
+@pytest.mark.parametrize("cls", _multi_input_classes())
+def test_multi_input_operator_refuses_a_geotensor_second_input(cls: type) -> None:
+    """GD1 for the second carrier: a GeoTensor there is refused too.
+
+    A GeoTensor is an ndarray, so a grid check that only sees GeoArrays
+    would take it for a plain array and skip the CRS / transform check.
+    """
+    values = _graph_values(cls)
+    values[-1] = _as_geotensor(values[-1])
+    with pytest.raises(TypeError, match="from_georeader"):
+        _build_seeded(cls)(*values)
 
 
 def test_phase_align_is_terminal_only_without_apply() -> None:

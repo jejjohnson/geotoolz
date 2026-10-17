@@ -295,7 +295,12 @@ def grid_matches(
 
     Returns:
         ``True`` when the grids match.
+
+    Raises:
+        TypeError: Either side is a georeader ``GeoTensor``.
     """
+    reject_geotensor(a, "grid_matches")
+    reject_geotensor(b, "grid_matches")
     shape_a, shape_b = np.shape(a), np.shape(b)
     if spatial_only:
         shape_a, shape_b = shape_a[-2:], shape_b[-2:]
@@ -353,6 +358,8 @@ def require_grid_match(
         ValueError: The grids differ; the message names the operator and
             both grids.
     """
+    reject_geotensor(a, op_name)
+    reject_geotensor(b, op_name)
     if not grid_matches(a, b, atol=atol, spatial_only=spatial_only):
         raise ValueError(
             f"{op_name}: the {names[1]} pixel grid "
