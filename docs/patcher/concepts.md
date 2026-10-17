@@ -75,12 +75,12 @@ memory.
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.ones((1, 256, 256), dtype=np.float32),                   # (1, 256, 256) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",
@@ -102,12 +102,12 @@ doubled: list[gp.Patch] = [
     for p in patcher.split(field)
 ]
 merged: np.ndarray = patcher.merge(doubled, field.domain)          # (1, 256, 256) float64
-stitched: GeoTensor = patcher.merge_to_field(doubled, field)       # (1, 256, 256) float32, georeferenced
+stitched: GeoArray = patcher.merge_to_field(doubled, field)       # (1, 256, 256) float32, georeferenced
 ```
 
 | `Patch` attribute | Set by | Holds |
 |---|---|---|
-| `data` | the field's `select` | the payload — a `GeoTensor`, `DataArray`, `GeoDataFrame`, … |
+| `data` | the field's `select` | the payload — a `GeoArray`, `DataArray`, `GeoDataFrame`, … |
 | `anchor` | the sampler | the patch origin (`(row, col)` on a raster) |
 | `indices` | the geometry | what was read: a rasterio `Window`, neighbour ids, a polygon |
 | `weights` | the window | per-cell weights for the merge |
@@ -121,8 +121,14 @@ output; `merge_to_field` rebuilds the field's carrier around it.
 A `Field` is anything with three members: `domain` (I/O-free metadata
 such as shape, CRS and transform), `select(indexer)` (read one patch) and
 `with_data(array)` (rebuild the carrier). The raster path wraps a
-georeader `GeoTensor` or lazy reader in `geopatcher.RasterField`; the
-other adapters live in `geopatcher.fields` behind extras. The
+`geoarray.GeoArray` or any lazy `geoarray.RasterSource` in
+`geopatcher.RasterField`: the source is the domain (its `grid` and
+`shape`), every patch is a `GeoArray` on its window's grid, and
+`merge_to_field` returns a `GeoArray` on the source grid. A georeader
+reader crosses with `geoarray.interop.georeader.source_from_georeader`
+(a `GeoTensor` with `from_georeader`); passing one directly raises a
+`TypeError` that names the adapter. The other adapters live in
+`geopatcher.fields` behind extras. The
 [Fields and domains table](patching.md#fields-and-domains) lists each
 adapter and its domain.
 

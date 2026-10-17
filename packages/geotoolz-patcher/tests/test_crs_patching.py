@@ -16,7 +16,8 @@ import warnings
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
+from geoarray.interop.georeader import to_georeader
 
 from geopatcher import RasterField, SpatialPatcher, spatial
 from geopatcher.fields import ReprojectingRasterField
@@ -32,7 +33,7 @@ _UTM_CRS = "EPSG:32630"
 
 def _utm_field(n: int = 100) -> RasterField:
     arr = np.arange(n * n, dtype=np.float32).reshape(n, n)
-    return RasterField(GeoTensor(values=arr, transform=_UTM_TRANSFORM, crs=_UTM_CRS))
+    return RasterField(GeoArray(data=arr, transform=_UTM_TRANSFORM, crs=_UTM_CRS))
 
 
 def _pixel_center_lonlat(row: int, col: int) -> tuple[float, float]:
@@ -157,8 +158,8 @@ class TestPolarDatelineGuard:
         # 85N coordinates belong.
         arr = np.zeros((10, 10), dtype=np.float32)
         polar = RasterField(
-            GeoTensor(
-                values=arr,
+            GeoArray(
+                data=arr,
                 transform=rasterio.Affine(1000, 0, -5000, 0, -1000, 5000),
                 crs="EPSG:3413",
             )
@@ -189,9 +190,7 @@ class TestReprojectingRasterField:
         from rasterio.windows import Window
 
         chip = field.select(Window(0, 0, 100, 100))
-        np.testing.assert_allclose(
-            np.asarray(chip.values), np.asarray(reader.values), rtol=1e-4
-        )
+        np.testing.assert_allclose(np.asarray(chip), np.asarray(reader), rtol=1e-4)
 
     def test_chips_are_on_destination_grid(self) -> None:
         reader = _utm_field().reader
@@ -205,7 +204,7 @@ class TestReprojectingRasterField:
         chips = list(patcher.split(field))
         assert chips
         for chip in chips:
-            assert chip.data.values.shape == (16, 16)
+            assert np.asarray(chip.data).shape == (16, 16)
             assert str(chip.data.crs) == "EPSG:3857"
 
     def test_stitched_output_matches_destination_grid(self) -> None:
@@ -226,14 +225,15 @@ class TestReprojectingRasterField:
             ReprojectingRasterField(reader, dst_crs="EPSG:3857", resampling="quantic")
 
 
-def _utm_3d_geotensor(n: int = 100, bands: int = 2) -> GeoTensor:
+def _utm_3d_scene(n: int = 100, bands: int = 2) -> GeoArray:
     arr = np.stack(
         [
             np.arange(n * n, dtype=np.float32).reshape(n, n) + 1e5 * b
             for b in range(bands)
         ]
     )
-    return GeoTensor(values=arr, transform=_UTM_TRANSFORM, crs=_UTM_CRS)
+    # 0 is the nodata the warp writes outside the source footprint.
+    return GeoArray(data=arr, transform=_UTM_TRANSFORM, crs=_UTM_CRS, fill_value=0.0)
 
 
 def _stride_patcher(size: int = 16) -> SpatialPatcher:
@@ -245,8 +245,8 @@ def _stride_patcher(size: int = 16) -> SpatialPatcher:
     )
 
 
-def _write_tif(path, gt: GeoTensor) -> str:
-    values = np.asarray(gt.values)
+def _write_tif(path, gt: GeoArray) -> str:
+    values = np.asarray(gt)
     with rasterio.open(
         path,
         "w",
@@ -256,7 +256,7 @@ def _write_tif(path, gt: GeoTensor) -> str:
         count=values.shape[0],
         dtype=values.dtype,
         crs=gt.crs,
-        transform=gt.transform,
+        transform=gt.grid.affine,
     ) as dst:
         dst.write(values)
     return str(path)
@@ -264,26 +264,29 @@ def _write_tif(path, gt: GeoTensor) -> str:
 
 class TestReprojectingRasterField3D:
     def test_domain_shape_keeps_leading_dims(self) -> None:
-        field = ReprojectingRasterField(_utm_3d_geotensor(), dst_crs="EPSG:3857")
+        field = ReprojectingRasterField(_utm_3d_scene(), dst_crs="EPSG:3857")
         assert len(field.domain.shape) == 3
         assert field.domain.shape[0] == 2
 
-    @pytest.mark.parametrize("backend", ["geotensor", "rasterio"])
+    @pytest.mark.parametrize("backend", ["geoarray", "rasterio"])
     def test_reprojecting_field_3d_merge(self, backend: str, tmp_path) -> None:
+        from geoarray.interop.georeader import source_from_georeader
         from georeader.rasterio_reader import RasterioReader
         from georeader.read import read_reproject
 
-        gt = _utm_3d_geotensor()
+        gt = _utm_3d_scene()
         reader = (
             gt
-            if backend == "geotensor"
-            else RasterioReader(_write_tif(tmp_path / "src.tif", gt))
+            if backend == "geoarray"
+            else source_from_georeader(
+                RasterioReader(_write_tif(tmp_path / "src.tif", gt))
+            )
         )
         field = ReprojectingRasterField(reader, dst_crs="EPSG:3857")
         patcher = _stride_patcher()
         chips = list(patcher.split(field))
         assert chips
-        assert all(c.data.values.shape == (2, 16, 16) for c in chips)
+        assert all(np.asarray(c.data).shape == (2, 16, 16) for c in chips)
         merged = np.asarray(patcher.merge(iter(chips), field.domain))
         assert merged.shape == field.domain.shape
 
@@ -291,9 +294,9 @@ class TestReprojectingRasterField3D:
         # Chips are warped independently, so allow the documented
         # approximate-transformer drift (well under a ramp step of 1).
         full = read_reproject(
-            gt,
+            to_georeader(gt),
             dst_crs="EPSG:3857",
-            dst_transform=field.domain.transform,
+            dst_transform=field.domain.grid.affine,
             window_out=rasterio.windows.Window(
                 0, 0, field.domain.shape[-1], field.domain.shape[-2]
             ),
@@ -303,7 +306,7 @@ class TestReprojectingRasterField3D:
         hh = (field.domain.shape[-2] // 16) * 16
         ww = (field.domain.shape[-1] // 16) * 16
         np.testing.assert_allclose(
-            merged[:, :hh, :ww], np.asarray(full.values)[:, :hh, :ww], atol=1.0
+            merged[:, :hh, :ww], np.asarray(full)[:, :hh, :ww], atol=1.0
         )
 
     def test_per_chip_warp_reads_only_chip_footprint(self, monkeypatch) -> None:
@@ -319,7 +322,7 @@ class TestReprojectingRasterField3D:
             return real(source, *args, **kwargs)
 
         monkeypatch.setattr(rasterio.warp, "reproject", spy)
-        field = ReprojectingRasterField(_utm_3d_geotensor(n=200), dst_crs="EPSG:3857")
+        field = ReprojectingRasterField(_utm_3d_scene(n=200), dst_crs="EPSG:3857")
         chips = list(_stride_patcher().split(field))
         assert len(chips) > 50
         assert seen
@@ -335,27 +338,25 @@ class TestReprojectingRasterField3D:
         from georeader.read import read_reproject
         from rasterio.windows import Window, transform as window_transform
 
-        gt = _utm_3d_geotensor()
+        gt = _utm_3d_scene()
         field = ReprojectingRasterField(gt, dst_crs="EPSG:3857", resolution=resolution)
         h, w = field.domain.shape[-2:]
         for window in (Window(0, 0, 8, 8), Window(w // 3, h // 3, 8, 8)):
             chip = field.select(window)
             ref = read_reproject(
-                gt,
+                to_georeader(gt),
                 dst_crs="EPSG:3857",
-                dst_transform=window_transform(window, field.domain.transform),
+                dst_transform=window_transform(window, field.domain.grid.affine),
                 window_out=Window(0, 0, 8, 8),
                 resampling=rasterio.warp.Resampling.bilinear,
             )
-            np.testing.assert_array_equal(
-                np.asarray(chip.values), np.asarray(ref.values)
-            )
+            np.testing.assert_array_equal(np.asarray(chip), np.asarray(ref))
 
     def test_chip_outside_source_is_nodata(self) -> None:
         from rasterio.windows import Window
 
-        field = ReprojectingRasterField(_utm_3d_geotensor(), dst_crs="EPSG:3857")
+        field = ReprojectingRasterField(_utm_3d_scene(), dst_crs="EPSG:3857")
         h, w = field.domain.shape[-2:]
         chip = field.select(Window(w + 50, h + 50, 8, 8))
-        assert chip.values.shape == (2, 8, 8)
-        assert np.all(np.asarray(chip.values) == chip.fill_value_default)
+        assert np.asarray(chip).shape == (2, 8, 8)
+        assert np.all(np.asarray(chip) == chip.fill_value)

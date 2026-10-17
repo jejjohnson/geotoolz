@@ -73,7 +73,7 @@ def stack_patches(
                 f"{type(value).__name__!r}, which converts to a "
                 f"{arr.ndim}-d {arr.dtype} array rather than numeric data. "
                 "The field's select() must return a materialised array "
-                "(e.g. a GeoTensor or DataArray), not a lazy reader or a "
+                "(e.g. a GeoArray or DataArray), not a lazy reader or a "
                 "Field wrapper — call .load() / .values on it first."
             )
         if expected_shape is None:

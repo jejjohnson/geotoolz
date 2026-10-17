@@ -32,6 +32,7 @@ from typing import Any, ClassVar, Literal
 import numpy as np
 
 from geopatcher._src._serialize import config_from_fields
+from geopatcher._src.carrier import raster_grid
 from geopatcher._src.domains import GridDomain, PointDomain, VectorDomain
 from geopatcher._src.exceptions import IncompleteScanConfiguration
 from geopatcher._src.spatial.geometry import (
@@ -606,7 +607,9 @@ def _raster_center_anchors(
     boundary = getattr(geometry, "boundary", "drop")
     if _drop_oversize("centred-anchor sampler", boundary, (h, w), (ph, pw)):
         return
-    inv = ~domain.transform
+    grid = raster_grid(domain)
+    assert grid is not None  # callers dispatch on a raster domain
+    inv = ~grid.affine
     for x, y in points:
         col_f, row_f = inv * (float(x), float(y))
         r, c = int(np.floor(row_f)), int(np.floor(col_f))
@@ -627,7 +630,8 @@ def _validate_polar_guard(policy: str) -> None:
 
 
 def _domain_crs(domain: Any) -> Any:
-    crs = getattr(domain, "crs", None)
+    grid = raster_grid(domain)
+    crs = grid.crs if grid is not None else getattr(domain, "crs", None)
     if crs is None:
         raise ValueError(
             "cannot reproject anchors: the domain exposes no CRS. Provide "

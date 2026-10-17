@@ -18,12 +18,12 @@ for points spaced along a track, with `spacing` in domain units.
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.ones((1, 256, 256), dtype=np.float32),       # (1, 256, 256) float32, UTM 11N
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",
@@ -54,11 +54,11 @@ warped from a crop of the source around its footprint.
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 
-source: GeoTensor = GeoTensor(
+source: GeoArray = GeoArray(
     np.ones((1, 256, 256), dtype=np.float32),           # (1, 256, 256) float32, UTM 11N at 10 m
     transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
     crs="EPSG:32611",
@@ -82,7 +82,12 @@ mosaic: np.ndarray = patcher.merge(chips, field.domain)  # (1, 111, 110) float64
   merge back without a rank mismatch.
 - Per-chip cost scales with the chip, not the scene.
 - Chips are warped independently, so a stitched mosaic can differ
-  slightly from one full-scene warp. Call `georeader.read.read_reproject`
-  once when you need that exactly.
+  slightly from one full-scene warp. Warp the whole scene once
+  (`geoops.geom.Reproject`) when you need that exactly.
+- The source is any `geoarray.RasterSource` (a `GeoArray`, or a lazy
+  reader read only around each chip); chips and `with_data` are
+  `GeoArray`s on the destination grid. georeader runs the warp
+  internally; a georeader reader goes in through
+  `geoarray.interop.georeader.source_from_georeader`.
 - `resampling=` defaults to `"bilinear"`; it is part of the
   [PatchCache](patch-cache.md) key.

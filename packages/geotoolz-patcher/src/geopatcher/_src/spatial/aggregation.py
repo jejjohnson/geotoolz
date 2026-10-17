@@ -932,9 +932,12 @@ def _zarr_to_cog(
     from rasterio.shutil import copy as rio_copy
     from rasterio.windows import Window
 
+    from geopatcher._src.carrier import raster_grid
+
     shape = tuple(rec.shape)
     if len(shape) not in (2, 3):
         raise ValueError("COG writer expects a 2-D array or a 3-D band-first array")
+    grid = raster_grid(domain)
     height, width = shape[-2:]
     profile: dict[str, Any] = {
         "driver": "GTiff",
@@ -942,8 +945,8 @@ def _zarr_to_cog(
         "width": width,
         "count": 1 if len(shape) == 2 else shape[0],
         "dtype": np.dtype(rec.dtype).name,
-        "crs": getattr(domain, "crs", None),
-        "transform": getattr(domain, "transform", rasterio.Affine.identity()),
+        "crs": None if grid is None else grid.crs,
+        "transform": rasterio.Affine.identity() if grid is None else grid.affine,
         "nodata": fill_value,
         "tiled": True,
         "blockxsize": blocksize,

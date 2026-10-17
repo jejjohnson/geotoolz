@@ -76,8 +76,9 @@ class Patch[AnchorT, IndicesT, DataT](_ReleaseLifecycleMixin):
     """A single patch produced by a `SpatialPatcher`.
 
     Args:
-        data: The substrate slice the operator consumes (a `GeoTensor`,
-            a sub-`DataArray`, a `GeoDataFrame` slice, …).
+        data: The substrate slice the operator consumes (a
+            `geoarray.GeoArray`, a sub-`DataArray`, a `GeoDataFrame`
+            slice, …).
         anchor: Where this patch lives in the global field. Shape varies
             with the `Sampler` (pixel coords, lat/lon, polygon id, …).
         indices: Backend-specific indexer used to extract `data` from

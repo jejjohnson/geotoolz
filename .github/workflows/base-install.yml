@@ -175,7 +175,7 @@ jobs:
           import pkgutil
 
           import numpy as np
-          from georeader.geotensor import GeoTensor
+          from geoarray import GeoArray
           from rasterio.transform import from_origin
 
           import geopatcher as gp
@@ -201,7 +201,7 @@ jobs:
 
           values = np.arange(2 * 16 * 16, dtype="float32").reshape(2, 16, 16)
           field = gp.RasterField(
-              GeoTensor(values, transform=from_origin(0, 160, 10, 10), crs="EPSG:32629")
+              GeoArray(values, from_origin(0, 160, 10, 10), "EPSG:32629")
           )
           patcher = gp.SpatialPatcher(
               geometry=gp.spatial.geometry.Rectangular(size=(8, 8)),

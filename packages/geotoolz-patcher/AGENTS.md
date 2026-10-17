@@ -30,6 +30,19 @@ retired spellings are rejected).
 
 ## Contracts
 
+- **The raster carrier is `geoarray.GeoArray`.** Raster fields take a
+  `geoarray.RasterSource` (`RasterField`, `ReprojectingRasterField`) or an
+  `AsyncRasterSource` (`AsyncRasterField`); every raster patch,
+  placeholder, `with_data`, `merge_to_field` and `MergePatches` result is
+  a `GeoArray`, and the fill is `fill_value`. `RasterDomain` is a protocol
+  (`grid` + full `shape`), satisfied by every `RasterSource` and by a bare
+  `geoarray.Grid`; the samplers and geometries read `grid` only. georeader
+  is an internal engine (the reprojecting field's warp, `compare_crs`),
+  imported lazily and reached through `geoarray.interop.georeader`
+  (`source_to_georeader` in, `from_georeader` out); a georeader object
+  passed in raises `TypeError` naming the adapter
+  (`_src/carrier.py`'s `reject_georeader`). geopatcher never imports
+  geoops. Shared raster helpers live in `_src/carrier.py`; ADR-012.
 - **`Field`** (`_src/protocols.py`): `domain` (I/O-free metadata), `select(indexer)`,
   `with_data(array)`. Optional: `select_many(indexers)` — `run.parallel_map`
   uses it for batched reads; `aselect` for `AsyncSpatialPatcher`;
@@ -48,7 +61,8 @@ retired spellings are rejected).
   named `module.qualname`.
 - **`PatchCache` format id** `"geopatcher.PatchCache/3"` must never change
   silently — bumping it orphans every existing cache; it needs a migration
-  and an ADR.
+  and an ADR. Entries of kind `"geotensor"` (before ADR-012) still decode,
+  as `GeoArray`.
 - **Object storage and COGs** come from geotoolz-cloud (`geocloud.store`,
   `geocloud.cog.CogSource`; `fields.CogField` subclasses it). Never build an
   obstore client here.
@@ -59,5 +73,9 @@ retired spellings are rejected).
 ## Tests
 
 - Run from this directory: `uv run pytest tests/test_sampler.py -v`.
+- Build raster fixtures as `geoarray.GeoArray` (`tests/_helpers.py`); a
+  file-backed field wraps a `RasterioReader` with `source_from_georeader`.
+  georeader appears in a test only as an oracle, behind
+  `to_georeader` / `from_georeader`.
 - Coverage gate: 65 %.
 - Docstring examples are illustrative (not collected as doctests).

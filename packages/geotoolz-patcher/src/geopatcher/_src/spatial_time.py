@@ -14,7 +14,7 @@ chip is read exactly as `SpatialPatcher.split` reads it — the spatial
 patcher's geometry / boundary / padding / weights, its ``on_error`` policy
 (failures land in ``spatial.errors``) and an optional `PatchCache` — and
 is then sliced along ``time_axis`` into the temporal patcher's windows,
-keeping the chip's carrier (`GeoTensor`, `DataArray`, …).
+keeping the chip's carrier (`GeoArray`, `DataArray`, …).
 """
 
 from __future__ import annotations
@@ -269,8 +269,8 @@ class SpatioTemporalPatcher:
     def _slice_time(self, data: Any, s: slice) -> Any:
         """``data`` sliced to ``s`` along ``time_axis``, keeping its carrier.
 
-        Positional indexing keeps a `GeoTensor` (``__getitem__`` →
-        ``isel``), an `xarray.DataArray`, a dask or a numpy array as it is;
+        Positional indexing keeps a `GeoArray` (``__getitem__`` keeps its
+        grid), an `xarray.DataArray`, a dask or a numpy array as it is;
         a mapping is sliced member by member (keeping its type).
         """
         if isinstance(data, Mapping):

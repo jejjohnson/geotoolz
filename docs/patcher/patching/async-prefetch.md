@@ -14,12 +14,12 @@ each read on your event loop.
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.ones((1, 512, 512), dtype=np.float32),       # (1, 512, 512) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",
@@ -58,7 +58,7 @@ from typing import Any
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.windows import Window
 
 import geopatcher as gp
@@ -74,15 +74,15 @@ class SlowAsyncField:
     def domain(self) -> Any:
         return self.inner.domain
 
-    async def aselect(self, indexer: Window) -> GeoTensor:
+    async def aselect(self, indexer: Window) -> GeoArray:
         await asyncio.sleep(0.001)
         return self.inner.select(indexer)
 
-    def with_data(self, data: np.ndarray) -> GeoTensor:
+    def with_data(self, data: np.ndarray) -> GeoArray:
         return self.inner.with_data(data)
 
 
-async def model(chip: GeoTensor) -> np.ndarray:
+async def model(chip: GeoArray) -> np.ndarray:
     """Stand-in async operator."""
     await asyncio.sleep(0.001)
     return np.asarray(chip) * 2.0                      # (1, 128, 128) float32 → (1, 128, 128) float32
@@ -91,7 +91,7 @@ async def model(chip: GeoTensor) -> np.ndarray:
 async def run() -> np.ndarray:
     field: SlowAsyncField = SlowAsyncField(
         gp.RasterField(
-            GeoTensor(
+            GeoArray(
                 np.ones((1, 512, 512), dtype=np.float32),  # (1, 512, 512) float32
                 transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
                 crs="EPSG:32611",

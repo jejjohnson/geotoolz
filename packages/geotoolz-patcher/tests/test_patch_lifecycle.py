@@ -14,7 +14,7 @@ import threading
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geopatcher import RasterField, SpatialPatcher, spatial
 from geopatcher._src.patch import Patch, SpatioTemporalPatch, TemporalPatch
@@ -143,8 +143,8 @@ class TestSplitBackpressureIntegration:
     """End-to-end: `max_in_flight` slots free even without close()."""
 
     def _field(self) -> RasterField:
-        gt = GeoTensor(
-            values=np.arange(64, dtype=np.float32).reshape(8, 8),
+        gt = GeoArray(
+            data=np.arange(64, dtype=np.float32).reshape(8, 8),
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
         )

@@ -616,7 +616,7 @@ current).
 | `Domain` | class | Metadata view of a field — bounds, CRS, no I/O. |
 | `Field` | class | A substrate the Patcher reads patches out of. |
 | `Patch` | class | A single patch produced by a `SpatialPatcher`. |
-| `RasterField` | class | Wrap a sync `GeoData` (a `RasterioReader`, a `GeoTensor`, …) as a `Field`. |
+| `RasterField` | class | A `geoarray.RasterSource` (a `GeoArray`, a lazy reader, …) as a `Field`. |
 | `SpatialPatcher` | class | The four-axis spatial Patcher. |
 | `SpatioTemporalPatch` | class | A patch carrying both a spatial and a temporal anchor. |
 | `SpatioTemporalPatcher` | class | Composition of a spatial and a temporal Patcher. |
@@ -636,14 +636,14 @@ current).
 
 | Name | Kind | What it does |
 |---|---|---|
-| `AsyncRasterField` | class | Async mirror of `RasterField` over an `AsyncGeoData`. |
+| `AsyncRasterField` | class | Async mirror of `RasterField` over a `geoarray.AsyncRasterSource`. |
 | `CogField` | class | A tiled COG `Field` with batched range-fetch reads. |
 | `DaskField` | class | Wrap a dask-backed `xarray.DataArray` as a lazy grid `Field`. |
 | `GeoPandasField` | class | Wrap a `geopandas.GeoDataFrame` as a `Field[VectorDomain]`. |
 | `GridDomain` | class | A dense, labeled N-D grid — the `xarray.DataArray` shape. |
 | `PointDomain` | class | Scattered points — coordinates + a `cKDTree` for nearest-neighbor lookups. |
-| `RasterDomain` | class | Re-exported from `georeader`. |
-| `ReprojectingRasterField` | class | Wrap a georeader reader, presenting a reprojected destination grid. |
+| `RasterDomain` | class | A raster domain: a `geoarray.Grid` plus the full array shape. |
+| `ReprojectingRasterField` | class | Wrap a `geoarray.RasterSource`, presenting a reprojected destination grid. |
 | `RioXarrayField` | class | Wrap a rioxarray-flavoured `xarray.DataArray` as a raster `Field`. |
 | `VectorDomain` | class | Vector geometries — polygons / lines indexed by an STRtree. |
 | `XarrayField` | class | Wrap an `xarray.DataArray` as a `Field[GridDomain]`. |

@@ -238,14 +238,14 @@ def test_point_field_roundtrip(name: str) -> None:
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("source", ["geotensor", "rasterio"])
+@pytest.mark.parametrize("source", ["geoarray", "rasterio"])
 def test_view_read_in_spawn_worker(source: str, tmp_path: Path) -> None:
     """A spawn-context pool (no inherited memory) reads ``view[i]``.
 
     Mirrors a torch DataLoader / Grain worker: the view is pickled into
     each worker once (the pool initializer), then indexed there.
     """
-    if source == "geotensor":
+    if source == "geoarray":
         field = make_raster_field(48)
     else:
         field = make_rasterio_reader_field(tmp_path / "src.tif")

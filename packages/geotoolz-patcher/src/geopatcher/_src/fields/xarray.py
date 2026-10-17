@@ -58,7 +58,7 @@ class XarrayField:
 
         Returns the bare `DataArray` (not another `XarrayField`) so the
         result is `np.asarray`-able and feeds straight into the spatial
-        aggregations. Mirrors `RasterField.select → GeoTensor`: select
+        aggregations. Mirrors `RasterField.select → GeoArray`: select
         returns the natural data payload, not another field wrapper. Use
         `XarrayField(da_sliced)` if you need to keep treating the slice
         as a sub-Field.

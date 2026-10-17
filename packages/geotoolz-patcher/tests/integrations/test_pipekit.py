@@ -18,7 +18,7 @@ import pickle
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from pipekit import Graph, Input, Lambda, Operator, Sequential, check_pickleable
 
 from geopatcher import Patch, RasterField, SpatialPatcher, spatial
@@ -34,8 +34,8 @@ from geopatcher.integrations.pipekit import (
 def field() -> RasterField:
     # 2-D field so OverlapAdd's row/col slicer matches the domain shape.
     arr = np.ones((16, 16), dtype=np.float32)
-    gt = GeoTensor(
-        values=arr,
+    gt = GeoArray(
+        data=arr,
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
     )

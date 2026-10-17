@@ -22,8 +22,8 @@ from rasterio.windows import Window
 
 pytest.importorskip("async_geotiff")
 
+from geoarray import GeoArray
 from geocloud.cog import CogSource
-from georeader.geotensor import GeoTensor
 from obstore.store import LocalStore
 
 from geopatcher import AsyncSpatialPatcher, SpatialPatcher, spatial
@@ -95,9 +95,9 @@ def test_is_a_cog_source_with_field_spellings(cog_path: Path) -> None:
 def test_with_data_carries_grid_and_nodata(cog_path: Path) -> None:
     field = _open(cog_path)
     restored = field.with_data(np.zeros((3, _H, _W), np.float32))
-    assert isinstance(restored, GeoTensor)
-    assert restored.transform == field.domain.transform
-    assert restored.fill_value_default == -1
+    assert isinstance(restored, GeoArray)
+    assert restored.grid.affine == field.domain.grid.affine
+    assert restored.fill_value == -1
 
 
 def test_pickles_back_to_a_cog_field(cog_path: Path) -> None:
@@ -115,7 +115,9 @@ def test_split_merge_reproduces_rasterio(cog_path: Path) -> None:
     patches = list(patcher.split(field))
     for p in patches:
         row, col = p.anchor
-        assert p.data.transform == field.domain.transform * Affine.translation(col, row)
+        assert p.data.grid.affine == field.domain.grid.affine * Affine.translation(
+            col, row
+        )
     merged = patcher.merge(patches, field.domain)
     with rasterio.open(cog_path) as src:
         np.testing.assert_array_equal(np.asarray(merged), src.read())

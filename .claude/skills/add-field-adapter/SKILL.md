@@ -17,12 +17,25 @@ Read `packages/geotoolz-patcher/AGENTS.md` first, and the ADRs in
 - Data on object storage is read through geotoolz-cloud
   (`geocloud.cog.CogSource`, `geocloud.store`); extend those rather than
   adding I/O here.
+- A new **raster** source needs no adapter: implement
+  `geoarray.RasterSource` (`grid`, `shape`, `dtype`, `fill_value`,
+  `attrs`, `read_window`, `load`) in the package that knows the format
+  and wrap it in `RasterField`; a georeader reader already crosses with
+  `geoarray.interop.georeader.source_from_georeader`.
 
 ## A field adapter (`_src/fields/<name>.py`)
 
 - Implement the `Field` protocol (`_src/protocols.py`): `domain` (I/O-free
   metadata: CRS, bounds, shape — reuse the domain types in
   `_src/domains.py`), `select(indexer)`, `with_data(array)`.
+- A raster domain is a `RasterDomain`: a `grid` (`geoarray.Grid`) plus the
+  full `shape`; the samplers and geometries read only the grid. Raster
+  chips and `with_data` results are `geoarray.GeoArray` (rewrap with
+  `_rewrap` in `_src/fields/raster.py`; the shared helpers —
+  `raster_grid`, `as_pixel_window`, `pad_carrier`, `reject_georeader`,
+  the process-pool wire form — are in `_src/carrier.py`). Refuse a
+  georeader object with `reject_georeader`; georeader itself may run only
+  as an internal engine behind `geoarray.interop.georeader`.
 - Optional, when the source supports it: `select_many(indexers)` (batched
   reads; `run.parallel_map` uses it), `aselect` for `AsyncSpatialPatcher`,
   `cache_id()` for `PatchCache` (raise `UnstableIdentityError` rather than

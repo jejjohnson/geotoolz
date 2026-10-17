@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geopatcher import (
     AsyncSpatialPatcher,
@@ -92,7 +92,7 @@ class _Recorder:
 def _raster(shape: tuple[int, ...]) -> RasterField:
     arr = np.arange(int(np.prod(shape)), dtype=np.float32).reshape(shape)
     return RasterField(
-        GeoTensor(values=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630")
+        GeoArray(data=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630")
     )
 
 
@@ -236,8 +236,8 @@ def test_coupled_split_keeps_the_chip_carrier() -> None:
     stp = _coupled([((8, 8), 5)])
     (patch,) = list(stp.split(field))
     chip = stp.spatial.patch_at(field, (8, 8))
-    assert isinstance(patch.data, GeoTensor)
-    assert patch.data.transform == chip.data.transform
+    assert isinstance(patch.data, GeoArray)
+    assert patch.data.grid.affine == chip.data.grid.affine
     np.testing.assert_array_equal(np.asarray(patch.data), np.asarray(chip.data)[4:6])
 
 

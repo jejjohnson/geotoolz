@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 import rasterio
 import shapely
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.windows import Window
 
 from geopatcher import Patch, RasterField, SpatialPatcher, spatial
@@ -26,16 +26,16 @@ def _patch(data, row: int, col: int, weights=None, *, shape=None) -> Patch:
 
 
 @pytest.fixture
-def empty_field() -> GeoTensor:
-    return GeoTensor(
-        values=np.zeros((4, 4), dtype=np.float32),
+def empty_field() -> GeoArray:
+    return GeoArray(
+        data=np.zeros((4, 4), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
     )
 
 
 class TestSpatialSum:
-    def test_disjoint_patches(self, empty_field: GeoTensor) -> None:
+    def test_disjoint_patches(self, empty_field: GeoArray) -> None:
         p1 = _patch(np.ones((2, 2)), 0, 0)
         p2 = _patch(np.full((2, 2), 3.0), 2, 2)
         out = spatial.aggregation.Sum().merge([p1, p2], empty_field)
@@ -47,7 +47,7 @@ class TestSpatialSum:
 
 
 class TestSpatialMean:
-    def test_overlap_mean(self, empty_field: GeoTensor) -> None:
+    def test_overlap_mean(self, empty_field: GeoArray) -> None:
         p1 = _patch(np.full((2, 2), 2.0), 0, 0)
         p2 = _patch(np.full((2, 2), 6.0), 1, 1)  # overlaps p1 at (1,1)
         out = spatial.aggregation.Mean().merge([p1, p2], empty_field)
@@ -55,7 +55,7 @@ class TestSpatialMean:
 
 
 class TestSpatialVariance:
-    def test_variance_zero_for_constant_patches(self, empty_field: GeoTensor) -> None:
+    def test_variance_zero_for_constant_patches(self, empty_field: GeoArray) -> None:
         p1 = _patch(np.full((2, 2), 5.0), 0, 0)
         p2 = _patch(np.full((2, 2), 5.0), 0, 0)
         out = spatial.aggregation.Variance().merge([p1, p2], empty_field)
@@ -63,7 +63,7 @@ class TestSpatialVariance:
 
 
 class TestSpatialOverlapAdd:
-    def test_uniform_weights_reconstruct(self, empty_field: GeoTensor) -> None:
+    def test_uniform_weights_reconstruct(self, empty_field: GeoArray) -> None:
         # Two patches, no overlap, boxcar weights -> exact reconstruction
         p1 = _patch(np.ones((2, 2)), 0, 0, weights=np.ones((2, 2)))
         p2 = _patch(np.full((2, 2), 5.0), 2, 2, weights=np.ones((2, 2)))
@@ -76,8 +76,8 @@ class TestSpatialOverlapAdd:
         domain has a leading band/time dim. Regression for the bug where
         ``acc[(row_slice, col_slice)]`` indexed the first two axes instead.
         """
-        domain = GeoTensor(
-            values=np.zeros((3, 4, 4), dtype=np.float32),  # (band, H, W)
+        domain = GeoArray(
+            data=np.zeros((3, 4, 4), dtype=np.float32),  # (band, H, W)
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
         )
@@ -89,7 +89,7 @@ class TestSpatialOverlapAdd:
         np.testing.assert_array_equal(out[:, :2, :2], 1.0)
         np.testing.assert_array_equal(out[:, 2:, 2:], 5.0)
 
-    def test_normalisation_with_overlap(self, empty_field: GeoTensor) -> None:
+    def test_normalisation_with_overlap(self, empty_field: GeoArray) -> None:
         # Two identical patches with non-uniform weights at the same location.
         # OverlapAdd normalises (sum w*x / sum w) → the per-cell average, which
         # equals x because both patches have the same data.
@@ -101,7 +101,7 @@ class TestSpatialOverlapAdd:
 
 
 class TestSpatialInvVarWeightedMean:
-    def test_two_patches_gaussian_merge(self, empty_field: GeoTensor) -> None:
+    def test_two_patches_gaussian_merge(self, empty_field: GeoArray) -> None:
         # Two overlapping Gaussian patches with the same mean -> global mean
         # equals it; global variance equals 1 / (1/var1 + 1/var2).
         mu = np.full((2, 2), 3.0)
@@ -115,7 +115,7 @@ class TestSpatialInvVarWeightedMean:
 
 
 class TestSpatialByIndex:
-    def test_returns_anchor_data_pairs(self, empty_field: GeoTensor) -> None:
+    def test_returns_anchor_data_pairs(self, empty_field: GeoArray) -> None:
         p1 = _patch(np.array([[1.0]]), 0, 0)
         p2 = _patch(np.array([[2.0]]), 1, 1)
         out = spatial.aggregation.ByIndex().merge([p1, p2], empty_field)
@@ -124,7 +124,7 @@ class TestSpatialByIndex:
 
 
 class TestSpatialHardVote:
-    def test_majority(self, empty_field: GeoTensor) -> None:
+    def test_majority(self, empty_field: GeoArray) -> None:
         # Three patches at (0,0); 2 vote for class 1, 1 votes for class 0
         p1 = _patch(np.zeros((2, 2), dtype=int), 0, 0)
         p2 = _patch(np.ones((2, 2), dtype=int), 0, 0)
@@ -134,7 +134,7 @@ class TestSpatialHardVote:
 
 
 class TestSpatialMedian:
-    def test_warns_when_streaming(self, empty_field: GeoTensor) -> None:
+    def test_warns_when_streaming(self, empty_field: GeoArray) -> None:
         # spatial.aggregation.Median.streaming_safe == False —
         # `_warn_if_unsafe_streaming` is called from SpatialPatcher.merge, not from
         # Median.merge itself.
@@ -145,7 +145,7 @@ class TestSpatialMedian:
         with pytest.warns(RuntimeWarning, match="streaming_safe = False"):
             _warn_if_unsafe_streaming(spatial.aggregation.Median())
 
-    def test_strict_raises_on_streaming_unsafe(self, empty_field: GeoTensor) -> None:
+    def test_strict_raises_on_streaming_unsafe(self, empty_field: GeoArray) -> None:
         # ADR-003: gp.observe.set_strict(True) promotes the streaming_safe
         # warning to a hard RuntimeError so batch / CI callers fail fast.
         # Capture and restore the initial value so we don't leak state
@@ -166,7 +166,7 @@ class TestSpatialMedian:
             gp.observe.set_strict(original)
         assert gp.observe.get_strict() is original
 
-    def test_median_value(self, empty_field: GeoTensor) -> None:
+    def test_median_value(self, empty_field: GeoArray) -> None:
         p1 = _patch(np.full((2, 2), 1.0), 0, 0)
         p2 = _patch(np.full((2, 2), 5.0), 0, 0)
         p3 = _patch(np.full((2, 2), 3.0), 0, 0)
@@ -205,7 +205,7 @@ _DENSE = [
 
 @pytest.mark.parametrize("cls", _DENSE, ids=lambda c: c.__name__)
 def test_masked_window_respected_by_all_aggregations(
-    cls: type, empty_field: GeoTensor
+    cls: type, empty_field: GeoArray
 ) -> None:
     out = cls().merge([_masked_patch(_DATA, _MASK)], empty_field)
     expected = np.full((4, 4), np.nan)
@@ -214,7 +214,7 @@ def test_masked_window_respected_by_all_aggregations(
 
 
 def test_masked_window_respected_by_variance_votes_and_posteriors(
-    empty_field: GeoTensor,
+    empty_field: GeoArray,
 ) -> None:
     twice = [_masked_patch(_DATA, _MASK), _masked_patch(_DATA + 2, _MASK)]
     var = spatial.aggregation.Variance().merge(twice, empty_field)
@@ -254,7 +254,7 @@ def test_masked_mean_through_polygon_patcher() -> None:
     # previously the whole bounding box was written.
     t = rasterio.transform.from_origin(0.0, 8.0, 1.0, 1.0)
     source = np.arange(64, dtype=np.float32).reshape(8, 8)
-    field = RasterField(GeoTensor(values=source, transform=t, crs="EPSG:32630"))
+    field = RasterField(GeoArray(data=source, transform=t, crs="EPSG:32630"))
     # The hypotenuse passes through no pixel centre (no edge ambiguity).
     tri = shapely.Polygon([(0.0, 8.0), (8.0, 8.0), (0.0, 0.5)])
     patcher = SpatialPatcher(
@@ -263,7 +263,7 @@ def test_masked_mean_through_polygon_patcher() -> None:
         window=spatial.window.Boxcar(),
         aggregation=spatial.aggregation.Mean(),
     )
-    patches = [p.with_data(np.asarray(p.data.values)) for p in patcher.split(field)]
+    patches = [p.with_data(np.asarray(p.data)) for p in patcher.split(field)]
     merged = patcher.merge(patches, field.domain)
     rows, cols = np.mgrid[0:8, 0:8]
     # Centre (c + .5, 7.5 - r) above the line y = 0.5 + 0.9375 x.
@@ -273,7 +273,7 @@ def test_masked_mean_through_polygon_patcher() -> None:
 
 
 @pytest.mark.parametrize("cls", _DENSE, ids=lambda c: c.__name__)
-def test_zero_weight_cells_are_nodata(cls: type, empty_field: GeoTensor) -> None:
+def test_zero_weight_cells_are_nodata(cls: type, empty_field: GeoArray) -> None:
     covered = _patch(np.full((2, 2), 4.0), 0, 0)
     out = cls().merge([covered], empty_field)
     assert out.dtype == np.float64
@@ -289,7 +289,7 @@ def test_zero_weight_cells_are_nodata(cls: type, empty_field: GeoTensor) -> None
     np.testing.assert_array_equal(filled[:2, :2], 4.0)
 
 
-def test_zero_weight_fill_on_votes_and_posteriors(empty_field: GeoTensor) -> None:
+def test_zero_weight_fill_on_votes_and_posteriors(empty_field: GeoArray) -> None:
     labels = _patch(np.ones((2, 2), dtype=int), 0, 0)
     hard = spatial.aggregation.HardVote(n_classes=2).merge([labels], empty_field)
     assert hard.dtype == np.int64
@@ -324,10 +324,10 @@ def test_zero_weight_fill_on_votes_and_posteriors(empty_field: GeoTensor) -> Non
 
 
 def _hann_constant_field(fill: float | None = None) -> RasterField:
-    kwargs = {} if fill is None else {"fill_value_default": fill}
+    kwargs = {} if fill is None else {"fill_value": fill}
     return RasterField(
-        GeoTensor(
-            values=np.full((24, 24), 2.5),
+        GeoArray(
+            data=np.full((24, 24), 2.5),
             transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 240.0),
             crs="EPSG:32630",
             **kwargs,
@@ -342,7 +342,7 @@ def _hann_merge(field: RasterField, aggregation: Any) -> np.ndarray:
         window=spatial.window.Hann(),
         aggregation=aggregation,
     )
-    patches = [p.with_data(np.asarray(p.data.values)) for p in patcher.split(field)]
+    patches = [p.with_data(np.asarray(p.data)) for p in patcher.split(field)]
     return np.asarray(patcher.merge(patches, field.domain))
 
 
@@ -358,7 +358,7 @@ def test_hann_keeps_the_leading_ring(cls: type) -> None:
         np.testing.assert_allclose(out, 2.5, rtol=1e-14)
 
     field = _hann_constant_field(fill=-9999.0)
-    out = _hann_merge(field, cls(fill_value=field.domain.fill_value_default))
+    out = _hann_merge(field, cls(fill_value=field.domain.fill_value))
     assert (out > 0).all()
 
 
@@ -398,8 +398,8 @@ def test_soft_vote_band_domain() -> None:
     # (K=2, 4, 4) probability chips on a (band=3, 8, 8) domain give one
     # (8, 8) label map: the cells hold what the patches carry, not three
     # copies of it.
-    domain = GeoTensor(
-        values=np.zeros((3, 8, 8), dtype=np.float32),
+    domain = GeoArray(
+        data=np.zeros((3, 8, 8), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
     )
@@ -438,8 +438,8 @@ def test_dense_merge_takes_band_axes_from_patches(aggregation, cells) -> None:
     # A per-patch operator that changes the band count (4 bands → 1 index,
     # a 2-D map, 2 features) merges into the patches' band axes on the
     # domain grid instead of being broadcast into the domain's 4 bands.
-    domain = GeoTensor(
-        values=np.zeros((4, 8, 8), dtype=np.float32),
+    domain = GeoArray(
+        data=np.zeros((4, 8, 8), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
     )
@@ -454,8 +454,8 @@ def test_dense_merge_takes_band_axes_from_patches(aggregation, cells) -> None:
 
 
 def test_dense_merge_rejects_patches_with_different_band_axes() -> None:
-    domain = GeoTensor(
-        values=np.zeros((4, 8, 8), dtype=np.float32),
+    domain = GeoArray(
+        data=np.zeros((4, 8, 8), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
     )
@@ -478,7 +478,7 @@ def test_dense_merge_rejects_patches_with_different_band_axes() -> None:
     ],
     ids=lambda a: type(a).__name__,
 )
-def test_unknown_indices_raise(aggregation: Any, empty_field: GeoTensor) -> None:
+def test_unknown_indices_raise(aggregation: Any, empty_field: GeoArray) -> None:
     # A point-index array is not a dense placement: every dense aggregation
     # used to skip it silently and return an empty field.
     if isinstance(aggregation, spatial.aggregation.InvVarWeightedMean):
@@ -495,8 +495,8 @@ def test_mean_std_and_min_max_are_nan_aware_and_crop_pad_fill() -> None:
     # stats ({'mean': nan}, {'min': inf, 'max': -inf}); pad fill (-1) used
     # to count as data.
     field = RasterField(
-        GeoTensor(
-            values=np.arange(36, dtype=np.float64).reshape(6, 6) + 1,
+        GeoArray(
+            data=np.arange(36, dtype=np.float64).reshape(6, 6) + 1,
             transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 6.0),
             crs="EPSG:32630",
         )
@@ -509,7 +509,7 @@ def test_mean_std_and_min_max_are_nan_aware_and_crop_pad_fill() -> None:
         window=spatial.window.Boxcar(),
         aggregation=spatial.aggregation.MinMax(),
     )
-    patches = [p.with_data(np.asarray(p.data.values)) for p in patcher.split(field)]
+    patches = [p.with_data(np.asarray(p.data)) for p in patcher.split(field)]
     patches.append(patches[0].with_data(np.full((4, 4), np.nan)))
     assert spatial.aggregation.MinMax().merge(patches, field.domain) == {
         "min": 1.0,
@@ -524,7 +524,7 @@ def test_mean_std_and_min_max_are_nan_aware_and_crop_pad_fill() -> None:
     assert spatial.aggregation.MinMax().merge(loose, None) == {"min": 1.0, "max": 3.0}
 
 
-def test_inv_var_zero_variance_is_exact(empty_field: GeoTensor) -> None:
+def test_inv_var_zero_variance_is_exact(empty_field: GeoArray) -> None:
     exact = _patch((np.full((2, 2), 5.0), np.zeros((2, 2))), 0, 0, shape=(2, 2))
     noisy = _patch((np.full((2, 2), 1.0), np.full((2, 2), 2.0)), 0, 0, shape=(2, 2))
     with warnings.catch_warnings():
@@ -560,8 +560,8 @@ def _reference_stack(patches: list[Patch], shape: tuple[int, int]) -> np.ndarray
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_median_and_mode_match_reference(seed: int) -> None:
-    domain = GeoTensor(
-        values=np.zeros((8, 8)), transform=rasterio.Affine.identity(), crs="EPSG:32630"
+    domain = GeoArray(
+        data=np.zeros((8, 8)), transform=rasterio.Affine.identity(), crs="EPSG:32630"
     )
     patches = _random_overlapping(seed)
     ref = _reference_stack(patches, (8, 8))
@@ -596,7 +596,7 @@ def test_median_buffer_bounded_by_overlap() -> None:
     assert stack.shape[0] == count.max() == 4
 
 
-def test_vote_ties_go_to_lowest_class(empty_field: GeoTensor) -> None:
+def test_vote_ties_go_to_lowest_class(empty_field: GeoArray) -> None:
     zero = _patch(np.zeros((2, 2), dtype=int), 0, 0)
     one = _patch(np.ones((2, 2), dtype=int), 0, 0)
     hard = spatial.aggregation.HardVote(n_classes=2).merge([one, zero], empty_field)

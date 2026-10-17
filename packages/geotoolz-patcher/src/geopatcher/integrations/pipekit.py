@@ -111,10 +111,10 @@ class MergePatches(Operator):
     the resulting `Operator` has a single positional input (the list of
     patches) and slots into the linear pipeline.
 
-    On a georeferenced domain (one with a ``transform`` and a ``crs``,
-    such as a `RasterField`'s) the merged array comes back as a
-    `georeader.GeoTensor` on the domain's grid — the carrier the patches
-    went in as — with the band count the patches carry: a per-patch
+    On a raster domain (a `RasterDomain`, such as a `RasterField`'s) the
+    merged array comes back as a `geoarray.GeoArray` on the domain's grid —
+    the carrier the patches went in as — with the band count the patches
+    carry: a per-patch
     operator that turns four bands into one index gives ``(1, H, W)``,
     with the source's stale per-band ``attrs`` dropped and a NaN fill.
     Other outputs (a ``dict``, a streaming zarr array, a non-georeferenced
@@ -127,7 +127,7 @@ class MergePatches(Operator):
 
     Note:
         ``forbid_in_yaml = True`` — `domain` is a runtime `Domain`
-        protocol object (CRS, affine transform, shape) and isn't in
+        protocol object (a grid and a shape) and isn't in
         general JSON-serialisable, so the constructor cannot be
         round-tripped from `get_config()` alone. `get_config()` emits a
         debug record (class names + nested configs) for introspection /

@@ -2,7 +2,7 @@
 
 A failed read under ``on_error="mask"`` yields an all-NaN patch flagged
 ``Patch.masked``. Where the field allows, the placeholder keeps the carrier
-and georeferencing of a successful read: a `GeoTensor` on the window's grid
+and georeferencing of a successful read: a `GeoArray` on the window's grid
 for a raster field, a `DataArray` from ``Field.placeholder`` for the xarray
 adapters. `AsyncSpatialPatcher.reduce` / `two_pass` mirror the sync ones.
 """
@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 import pytest
 from _helpers import ArrayField, make_raster_field
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.windows import Window, transform as window_transform
 
 from geopatcher import AsyncSpatialPatcher, RasterField, SpatialPatcher, spatial
@@ -47,7 +47,7 @@ class FlakyRaster(RasterField):
         return super().select(window)
 
 
-def test_raster_placeholder_is_a_georeferenced_geotensor() -> None:
+def test_raster_placeholder_is_a_georeferenced_geoarray() -> None:
     src = make_raster_field(16, dtype=np.float32)
     patcher = _patcher(on_error="mask")
     patches = list(patcher.split(FlakyRaster(src.reader)))
@@ -55,9 +55,11 @@ def test_raster_placeholder_is_a_georeferenced_geotensor() -> None:
     masked = [p for p in patches if p.masked]
     assert [p.anchor for p in masked] == [BAD]
     chip = masked[0].data
-    assert isinstance(chip, GeoTensor)
-    assert np.isnan(chip.values).all()
-    assert chip.transform == window_transform(Window(8, 0, 8, 8), src.reader.transform)
+    assert isinstance(chip, GeoArray)
+    assert np.isnan(np.asarray(chip)).all()
+    assert chip.grid.affine == window_transform(
+        Window(8, 0, 8, 8), src.reader.grid.affine
+    )
     assert chip.crs == src.reader.crs
     assert not any(p.masked for p in patches if p.anchor != BAD)
 
@@ -69,11 +71,11 @@ def test_raster_placeholder_merges_to_field() -> None:
     out = patcher.merge_to_field(list(patcher.split(flaky)), flaky)
 
     # The hole takes the source's nodata; every other cell is the data.
-    assert isinstance(out, GeoTensor)
-    assert out.transform == src.reader.transform
+    assert isinstance(out, GeoArray)
+    assert out.grid.affine == src.reader.grid.affine
     expected = np.asarray(src.reader).copy()
-    expected[0:8, 8:16] = out.fill_value_default
-    np.testing.assert_array_equal(out.values, expected)
+    expected[0:8, 8:16] = out.fill_value
+    np.testing.assert_array_equal(np.asarray(out), expected)
 
 
 def test_plain_array_field_keeps_a_bare_placeholder() -> None:
@@ -129,7 +131,7 @@ def test_xarray_placeholder_is_a_dataarray_with_the_chip_coords() -> None:
     assert masked.data.dims == good.dims
     np.testing.assert_array_equal(masked.data["x"], good["x"])
     np.testing.assert_array_equal(masked.data["y"], good["y"])
-    assert np.isnan(masked.data.values).all()
+    assert np.isnan(np.asarray(masked.data)).all()
 
 
 def test_rioxarray_placeholder_carries_the_window_transform() -> None:
@@ -152,7 +154,7 @@ def test_rioxarray_placeholder_carries_the_window_transform() -> None:
     assert masked.data.rio.crs == good.rio.crs
     np.testing.assert_allclose(masked.data["x"], good["x"])
     np.testing.assert_allclose(masked.data["y"], good["y"])
-    assert np.isnan(masked.data.values).all()
+    assert np.isnan(np.asarray(masked.data)).all()
 
     merged = patcher.merge_to_field(patches, field)
     values = np.asarray(getattr(merged, "da", merged))
