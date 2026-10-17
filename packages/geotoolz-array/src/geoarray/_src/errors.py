@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-__all__ = ["GeoArrayError", "GeoArrayTraceError", "X64Error"]
+__all__ = ["GeoArrayError", "GeoArrayTraceError", "GridMismatchError", "X64Error"]
 
 
 class GeoArrayError(Exception):
@@ -26,4 +26,13 @@ class GeoArrayTraceError(GeoArrayError, TypeError):
     tracers. Anything that must read their values on the host (a `Grid`, a
     NumPy function, `GeoArray.to_numpy`) raises this instead of JAX's
     ``TracerArrayConversionError``, naming what to do instead.
+    """
+
+
+class GridMismatchError(GeoArrayError, ValueError):
+    """Carriers that must share one pixel grid do not.
+
+    `combine`, `stack` and `concatenate` need the same CRS, spatial shape,
+    batch shape and (when concrete) an exactly equal transform. Resample
+    one carrier onto the other's grid first (``geoops.functional``).
     """

@@ -22,8 +22,17 @@ from typing import Any
 
 import numpy as np
 
+from geoarray._src.backend import is_tracer
+from geoarray._src.errors import GeoArrayTraceError
 
-__all__ = ["FrozenAttrs"]
+
+__all__ = [
+    "PER_BAND_KEYS",
+    "FrozenAttrs",
+    "concat_bands",
+    "drop_band_keys",
+    "select_bands",
+]
 
 _SCALARS = (str, bytes, bool, int, float, complex, type(None))
 
@@ -156,3 +165,77 @@ class FrozenAttrs(Mapping[str, Any]):
             {'tags': {'AREA_OR_POINT': 'Area'}}
         """
         return {k: _thaw(v) for k, v in self._items.items()}
+
+
+#: The attrs keys that hold one entry per band. Band selection selects
+#: their entries; a change in the band count that no selection explains
+#: drops them (so every per-band key always matches the band count).
+PER_BAND_KEYS: tuple[str, ...] = (
+    "band_names",
+    "descriptions",
+    "bands",
+    "band_descriptions",
+    "wavelengths",
+    "wavelengths_nm",
+)
+
+
+def select_bands(attrs: FrozenAttrs, index: Any, count: int) -> FrozenAttrs:
+    """Apply a band-axis index to every per-band key.
+
+    Args:
+        attrs: The carrier's attrs.
+        index: What indexed the band axis: an int, a slice, a list or array
+            of ints, or a boolean mask. Must be concrete.
+        count: The band count before indexing.
+
+    Returns:
+        Attrs whose per-band keys hold the selected entries; a per-band
+        key whose length does not match ``count`` is dropped.
+
+    Example:
+        >>> attrs = FrozenAttrs(band_names=["B04", "B08", "B11"], sensor="S2A")
+        >>> select_bands(attrs, [2, 0], 3)
+        FrozenAttrs({'band_names': ('B11', 'B04'), 'sensor': 'S2A'})
+    """
+    if is_tracer(index):
+        raise GeoArrayTraceError(
+            "a band index must be concrete: the per-band attrs are static, so "
+            "the selection must be known when tracing; index g.data instead, "
+            "or select the bands outside jit"
+        )
+    positions = np.atleast_1d(np.arange(count)[index]).tolist()
+    selected: dict[str, Any] = {}
+    for key, value in attrs.items():
+        if key not in PER_BAND_KEYS:
+            selected[key] = value
+        elif isinstance(value, tuple) and len(value) == count:
+            selected[key] = tuple(value[i] for i in positions)
+    return FrozenAttrs(selected)
+
+
+def drop_band_keys(attrs: FrozenAttrs) -> FrozenAttrs:
+    """Attrs without any per-band key (see `PER_BAND_KEYS`)."""
+    return attrs.drop(*PER_BAND_KEYS)
+
+
+def concat_bands(parts: list[tuple[FrozenAttrs, int]]) -> FrozenAttrs:
+    """Attrs for carriers concatenated along the band axis.
+
+    The first carrier's attrs, with each per-band key concatenated when
+    every part has it with one entry per band, and dropped otherwise.
+
+    Args:
+        parts: ``(attrs, count)`` for each carrier, in order.
+    """
+    first = parts[0][0]
+    merged: dict[str, Any] = {k: v for k, v in first.items() if k not in PER_BAND_KEYS}
+    for key in PER_BAND_KEYS:
+        values = [attrs.get(key) for attrs, _ in parts]
+        tuples = [v for v in values if isinstance(v, tuple)]
+        counts = [n for _, n in parts]
+        if len(tuples) == len(parts) and all(
+            len(v) == n for v, n in zip(tuples, counts, strict=True)
+        ):
+            merged[key] = tuple(item for v in tuples for item in v)
+    return FrozenAttrs(merged)

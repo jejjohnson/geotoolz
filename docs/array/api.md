@@ -24,6 +24,26 @@ A rectangle of pixels.
 Hashable metadata.
 
 ::: geoarray.FrozenAttrs
+::: geoarray.PER_BAND_KEYS
+
+## Geometry
+
+Re-index or re-describe pixels without computing new values.
+
+::: geoarray.crop
+::: geoarray.read_window
+::: geoarray.write_window
+::: geoarray.pad
+::: geoarray.pixel_coords
+::: geoarray.footprint
+
+## Joining carriers
+
+Carriers on one grid: the same CRS, spatial shape and transform.
+
+::: geoarray.combine
+::: geoarray.stack
+::: geoarray.concatenate
 
 ## Coercions
 
@@ -39,3 +59,4 @@ Every error geoarray raises on its own account subclasses `GeoArrayError`.
 ::: geoarray.GeoArrayError
 ::: geoarray.X64Error
 ::: geoarray.GeoArrayTraceError
+::: geoarray.GridMismatchError

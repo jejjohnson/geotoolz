@@ -15,7 +15,15 @@ rasterio or georeader (ruff's `TID251` rejects it).
   and a rectangle of pixels (named apart from geopatcher's window
   *functions*, in rasterio's `Window` field order); all affine maths
   lives here.
-- **`FrozenAttrs`** (`_src/attrs.py`) — hashable metadata.
+- **`FrozenAttrs`** (`_src/attrs.py`) — hashable metadata, and the
+  per-band rules (`PER_BAND_KEYS`, `select_bands`, `concat_bands`) that
+  keep every per-band key one entry per band.
+- **Indexing and nodata** (`GeoArray.__getitem__`, `isel`, `squeeze`,
+  `valid_mask`, in `_src/array.py`) — spatial slices move the transform
+  through `shift_scale_transform`, the one place slice maths lives.
+- **Geometry functions** (`_src/geometry.py`) — `crop`, `read_window`,
+  `write_window`, `pad`, `pixel_coords`, `footprint`, and the joins
+  `combine` / `stack` / `concatenate` (`GridMismatchError`).
 - **The backend dispatch** (`_src/backend.py`) — the one place that tells
   NumPy from JAX and imports JAX on demand.
 
@@ -54,6 +62,9 @@ interpolates belong in `geoops.functional`.
 
 ## Conventions
 
+- **A 4-D carrier never loses its band axis alone**: an integer band
+  index or a squeeze that would turn `(T, C, H, W)` into `(T, H, W)`
+  raises, because `(T, H, W)` reads as `(C, H, W)`.
 - JAX is optional. Import it through `_src/backend.py` (`import_jax`,
   `is_jax_array`, `is_tracer`); a NumPy-only install never loads it.
   The pytree is registered at import whenever JAX is installed.

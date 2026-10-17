@@ -34,6 +34,8 @@ dependencies = [
 # whenever JAX is installed). The transform is float64, so JAX carriers
 # need `jax_enable_x64`.
 jax = ["jax>=0.4.30"]
+# `footprint`: a carrier's outline as a shapely Polygon.
+vector = ["shapely>=2.0"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
