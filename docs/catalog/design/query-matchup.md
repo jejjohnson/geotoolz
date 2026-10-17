@@ -12,7 +12,7 @@
 Today the three packages cover discovery / transform / patching as separate concerns:
 
 - **`geocatalog`** is a *local* spatiotemporal index over files already on disk. Its `GeoCatalog` Protocol, `GeoSlice` wire format, GeoParquet 1.1 persistence, and DuckDB SQL backend handle "what do I have, where, when?" for raster, vector, and xarray sources.
-- **`geotoolz`** is a `pipekit.Operator` library of remote-sensing domain operations on `GeoTensor` (radiometry, indices, masking, single-source geom ops, segmentation, etc.). Every operator is serializable to YAML and composes into `Sequential` / `Graph` pipelines.
+- **`geotoolz`** is a `pipekit.Operator` library of remote-sensing domain operations on `geoarray.GeoArray` (radiometry, indices, masking, single-source geom ops, segmentation, etc.). Every operator is serializable to YAML and composes into `Sequential` / `Graph` pipelines.
 - **`geopatcher`** is a four-axis (Geometry × Sampler × Window × Aggregation) patching framework with three patcher types (`SpatialPatcher`, `TemporalPatcher`, `SpatioTemporalPatcher`) and `Field` adapters for raster / xarray / vector / xvec / rio-xarray. Streaming-first, numpy + scipy in the core.
 
 What's missing is the layer **above** local catalogs — discovering remote granules from external systems (NASA earthaccess, STAC endpoints, Google Earth Engine), deciding what's interesting, persisting that decision, finding *matchups* between heterogeneous sources, and optionally staging bytes — and the layer **between** patching and these matched sources so a downstream sampler can read co-located neighborhoods across LEO, GEO, vector, and point-cloud modalities.
@@ -103,8 +103,8 @@ This design covers all three packages because the user-facing workflow crosses a
 
 Three boundary rules that drive the rest of the document:
 
-1. **Geocatalog never transforms pixels.** It returns URIs and metadata; staging is opt-in; loading remains delegated to `georeader`/`rasterio`/`xarray`.
-2. **Geotoolz operators are the only place coregistration logic lives.** They take 1–N `GeoTensor`s in, return one out, are stateless, and serialize. Geopatcher and geocatalog both *call* them; neither *contains* them.
+1. **Geocatalog never transforms pixels.** It returns URIs and metadata; staging is opt-in; loading remains delegated to `rasterio`/`xarray` (and georeader's readers, behind `geoarray.interop.georeader`), and every loaded raster is a `geoarray.GeoArray`.
+2. **Geotoolz operators are the only place coregistration logic lives.** They take 1–N `GeoArray`s in, return one out, are stateless, and serialize. Geopatcher and geocatalog both *call* them; neither *contains* them.
 3. **Geopatcher's core stays numpy+scipy.** `MatchedField` adds a composite Field that dispatches to operators (provided by the user, typically from geoops). The 4-axis machinery is untouched.
 
 ## 4. GeoCatalog: Sources, queries, matchups, staging
@@ -386,7 +386,7 @@ src/geoops/
 
 ### 5.2 Operator catalog
 
-All operators are `pipekit.Operator` subclasses, `__call__(*inputs) → GeoTensor`, with `get_config()` for YAML round-trip.
+All operators are `pipekit.Operator` subclasses, `__call__(*inputs) → GeoArray`, with `get_config()` for YAML round-trip.
 
 | Operator | Inputs → Output | Builds on | Notes |
 |---|---|---|---|
@@ -398,7 +398,7 @@ All operators are `pipekit.Operator` subclasses, `__call__(*inputs) → GeoTenso
 | `RasterToPointCloud(k=…, max_radius=…)` | `(raster, cloud) → cloud_with_attrs` | scipy.spatial.KDTree | Sample raster onto cloud nodes |
 | `PointCloudToRaster(method="idw" \| "binned_stat", like=…)` | `(cloud, like) → raster` | scipy KDTree + IDW | Rasterize point cloud |
 | `VectorToRasterAgg(agg="mean" \| "majority" \| "count", like=…)` | `(vector, like) → raster` | extends `Rasterize` | Aggregation policy for overlapping features |
-| `StackMatched(order=…, fill_value=NaN)` | `[t1, t2, …] → multi_band` | numpy stack + reproject-to-like | Compositing-style: N aligned tensors → 1 multi-band GeoTensor |
+| `StackMatched(order=…, fill_value=NaN)` | `[t1, t2, …] → multi_band` | numpy stack + reproject-to-like | Compositing-style: N aligned rasters → 1 multi-band GeoArray |
 | `BlendMatched(weights=… \| "ivw", method="mean")` | `[t1, t2, …] → blended` | numpy weighted mean | IVW = inverse-variance weighting |
 
 **xvec dependency.** Added as a new optional extra:
@@ -418,7 +418,7 @@ vector-cube = ["xvec>=0.4"]
 class RasterToRasterLike(Operator):
     resampling: Resampling = Resampling.bilinear
 
-    def __call__(self, src: GeoTensor, like: GeoTensor) -> GeoTensor:
+    def __call__(self, src: GeoArray, like: GeoArray) -> GeoArray:
         ...
 
     def get_config(self) -> dict:
@@ -431,7 +431,7 @@ class SwathToGrid(Operator):
     target_res: tuple[float, float]
     bounds: Bounds | None = None
 
-    def __call__(self, swath: GeoTensor) -> GeoTensor: ...
+    def __call__(self, swath: GeoArray) -> GeoArray: ...
     def get_config(self) -> dict: ...
 
 
@@ -439,7 +439,7 @@ class RasterToPoints(Operator):
     extract: Literal["nearest", "bilinear"] = "bilinear"
     out_var: str = "value"
 
-    def __call__(self, raster: GeoTensor, points: "xvec.DataArray") -> "xvec.DataArray": ...
+    def __call__(self, raster: GeoArray, points: "xvec.DataArray") -> "xvec.DataArray": ...
 ```
 
 ### 5.4 What this unlocks beyond matchups
@@ -539,7 +539,7 @@ class MatchedPatch:
 `MatchedPatch` does not subclass `Patch` — it's a sibling carrier. Operators that want to consume one explicitly type against `MatchedPatch`; legacy operators see a single primary `Patch` via `mp.members["primary"]`.
 
 `valid_mask[name]` is False where the member equals its carrier's
-declared nodata (`GeoTensor.fill_value_default`, rioxarray `rio.nodata`)
+declared nodata (`GeoArray.fill_value`, rioxarray `rio.nodata`)
 and, for float data, where it is NaN / ±inf; a bare ndarray declares no
 nodata, so only the float test applies. A matched patch also carries the
 `Patch` release lifecycle (`close()` / `with mp: ...`) for

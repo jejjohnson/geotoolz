@@ -7,6 +7,7 @@ import threading
 import numpy as np
 import pandas as pd
 import pytest
+from geoarray import GeoArray
 
 import geocatalog._src.formats.raster as raster_module
 from geocatalog import GeoSlice
@@ -72,9 +73,9 @@ class TestLoadRaster:
             crs="EPSG:32629",
         )
         tensor = load_raster(catalog, sl)
-        assert tensor.values.shape == (3, 32, 32)
+        assert np.asarray(tensor).shape == (3, 32, 32)
         # All pixels are 42 in our synthetic file.
-        np.testing.assert_array_equal(tensor.values, 42)
+        np.testing.assert_array_equal(np.asarray(tensor), 42)
 
     def test_rejects_invalid_merge_method(self, utm29_tile_factory) -> None:
         path = utm29_tile_factory((500_000, 4_000_000, 500_320, 4_000_320), "20240115")
@@ -108,7 +109,7 @@ class TestLoadRaster:
             crs="EPSG:32629",
         )
         tensor = load_raster(catalog, sl, band_indexes=[1, 3])
-        assert tensor.values.shape[0] == 2
+        assert np.asarray(tensor).shape[0] == 2
 
 
 class TestLoadRasterTimeseries:
@@ -153,9 +154,9 @@ class TestLoadRasterTimeseries:
 
         tensor = load_raster_timeseries(catalog, sl, n_workers=2)
         # Two days, 3 bands, 32x32.
-        assert tensor.values.shape == (2, 3, 32, 32)
-        np.testing.assert_array_equal(tensor.values[0], 1)
-        np.testing.assert_array_equal(tensor.values[1], 2)
+        assert np.asarray(tensor).shape == (2, 3, 32, 32)
+        np.testing.assert_array_equal(np.asarray(tensor)[0], 1)
+        np.testing.assert_array_equal(np.asarray(tensor)[1], 2)
 
     def test_missing_day_skip_and_raise(
         self, utm29_tile_factory, monkeypatch: pytest.MonkeyPatch
@@ -190,9 +191,9 @@ class TestLoadRasterTimeseries:
         monkeypatch.setattr(raster_module, "load_raster", raise_on_middle_day)
 
         tensor = load_raster_timeseries(catalog, sl, n_workers=2)
-        assert tensor.values.shape == (2, 3, 32, 32)
-        np.testing.assert_array_equal(tensor.values[0], 1)
-        np.testing.assert_array_equal(tensor.values[1], 3)
+        assert np.asarray(tensor).shape == (2, 3, 32, 32)
+        np.testing.assert_array_equal(np.asarray(tensor)[0], 1)
+        np.testing.assert_array_equal(np.asarray(tensor)[1], 3)
         with pytest.raises(ValueError, match="missing middle day"):
             load_raster_timeseries(catalog, sl, n_workers=2, on_missing_day="raise")
 
@@ -217,7 +218,7 @@ class TestLoadRasterTimeseries:
 
         serial = load_raster_timeseries(catalog, sl, n_workers=1)
         concurrent = load_raster_timeseries(catalog, sl, n_workers=2)
-        np.testing.assert_array_equal(serial.values, concurrent.values)
+        np.testing.assert_array_equal(np.asarray(serial), np.asarray(concurrent))
 
 
 class TestLoadRasterConcurrentOpen:
@@ -248,8 +249,8 @@ class TestLoadRasterConcurrentOpen:
         catalog, sl = self._four_tile_setup(utm29_tile_factory)
         serial = load_raster(catalog, sl, max_open_workers=1)
         parallel = load_raster(catalog, sl, max_open_workers=8)
-        np.testing.assert_array_equal(serial.values, parallel.values)
-        assert serial.transform == parallel.transform
+        np.testing.assert_array_equal(np.asarray(serial), np.asarray(parallel))
+        assert serial.grid == parallel.grid
 
     def test_opens_actually_run_concurrently(
         self, utm29_tile_factory, monkeypatch: pytest.MonkeyPatch
@@ -296,5 +297,67 @@ class TestLoadRasterConcurrentOpen:
         catalog, sl = self._four_tile_setup(utm29_tile_factory)
         sync_tensor = load_raster(catalog, sl)
         async_tensor = asyncio.run(aload_raster(catalog, sl, max_open_workers=4))
-        np.testing.assert_array_equal(sync_tensor.values, async_tensor.values)
-        assert sync_tensor.transform == async_tensor.transform
+        np.testing.assert_array_equal(np.asarray(sync_tensor), np.asarray(async_tensor))
+        assert sync_tensor.grid == async_tensor.grid
+
+
+class TestLoadersReturnGeoArray:
+    """The loaders' carrier: a `geoarray.GeoArray` on the slice grid."""
+
+    @staticmethod
+    def _setup(utm29_tile_factory) -> tuple:
+        bounds = (500_000, 4_000_000, 500_320, 4_000_320)
+        paths = [
+            utm29_tile_factory(bounds, "20240115", value=1),
+            utm29_tile_factory(bounds, "20240116", value=2),
+        ]
+        catalog = build_raster_catalog(paths, filename_regex=REGEX)
+        # Wider than the files, so the mosaic has uncovered pixels.
+        sl = GeoSlice(
+            bounds=(500_000, 4_000_000, 500_400, 4_000_320),
+            interval=pd.Interval(
+                pd.Timestamp("2024-01-15"), pd.Timestamp("2024-01-16"), closed="both"
+            ),
+            resolution=(10.0, 10.0),
+            crs="EPSG:32629",
+        )
+        return catalog, sl
+
+    def test_load_raster_is_on_the_slice_grid(self, utm29_tile_factory) -> None:
+        catalog, sl = self._setup(utm29_tile_factory)
+        scene = load_raster(catalog, sl)
+        assert isinstance(scene, GeoArray)
+        assert scene.shape == (3, 32, 40)
+        assert scene.grid == sl.grid
+        assert scene.dtype == np.uint16
+        # No source declares a nodata: the mosaic writes 0 where nothing
+        # covers a pixel, and declares it.
+        assert scene.fill_value == 0
+        assert not np.asarray(scene.valid_mask())[:, -8:].any()
+
+    def test_nodata_override_is_the_fill(self, utm29_tile_factory) -> None:
+        catalog, sl = self._setup(utm29_tile_factory)
+        scene = load_raster(catalog, sl, nodata=65535)
+        assert scene.fill_value == 65535
+        assert (np.asarray(scene)[:, :, -8:] == 65535).all()
+
+    def test_timeseries_is_one_geoarray_on_the_slice_grid(
+        self, utm29_tile_factory
+    ) -> None:
+        catalog, sl = self._setup(utm29_tile_factory)
+        stack = load_raster_timeseries(catalog, sl, nodata=65535, n_workers=1)
+        assert isinstance(stack, GeoArray)
+        assert stack.shape == (2, 3, 32, 40)
+        assert stack.dims == ("time", "band", "y", "x")
+        assert stack.grid == sl.grid
+        assert stack.fill_value == 65535
+
+    def test_aload_raster_returns_a_geoarray(self, utm29_tile_factory) -> None:
+        import asyncio
+
+        from geocatalog.load import aload_raster
+
+        catalog, sl = self._setup(utm29_tile_factory)
+        scene = asyncio.run(aload_raster(catalog, sl))
+        assert isinstance(scene, GeoArray)
+        assert scene.grid == sl.grid

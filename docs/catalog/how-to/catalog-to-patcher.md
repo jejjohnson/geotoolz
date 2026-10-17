@@ -1,8 +1,9 @@
 # Patch a catalog with geopatcher
 
 `geocatalog.patch.field_for` mosaics the rows a `GeoSlice` selects into one
-`geopatcher.RasterField`, which a `SpatialPatcher` splits into patches and
-merges back. It needs the `[patch]` extra; how the patcher and catalog fit
+`geoarray.GeoArray` on the slice grid and wraps it as a
+`geopatcher.RasterField` (the GeoArray is the field's `domain`), which a
+`SpatialPatcher` splits into patches and merges back. It needs the `[patch]` extra; how the patcher and catalog fit
 together is on [How the packages interlock](../../geostack.md).
 
 ## Tile a mosaic and stitch it back
@@ -15,6 +16,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import rasterio
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geocatalog as gc
@@ -41,7 +43,8 @@ aoi: gc.GeoSlice = gc.GeoSlice(
     crs="EPSG:32611",
 )
 
-field: gp.RasterField = gc.patch.field_for(catalog, aoi)              # domain (C, H, W) uint16
+field: gp.RasterField = gc.patch.field_for(catalog, aoi)              # domain: (C, H, W) uint16 GeoArray
+assert field.domain.grid == aoi.grid                                  # on the slice grid
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
     geometry=gp.spatial.geometry.Rectangular(size=(100, 100)),
     sampler=gp.spatial.sampler.RegularStride(step=(100, 100)),
@@ -54,6 +57,7 @@ scaled: list[gp.Patch] = [
     for p in patches
 ]
 reflectance: np.ndarray = patcher.merge(scaled, field.domain)         # (C, H, W) float64
+georeferenced: GeoArray = patcher.merge_to_field(scaled, field)       # (C, H, W) float64 on aoi.grid
 ```
 
 `field_for` reads through `load_raster`, so files in other CRSs are warped
@@ -64,7 +68,7 @@ onto the slice grid and mosaicked. Its options:
 | `slice_=None` | cover the whole catalog in its CRS, on the first file's grid |
 | `asset="B04"` | read that key of each row's `assets` map (bundle or staged rows) instead of `filepath` |
 | `band_indexes=[1, 2]` | keep these 1-indexed bands |
-| `materialize=False` | read nothing; return one lazy `RasterField` per row, each in its file's own CRS and grid |
+| `materialize=False` | read nothing; return one lazy `RasterField` per row, each over a `geoarray.RasterSource` in its file's own CRS and grid (georeader's `RasterioReader` behind `geoarray.interop.georeader.source_from_georeader`) |
 
 For remote rows, [stage](staging.md) the catalog first so the patcher
 reads local files. Choosing the patcher's four axes is covered in the
@@ -81,7 +85,7 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geocatalog as gc
@@ -101,7 +105,7 @@ catalog: InMemoryGeoCatalog = gc.build.build_raster_catalog(
 domain: gc.patch.CatalogDomain = gc.patch.CatalogDomain(catalog=catalog, resolution=(10.0, 10.0))
 means: list[float] = []
 for slice_ in domain.slices():                                       # one 3 km slice per row
-    nir: GeoTensor = gc.load.load_raster(catalog, slice_, band_indexes=[4])  # (1, 300, 300) uint16
+    nir: GeoArray = gc.load.load_raster(catalog, slice_, band_indexes=[4])  # (1, 300, 300) uint16
     means.append(float(np.asarray(nir).mean()))
 ```
 

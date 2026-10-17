@@ -15,7 +15,7 @@ path. Queries then touch only that index, and a loader opens only the
 files that overlap. The import name is `geocatalog`; how it fits with the
 other packages is on [How the packages interlock](../geostack.md).
 
-![geocatalog: sources are built into an InMemory or DuckDB catalog, queried with a GeoSlice, and only the hits are loaded as a GeoTensor or a geopatcher RasterField](../assets/diagrams/catalog-flow.png)
+![geocatalog: sources are built into an InMemory or DuckDB catalog, queried with a GeoSlice, and only the hits are loaded as a GeoArray or a geopatcher RasterField](../assets/diagrams/catalog-flow.png)
 
 ## Install
 
@@ -34,7 +34,7 @@ pip install 'geotoolz-catalog[duckdb,stac]'   # add extras as needed
 | `[earthaccess]` / `[gee]` | `EarthAccessSource` / `GEESource` | NASA Earthdata / Earth Engine discovery |
 | `[sources-all]` | `[earthaccess]` + `[stac]` + `[gee]` | Every source adapter |
 | `[cloud]` | geotoolz-cloud with its `[fsspec]` extra | `s3://` `gs://` `az://` `https://` `hf://` reads in builders and loaders (`geocloud.fs`) and `stage()` of remote URIs (`geocloud.files`), on one client pool and credential registry |
-| `[patch]` | geotoolz-patcher | `geocatalog.patch.field_for` |
+| `[patch]` | geotoolz-patcher, and georeader for the lazy readers | `geocatalog.patch.field_for` |
 | `[full]` | All of the above | One-shot install |
 
 ## Quickstart
@@ -49,7 +49,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geocatalog as gc
@@ -78,11 +78,13 @@ aoi: gc.GeoSlice = gc.GeoSlice(
 )
 
 hits: InMemoryGeoCatalog = catalog.query(aoi)                         # 2 rows — no file opened
-tensor: GeoTensor = gc.load.load_raster(hits, aoi, band_indexes=[1, 2, 3])  # (3, 500, 500) uint16
+scene: GeoArray = gc.load.load_raster(hits, aoi, band_indexes=[1, 2, 3])  # (3, 500, 500) uint16 on aoi.grid
 ```
 
 `hits` is itself a catalog, so queries chain and set-combine. Only the
-loader opens files, and only the ones that overlap. The
+loader opens files, and only the ones that overlap; it returns a
+`geoarray.GeoArray` on the slice grid (`scene.grid == aoi.grid`) with its
+nodata in `fill_value`. The
 [Quickstart](quickstart.md) adds STAC discovery and saving the catalog.
 
 ## What's inside

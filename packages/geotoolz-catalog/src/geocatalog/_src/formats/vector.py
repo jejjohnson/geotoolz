@@ -2,7 +2,7 @@
 
 Each row's footprint is the vector file's ``total_bounds`` in the
 target CRS; loaders rasterise the matching features into a label
-`GeoTensor` for one of three ML tasks: ``"semantic_segmentation"``,
+`geoarray.GeoArray` for one of three ML tasks: ``"semantic_segmentation"``,
 ``"object_detection"``, ``"instance_segmentation"``.
 """
 
@@ -18,7 +18,7 @@ import geopandas as gpd
 import numpy as np
 import pyproj
 import shapely.geometry
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from loguru import logger as log
 from rasterio.features import rasterize
 
@@ -344,8 +344,8 @@ def load_vector(
     fill: int = 0,
     storage_options: dict[str, Any] | None = None,
     retries: int = 3,
-) -> GeoTensor:
-    """Rasterise the catalog's vector rows matching ``slice_`` into a `GeoTensor`.
+) -> GeoArray:
+    """Rasterise the catalog's vector rows matching ``slice_`` into a `GeoArray`.
 
     Filters the catalog with ``catalog.query(slice_)``, opens every
     matching vector file, clips its features to ``slice_.bounds`` (in
@@ -357,9 +357,9 @@ def load_vector(
 
     Args:
         catalog: A vector-backend catalog.
-        slice_: Window to rasterise into. The result has
-            ``shape == slice_.shape`` and ``crs``/``transform`` from
-            ``slice_``.
+        slice_: Window to rasterise into. The result is on
+            ``slice_.grid``: ``(1, *slice_.shape)``, with the slice's
+            transform and CRS.
         task: Which ML target shape to produce:
 
             - ``"semantic_segmentation"``: one channel of class IDs
@@ -374,15 +374,23 @@ def load_vector(
             ``None`` falls back to ``burn_value``.
         burn_value: The value burnt in for ``"semantic_segmentation"``
             when ``label_field`` is ``None``. Default 1.
-        fill: Background value written outside any feature. Default 0.
+        fill: Background value written outside any feature, and the
+            result's ``fill_value``. Default 0.
         storage_options: obstore store options for cloud/HTTP URIs, read
             through `geocloud.fs` (the ``[cloud]`` extra).
         retries: Retries for transient I/O failures per file open. ``0``
             disables retry/backoff.
 
     Returns:
-        A `GeoTensor` of shape ``(1, H, W)`` with ``dtype=int64``,
-        ``transform`` and ``crs`` matching ``slice_``.
+        A `geoarray.GeoArray` of shape ``(1, H, W)`` with ``dtype=int64``
+        on the slice grid (its ``grid`` equals ``slice_.grid``), with
+        ``fill_value=fill``.
+
+    Example:
+        Class labels aligned with the imagery of the same slice::
+
+            labels = load_vector(catalog, slice_, label_field="class_id")
+            labels.shape, labels.grid == slice_.grid  # (1, H, W), True
 
     Raises:
         TypeError: If the catalog's backend tag is not ``"vector"``.
@@ -459,9 +467,4 @@ def load_vector(
         )
         raster = burned[np.newaxis, ...]
 
-    return GeoTensor(
-        values=raster,
-        transform=transform,
-        crs=slice_.crs,
-        fill_value_default=fill,
-    )
+    return GeoArray(raster, transform, slice_.crs, fill_value=fill)  # (1, H, W) int64
