@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.5.1...geotoolz-catalog-v0.6.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* `import geotoolz` no longer provides the operators. Use `import geoops` (distribution `geotoolz-ops`). `pip install geotoolz` now installs the whole stack.
+
+### Features
+
+* **catalog:** index and load ensemble state histories (geocatalog.states) ([#494](https://github.com/jejjohnson/geotoolz/issues/494)) ([ac725ce](https://github.com/jejjohnson/geotoolz/commit/ac725ce9eaed94df21b3315c45cc08a1d7132dfc))
+
+
+### Bug Fixes
+
+* **build:** ship a LICENSE in each package so it builds ([#491](https://github.com/jejjohnson/geotoolz/issues/491)) ([48a705a](https://github.com/jejjohnson/geotoolz/commit/48a705a382a53ec0125c52817f3b4f29353de2aa))
+
+
+### Code Refactoring
+
+* rename the operator package to geotoolz-ops (import geoops) ([#489](https://github.com/jejjohnson/geotoolz/issues/489)) ([278b8af](https://github.com/jejjohnson/geotoolz/commit/278b8afbc675b9e082ac75488200a4729da38097))
+
 ## [0.5.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.5.0...geotoolz-catalog-v0.5.1) (2026-10-12)
 
 
