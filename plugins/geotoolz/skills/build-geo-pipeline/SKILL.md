@@ -47,6 +47,7 @@ an object-store client — look it up:
 | discover scenes in STAC / CMR / earthaccess | `geotoolz-catalog` | `geocatalog.sources` (`STACSource`, `from_stac_search`) |
 | index files, query by area + time | `geotoolz-catalog` | `geocatalog.build.build_raster_catalog`, `catalog.query(GeoSlice(...))` |
 | read pixels on a target grid | `geotoolz-catalog` | `geocatalog.load.load_raster` / `load_raster_timeseries` / `load_xarray` |
+| index and load model states (forecast runs × members × leads) | `geotoolz-catalog` | `geocatalog.build.build_state_catalog`, `geocatalog.states.load_states` and its typed queries |
 | copy remote assets locally | `geotoolz-catalog` | `geocatalog.staging.stage` |
 | read a sensor product (GOES, Himawari, …) | `geotoolz-products` | `geoproducts.<sensor>.Reader`, `.aws` download helpers, `geoproducts.stack` |
 | tile, process, stitch with overlap blending | `geotoolz-patcher` | `geopatcher.SpatialPatcher` + `spatial.geometry/sampler/window/aggregation` |

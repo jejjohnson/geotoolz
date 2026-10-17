@@ -11,6 +11,7 @@ each namespace serves is in the
 - [Backends](backends.md): `geocatalog.backends`
 - [Matchup](matchup.md): `geocatalog.matchup`
 - [Load](load.md): `geocatalog.load`
+- [States](states.md): `geocatalog.states`
 - [Storage](storage.md): `geocatalog.storage`
 - [Staging](staging.md): `geocatalog.staging`
 - [Patch](patch.md): `geocatalog.patch`

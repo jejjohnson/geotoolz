@@ -17,6 +17,7 @@ namespace, named for the workflow step it serves:
 | hold | `geocatalog.backends` | `_src/backends/` |
 | join | `geocatalog.matchup` | `_src/matchup/` |
 | read | `geocatalog.load` | `_src/formats/` |
+| model states | `geocatalog.states` | `_src/states.py` (queries, name maps), `_src/formats/states.py` (builder + loader) |
 | save / share | `geocatalog.storage` | `_src/storage/` |
 | stage | `geocatalog.staging` | `_src/staging/` |
 | patch | `geocatalog.patch` | `_src/patch/` |
@@ -56,6 +57,11 @@ dependencies are actually imported).
 - **Persisted catalogs**: GeoParquet carries `SCHEMA_VERSION_CURRENT`; a
   schema change needs a migration in `migrate_geoparquet` and a
   `docs/catalog/schema-versions.md` entry.
+- **State columns** (schema v1): `kind`, `run_time`, `member`, `producer`,
+  `parents` (`STATE_COLUMNS` in `_src/_schema.py`) have fixed types; a
+  catalog carries all five or none. Coerce them with
+  `coerce_state_columns` wherever rows are read back (Parquet, DuckDB),
+  and never let the streaming writer infer their types.
 - **Object storage** (the `[cloud]` extra; credentials from
   `geocloud.credentials`): `stage()` downloads remote URIs with
   `geocloud.files.download` — never a copy loop of its own — and builders
