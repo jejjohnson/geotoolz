@@ -1,19 +1,23 @@
 """Async COG reading on the `CogSource` engine.
 
-`AsyncCogReader` is the ``await``-native, georeader-shaped face of a
-`CogSource`: one async-geotiff handle, one pooled obstore
-client, the same tile de-duplication and concurrent fetch groups, the
-same nodata / mask / snapping semantics. It exposes georeader's
-`GeoData` metadata surface (``crs``, ``transform``, ``shape``,
-``bounds``, ``res``, ``footprint`` …) so georeader's window helpers
-work on it, lazy window views (``read_from_window`` does no I/O) and an
-async ``load``.
+`AsyncCogReader` is the ``await``-native face of a `CogSource`: one
+async-geotiff handle, one pooled obstore client, the same tile
+de-duplication and concurrent fetch groups, the same nodata / mask /
+snapping semantics. It is a `geoarray.AsyncRasterSource` (``grid``,
+``shape``, ``dtype``, ``fill_value``, ``attrs``, ``aread_window``,
+``aload``), and keeps georeader's metadata surface (``crs``, an
+``affine.Affine`` ``transform``, ``bounds``, ``res``, ``footprint`` …) so
+georeader's window helpers work on it, lazy window views
+(``read_from_window`` does no I/O) and an async ``load``. Every read
+returns a `geoarray.GeoArray`.
 
 The module-level coroutines mirror ``georeader.read``. Each one works
 out which source pixels the request needs, fetches them asynchronously,
-and hands the in-memory `GeoTensor` to the matching sync
-``georeader.read`` function — so results match the sync path pixel for
-pixel, while the event loop is free during I/O. Reprojections fetch the
+and hands the in-memory chunk to the matching sync ``georeader.read``
+function (georeader is the engine; the result is converted back with
+``geoarray.interop.georeader.from_georeader``) — so results match the
+sync path pixel for pixel, while the event loop is free during I/O.
+Reprojections fetch the
 same source chunk georeader reads from a lazy reader (the destination
 footprint plus a 3-pixel margin, boundless); destinations that miss the
 image fetch nothing. A destination far coarser than the source (a
@@ -28,12 +32,14 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import rasterio.windows
+from geoarray import FrozenAttrs, GeoArray, Grid, PixelWindow
+from geoarray.interop.georeader import from_georeader, to_georeader
 from georeader import read as _read, window_utils
-from georeader.geotensor import GeoTensor
 from rasterio.enums import Resampling
 from rasterio.transform import Affine, from_bounds as _transform_from_bounds
 from rasterio.windows import Window
 
+from geocloud._src.carrier import reject_georeader
 from geocloud._src.cog_source import (
     CogSource,
     _build_domain,
@@ -57,17 +63,27 @@ def _window(col_off: float, row_off: float, width: float, height: float) -> Wind
     return Window(col_off=col_off, row_off=row_off, width=width, height=height)
 
 
+def _snapped(window: Any) -> Window:
+    """``window`` snapped outward to whole pixels, as a rasterio ``Window``."""
+    w = _snap_window(window)
+    return _window(w.col_off, w.row_off, w.width, w.height)
+
+
 @dataclasses.dataclass(eq=False)
 class AsyncCogReader:
     """``await``-native COG reader over a `CogSource`.
 
     Open with :meth:`open`; metadata is then sync and free, reads are
-    coroutines::
+    coroutines returning `geoarray.GeoArray`::
 
         reader = await AsyncCogReader.open("s3://bucket/scene.tif")
         view = reader.read_from_window(Window(0, 0, 512, 512))  # no I/O
-        chip = await view.load()                                 # GeoTensor
+        chip = await view.load()                     # (bands, 512, 512)
         chips = await reader.load_many(windows)  # shared tiles fetched once
+
+    A reader is a `geoarray.AsyncRasterSource`: ``grid``, ``shape``,
+    ``dtype``, ``fill_value``, ``attrs``, ``aread_window(PixelWindow)`` and
+    ``aload()``.
 
     A view shares the parsed header with its parent and only carries a
     different ``window_focus``. As with georeader's `RasterioReader`, a
@@ -75,7 +91,7 @@ class AsyncCogReader:
     view is placed relative to the view's origin but may reach past the
     view's edges (it is clipped or filled only at the image's edges).
     Out-of-image pixels, and pixels the
-    COG's internal mask marks invalid, read as ``fill_value_default``.
+    COG's internal mask marks invalid, read as ``fill_value``.
     The reader pickles (by URL, through its source).
 
     Args:
@@ -90,7 +106,7 @@ class AsyncCogReader:
 
     def __post_init__(self) -> None:
         if self.window_focus is not None:
-            self.window_focus = _window(*_snap_window(self.window_focus))
+            self.window_focus = _snapped(self.window_focus)
 
     @classmethod
     async def open(
@@ -143,7 +159,7 @@ class AsyncCogReader:
 
     @property
     def transform(self) -> Affine:
-        """Affine transform of this view's top-left pixel."""
+        """Affine transform of this view's top-left pixel (``affine.Affine``)."""
         focus = self._focus
         return self.source.domain.transform * Affine.translation(
             focus.col_off, focus.row_off
@@ -176,9 +192,19 @@ class AsyncCogReader:
         return np.dtype(self.source.dtype)
 
     @property
-    def fill_value_default(self) -> float | int:
+    def fill_value(self) -> float | int:
         """Nodata, else ``0``: the value of out-of-image and masked pixels."""
-        return self.source.fill_value_default
+        return self.source.fill_value
+
+    @property
+    def grid(self) -> Grid:
+        """This view's pixel grid: ``transform``, ``crs`` and ``(H, W)``."""
+        return Grid.from_affine(self.transform, self.crs, self.shape[-2:])
+
+    @property
+    def attrs(self) -> FrozenAttrs:
+        """Metadata every read carries (`CogSource.attrs`)."""
+        return self.source.attrs
 
     @property
     def res(self) -> tuple[float, float]:
@@ -198,7 +224,7 @@ class AsyncCogReader:
 
     # ------------------------------------------------------------- reading
     def read_from_window(
-        self, window: Window, boundless: bool = True
+        self, window: Window | PixelWindow, boundless: bool = True
     ) -> AsyncCogReader:
         """A view of ``window``, offset from this view's origin. **Sync, no I/O.**
 
@@ -217,12 +243,12 @@ class AsyncCogReader:
         )
         if not boundless:
             absolute = rasterio.windows.intersection(
-                _window(*_snap_window(absolute)), self._raster_window
+                _snapped(absolute), self._raster_window
             )
         return dataclasses.replace(self, window_focus=absolute)
 
-    async def load(self, boundless: bool = True) -> GeoTensor:
-        """Read this view as a `GeoTensor`.
+    async def load(self, boundless: bool = True) -> GeoArray:
+        """Read this view as a `geoarray.GeoArray` ``(bands, h, w)``.
 
         ``boundless=True`` returns the full view, out-of-image pixels
         filled; ``boundless=False`` returns its intersection with the
@@ -233,7 +259,46 @@ class AsyncCogReader:
             focus = rasterio.windows.intersection(focus, self._raster_window)
         return await self.source.aread_window(focus)
 
-    async def load_many(self, windows: list[Window]) -> list[GeoTensor]:
+    async def aread_window(
+        self, window: PixelWindow | Window, *, boundless: bool = True
+    ) -> GeoArray:
+        """Read ``window`` (offset from this view's origin) — `AsyncRasterSource`.
+
+        ``boundless=True`` returns the whole snapped window: pixels off the
+        image read as ``fill_value`` (on a view, pixels past the view's edge
+        but inside the image are read, as with :meth:`read_from_window`).
+        ``boundless=False`` clips the window to this view's grid.
+
+        Raises:
+            ValueError: ``boundless=False`` and the window misses the grid.
+        """
+        snapped = _snap_window(window)
+        if not boundless:
+            extent = PixelWindow(
+                col_off=0, row_off=0, width=self.width, height=self.height
+            )
+            inside = snapped.intersection(extent)
+            if inside is None:
+                raise ValueError(
+                    f"AsyncCogReader: window {snapped} does not overlap the "
+                    f"grid {extent.shape} (boundless=False)."
+                )
+            snapped = inside
+        focus = self._focus
+        return await self.source.aread_window(
+            PixelWindow(
+                col_off=snapped.col_off + int(focus.col_off),
+                row_off=snapped.row_off + int(focus.row_off),
+                width=snapped.width,
+                height=snapped.height,
+            )
+        )
+
+    async def aload(self) -> GeoArray:
+        """Every pixel of this view — `AsyncRasterSource` (same as `load`)."""
+        return await self.load()
+
+    async def load_many(self, windows: list[Window | PixelWindow]) -> list[GeoArray]:
         """Read many windows (offset from this view's origin) in one batch.
 
         Tiles shared between windows are fetched and decoded once (see
@@ -296,8 +361,8 @@ class AsyncCogReader:
 
 # ----------------------------------------------------------------- read_*
 async def read_from_window(
-    reader: AsyncCogReader, window: Window, boundless: bool = True
-) -> GeoTensor | None:
+    reader: AsyncCogReader, window: Window | PixelWindow, boundless: bool = True
+) -> GeoArray | None:
     """Read ``window`` of ``reader`` (see `AsyncCogReader.read_from_window`).
 
     Like `georeader.read.read_from_window`, ``boundless=False`` on a
@@ -305,9 +370,7 @@ async def read_from_window(
     returns ``None`` (no fetch).
     """
     extent = _window(0, 0, reader.width, reader.height)
-    if not boundless and not rasterio.windows.intersect(
-        [_window(*_snap_window(window)), extent]
-    ):
+    if not boundless and not rasterio.windows.intersect([_snapped(window), extent]):
         return None
     return await reader.read_from_window(window, boundless=boundless).load(
         boundless=boundless
@@ -320,7 +383,7 @@ async def read_from_bounds(
     crs_bounds: Any = None,
     pad_add: tuple[int, int] = (0, 0),
     boundless: bool = True,
-) -> GeoTensor | None:
+) -> GeoArray | None:
     """Async `georeader.read.read_from_bounds`: the pixels covering ``bounds``."""
     window = _read.window_from_bounds(reader, bounds, crs_bounds)
     if any(p > 0 for p in pad_add):
@@ -337,7 +400,7 @@ async def read_from_polygon(
     pad_add: tuple[int, int] = (0, 0),
     boundless: bool = True,
     window_surrounding: bool = False,
-) -> GeoTensor | None:
+) -> GeoArray | None:
     """Async `georeader.read.read_from_polygon`: the pixels covering ``polygon``."""
     window = _read.window_from_polygon(
         reader, polygon, crs_polygon, window_surrounding=window_surrounding
@@ -355,7 +418,7 @@ async def read_from_center_coords(
     shape: tuple[int, int],
     crs_center_coords: Any = None,
     boundless: bool = True,
-) -> GeoTensor | None:
+) -> GeoArray | None:
     """Async `georeader.read.read_from_center_coords`: a ``shape`` chip at a point."""
     window = _read.window_from_center_coords(
         reader, center_coords, shape, crs_center_coords
@@ -365,7 +428,7 @@ async def read_from_center_coords(
 
 async def _load_footprint(
     reader: AsyncCogReader, polygon: BaseGeometry, crs_polygon: Any
-) -> GeoTensor:
+) -> GeoArray:
     """Fetch the source chunk georeader warps for ``polygon``.
 
     The window of ``polygon`` plus `_REPROJECT_PAD` pixels, rounded
@@ -398,7 +461,7 @@ async def read_reproject(
     resampling: Resampling = Resampling.cubic_spline,
     dtype_dst: Any = None,
     dst_nodata: Any = None,
-) -> GeoTensor:
+) -> GeoArray:
     """Async `georeader.read.read_reproject` onto a destination grid.
 
     The grid is ``dst_transform`` + ``window_out``, or derived from
@@ -421,14 +484,16 @@ async def read_reproject(
     chunk = await _load_footprint(
         reader, window_utils.window_polygon(window_out, dst_transform), dst_crs
     )
-    return _read.read_reproject(
-        chunk,
-        dst_crs=dst_crs,
-        dst_transform=dst_transform,
-        window_out=window_out,
-        resampling=resampling,
-        dtype_dst=dtype_dst,
-        dst_nodata=dst_nodata,
+    return from_georeader(
+        _read.read_reproject(
+            to_georeader(chunk),
+            dst_crs=dst_crs,
+            dst_transform=dst_transform,
+            window_out=window_out,
+            resampling=resampling,
+            dtype_dst=dtype_dst,
+            dst_nodata=dst_nodata,
+        )
     )
 
 
@@ -439,28 +504,41 @@ async def read_reproject_like(
     resampling: Resampling = Resampling.cubic_spline,
     dtype_dst: Any = None,
     dst_nodata: Any = None,
-) -> GeoTensor:
+) -> GeoArray:
     """Async `georeader.read.read_reproject_like`: onto ``data_like``'s grid.
 
-    With ``resolution_dst`` (a number, or ``(x, y)`` like ``.res``) the
-    grid keeps ``data_like``'s extent at the new pixel size. Unlike
-    georeader 2.2, whose output shape takes the x resolution for the
-    height, anisotropic tuples size rows from y and columns from x.
+    ``data_like`` is a `geoarray.GeoArray` or any `geoarray.RasterSource`
+    (anything with a ``grid``). With ``resolution_dst`` (a number, or
+    ``(x, y)`` like ``grid.res``) the grid keeps ``data_like``'s extent at
+    the new pixel size. Unlike georeader 2.2, whose output shape takes the
+    x resolution for the height, anisotropic tuples size rows from y and
+    columns from x.
+
+    Raises:
+        TypeError: ``data_like`` is a georeader object (convert it with
+            ``geoarray.interop.georeader``), or has no ``grid``.
     """
-    height, width = data_like.shape[-2:]
+    reject_georeader(data_like, "read_reproject_like")
+    grid = getattr(data_like, "grid", None)
+    if not isinstance(grid, Grid):
+        raise TypeError(
+            "read_reproject_like takes a GeoArray or a geoarray.RasterSource as "
+            f"data_like, got {type(data_like).__name__}"
+        )
+    height, width = grid.shape
     if resolution_dst is not None:
         res_x, res_y = (
             (resolution_dst, resolution_dst)
             if isinstance(resolution_dst, int | float)
             else resolution_dst
         )
-        like_x, like_y = data_like.res
+        like_x, like_y = grid.res
         height = round(height * like_y / res_y)
         width = round(width * like_x / res_x)
     return await read_reproject(
         reader,
-        dst_crs=data_like.crs,
-        dst_transform=data_like.transform,
+        dst_crs=grid.crs,
+        dst_transform=grid.affine,
         resolution_dst_crs=resolution_dst,
         window_out=_window(0, 0, width, height),
         resampling=resampling,
@@ -474,7 +552,7 @@ async def read_to_crs(
     dst_crs: Any,
     resampling: Resampling = Resampling.cubic_spline,
     resolution_dst_crs: float | tuple[float, float] | None = None,
-) -> GeoTensor:
+) -> GeoArray:
     """Async `georeader.read.read_to_crs`: the whole view, reprojected.
 
     Already in ``dst_crs``: the view is loaded as is.
@@ -500,10 +578,10 @@ async def read_from_tile(
     z: int,
     out_shape: tuple[int, int] = (256, 256),
     resampling: Resampling = Resampling.cubic_spline,
-) -> GeoTensor:
+) -> GeoArray:
     """The XYZ (slippy-map) tile ``(x, y, z)`` in EPSG:3857, ``out_shape`` pixels.
 
-    Tiles off the image come back filled with ``fill_value_default``
+    Tiles off the image come back filled with ``fill_value``
     without any fetch. For tiles much coarser than the source pixels,
     pass a `AsyncCogReader.reader_overview` of matching resolution.
     """

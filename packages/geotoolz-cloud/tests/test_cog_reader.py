@@ -1,8 +1,10 @@
 """Tests for `geocloud.cog.AsyncCogReader` — the async face of the COG engine.
 
 Every async read is checked against the matching sync ``georeader.read``
-function on a `RasterioReader` over the same file: the async path only
-changes *how* the source pixels are fetched, never the result. Skipped
+function on a `RasterioReader` over the same file (georeader is the
+oracle; its ``GeoTensor`` results are converted with ``from_georeader``):
+the async path only changes *how* the source pixels are fetched, never the
+result. Reads return `geoarray.GeoArray`. Skipped
 unless the ``[cog]`` extra is installed; no network (``LocalStore``).
 """
 
@@ -16,6 +18,8 @@ import numpy as np
 import pytest
 import rasterio
 import rasterio.windows
+from geoarray import AsyncRasterSource, GeoArray, Grid, PixelWindow, RasterSource
+from geoarray.interop.georeader import from_georeader, to_georeader
 from georeader import read
 from georeader.geotensor import GeoTensor
 from georeader.rasterio_reader import RasterioReader
@@ -81,15 +85,18 @@ def _open(path: Path, **kwargs) -> cog.AsyncCogReader:
     )
 
 
-def _assert_same(got: GeoTensor, expected: GeoTensor) -> None:
-    assert isinstance(got, GeoTensor)
+def _assert_same(got: GeoArray, expected: GeoTensor | GeoArray) -> None:
+    """``got`` (ours) matches ``expected`` (georeader's oracle, or ours)."""
+    if isinstance(expected, GeoTensor):
+        expected = from_georeader(expected)
+    assert isinstance(got, GeoArray)
     assert got.shape == expected.shape
     np.testing.assert_array_equal(np.asarray(got), np.asarray(expected))
-    assert got.transform.almost_equals(expected.transform, precision=1e-6)
+    assert got.grid.affine.almost_equals(expected.grid.affine, precision=1e-6)
     assert rasterio.crs.CRS.from_user_input(
         got.crs
     ) == rasterio.crs.CRS.from_user_input(expected.crs)
-    assert got.fill_value_default == expected.fill_value_default
+    assert got.fill_value == expected.fill_value
 
 
 # ---------------------------------------------------------------- metadata
@@ -101,10 +108,64 @@ def test_metadata_matches_rasterio_reader(cog_path: Path):
     assert reader.bounds == pytest.approx(sync.bounds)
     assert reader.res == pytest.approx(sync.res)
     assert reader.dtype == np.dtype(sync.dtype)
-    assert reader.fill_value_default == sync.fill_value_default == _NODATA
+    assert reader.fill_value == sync.fill_value_default == _NODATA
     assert rasterio.crs.CRS.from_user_input(reader.crs) == sync.crs
     assert reader.footprint().equals(sync.footprint())
     assert reader.footprint("EPSG:4326").equals_exact(sync.footprint("EPSG:4326"), 1e-9)
+
+
+def test_reader_is_an_async_raster_source(cog_path: Path):
+    reader = _open(cog_path)
+    assert isinstance(reader, AsyncRasterSource)
+    assert not isinstance(reader, RasterSource)  # its reads are coroutines
+    with rasterio.open(cog_path) as src:
+        assert reader.grid == Grid.from_affine(src.transform, src.crs, src.shape)
+        values = src.read()
+    assert reader.shape == (3, _H, _W)
+    assert reader.dtype == np.uint16
+    assert reader.fill_value == _NODATA
+    assert dict(reader.attrs) == {}
+    loaded = asyncio.run(reader.aload())
+    assert isinstance(loaded, GeoArray)
+    assert loaded.grid == reader.grid
+    np.testing.assert_array_equal(loaded.data, values)
+    assert loaded.identical(asyncio.run(reader.load()))
+    assert loaded.identical(reader.source.load())
+
+
+def test_aread_window_matches_the_loaded_carrier(cog_path: Path):
+    """aread_window(w) == load().read_window(w), for a reader and for a view."""
+    reader = _open(cog_path)
+    loaded = asyncio.run(reader.aload())
+    window = PixelWindow(col_off=17, row_off=9, width=50, height=40)
+    chip = asyncio.run(reader.aread_window(window))
+    assert chip.identical(loaded.read_window(window))
+    assert chip.grid == reader.grid.crop(window)
+    view = reader.read_from_window(Window(10, 20, 40, 30))
+    assert view.grid == reader.grid.crop(
+        PixelWindow(col_off=10, row_off=20, width=40, height=30)
+    )
+    inner = PixelWindow(col_off=5, row_off=5, width=8, height=8)
+    got = asyncio.run(view.aread_window(inner))
+    assert got.identical(asyncio.run(view.aload()).read_window(inner))
+
+
+def test_aread_window_boundless_false_clips_to_the_grid(cog_path: Path):
+    reader = _open(cog_path)
+    window = PixelWindow(col_off=90, row_off=70, width=40, height=40)
+    clipped = asyncio.run(reader.aread_window(window, boundless=False))
+    assert clipped.shape == (3, _H - 70, _W - 90)
+    assert asyncio.run(reader.aread_window(window)).shape == (3, 40, 40)
+    view = reader.read_from_window(Window(80, 0, 20, _H))
+    beyond = PixelWindow(col_off=15, row_off=0, width=10, height=5)
+    assert asyncio.run(view.aread_window(beyond, boundless=False)).shape == (3, 5, 5)
+    with pytest.raises(ValueError, match="does not overlap"):
+        asyncio.run(
+            view.aread_window(
+                PixelWindow(col_off=30, row_off=0, width=5, height=5),
+                boundless=False,
+            )
+        )
 
 
 def test_views_do_no_io_and_compose(cog_path: Path, monkeypatch):
@@ -278,14 +339,32 @@ def test_read_reproject_like_matches_sync(cog_path: Path):
     (lon,), (lat,) = transform_points(
         "EPSG:32630", "EPSG:4326", [500_600.0], [3_997_900.0]
     )
-    like = GeoTensor(
+    like = GeoArray(
         np.zeros((1, 40, 50), dtype="float32"),
-        transform=Affine(0.0003, 0.0, lon, 0.0, -0.0003, lat),
-        crs="EPSG:4326",
-        fill_value_default=0,
+        Affine(0.0003, 0.0, lon, 0.0, -0.0003, lat),
+        "EPSG:4326",
+        fill_value=0,
     )
     got = asyncio.run(cog.read_reproject_like(reader, like))
-    _assert_same(got, read.read_reproject_like(sync, like))
+    _assert_same(got, read.read_reproject_like(sync, to_georeader(like)))
+    # Any source with a grid works: a view of the same reader, nearest
+    # resampling onto its own grid, reads that view's pixels back.
+    view = reader.read_from_window(Window(20, 10, 30, 25))
+    same = asyncio.run(
+        cog.read_reproject_like(reader, view, resampling=Resampling.nearest)
+    )
+    _assert_same(same, asyncio.run(view.load()))
+
+
+def test_read_reproject_like_refuses_a_geotensor(cog_path: Path):
+    reader = _open(cog_path)
+    like = RasterioReader(str(cog_path)).load()
+    with pytest.raises(TypeError, match="from_georeader"):
+        asyncio.run(cog.read_reproject_like(reader, like))
+    with pytest.raises(TypeError, match="source_from_georeader"):
+        asyncio.run(cog.read_reproject_like(reader, RasterioReader(str(cog_path))))
+    with pytest.raises(TypeError, match="RasterSource"):
+        asyncio.run(cog.read_reproject_like(reader, np.zeros((4, 4))))
 
 
 def test_read_reproject_like_anisotropic_resolution_keeps_extent(cog_path: Path):
@@ -294,11 +373,11 @@ def test_read_reproject_like_anisotropic_resolution_keeps_extent(cog_path: Path)
     (lon,), (lat,) = transform_points(
         "EPSG:32630", "EPSG:4326", [500_600.0], [3_999_500.0]
     )
-    like = GeoTensor(
+    like = GeoArray(
         np.zeros((1, 40, 50), dtype="float32"),
-        transform=Affine(0.0003, 0.0, lon, 0.0, -0.0003, lat),
-        crs="EPSG:4326",
-        fill_value_default=0,
+        Affine(0.0003, 0.0, lon, 0.0, -0.0003, lat),
+        "EPSG:4326",
+        fill_value=0,
     )
     got = asyncio.run(
         cog.read_reproject_like(reader, like, resolution_dst=(0.0006, 0.0002))

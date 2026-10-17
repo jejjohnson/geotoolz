@@ -235,28 +235,6 @@ def _load_or_raise(out: Any, src: Source, what: str) -> GeoArray:
     return from_engine(out.load())
 
 
-def _hashable_attrs(value: Any) -> Any:
-    """``value`` with every multi-dimensional array turned into nested lists.
-
-    A GeoArray's attrs are frozen (hashable): 1-D numeric arrays become
-    tuples, but a 2-D array (HDF geolocation latitudes / longitudes)
-    cannot. Those are stored as nested lists, which freeze to nested
-    tuples; ``np.asarray(attrs["geolocation"]["latitude"])`` gives the
-    array back.
-    """
-    if isinstance(value, np.ndarray) and value.ndim > 1:
-        return value.tolist()
-    if isinstance(value, dict):
-        return {key: _hashable_attrs(item) for key, item in value.items()}
-    return value
-
-
-def _from_cloud_reader(gt: Any) -> GeoArray:
-    """A geotoolz-cloud reader's ``GeoTensor`` as a `GeoArray`."""
-    gt.attrs = _hashable_attrs(dict(gt.attrs or {}))
-    return from_engine(gt)
-
-
 class ReadWindow(SourceOperator):
     """Read a pixel-space rectangular window from a raster source.
 
@@ -846,7 +824,7 @@ class ReadHDF(SourceOperator):
             out = _cloud_call("hdf5", "ReadHDF", call)
         except (KeyError, OSError, ValueError) as exc:
             raise _read_error(self.path, exc) from exc
-        return _from_cloud_reader(out)
+        return out  # geocloud returns a GeoArray
 
 
 class ReadNetCDF(SourceOperator):
@@ -901,7 +879,7 @@ class ReadNetCDF(SourceOperator):
             out = _cloud_call("netcdf", "ReadNetCDF", call)
         except (KeyError, OSError, RuntimeError, ValueError) as exc:
             raise _read_error(self.path, exc) from exc
-        return _from_cloud_reader(out)
+        return out  # geocloud returns a GeoArray
 
 
 class WriteCOG(SinkOperator):
@@ -984,7 +962,7 @@ class WriteCOG(SinkOperator):
             from geocloud.cog import write_cog
 
             write_cog(
-                to_engine(gt),
+                gt,
                 self.path,
                 compress=self.compress,
                 level=self.level,

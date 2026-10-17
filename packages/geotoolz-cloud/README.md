@@ -11,7 +11,9 @@ Cloud object storage for the geotoolz stack (import name `geocloud`): one
 process-wide [obstore](https://developmentseed.org/obstore/) client pool,
 file verbs on top of it (list, download, upload, copy, sync, sign),
 credentials registered once per bucket, and batched, async
-Cloud-Optimized GeoTIFF reads.
+Cloud-Optimized GeoTIFF reads. Every raster it reads or writes is a
+[`geoarray.GeoArray`](../geotoolz-array/README.md), and its COG readers are
+`geoarray.RasterSource`s.
 
 geopatcher's `CogField` and geoproducts' cloud byte reads take their client
 from `geocloud.store`, so a process talking to one bucket through them builds
@@ -34,7 +36,7 @@ pip install 'geotoolz-cloud[cog]'     # + COG reads (async-geotiff)
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
-| *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store`, `geocloud.files`, `geocloud.credentials`, `geocloud.cog.write_cog` |
+| *(base)* | obstore, geotoolz-array (+ its georeader adapter), rasterio, numpy | `geocloud.store`, `geocloud.files`, `geocloud.credentials`, `geocloud.cog.write_cog` |
 | `[cog]` | async-geotiff | `geocloud.cog` (`CogSource`, `AsyncCogReader`, `read_*`) |
 | `[fsspec]` | fsspec (no s3fs / gcsfs / adlfs) | `geocloud.fs`, the fsspec filesystem on the pool |
 | `[hdf5]` / `[netcdf]` / `[hdf4]` | h5py / netCDF4 / pyhdf | `geocloud.hdf` readers for HDF5 + NetCDF-4 / NetCDF-3 / HDF4 |
@@ -46,8 +48,7 @@ two overlapping windows of its red band. Their shared tiles are fetched
 once.
 
 ```python
-from georeader.geotensor import GeoTensor
-from rasterio.windows import Window
+from geoarray import GeoArray, PixelWindow
 
 from geocloud import credentials, files
 from geocloud.cog import CogSource
@@ -57,10 +58,11 @@ credentials.set_credentials("s3://sentinel-cogs", anonymous=True, region="us-wes
 scene: str = "s3://sentinel-cogs/sentinel-s2-l2a-cogs/10/S/DG/2024/7/S2A_10SDG_20240702_0_L2A/"
 objects: list[files.ObjectInfo] = files.ls(scene)        # B01.tif … TCI.tif, metadata
 src: CogSource = CogSource.open(scene + "B04.tif")       # one header fetch
-src.domain.shape                                          # (1, 10980, 10980) · EPSG:32610, 10 m
-chips: list[GeoTensor] = src.read_windows(
-    [Window(0, 0, 512, 512), Window(256, 0, 512, 512)]
-)                                                         # 2 × (1, 512, 512) uint16
+src.shape                                                 # (1, 10980, 10980) · EPSG:32610, 10 m
+chips: list[GeoArray] = src.read_windows([
+    PixelWindow(col_off=0, row_off=0, width=512, height=512),
+    PixelWindow(col_off=256, row_off=0, width=512, height=512),
+])                                                        # 2 × (1, 512, 512) uint16
 ```
 
 ## The client pool — `geocloud.store`
@@ -118,29 +120,41 @@ the pool (and by GDAL through `gdal_access`); nothing is written to
 ## COG reads — `geocloud.cog`
 
 ```python
-from georeader.geotensor import GeoTensor
-from rasterio.windows import Window
+from geoarray import GeoArray, PixelWindow, RasterSource
 
 from geocloud.cog import AsyncCogReader, CogSource, read_from_tile
 
+uri = "s3://sentinel-cogs/sentinel-s2-l2a-cogs/10/S/DG/2024/7/S2A_10SDG_20240702_0_L2A/B04.tif"
 src: CogSource = CogSource.open(uri)                    # one header fetch
-src.domain.shape                                        # (1, 10980, 10980)
-chips: list[GeoTensor] = src.read_windows(              # tiles shared by the
-    [Window(0, 0, 512, 512), Window(256, 0, 512, 512)]  # windows fetched once
-)                                                       # 2 × (1, 512, 512) uint16
+src.shape                                               # (1, 10980, 10980)
+chips: list[GeoArray] = src.read_windows([              # tiles shared by the
+    PixelWindow(col_off=0, row_off=0, width=512, height=512),    # windows
+    PixelWindow(col_off=256, row_off=0, width=512, height=512),  # fetched once
+])                                                      # 2 × (1, 512, 512) uint16
+assert isinstance(src, RasterSource)                    # grid, read_window, load
 
-reader: AsyncCogReader = await AsyncCogReader.open(uri)  # georeader GeoData face
-tile: GeoTensor = await read_from_tile(reader, x=163, y=395, z=10)  # (1, 256, 256)
+# in a notebook / async function:
+reader: AsyncCogReader = await AsyncCogReader.open(uri)  # an AsyncRasterSource
+tile: GeoArray = await read_from_tile(reader, x=163, y=395, z=10)  # (1, 256, 256) uint16
 ```
 
-`CogSource` pickles by URL, so it ships to process-pool workers;
+`CogSource` pickles by URL, so it ships to process-pool workers.
 `AsyncCogReader`'s `read_*` coroutines mirror `georeader.read` pixel for
-pixel. Lossless codecs decode bit-for-bit identical to GDAL.
+pixel (georeader is the engine; results come back as `GeoArray`). Lossless
+codecs decode bit-for-bit identical to GDAL.
 
 ## COG writes — `geocloud.cog.write_cog`
 
 ```python
+import numpy as np
+from geoarray import GeoArray
+
 from geocloud.cog import write_cog
+
+grid = (10.0, 0.0, 500_000.0, 0.0, -10.0, 4_200_000.0)  # (a, b, c, d, e, f)
+rng = np.random.default_rng(0)
+ndvi: GeoArray = GeoArray(rng.random((1, 1024, 1024), "float32"), grid, "EPSG:32610", fill_value=np.nan)  # (1, 1024, 1024) float32
+classes: GeoArray = GeoArray(rng.integers(0, 9, (1024, 1024), "uint8"), grid, "EPSG:32610", fill_value=0)  # (1024, 1024) uint8
 
 write_cog(ndvi, "s3://bucket/products/ndvi.tif")         # validated COG, uploaded
 write_cog(classes, "landcover.tif", compress="zstd")     # atomic local write
@@ -150,17 +164,17 @@ Staged in a temporary directory, translated by GDAL's `COG` driver, checked
 (`LAYOUT=COG`, shape, dtype, tiles, overviews), then renamed or uploaded into
 place. The defaults follow the dtype: a predictor, `nearest` overviews for
 classes and masks, `average` for floats, and a nodata only when the dtype
-can hold it. Lazy georeader readers are staged strip by strip. It needs no
-extra.
+can hold it. A lazy `geoarray.RasterSource` (a `CogSource`, a product
+reader) is staged strip by strip. It needs no extra.
 
 ## HDF and NetCDF — `geocloud.hdf`
 
 ```python
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geocloud.hdf import open_hdf5, read_netcdf
 
-ch4: GeoTensor = read_netcdf("s3://bucket/L2.nc", "methane", group="PRODUCT")  # (H, W) float · NaN = fill
+ch4: GeoArray = read_netcdf("s3://bucket/L2.nc", "methane", group="PRODUCT")  # (H, W) float · NaN = fill
 with open_hdf5("s3://noaa-goes19/ABI-L1b-RadC/2024/245/18/scene.nc") as f:
     radiance = f["Rad"][:500, :500]                       # only these chunks are fetched
 ```
