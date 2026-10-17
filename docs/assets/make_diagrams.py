@@ -10,7 +10,7 @@ Produces (under ``docs/assets/``):
   boxes-and-arrows.
 * ``operator-lifecycle.png`` — input → forward → output with type
   annotations.
-* ``pipeline-ecosystem.png`` — how ``geocatalog``, ``geotoolz``, and
+* ``pipeline-ecosystem.png`` — how ``geocatalog``, ``geoops``, and
   ``geopatcher`` fit together.
 
 The script uses only ``matplotlib`` + synthetic data so it runs in any
@@ -238,7 +238,7 @@ def make_operator_lifecycle() -> Path:
 def make_pipeline_ecosystem() -> Path:
     fig, ax = plt.subplots(figsize=(12, 5.2))
     ax.set_title(
-        "The pipeline ecosystem — geocatalog → geotoolz → geopatcher",
+        "The pipeline ecosystem — geocatalog → geoops → geopatcher",
         fontsize=12,
         color=TEXT,
         pad=10,
@@ -246,7 +246,7 @@ def make_pipeline_ecosystem() -> Path:
 
     # group rects — centred at y=2.0, each 2.8 wide x 3.2 tall
     _group(ax, 1.9, 2.0, 2.8, 3.2, "geocatalog — discover & load")
-    _group(ax, 5.7, 2.0, 2.8, 3.2, "geotoolz — operate")
+    _group(ax, 5.7, 2.0, 2.8, 3.2, "geoops — operate")
     _group(ax, 9.5, 2.0, 2.8, 3.2, "geopatcher (via geoops.patch_ops)")
 
     # geocatalog: stack STAC -> LoadScene vertically
@@ -254,7 +254,7 @@ def make_pipeline_ecosystem() -> Path:
     _box(ax, 1.9, 2.0, 1.8, 0.55, "LoadScene")
     _arrow(ax, 1.9, 2.7, 1.9, 2.3)
 
-    # geotoolz: three boxes vertical
+    # geoops: three boxes vertical
     _box(ax, 5.7, 3.0, 1.8, 0.55, "Scale")
     _box(ax, 5.7, 2.0, 1.8, 0.55, "CloudMask")
     _box(ax, 5.7, 1.0, 1.8, 0.55, "NDVI")

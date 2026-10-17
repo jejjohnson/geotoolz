@@ -22,7 +22,7 @@ core comes from [pipekit](https://github.com/jejjohnson/pipekit); about
 275 remote-sensing operators sit on top. How geotoolz meets the other
 packages is on [How the packages interlock](../geostack.md).
 
-![Sequential and Graph composition of geotoolz operators, with the output shape and dtype of every step](../assets/diagrams/geotoolz-composition.png)
+![Sequential and Graph composition of geoops operators, with the output shape and dtype of every step](../assets/diagrams/geotoolz-composition.png)
 
 ## Install
 

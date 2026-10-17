@@ -33,10 +33,6 @@ PACKAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         "packages/geotoolz/pyproject.toml",
         ("packages/geotoolz/src/geotoolz",),
     ),
-    "geotoolz-ops": (
-        "packages/geotoolz-ops/pyproject.toml",
-        ("packages/geotoolz-ops/src/geoops",),
-    ),
     "geotoolz-catalog": (
         "packages/geotoolz-catalog/pyproject.toml",
         ("packages/geotoolz-catalog/src/geocatalog",),
@@ -44,6 +40,10 @@ PACKAGES: dict[str, tuple[str, tuple[str, ...]]] = {
     "geotoolz-cloud": (
         "packages/geotoolz-cloud/pyproject.toml",
         ("packages/geotoolz-cloud/src/geocloud",),
+    ),
+    "geotoolz-ops": (
+        "packages/geotoolz-ops/pyproject.toml",
+        ("packages/geotoolz-ops/src/geoops",),
     ),
     "geotoolz-patcher": (
         "packages/geotoolz-patcher/pyproject.toml",
@@ -86,9 +86,9 @@ FORBIDDEN: dict[str, str] = {
 ALLOWED: dict[str, str] = {
     "geocatalog": "geotoolz-catalog",
     "geocloud": "geotoolz-cloud",
+    "geoops": "geotoolz-ops",
     "geopatcher": "geotoolz-patcher",
     "geoproducts": "geotoolz-products",
-    "geoops": "geotoolz-ops",
     "georeader": "georeader-spaceml",
     "geotoolz": "geotoolz",
     "pipekit": "pipekit",

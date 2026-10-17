@@ -4,7 +4,7 @@
 > first-class API — so a catalog query, a product reader, a patcher and an
 > operator chain fit together without glue code.
 
-![The geostack: find with geotoolz-catalog, read with geotoolz-products, cut with geotoolz-patcher, compute with geotoolz, stitch back with geotoolz-patcher](assets/diagrams/stack-overview.png)
+![The geostack: find with geotoolz-catalog, read with geotoolz-products, cut with geotoolz-patcher, compute with geotoolz-ops, stitch back with geotoolz-patcher](assets/diagrams/stack-overview.png)
 
 Five packages, one job each. `geotoolz-cloud` sits underneath the others:
 every read or write that touches a bucket goes through it.
