@@ -1,11 +1,12 @@
 """Write a Cloud-Optimized GeoTIFF to a local path or any object store.
 
-`write_cog` turns a georeader `GeoTensor` (or a lazy `GeoData` reader) into
-a validated COG in two GDAL steps:
+`write_cog` turns a `geoarray.GeoArray` (or any lazy `geoarray.RasterSource`)
+into a validated COG in two GDAL steps:
 
 1. **Stage** the pixels into a tiled GeoTIFF in a private temporary
-   directory: in one write for an in-memory `GeoTensor`, strip by strip
-   for a lazy reader, so a scene larger than memory never loads whole.
+   directory: in one write for an in-memory `GeoArray`, strip by strip
+   (``read_window``) for a lazy source, so a scene larger than memory never
+   loads whole.
    Nodata, band descriptions and tags are set here.
 2. **Translate** it with GDAL's ``COG`` driver (``rasterio.shutil.copy``),
    which lays out the tiles, builds the overviews and puts the header
@@ -34,7 +35,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+from geoarray import GeoArray, Grid, PixelWindow, RasterSource
 
+from geocloud._src.carrier import reject_georeader
 from geocloud._src.files import exists, upload
 from geocloud._src.redact import redact
 from geocloud._src.store import local_path
@@ -83,11 +86,9 @@ _STRIP_BLOCKS = 4
 Auto = Literal["auto"]
 
 
-def _values(data: Any) -> np.ndarray | None:
-    """The in-memory pixels of a GeoTensor, or ``None`` for a lazy reader."""
-    from georeader.geotensor import GeoTensor
-
-    return np.asarray(data) if isinstance(data, GeoTensor) else None
+def _values(data: GeoArray | RasterSource) -> np.ndarray | None:
+    """The in-memory pixels of a GeoArray, or ``None`` for a lazy source."""
+    return np.asarray(data) if isinstance(data, GeoArray) else None
 
 
 def _bands_hw(shape: Sequence[int]) -> tuple[int, int, int]:
@@ -115,7 +116,7 @@ def _resolve_nodata(
 ) -> float | int | None:
     """The nodata to write, checked to be representable in ``dtype``.
 
-    ``"auto"`` takes the GeoTensor's ``fill_value_default`` when the
+    ``"auto"`` takes the data's ``fill_value`` when the
     output dtype can hold it, else writes none (a NaN fill on integer
     data, say). An explicit value that does not fit raises.
     """
@@ -171,7 +172,8 @@ def _strips(height: int, rows: int) -> Iterator[tuple[int, int]]:
 
 
 def _stage(
-    data: Any,
+    data: GeoArray | RasterSource,
+    grid: Grid,
     values: np.ndarray | None,
     path: Path,
     *,
@@ -186,6 +188,7 @@ def _stage(
 ) -> None:
     """Write the pixels to a tiled, uncompressed GeoTIFF at ``path``."""
     import rasterio
+    from rasterio.crs import CRS
     from rasterio.windows import Window
 
     profile = {
@@ -194,8 +197,8 @@ def _stage(
         "height": height,
         "width": width,
         "dtype": dtype.name,
-        "crs": data.crs,
-        "transform": data.transform,
+        "crs": CRS.from_user_input(grid.crs),
+        "transform": grid.affine,
         "nodata": nodata,
         "tiled": True,
         "blockxsize": blocksize,
@@ -208,8 +211,9 @@ def _stage(
             dst.write(values.reshape(count, height, width).astype(dtype, copy=False))
             return
         for top, rows in _strips(height, blocksize * _STRIP_BLOCKS):
+            strip = PixelWindow(col_off=0, row_off=top, width=width, height=rows)
+            chunk = np.asarray(data.read_window(strip, boundless=False))
             window = Window(col_off=0, row_off=top, width=width, height=rows)
-            chunk = np.asarray(data.read_from_window(window, boundless=False))
             dst.write(
                 chunk.reshape(count, rows, width).astype(dtype, copy=False),
                 window=window,
@@ -262,7 +266,7 @@ def _check(
 
 
 def write_cog(
-    data: Any,
+    data: GeoArray | RasterSource,
     dest: str | os.PathLike[str],
     *,
     compress: str = "deflate",
@@ -287,10 +291,11 @@ def write_cog(
     docstring for the steps.
 
     Args:
-        data: A georeader `GeoTensor` of shape ``(H, W)`` or ``(C, H, W)``,
-            or a lazy `GeoData` reader (``transform``, ``crs``, ``shape``,
-            ``read_from_window``), which is staged strip by strip without
-            loading it whole. It must carry a CRS.
+        data: A `geoarray.GeoArray` of shape ``(H, W)`` or ``(C, H, W)``,
+            or any lazy `geoarray.RasterSource` (``grid``, ``shape``,
+            ``dtype``, ``fill_value``, ``attrs``, ``read_window``), which
+            is staged strip by strip without loading it whole. It must
+            carry a CRS.
         dest: A local path or a URI `geocloud.files` can upload to
             (``s3://``, ``gs://``, ``az://`` / ``abfs[s]://``, Azure
             ``https://``).
@@ -310,7 +315,7 @@ def write_cog(
             picks ``"nearest"`` for integer and boolean data (classes and
             masks keep their values) and ``"average"`` for floats.
         nodata: The nodata value. ``"auto"`` (default) takes the data's
-            ``fill_value_default`` when the dtype can hold it (never for a
+            ``fill_value`` when the dtype can hold it (never for a
             boolean mask, written as ``uint8`` 0 / 1); ``None`` writes
             none. An explicit value must fit the dtype.
         descriptions: Band descriptions; ``None`` takes the data's
@@ -330,6 +335,9 @@ def write_cog(
         ``dest`` (a ``Path`` for a local destination).
 
     Raises:
+        TypeError: ``data`` is not a GeoArray or RasterSource — a georeader
+            ``GeoTensor`` / reader is refused with the
+            ``geoarray.interop.georeader`` function that converts it.
         ValueError: The data is not 2-D / 3-D or has no CRS, an option is
             unknown, ``blocksize`` is not a power of two, or ``nodata`` /
             ``descriptions`` do not fit the data.
@@ -340,11 +348,11 @@ def write_cog(
         >>> import tempfile, pathlib
         >>> import numpy as np, rasterio
         >>> from affine import Affine
-        >>> from georeader.geotensor import GeoTensor
-        >>> scene = GeoTensor(
+        >>> from geoarray import GeoArray
+        >>> scene = GeoArray(
         ...     np.arange(2 * 600 * 600, dtype="float32").reshape(2, 600, 600),
-        ...     transform=Affine(10, 0, 500_000, 0, -10, 4_000_000),
-        ...     crs="EPSG:32630", fill_value_default=np.nan,
+        ...     Affine(10, 0, 500_000, 0, -10, 4_000_000),
+        ...     "EPSG:32630", fill_value=np.nan,
         ...     attrs={"band_names": ["red", "nir"]},
         ... )
         >>> path = write_cog(scene, pathlib.Path(tempfile.mkdtemp()) / "scene.tif",
@@ -366,13 +374,20 @@ def write_cog(
         raise ValueError(
             f"write_cog: blocksize must be a power of two >= 16; got {blocksize}."
         )
-    if getattr(data, "crs", None) is None:
+    reject_georeader(data, "write_cog")
+    if not isinstance(data, GeoArray | RasterSource):
+        raise TypeError(
+            "write_cog takes a geoarray.GeoArray or a geoarray.RasterSource, "
+            f"got {type(data).__name__}"
+        )
+    count, height, width = _bands_hw(data.shape)
+    grid = data.grid
+    if grid.crs is None:
         raise ValueError(
             "write_cog: the data has no CRS; a COG without georeferencing is "
-            "just a TIFF. Set one on the GeoTensor first."
+            "just a TIFF. Set one on the GeoArray first."
         )
     values = _values(data)
-    count, height, width = _bands_hw(values.shape if values is not None else data.shape)
     source_dtype = values.dtype if values is not None else np.dtype(data.dtype)
     dtype = _output_dtype(np.dtype(source_dtype))
     if resampling is None:
@@ -383,13 +398,11 @@ def write_cog(
             f"write_cog: resampling={resampling!r}; "
             f"choose one of {sorted(RESAMPLINGS)}."
         )
-    fill = getattr(data, "fill_value_default", None)
+    fill = data.fill_value
     if np.dtype(source_dtype) == np.bool_:
         fill = None  # a mask's False is data, not nodata
     written_nodata = _resolve_nodata(nodata, fill, dtype)
-    names = _resolve_descriptions(
-        descriptions, getattr(data, "attrs", None) or {}, count
-    )
+    names = _resolve_descriptions(descriptions, data.attrs or {}, count)
 
     local = local_path(dest)
     if not overwrite and exists(dest, storage_options=storage_options):
@@ -423,6 +436,7 @@ def write_cog(
         built = Path(workdir) / "cog.tif"
         _stage(
             data,
+            grid,
             values,
             staged,
             dtype=dtype,

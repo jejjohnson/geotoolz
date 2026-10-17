@@ -1,6 +1,6 @@
 # Read HDF and NetCDF
 
-Read one variable of a NetCDF, HDF5 or HDF4 file as a `GeoTensor`, from a
+Read one variable of a NetCDF, HDF5 or HDF4 file as a `geoarray.GeoArray`, from a
 local path or any URI the pool reads. `geocloud.hdf` is the stack's one
 implementation: `gz.io.ReadNetCDF` / `ReadHDF` and the GOES and Himawari
 readers all use it.
@@ -32,7 +32,7 @@ from pathlib import Path
 
 import netCDF4
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from obstore.store import MemoryStore
 from pyproj import CRS
 
@@ -53,15 +53,15 @@ with netCDF4.Dataset(path, "w") as ds:                      # a small packed L2 
 
 mount("s3://demo-hdf", MemoryStore())                       # a stand-in bucket
 files.upload(path, "s3://demo-hdf/l2.nc")
-methane: GeoTensor = read_netcdf("s3://demo-hdf/l2.nc", "ch4")  # (20, 30) float64 · ppb · NaN = fill
-assert methane.crs is not None and methane.transform.a == 10
+methane: GeoArray = read_netcdf("s3://demo-hdf/l2.nc", "ch4")  # (20, 30) float64 · ppb · NaN = fill
+assert methane.crs is not None and methane.res == (10.0, 10.0)
 ```
 
 ## Read an HDF5 dataset without downloading it
 
 `open_hdf5` hands you an `h5py.File` over ranged reads, for code that
 walks a product's own layout. `read_hdf` reads one dataset as a
-`GeoTensor`, with 1-based band `indexes` and optional swath `geolocation`.
+`GeoArray`, with 1-based band `indexes` and optional swath `geolocation`.
 
 ```python
 import tempfile
@@ -69,7 +69,7 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from obstore.store import MemoryStore
 
 from geocloud import files
@@ -84,7 +84,7 @@ mount("s3://demo-h5", MemoryStore())
 files.upload(path, "s3://demo-h5/swath.h5")
 with open_hdf5("s3://demo-h5/swath.h5") as f:
     corner: np.ndarray = f["radiance"][0, :10, :10]           # (10, 10) float32, one chunk fetched
-bands: GeoTensor = read_hdf("s3://demo-h5/swath.h5", "radiance", indexes=[3, 1])  # (2, 200, 300) float32
+bands: GeoArray = read_hdf("s3://demo-h5/swath.h5", "radiance", indexes=[3, 1])  # (2, 200, 300) float32
 ```
 
 ## Decode CF packing yourself
@@ -104,4 +104,8 @@ read attributes and coordinates as plain Python values.
   the file has neither a `GeoTransform` nor evenly spaced 1-D coordinates.
   Swath products ship 2-D latitude / longitude arrays instead: read them
   with `read_hdf(..., geolocation=("lat", "lon"))` for an HDF / NetCDF-4
-  file, or with netCDF4 for a NetCDF-3 one.
+  file, or with netCDF4 for a NetCDF-3 one. A carrier's attrs are frozen,
+  so `attrs["geolocation"]["latitude"]` is a tuple of row tuples:
+  `np.asarray` it back into an array.
+- **No declared fill** means `fill_value` is `0` (`fill_value_from_attrs`'s default); check
+  `out.attrs["attrs"]` for what the file declares.

@@ -347,8 +347,10 @@ jobs:
           from geocloud.cog import CogSource
           from geocloud.store import clear_obstore_pool, get_obstore, object_key
 
-          for module in ("async_geotiff", "geopatcher", "geotoolz"):
+          for module in ("async_geotiff", "geopatcher", "geoops", "geotoolz"):
               assert importlib.util.find_spec(module) is None, f"{module} installed"
+          # The carrier (and its georeader adapter) come with the base install.
+          from geoarray.interop.georeader import from_georeader  # noqa: F401
 
           store = get_obstore("s3://bucket/a/b.tif")
           assert get_obstore("s3://bucket/c.tif") is store

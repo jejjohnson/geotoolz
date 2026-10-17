@@ -1543,6 +1543,7 @@ version = "0.5.0"
 source = { editable = "packages/geotoolz-cloud" }
 dependencies = [
     { name = "georeader-spaceml" },
+    { name = "geotoolz-array", extra = ["georeader"] },
     { name = "numpy" },
     { name = "obstore" },
     { name = "rasterio" },
@@ -1583,6 +1584,7 @@ requires-dist = [
     { name = "async-geotiff", marker = "extra == 'cog'", specifier = ">=0.5,<0.6" },
     { name = "fsspec", marker = "extra == 'fsspec'", specifier = ">=2024.12" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
+    { name = "geotoolz-array", extras = ["georeader"], editable = "packages/geotoolz-array" },
     { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.10" },
     { name = "netcdf4", marker = "extra == 'netcdf'", specifier = ">=1.6.5" },
     { name = "numpy", specifier = ">=1.26" },
