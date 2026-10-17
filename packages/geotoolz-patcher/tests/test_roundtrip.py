@@ -15,6 +15,10 @@ The properties (with the operator fixed to identity):
 - **Disjoint OverlapAdd reconstruction.** Same setup with
   `spatial.aggregation.OverlapAdd`; the boxcar trivially satisfies COLA at
   stride==patch_size, so reconstruction is bit-exact.
+- **Hann overlap-add identity (gate C1).** A non-constant float64 field
+  through `spatial.window.Hann` x `spatial.aggregation.OverlapAdd` at hop
+  size / 2 is reproduced to 1e-6 away from the scene edges, with and
+  without normalisation.
 - **Constant-field idempotence.** For any (geometry, sampler) and
   aggregations that preserve constants (`Max`, `Min`, `Mean`), the
   touched region of a constant field maps to the same constant.
@@ -37,6 +41,7 @@ from georeader.geotensor import GeoTensor
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from geopatcher import RasterField, SpatialPatcher, spatial
+from geopatcher.run import parallel_map
 
 
 def _identity(arr):
@@ -306,3 +311,54 @@ def test_random_sampler_split_is_deterministic_under_seed(seed: int) -> None:
     a = [p.anchor for p in patcher.split(field)]
     b = [p.anchor for p in patcher.split(field)]
     assert a == b
+
+
+# Gate C1 "Patch identity": an identity model through split -> map ->
+# merge with Hann overlap-add reproduces the input to 1e-6 in float64,
+# away from scene edges. The field is non-constant (a ramp plus seeded
+# noise) so a misplaced or transposed patch cannot hide, the way it can
+# on the constant fields of `test_window.py`.
+_C1_SIZE = 16  # even, so Hann is exactly COLA at hop size / 2
+_C1_STEP = _C1_SIZE // 2
+# Non-square, and tileable under boundary="drop": (56 - 16) / 8 + 1 = 6
+# patches down, (72 - 16) / 8 + 1 = 8 across.
+_C1_SHAPE = (56, 72)
+
+
+@pytest.mark.parametrize("normalize_by_window", [True, False])
+def test_hann_overlap_add_identity(normalize_by_window: bool) -> None:
+    rows, cols = np.mgrid[0 : _C1_SHAPE[0], 0 : _C1_SHAPE[1]].astype(np.float64)
+    x = (
+        0.37 * rows - 1.21 * cols + np.random.default_rng(0).standard_normal(_C1_SHAPE)
+    )  # (H, W) float64
+    field = RasterField(
+        GeoTensor(values=x, transform=rasterio.Affine.identity(), crs="EPSG:32630")
+    )
+    patcher = SpatialPatcher(
+        geometry=spatial.geometry.Rectangular(size=(_C1_SIZE, _C1_SIZE)),
+        sampler=spatial.sampler.RegularStride(step=(_C1_STEP, _C1_STEP)),
+        window=spatial.window.Hann(),
+        aggregation=spatial.aggregation.OverlapAdd(
+            normalize_by_window=normalize_by_window
+        ),
+    )
+    patches = parallel_map(patcher, field, lambda d: np.asarray(d), n_workers=2)
+    assert len(patches) == 6 * 8
+    out = np.asarray(patcher.merge(patches, field.domain))  # (H, W)
+    assert out.shape == x.shape
+    assert out.dtype == np.float64
+
+    # Margin m = the window half-width = the hop. The outer band of width
+    # `step` is covered by a single chip: normalised, Σwx/Σw is still x
+    # there, but un-normalised it carries the bare taper w·x. Inside it,
+    # every pixel sits under exactly two shifted Hann windows per axis,
+    # which sum to 1 (COLA at hop size / 2), so the raw weighted sum is
+    # already the field: both settings must reproduce the interior.
+    m = _C1_STEP
+    interior = (slice(m, -m), slice(m, -m))
+    np.testing.assert_allclose(out[interior], x[interior], atol=1e-6, rtol=0)
+
+    # Teeth: a stitch off by one pixel along either axis must fail.
+    for axis in (0, 1):
+        shifted = np.roll(x, 1, axis=axis)
+        assert not np.allclose(out[interior], shifted[interior], atol=1e-6, rtol=0)
