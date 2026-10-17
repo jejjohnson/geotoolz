@@ -11,7 +11,7 @@ the rules every operator keeps. The how-tos put it to work:
 An `Operator` is a callable with a keyword-only constructor and an
 `_apply` method. The base class comes from
 [pipekit](https://github.com/jejjohnson/pipekit), which knows nothing
-about rasters; geotoolz operators narrow it to `GeoTensor` and `ndarray`.
+about rasters; geotoolz operators narrow it to `GeoArray` and `ndarray`.
 
 | The base class gives you | What it does |
 |---|---|
@@ -140,7 +140,7 @@ the same everywhere.
 - **Geo-dependent operators** (reprojection, rasterising, metre-based
   measures) reject a plain array with one message naming the operator.
 - **Multi-input operators** require one pixel grid: equal `(H, W)`, and
-  for GeoTensors an equal CRS and an **exactly** equal transform. There
+  for GeoArrays an equal CRS and an **exactly** equal transform. There
   is no tolerance, because sub-pixel drift is a real source of bugs.
 - **Per-pixel reductions over a stack** (the `compositing` operators)
   also require the band axis to match. Plain arrays compare shape only.
@@ -158,7 +158,7 @@ family.
 - geotoolz writes only `band_names`; the other two keys are read for
   rasterio and other producers.
 - A string on a plain `ndarray` raises `TypeError`. A name missing from a
-  GeoTensor raises `ValueError`. The one exception is `plume.SBMP`, which
+  GeoArray raises `ValueError`. The one exception is `plume.SBMP`, which
   maps its `"B11"` / `"B12"` defaults onto a plain 12-band L2A array.
 
 ## Mask polarity
@@ -172,7 +172,7 @@ Producers (`qa`, `mask`, `restore.OutlierMask`) and consumers
   `keep="inside"` (the default) or `keep="outside"`.
   `ApplyMask(mask=BBoxMask(bounds=aoi))` keeps the AOI.
 - **Consumers have no `invert=` switch.** Flip a keep-polarity mask, such
-  as georeader's `validmask()`, with `InvertMask`.
+  as `GeoArray.valid_mask()`, with `InvertMask`.
 - **Detections mark the feature.** Feed a segmentation or plume mask to
   `ApplyMask` to drop the feature, or through `InvertMask` to keep it.
 - **Morphology is polarity-neutral.** `DilateMask`, `BufferMask` and
@@ -228,7 +228,7 @@ denoised: np.ndarray = mnf.inverse(mnf(scene))                # (4, 32, 32) → 
 
 ![The geostack: geocatalog finds, geoproducts reads, geopatcher cuts, geoops computes, geopatcher stitches](../assets/diagrams/stack-overview.png)
 
-geotoolz is the compute stage. It sees only `GeoTensor`s, so it does not
+geotoolz is the compute stage. It sees only `GeoArray`s, so it does not
 care which catalog or reader produced them. The seams are on
 [How the packages interlock](../geostack.md); the patcher bridge is
 [Tile → operate → stitch](patch_ops.md).

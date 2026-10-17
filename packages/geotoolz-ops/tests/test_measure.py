@@ -4,24 +4,24 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _helpers import toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import toy_geoarray
+from geoarray import GeoArray
 from shapely.geometry import LineString
 
 import geoops as gz
 
 
-def _gt(values: np.ndarray) -> GeoTensor:
-    return toy_geotensor(values, fill_value_default=0)
+def _gt(values: np.ndarray) -> GeoArray:
+    return toy_geoarray(values, fill_value=0)
 
 
-def test_label_connected_components_returns_int_geotensor() -> None:
+def test_label_connected_components_returns_int_geoarray() -> None:
     mask = _gt(np.array([[1, 0, 1], [1, 0, 0]], dtype=bool))
 
     labels = gz.measure.LabelConnectedComponents(connectivity=4)(mask)
 
     assert labels.shape == mask.shape
-    assert labels.transform == mask.transform
+    assert labels.grid == mask.grid
     assert np.asarray(labels).dtype == np.int32
     assert int(np.asarray(labels).max()) == 2
 
@@ -170,11 +170,11 @@ def test_skeleton_length_diagonal_steps_are_euclidean() -> None:
         pytest.param(gz.measure.SkeletonLength(), np.eye(5, dtype=bool), id="skeleton"),
     ],
 )
-def test_plain_ndarray_matches_geotensor_path(
+def test_plain_ndarray_matches_geoarray_path(
     op: gz.Operator, values: np.ndarray
 ) -> None:
     """Metadata-independent measure ops accept plain ndarrays and match
-    the GeoTensor path (array outputs stay plain ndarrays)."""
+    the GeoArray path (array outputs stay plain ndarrays)."""
     out_plain = op(values)
     out_geo = op(_gt(values))
 
@@ -203,8 +203,8 @@ def test_plain_ndarray_matches_geotensor_path(
 def test_geo_dependent_ops_reject_plain_arrays(
     op: gz.Operator, values: np.ndarray
 ) -> None:
-    """Ops whose output geometry needs the transform stay GeoTensor-only."""
-    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+    """Ops whose output geometry needs the transform stay GeoArray-only."""
+    with pytest.raises(TypeError, match="georeferenced GeoArray"):
         op(values)
 
 

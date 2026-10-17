@@ -1,13 +1,13 @@
 """Tier-A primitives — pure-numpy spectral-index math.
 
 Every function here is a one-liner over ``numpy.ndarray`` that takes raw
-band indices and returns the index value. No `GeoTensor` knowledge, no
+band indices and returns the index value. No `GeoArray` knowledge, no
 metadata, no operator state — the carrier-aware wrappers in
 `geoops.indices._src.operators` provide all that.
 
 The convention for the spatial axes (``H, W``) is the trailing two axes
 of the input. The *band* axis is configurable (``axis`` kwarg, default
-``-3``, georeader's band axis) so the same primitive works on
+``-3``, the carrier's band axis) so the same primitive works on
 ``(C, H, W)`` rasters and ``(T, C, H, W)`` time-cubes.
 
 All indices return a single-channel ndarray with the band axis
@@ -73,7 +73,7 @@ def normalized_difference(
             NDVI this is NIR; for NDWI (McFeeters) this is Green; for
             NDBI this is SWIR.
         b_idx: Index of the "low" band. NDVI: Red; NDWI: NIR; NDBI: NIR.
-        axis: Position of the band axis. Default ``-3`` (georeader's
+        axis: Position of the band axis. Default ``-3`` (the carrier's
             ``(C, H, W)`` / ``(T, C, H, W)`` layout; matches
             ``rasterio.read()`` output).
         eps: Small constant added to the denominator. Default ``1e-10``.

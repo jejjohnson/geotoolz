@@ -14,7 +14,7 @@ Examples:
 
         import geoops as gz
         ndvi = gz.indices.NDVI(nir=7, red=3)  # S2 band order
-        v = ndvi(reflectance_geotensor)               # GeoTensor (H, W)
+        v = ndvi(reflectance_geoarray)               # GeoArray (H, W)
 
     Composition::
 
@@ -22,12 +22,12 @@ Examples:
             gz.radiometry.DNToReflectance(scale=1e-4)
             | gz.indices.NDVI(nir=7, red=3)
         )
-        v = pipeline(dn_geotensor)
+        v = pipeline(dn_geoarray)
 
     Stack the index back as an extra channel::
 
         op = gz.indices.AppendIndex(index_op=gz.indices.NDVI())
-        stacked = op(reflectance_geotensor)  # shape (C+1, H, W)
+        stacked = op(reflectance_geoarray)  # shape (C+1, H, W)
 """
 
 from __future__ import annotations

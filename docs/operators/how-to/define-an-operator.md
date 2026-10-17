@@ -13,7 +13,7 @@ output's fill, then run `geoops.testing.check_operator`.
 
 ```python
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geoops as gz
@@ -27,22 +27,22 @@ class Scale(gz.Operator):
     def __init__(self, *, scale: float = 1e-4) -> None:
         self.scale = scale                                          # same name as the argument
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out: np.ndarray = np.asarray(gt, dtype=np.float32) * self.scale  # (C, H, W) any → (C, H, W) float32
         # Rewrap like the input and write the output's fill into its nodata pixels.
-        return wrap_filled(gt, out, fill_value_default=carried_fill(gt, out.dtype))
+        return wrap_filled(gt, out, fill_value=carried_fill(gt, out.dtype))
 
 
 rng: np.random.Generator = np.random.default_rng(0)
 dn: np.ndarray = rng.integers(1, 4000, size=(4, 32, 32), dtype=np.uint16)  # (4, 32, 32) uint16
 dn[:, :2, :2] = 0                                                         # a few nodata pixels
-scene: GeoTensor = GeoTensor(
+scene: GeoArray = GeoArray(
     dn, transform=from_origin(750_000, 4_350_000, 10, 10), crs="EPSG:32610",
-    fill_value_default=0, attrs={"band_names": ["B2", "B3", "B4", "B8"]},
+    fill_value=0, attrs={"band_names": ["B2", "B3", "B4", "B8"]},
 )
 
 op: Scale = Scale(scale=1e-4)
-reflectance: GeoTensor = check_operator(op, scene)                        # (4, 32, 32) uint16 → (4, 32, 32) float32
+reflectance: GeoArray = check_operator(op, scene)                        # (4, 32, 32) uint16 → (4, 32, 32) float32
 assert op.get_config() == {"scale": 1e-4}
 assert gz.Operator.from_state(op.state).get_config() == op.get_config()
 ```
@@ -52,13 +52,17 @@ assert gz.Operator.from_state(op.state).get_config() == op.get_config()
 - the constructor is keyword-only, and `get_config()` is JSON that
   rebuilds an equal operator (or the operator is `forbid_in_yaml`);
 - the operator works on graph `Input` nodes;
-- a GeoTensor in gives a GeoTensor out on the same grid, and a plain array
+- a GeoArray in gives a GeoArray out on the same grid, and a plain array
   gives a plain array;
-- `attrs` is a fresh dict whose per-band keys match the output bands;
+- the per-band `attrs` keys match the output bands;
 - the fill suits the output dtype, the input's nodata stays nodata, and
   the input is left untouched;
 - a `(T, C, H, W)` stack matches the per-frame results, or is rejected
-  with an error naming the operator.
+  with an error naming the operator;
+- a georeader `GeoTensor` is refused with a `TypeError` naming
+  `geoarray.interop.georeader.from_georeader` (`wrap_like` and the nodata
+  helpers do this for you; an operator that uses neither calls
+  `geoops.carrier.reject_geotensor`).
 
 ## Follow the rules
 
@@ -67,7 +71,7 @@ assert gz.Operator.from_state(op.state).get_config() == op.get_config()
 | Keyword-only `__init__(self, *, ...)`, each argument stored under its own name | `get_config()` is derived from it; configs map to arguments by name. |
 | Hold configuration only, never a carrier | A second raster is a positional `_apply` argument, so a `Graph` can wire it in. |
 | Implement `_apply`, never `__call__` | `__call__` switches between eager runs and graph recording. |
-| Read with `np.asarray(gt)`, rewrap with `wrap_like` | Plain arrays and GeoTensors both work; CRS, transform and attrs carry over. |
+| Read with `np.asarray(gt)`, rewrap with `wrap_like` | Plain arrays and GeoArrays both work; CRS, transform and attrs carry over. |
 | Never mutate the input | The same scene may feed other branches. |
 | Declare the output fill | `False` for masks, `0` for labels and counts, `NaN` for new float quantities, `carried_fill(gt, dtype)` for carried values. |
 | Use the shared parameter names | `red` / `nir` / `qa_band` for one band, `bands`, `fill_value`, `window`, `seed`, `eps`. |
@@ -84,7 +88,7 @@ by frame.
 
 ```python
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geoops as gz
@@ -99,23 +103,23 @@ class RedEdgeChlorophyll(gz.Operator):
         self.nir, self.red_edge, self.eps = nir, red_edge, eps
 
     @over_frames
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         x: np.ndarray = mask_invalid_to_nan(gt)                       # (C, H, W) any → (C, H, W) float · NaN = nodata
         nir: np.ndarray = x[resolve_band(gt, self.nir)]               # (H, W) float
         red_edge: np.ndarray = x[resolve_band(gt, self.red_edge)]     # (H, W) float
-        return wrap_like(gt, nir / (red_edge + self.eps) - 1, fill_value_default=np.nan)
+        return wrap_like(gt, nir / (red_edge + self.eps) - 1, fill_value=np.nan)
 
 
 rng: np.random.Generator = np.random.default_rng(0)
 dn: np.ndarray = rng.integers(1, 4000, size=(4, 32, 32), dtype=np.uint16)  # (4, 32, 32) uint16
 dn[:, :2, :2] = 0                                                         # a few nodata pixels
-scene: GeoTensor = GeoTensor(
+scene: GeoArray = GeoArray(
     dn, transform=from_origin(750_000, 4_350_000, 10, 10), crs="EPSG:32610",
-    fill_value_default=0, attrs={"band_names": ["B2", "B4", "B5", "B8"]},
+    fill_value=0, attrs={"band_names": ["B2", "B4", "B5", "B8"]},
 )
 
-cire: GeoTensor = check_operator(RedEdgeChlorophyll(nir="B8", red_edge="B5"), scene)  # (4, 32, 32) uint16 → (32, 32) float · NaN = nodata
-assert np.isnan(cire.values[:2, :2]).all()
+cire: GeoArray = check_operator(RedEdgeChlorophyll(nir="B8", red_edge="B5"), scene)  # (4, 32, 32) uint16 → (32, 32) float · NaN = nodata
+assert np.isnan(np.asarray(cire)[:2, :2]).all()
 ```
 
 Built-in indices such as `gz.NDVI` have the same shape. Before writing a step, search

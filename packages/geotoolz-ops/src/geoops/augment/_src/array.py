@@ -1,4 +1,4 @@
-"""Tier-A primitives for :mod:`geoops.augment` -- deterministic, no ``GeoTensor``.
+"""Tier-A primitives for :mod:`geoops.augment` -- deterministic, no ``GeoArray``.
 
 The augmentation operators draw their random parameters (factors,
 angles, noise fields) from a seeded generator and hand them to these

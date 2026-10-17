@@ -4,12 +4,12 @@ Module rule for ``learn/_src``:
 
 * ``array.py`` -- Tier A: axis bookkeeping (reshape modes, output fill
   values); no sklearn, no carriers.
-* ``estimators.py`` -- :class:`GeoTensorEstimator`, the non-Operator
+* ``estimators.py`` -- :class:`GeoArrayEstimator`, the non-Operator
   adapter that marshals a carrier to ``(n_samples, n_features)``, applies
   the NaN strategy, calls the estimator and restores the grid, plus its
   joblib state I/O.
 * ``operators.py`` (this module) -- the Operators: :class:`SklearnOp`
-  (fitting lifecycle over a :class:`GeoTensorEstimator`), the named
+  (fitting lifecycle over a :class:`GeoArrayEstimator`), the named
   convenience wrappers (``PixelwisePCA``, ``PixelwiseKMeans``, ...), and the
   framework-agnostic :class:`ModelOp`, which wraps any callable (torch,
   JAX, sklearn ``predict``, a plain function) without importing a
@@ -27,8 +27,9 @@ from pipekit.protocols import Predictor
 
 from geoops._src.config import jsonable
 from geoops._src.fitted import fit_lock, fit_once
+from geoops._src.geo import reject_geotensor
 from geoops.learn._src.estimators import (
-    GeoTensorEstimator,
+    GeoArrayEstimator,
     NanStrategy,
     ReshapeMode,
     Task,
@@ -36,26 +37,26 @@ from geoops.learn._src.estimators import (
 
 
 if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
 
 FitMode = Literal["pre_fit", "fit_on_call", "refit", "fit_streaming", "fit_only"]
 
 
 class SklearnOp(Operator):
-    """Universal adapter for scikit-learn-compatible estimators on GeoTensors.
+    """Universal adapter for scikit-learn-compatible estimators on GeoArrays.
 
     Delegates the ``(C, H, W) <-> (n_samples, n_features)`` marshalling
-    to :class:`GeoTensorEstimator` and adds the fitting lifecycle
+    to :class:`GeoArrayEstimator` and adds the fitting lifecycle
     (``fit_mode``) plus joblib state persistence. Metadata-independent:
-    accepts a ``GeoTensor`` or a plain ``np.ndarray`` and returns a
+    accepts a ``GeoArray`` or a plain ``np.ndarray`` and returns a
     matching carrier whenever the estimator output preserves the input's
     spatial ``(H, W)`` layout; sample-only outputs (and
     ``nan_transform="drop"`` with invalid rows) come back as bare ndarrays.
 
     Args:
         estimator: scikit-learn-compatible object to wrap.
-        mode: Named reshape mode passed to :class:`GeoTensorEstimator`.
+        mode: Named reshape mode passed to :class:`GeoArrayEstimator`.
         sample_axes: Explicit sample axes for ``mode="custom"``.
         feature_axes: Explicit feature axes for ``mode="custom"``.
         fit_mode: Fitting lifecycle: ``"pre_fit"`` (loaded state, never
@@ -77,12 +78,12 @@ class SklearnOp(Operator):
             arbitrary code: only pass files from a trusted source (see
             :meth:`load_state`).
         out_band_names: Names of the output bands, written to
-            ``attrs["band_names"]`` of GeoTensor outputs (must match the
+            ``attrs["band_names"]`` of GeoArray outputs (must match the
             output band count). ``None`` keeps the input's band keys when
             the band count is unchanged and drops them otherwise.
         label_fill_value: Fill value of integer outputs such as
             cluster-label maps (default ``-1``). Float outputs always use
-            ``NaN``. See :class:`GeoTensorEstimator` for the nodata rules
+            ``NaN``. See :class:`GeoArrayEstimator` for the nodata rules
             (fill pixels of the input are excluded from fits and come back
             as the output fill).
 
@@ -156,7 +157,7 @@ class SklearnOp(Operator):
         self.out_band_names = out_band_names
         self.label_fill_value = label_fill_value
         self._task = resolved_task
-        self._geo_estimator = GeoTensorEstimator(
+        self._geo_estimator = GeoArrayEstimator(
             estimator,
             mode=mode,
             sample_axes=sample_axes,
@@ -177,7 +178,7 @@ class SklearnOp(Operator):
         """Whether the wrapped estimator has been fitted (or loaded)."""
         return self._geo_estimator.is_fitted
 
-    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+    def fit(self, gt: GeoArray | np.ndarray) -> Self:
         """Fit the wrapped estimator on ``gt`` (``nan_fit`` strategy applies).
 
         Returns:
@@ -186,7 +187,7 @@ class SklearnOp(Operator):
         self._geo_estimator.fit(gt)
         return self
 
-    def partial_fit(self, gt: GeoTensor | np.ndarray) -> Self:
+    def partial_fit(self, gt: GeoArray | np.ndarray) -> Self:
         """Update a streaming estimator with one more batch.
 
         Returns:
@@ -195,15 +196,15 @@ class SklearnOp(Operator):
         self._geo_estimator.partial_fit(gt)
         return self
 
-    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def transform(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Apply ``estimator.transform`` without fitting."""
         return self._geo_estimator.transform(gt)
 
-    def predict(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def predict(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Apply ``estimator.predict`` without fitting."""
         return self._geo_estimator.predict(gt)
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         geo = self._geo_estimator
         if self.fit_mode == "pre_fit":
             return getattr(geo, self._task)(gt)
@@ -231,7 +232,7 @@ class SklearnOp(Operator):
             write_meta: Also write a timestamped ``<path>.meta.json``
                 sidecar (scikit-learn version, fit shape / sample count,
                 UTC ``fit_timestamp``); off by default. See
-                :meth:`GeoTensorEstimator.save_state`.
+                :meth:`GeoArrayEstimator.save_state`.
         """
         self._geo_estimator.save_state(path, write_meta=write_meta)
         self.estimator = self._geo_estimator.estimator
@@ -469,15 +470,15 @@ class PixelwiseIterativeImputer(SklearnOp):
 class ModelOp(Operator):
     """Wrap any callable as an Operator.
 
-    Materialises the GeoTensor to a plain ``np.ndarray`` (via
+    Materialises the GeoArray to a plain ``np.ndarray`` (via
     ``np.asarray``) before handing it to the model — frameworks that
     strip the subclass (torch, JAX, sklearn) don't care, and frameworks
     that preserve it (numpy proper) still see something sensible.
 
     Output contract: the model's return value is passed through **as-is**
-    and never rewrapped into the input carrier -- a ``GeoTensor`` input
+    and never rewrapped into the input carrier -- a ``GeoArray`` input
     yields whatever the model returns (an ``np.ndarray``, a torch tensor,
-    ...) without ``transform`` / ``crs`` / ``fill_value_default``. Rewrap
+    ...) without ``transform`` / ``crs`` / ``fill_value``. Rewrap
     it yourself, or use :class:`SklearnOp`, which restores the grid for
     per-pixel estimators.
 
@@ -559,6 +560,7 @@ class ModelOp(Operator):
         return getattr(self.model, self.method)
 
     def _apply(self, gt: Carrier) -> Any:
+        reject_geotensor(gt, type(self).__name__)
         arr = np.asarray(gt)
         fn = self._resolve_callable()
         if self.batch_size is None:

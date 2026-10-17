@@ -16,11 +16,12 @@ pytest.importorskip(
 
 import numpy as np
 import rasterio
+from geoarray import GeoArray
 from geopatcher import RasterField, SpatialPatcher, spatial
-from georeader.geotensor import GeoTensor
 from pipekit import Lambda
 
 from geoops import Sequential
+from geoops._src.geo import affine_of
 from geoops.patch_ops import (
     ApplyToChips,
     GridSampler,
@@ -30,7 +31,7 @@ from geoops.patch_ops import (
 
 def _ones_field() -> RasterField:
     arr = np.ones((32, 32), dtype=np.float32)
-    gt = GeoTensor(values=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630")
+    gt = GeoArray(data=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630")
     return RasterField(gt)
 
 
@@ -93,11 +94,11 @@ def test_band_collapsing_operator_merges_onto_the_field_grid() -> None:
 
     transform = rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0)
     rng = np.random.default_rng(0)
-    scene = GeoTensor(
-        values=rng.integers(1, 10_000, (4, 64, 64)).astype(np.uint16),
+    scene = GeoArray(
+        data=rng.integers(1, 10_000, (4, 64, 64)).astype(np.uint16),
         transform=transform,
         crs="EPSG:32630",
-        fill_value_default=0,
+        fill_value=0,
         attrs={"band_names": ["B02", "B03", "B04", "B08"]},
     )
     field = RasterField(scene)
@@ -120,11 +121,11 @@ def test_band_collapsing_operator_merges_onto_the_field_grid() -> None:
 
     out = pipe(field)
 
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
     assert out.shape == (64, 64)
-    assert out.transform == transform
+    assert affine_of(out) == transform
     assert "band_names" not in out.attrs
-    assert np.isnan(out.fill_value_default)
+    assert np.isnan(out.fill_value)
     whole = np.asarray(ndvi(scene))
     covered = ~np.isnan(np.asarray(out))
     np.testing.assert_allclose(np.asarray(out)[covered], whole[covered], atol=1e-12)

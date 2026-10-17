@@ -17,13 +17,14 @@ pytest.importorskip(
 
 import numpy as np
 import rasterio
+from geoarray import GeoArray
 from geopatcher import Patch, RasterField, SpatialPatcher, spatial
-from georeader.geotensor import GeoTensor
 from pipekit import Lambda
 
 import geoops
 import geoops.patch_ops as patch_ops
 from geoops import Sequential
+from geoops._src.geo import affine_of
 from geoops.patch_ops import (
     ApplyToChips,
     GridSampler,
@@ -36,8 +37,8 @@ from geoops.patch_ops import (
 def field() -> RasterField:
     # 2-D field so OverlapAdd's row/col slicer matches the domain shape.
     arr = np.ones((16, 16), dtype=np.float32)
-    gt = GeoTensor(
-        values=arr,
+    gt = GeoArray(
+        data=arr,
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
     )
@@ -98,7 +99,7 @@ def test_runtime_holders_are_forbid_in_yaml(patcher: SpatialPatcher) -> None:
     assert GridSampler.forbid_in_yaml is True
     assert MergePatches.forbid_in_yaml is True
     field = RasterField(
-        GeoTensor(np.ones((4, 4)), rasterio.Affine.identity(), "EPSG:32630")
+        GeoArray(np.ones((4, 4)), rasterio.Affine.identity(), "EPSG:32630")
     )
     config = MergePatches(
         aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain
@@ -202,9 +203,9 @@ class TestLabelSamplers:
         return lab
 
     @pytest.fixture
-    def scene(self) -> GeoTensor:
-        return GeoTensor(
-            values=np.arange(30 * 30, dtype=np.float32).reshape(30, 30),
+    def scene(self) -> GeoArray:
+        return GeoArray(
+            data=np.arange(30 * 30, dtype=np.float32).reshape(30, 30),
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
         )
@@ -218,7 +219,7 @@ class TestLabelSamplers:
         ]
 
     def test_stratified_largest_remainder_allocation(
-        self, labels: np.ndarray, scene: GeoTensor
+        self, labels: np.ndarray, scene: GeoArray
     ) -> None:
         from collections import Counter
 
@@ -237,7 +238,7 @@ class TestLabelSamplers:
         assert Counter(self._classes(patches, labels, (4, 4))) == {0: 4, 1: 2, 2: 1}
 
     def test_stratified_seed_reproducible(
-        self, labels: np.ndarray, scene: GeoTensor
+        self, labels: np.ndarray, scene: GeoArray
     ) -> None:
         from geoops.patch_ops import StratifiedSample
 
@@ -263,7 +264,7 @@ class TestLabelSamplers:
                 size=(4, 4),
             )
 
-    def test_stratified_sparse_class_warns_and_shrinks(self, scene: GeoTensor) -> None:
+    def test_stratified_sparse_class_warns_and_shrinks(self, scene: GeoArray) -> None:
         from geoops.patch_ops import StratifiedSample
 
         # Class 1 exists at a single centre position only.
@@ -281,7 +282,7 @@ class TestLabelSamplers:
         assert len(patches) == 5  # 4 of class 0 + the single class-1 chip
 
     def test_chips_carry_shifted_transform(
-        self, labels: np.ndarray, scene: GeoTensor
+        self, labels: np.ndarray, scene: GeoArray
     ) -> None:
         from geoops.patch_ops import StratifiedSample
 
@@ -295,15 +296,16 @@ class TestLabelSamplers:
         for p in op(scene):
             r, c = p.anchor
             assert p.data.shape[-2:] == (6, 6)
-            assert p.data.transform.c == pytest.approx(float(c))
-            assert p.data.transform.f == pytest.approx(float(r))
+            assert isinstance(p.data, GeoArray)
+            assert affine_of(p.data).c == pytest.approx(float(c))
+            assert affine_of(p.data).f == pytest.approx(float(r))
             assert p.indices.col_off == c and p.indices.row_off == r
             np.testing.assert_array_equal(
                 np.asarray(p.data), np.asarray(scene)[r : r + 6, c : c + 6]
             )
 
     def test_stratified_composes_with_apply_to_chips(
-        self, labels: np.ndarray, scene: GeoTensor
+        self, labels: np.ndarray, scene: GeoArray
     ) -> None:
         from geoops.patch_ops import StratifiedSample
 
@@ -329,7 +331,7 @@ class TestLabelSamplers:
             )
 
     def test_balanced_exact_n_per_class(
-        self, labels: np.ndarray, scene: GeoTensor
+        self, labels: np.ndarray, scene: GeoArray
     ) -> None:
         from collections import Counter
 
@@ -340,7 +342,7 @@ class TestLabelSamplers:
         assert Counter(self._classes(patches, labels, (4, 4))) == {0: 5, 1: 5, 2: 5}
 
     def test_balanced_explicit_classes(
-        self, labels: np.ndarray, scene: GeoTensor
+        self, labels: np.ndarray, scene: GeoArray
     ) -> None:
         from geoops.patch_ops import BalancedSampler
 
@@ -352,7 +354,7 @@ class TestLabelSamplers:
         assert classes == {0, 2}
         assert len(patches) == 6
 
-    def test_balanced_sparse_class_warns(self, scene: GeoTensor) -> None:
+    def test_balanced_sparse_class_warns(self, scene: GeoArray) -> None:
         from geoops.patch_ops import BalancedSampler
 
         labels = np.zeros((30, 30), dtype=np.int64)
@@ -373,7 +375,7 @@ class TestLabelSamplers:
             assert isinstance(p.data, np.ndarray)
             assert p.data.shape == (3, 8, 8)
 
-    def test_patch_size_larger_than_labels_raises(self, scene: GeoTensor) -> None:
+    def test_patch_size_larger_than_labels_raises(self, scene: GeoArray) -> None:
         from geoops.patch_ops import BalancedSampler
 
         op = BalancedSampler(

@@ -5,49 +5,48 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from _helpers import toy_geotensor, uint16_dn_cube
-from georeader.geotensor import GeoTensor
+from _helpers import toy_geoarray, uint16_dn_cube
+from geoarray import GeoArray
 
 from geoops import indices, spectral
+from geoops._src.geo import affine_of
 
 
 _BAND_NAMES = ["B2", "B4", "B8", "B11"]
 _WAVELENGTHS = [490.0, 665.0, 842.0, 1610.0]
 
 
-def _toy_geotensor(values: np.ndarray) -> GeoTensor:
+def _toy_geoarray(values: np.ndarray) -> GeoArray:
     """Shared toy factory plus the S2-ish band metadata used here."""
-    return toy_geotensor(
+    return toy_geoarray(
         values,
         attrs={"band_names": list(_BAND_NAMES), "wavelengths": list(_WAVELENGTHS)},
     )
 
 
 def test_select_bands_by_name_and_index_match() -> None:
-    gt = _toy_geotensor(np.arange(4 * 2 * 3, dtype=np.float32).reshape(4, 2, 3))
+    gt = _toy_geoarray(np.arange(4 * 2 * 3, dtype=np.float32).reshape(4, 2, 3))
     by_name = spectral.SelectBands(bands=["B8", "B4"])(gt)
     by_index = spectral.SelectBands(bands=[2, 1])(gt)
 
     np.testing.assert_array_equal(np.asarray(by_name), np.asarray(by_index))
-    assert by_name.transform == gt.transform
+    assert by_name.grid == gt.grid
     assert str(by_name.crs) == str(gt.crs)
-    assert by_name.attrs["band_names"] == ["B8", "B4"]
-    assert by_name.attrs["wavelengths"] == [842.0, 665.0]
+    assert by_name.attrs["band_names"] == ("B8", "B4")
+    assert by_name.attrs["wavelengths"] == (842.0, 665.0)
 
 
 def test_reorder_bands_preserves_band_metadata() -> None:
-    gt = _toy_geotensor(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2))
+    gt = _toy_geoarray(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2))
     out = spectral.ReorderBands(order=["B11", "B2"])(gt)
 
     np.testing.assert_array_equal(np.asarray(out), np.asarray(gt)[[3, 0]])
-    assert out.attrs["band_names"] == ["B11", "B2"]
-    assert out.attrs["wavelengths"] == [1610.0, 490.0]
+    assert out.attrs["band_names"] == ("B11", "B2")
+    assert out.attrs["wavelengths"] == (1610.0, 490.0)
 
 
 def test_band_math_matches_normalized_difference() -> None:
-    gt = _toy_geotensor(
-        np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32)
-    )
+    gt = _toy_geoarray(np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32))
 
     via_math = spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)")(gt)
     via_op = indices.NormalizedDifference(a="B8", b="B4", eps=1e-6)(gt)
@@ -56,16 +55,14 @@ def test_band_math_matches_normalized_difference() -> None:
 
 
 def test_band_math_unknown_band_raises_clear_error() -> None:
-    gt = _toy_geotensor(np.ones((4, 2, 2), dtype=np.float32))
+    gt = _toy_geoarray(np.ones((4, 2, 2), dtype=np.float32))
 
     with pytest.raises(ValueError, match="Unknown band name"):
         spectral.BandMath(expression="B99 + B8")(gt)
 
 
 def test_band_math_allows_safe_numpy_functions() -> None:
-    gt = _toy_geotensor(
-        np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32)
-    )
+    gt = _toy_geoarray(np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32))
 
     out = spectral.BandMath(expression="sqrt(B8)")(gt)
 
@@ -81,7 +78,7 @@ def test_band_math_uint16_no_wrap() -> None:
     np.testing.assert_allclose(out, [[-2000.0]])
 
     ndvi = spectral.BandMath(expression="(a - b) / (a + b)", band_names=["a", "b"])
-    np.testing.assert_allclose(np.asarray(ndvi(toy_geotensor(cube))), [[-0.5]])
+    np.testing.assert_allclose(np.asarray(ndvi(toy_geoarray(cube))), [[-0.5]])
 
     # Signed overflow in ``a + b`` / ``a * b`` is gone too.
     cube16 = uint16_dn_cube(2).astype(np.int16) * 10
@@ -91,9 +88,7 @@ def test_band_math_uint16_no_wrap() -> None:
 
 
 def test_band_ratio_by_name() -> None:
-    gt = _toy_geotensor(
-        np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32)
-    )
+    gt = _toy_geoarray(np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32))
 
     out = spectral.BandRatio(numerator="B8", denominator="B4", eps=0.0)(gt)
 
@@ -102,8 +97,8 @@ def test_band_ratio_by_name() -> None:
 
 def test_continuum_removal_flat_and_absorption() -> None:
     wavelengths = np.array([2100.0, 2200.0, 2300.0])
-    flat = GeoTensor(
-        values=np.ones((3, 1, 1), dtype=np.float32),
+    flat = GeoArray(
+        data=np.ones((3, 1, 1), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32629",
         attrs={"wavelengths": wavelengths.tolist()},
@@ -113,8 +108,8 @@ def test_continuum_removal_flat_and_absorption() -> None:
         1.0,
     )
 
-    absorption = GeoTensor(
-        values=np.array([[[1.0]], [[0.8]], [[1.0]]], dtype=np.float32),
+    absorption = GeoArray(
+        data=np.array([[[1.0]], [[0.8]], [[1.0]]], dtype=np.float32),
         transform=flat.transform,
         crs=flat.crs,
         attrs={"wavelengths": wavelengths.tolist()},
@@ -124,8 +119,8 @@ def test_continuum_removal_flat_and_absorption() -> None:
 
 
 def test_continuum_removal_linear_method() -> None:
-    gt = GeoTensor(
-        values=np.array([[[1.0]], [[0.75]], [[0.5]]], dtype=np.float32),
+    gt = GeoArray(
+        data=np.array([[[1.0]], [[0.75]], [[0.5]]], dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32629",
         attrs={"wavelengths": [1.0, 2.0, 3.0]},
@@ -138,7 +133,7 @@ def test_continuum_removal_linear_method() -> None:
 
 
 def test_spectral_binning_and_smoothing_preserve_spatial_metadata() -> None:
-    gt = _toy_geotensor(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2))
+    gt = _toy_geoarray(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2))
 
     binned = spectral.SpectralBinning(
         target_wavelengths=[577.5, 1226.0],
@@ -146,18 +141,18 @@ def test_spectral_binning_and_smoothing_preserve_spatial_metadata() -> None:
         method="mean",
     )(gt)
     assert binned.shape == (2, 2, 2)
-    assert binned.transform == gt.transform
+    assert binned.grid == gt.grid
     np.testing.assert_allclose(
         np.asarray(binned)[0], np.mean(np.asarray(gt)[:2], axis=0)
     )
 
     smoothed = spectral.SpectralSmoothing(method="moving_average", window=3)(gt)
     assert smoothed.shape == gt.shape
-    assert smoothed.transform == gt.transform
+    assert smoothed.grid == gt.grid
 
 
 def test_spectral_binning_median_and_weighted_mean() -> None:
-    gt = _toy_geotensor(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2))
+    gt = _toy_geoarray(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2))
 
     median = spectral.SpectralBinning(
         target_wavelengths=[577.5],
@@ -175,7 +170,7 @@ def test_spectral_binning_median_and_weighted_mean() -> None:
 
 
 def test_spectral_smoothing_savgol_and_gaussian() -> None:
-    gt = _toy_geotensor(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2))
+    gt = _toy_geoarray(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2))
 
     savgol = spectral.SpectralSmoothing(method="savgol", window=3, polyorder=1)(gt)
     gaussian = spectral.SpectralSmoothing(method="gaussian", window=3)(gt)
@@ -191,7 +186,7 @@ def test_spectral_smoothing_gaussian_uint16_returns_float() -> None:
     cube = uint16_dn_cube(5)
     op = spectral.SpectralSmoothing(method="gaussian", window=3)
 
-    out = op(toy_geotensor(cube))
+    out = op(toy_geoarray(cube))
     expected = op(cube.astype(np.float64))
 
     assert np.asarray(out).dtype == np.float64
@@ -199,15 +194,15 @@ def test_spectral_smoothing_gaussian_uint16_returns_float() -> None:
 
 
 def test_stack_and_split_bands() -> None:
-    gt = _toy_geotensor(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2))
+    gt = _toy_geoarray(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2))
     split = spectral.SplitBands()(gt)
     assert len(split) == 4
     assert split[0].shape == (1, 2, 2)
-    assert split[0].attrs["band_names"] == ["B2"]
+    assert split[0].attrs["band_names"] == ("B2",)
 
     stacked = spectral.StackBands()(split[:2])
     np.testing.assert_array_equal(np.asarray(stacked), np.asarray(gt)[:2])
-    assert stacked.transform == gt.transform
+    assert stacked.grid == gt.grid
 
 
 def test_spectral_get_config_serialization() -> None:
@@ -300,36 +295,36 @@ def test_spectral_hydra_zen_roundtrip(op: object) -> None:
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
 
 
-def test_geotensor_metadata_propagates_through_spectral_ops() -> None:
+def test_geoarray_metadata_propagates_through_spectral_ops() -> None:
     """Spatial transform/CRS must survive every spectral Operator (Tier-B)."""
-    gt = _toy_geotensor(np.arange(4 * 3 * 3, dtype=np.float32).reshape(4, 3, 3))
+    gt = _toy_geoarray(np.arange(4 * 3 * 3, dtype=np.float32).reshape(4, 3, 3))
 
     # Band subsets and value-preserving transforms keep the input's fill;
     # derived products (new quantities) declare NaN (#146).
     ops = [
-        (spectral.SelectBands(bands=["B2", "B8"]), gt.fill_value_default),
+        (spectral.SelectBands(bands=["B2", "B8"]), gt.fill_value),
         (spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)"), np.nan),
         (spectral.BandRatio(numerator="B8", denominator="B4"), np.nan),
         (spectral.ContinuumRemoval(method="linear"), np.nan),
         (
             spectral.SpectralBinning(target_wavelengths=[577.5], width=200.0),
-            gt.fill_value_default,
+            gt.fill_value,
         ),
         (
             spectral.SpectralSmoothing(method="moving_average", window=3),
-            gt.fill_value_default,
+            gt.fill_value,
         ),
     ]
     for op, fill in ops:
         out = op(gt)
-        assert out.transform == gt.transform
+        assert out.grid == gt.grid
         assert str(out.crs) == str(gt.crs)
-        np.testing.assert_equal(out.fill_value_default, fill)
+        np.testing.assert_equal(out.fill_value, fill)
 
 
 def test_split_bands_rejects_out_of_range_axis() -> None:
     """SplitBands must validate axis bounds rather than silently wrapping."""
-    gt = _toy_geotensor(np.ones((4, 2, 2), dtype=np.float32))
+    gt = _toy_geoarray(np.ones((4, 2, 2), dtype=np.float32))
 
     with pytest.raises(ValueError, match="out of range"):
         spectral.SplitBands(axis=-4)(gt)
@@ -355,7 +350,7 @@ def test_spectral_binning_weighted_mean_rejects_nonpositive_width() -> None:
 
 def test_select_and_split_bands_subset_every_per_band_key() -> None:
     """``descriptions`` / ``bands`` follow the selection, not just names (#144)."""
-    gt = toy_geotensor(
+    gt = toy_geoarray(
         np.arange(12, dtype=np.float32).reshape(3, 2, 2),
         attrs={
             "band_names": ["a", "b", "c"],
@@ -372,7 +367,7 @@ def test_select_and_split_bands_subset_every_per_band_key() -> None:
         "k": 1,
     }
     parts = spectral.SplitBands()(gt)
-    assert [p.attrs["descriptions"] for p in parts] == [["A"], ["B"], ["C"]]
+    assert [p.attrs["descriptions"] for p in parts] == [("A",), ("B",), ("C",)]
     ratio = spectral.BandRatio(numerator=0, denominator=1)(gt)
     assert ratio.attrs == {"k": 1}
 
@@ -381,29 +376,29 @@ def test_stack_bands_keeps_each_band_key_only_when_every_input_has_it() -> None:
     """Names present on every input are stacked; partial wavelengths are dropped."""
     base_transform = rasterio.Affine.identity()
     crs = "EPSG:32629"
-    gt_a = GeoTensor(
-        values=np.ones((1, 2, 2), dtype=np.float32),
+    gt_a = GeoArray(
+        data=np.ones((1, 2, 2), dtype=np.float32),
         transform=base_transform,
         crs=crs,
-        fill_value_default=-9999,
+        fill_value=-9999,
         attrs={"band_names": ["A"], "wavelengths": [490.0]},
     )
-    gt_b = GeoTensor(
-        values=np.ones((1, 2, 2), dtype=np.float32),
+    gt_b = GeoArray(
+        data=np.ones((1, 2, 2), dtype=np.float32),
         transform=base_transform,
         crs=crs,
-        fill_value_default=-9999,
+        fill_value=-9999,
         attrs={"band_names": ["B"]},  # no wavelengths
     )
 
     stacked = spectral.StackBands()([gt_a, gt_b])
-    assert stacked.attrs["band_names"] == ["A", "B"]
+    assert stacked.attrs["band_names"] == ("A", "B")
     assert "wavelengths" not in stacked.attrs
 
 
 def test_band_math_rejects_unsupported_unary_operator() -> None:
     """Bitwise-not and logical-not are not supported unary operators."""
-    gt = _toy_geotensor(np.ones((4, 2, 2), dtype=np.float32))
+    gt = _toy_geoarray(np.ones((4, 2, 2), dtype=np.float32))
 
     with pytest.raises(ValueError, match="Unsupported unary operator"):
         spectral.BandMath(expression="~B8")(gt)
@@ -415,11 +410,11 @@ def test_band_math_rejects_unsupported_unary_operator() -> None:
 def test_select_bands_rejects_mismatched_wavelengths_length() -> None:
     """SelectBands must validate gt.attrs['wavelengths'] length matches band axis."""
     arr = np.ones((4, 2, 2), dtype=np.float32)
-    gt = GeoTensor(
-        values=arr,
+    gt = GeoArray(
+        data=arr,
         transform=rasterio.Affine.identity(),
         crs="EPSG:32629",
-        fill_value_default=-9999,
+        fill_value=-9999,
         attrs={
             "band_names": ["B2", "B4", "B8", "B11"],
             "wavelengths": [490.0, 665.0],  # length mismatch
@@ -432,7 +427,7 @@ def test_select_bands_rejects_mismatched_wavelengths_length() -> None:
 
 def test_collapsing_ops_drop_stale_band_attrs() -> None:
     """Ops that collapse / reshape the band axis must drop stale band_names."""
-    gt = _toy_geotensor(np.ones((4, 2, 2), dtype=np.float32))
+    gt = _toy_geoarray(np.ones((4, 2, 2), dtype=np.float32))
 
     for op in [
         spectral.BandRatio(numerator="B8", denominator="B4"),
@@ -446,7 +441,7 @@ def test_collapsing_ops_drop_stale_band_attrs() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Plain-ndarray carrier support (georeader GeoTensor 2.x numpy-compat)
+# Plain-ndarray carrier support (georeader GeoArray 2.x numpy-compat)
 # ---------------------------------------------------------------------------
 
 
@@ -467,13 +462,13 @@ def test_collapsing_ops_drop_stale_band_attrs() -> None:
     ids=lambda op: type(op).__name__,
 )
 def test_spectral_ops_accept_plain_ndarray(op) -> None:
-    """Plain ndarray in -> plain ndarray out, values matching the GeoTensor path."""
+    """Plain ndarray in -> plain ndarray out, values matching the GeoArray path."""
     arr = np.linspace(0.1, 1.0, 4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2)
 
     out = op(arr)
     assert type(out) is np.ndarray
 
-    gt_out = op(_toy_geotensor(arr))
+    gt_out = op(_toy_geoarray(arr))
     np.testing.assert_allclose(out, np.asarray(gt_out), rtol=1e-6)
 
 
@@ -509,8 +504,8 @@ def test_4d_time_stack() -> None:
     picked = spectral.SelectBands(bands=["b2", "b0"])(stack)
     assert picked.shape == (2, 2, 4, 4)
     np.testing.assert_array_equal(np.asarray(picked), values[:, [2, 0]])
-    assert picked.attrs["band_names"] == ["b2", "b0"]
-    assert picked.attrs["wavelengths"] == [690.0, 490.0]
+    assert picked.attrs["band_names"] == ("b2", "b0")
+    assert picked.attrs["wavelengths"] == (690.0, 490.0)
 
     nd = spectral.BandMath(expression="(b1 - b0) / (b1 + b0)")(stack)
     assert nd.shape == (2, 1, 4, 4)
@@ -529,33 +524,33 @@ def test_4d_time_stack() -> None:
 def test_stack_bands_rejects_mismatched_fill() -> None:
     """Stacking fill 0 with fill -9999 used to silently declare fill 0."""
     values = np.ones((1, 2, 2), dtype=np.float32)
-    gt_a = toy_geotensor(values, fill_value_default=0)
-    gt_b = toy_geotensor(values, fill_value_default=-9999)
+    gt_a = toy_geoarray(values, fill_value=0)
+    gt_b = toy_geoarray(values, fill_value=-9999)
 
-    with pytest.raises(ValueError, match="fill_value_default"):
+    with pytest.raises(ValueError, match="fill_value"):
         spectral.StackBands()([gt_a, gt_b])
 
 
 def test_stack_bands_nan_fills_match() -> None:
     values = np.ones((1, 2, 2), dtype=np.float32)
-    gt_a = toy_geotensor(values, fill_value_default=np.nan)
-    gt_b = toy_geotensor(np.full((2, 2, 2), 2.0, np.float32), fill_value_default=np.nan)
+    gt_a = toy_geoarray(values, fill_value=np.nan)
+    gt_b = toy_geoarray(np.full((2, 2, 2), 2.0, np.float32), fill_value=np.nan)
 
     stacked = spectral.StackBands()([gt_a, gt_b])
 
     assert stacked.shape == (3, 2, 2)
-    assert np.isnan(stacked.fill_value_default)
+    assert np.isnan(stacked.fill_value)
     np.testing.assert_array_equal(np.asarray(stacked)[:, 0, 0], [1.0, 2.0, 2.0])
 
 
 def test_stack_bands_rejects_mismatched_grid() -> None:
     values = np.ones((1, 2, 2), dtype=np.float32)
-    gt_a = toy_geotensor(values)
-    shifted = toy_geotensor(
-        values, transform=gt_a.transform * rasterio.Affine.translation(1, 0)
+    gt_a = toy_geoarray(values)
+    shifted = toy_geoarray(
+        values, transform=affine_of(gt_a) * rasterio.Affine.translation(1, 0)
     )
-    other_crs = toy_geotensor(values, crs="EPSG:4326")
-    other_shape = toy_geotensor(np.ones((1, 3, 2), dtype=np.float32))
+    other_crs = toy_geoarray(values, crs="EPSG:4326")
+    other_shape = toy_geoarray(np.ones((1, 3, 2), dtype=np.float32))
 
     for other in (shifted, other_crs, other_shape):
         with pytest.raises(ValueError, match="different grid"):
@@ -566,17 +561,17 @@ def test_stack_bands_rejects_mixed_carriers() -> None:
     values = np.ones((1, 2, 2), dtype=np.float32)
 
     with pytest.raises(ValueError, match="cannot mix"):
-        spectral.StackBands()([toy_geotensor(values), values])
+        spectral.StackBands()([toy_geoarray(values), values])
 
 
 def test_stack_bands_promotes_2d_and_mixed_band_counts() -> None:
-    gt_a = toy_geotensor(np.zeros((2, 2), dtype=np.float32))
-    gt_b = toy_geotensor(np.ones((2, 2, 2), dtype=np.float32))
+    gt_a = toy_geoarray(np.zeros((2, 2), dtype=np.float32))
+    gt_b = toy_geoarray(np.ones((2, 2, 2), dtype=np.float32))
 
     stacked = spectral.StackBands()([gt_a, gt_b])
 
     assert stacked.shape == (3, 2, 2)
-    assert stacked.fill_value_default == gt_a.fill_value_default
+    assert stacked.fill_value == gt_a.fill_value
     np.testing.assert_array_equal(np.asarray(stacked)[:, 0, 0], [0.0, 1.0, 1.0])
 
 

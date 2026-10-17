@@ -10,19 +10,20 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio
-from _helpers import fill_pixel_mask, toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import fill_pixel_mask, toy_geoarray
+from geoarray import GeoArray, footprint
 from pipekit import Operator, Sequential
 
 import geoops as gz
 from geoops import augment
+from geoops._src.geo import affine_of
 
 
-def _toy_geotensor(values: np.ndarray, **kwargs: Any) -> GeoTensor:
+def _toy_geoarray(values: np.ndarray, **kwargs: Any) -> GeoArray:
     # The ``patch`` data starts at 0.0, so a 0 fill would silently mark
     # pixel (0, 0) as nodata; use a fill the toy data never takes.
-    kwargs.setdefault("fill_value_default", -9999.0)
-    return toy_geotensor(
+    kwargs.setdefault("fill_value", -9999.0)
+    return toy_geoarray(
         values,
         **kwargs,
         attrs={
@@ -34,13 +35,13 @@ def _toy_geotensor(values: np.ndarray, **kwargs: Any) -> GeoTensor:
 
 
 @pytest.fixture
-def patch() -> GeoTensor:
+def patch() -> GeoArray:
     arr = np.arange(4 * 5 * 6, dtype=np.float32).reshape(4, 5, 6) / 100.0
-    return _toy_geotensor(arr)
+    return _toy_geoarray(arr)
 
 
-def _xy(transform: rasterio.Affine, col: int, row: int) -> tuple[float, float]:
-    return transform * (col, row)
+def _xy(transform: Any, col: int, row: int) -> tuple[float, float]:
+    return affine_of(transform) * (col, row)
 
 
 def test_imports_augment_module() -> None:
@@ -48,7 +49,7 @@ def test_imports_augment_module() -> None:
     assert hasattr(gz.augment, "RandomFlip")
 
 
-def test_random_flip_noop_and_forced_transform(patch: GeoTensor) -> None:
+def test_random_flip_noop_and_forced_transform(patch: GeoArray) -> None:
     no_op = augment.RandomFlip(p_horizontal=0.0, p_vertical=0.0, seed=0)(patch)
     assert no_op is patch
 
@@ -61,7 +62,7 @@ def test_random_flip_noop_and_forced_transform(patch: GeoTensor) -> None:
     assert flipped.bounds == patch.bounds
 
 
-def test_random_rotate90_matches_numpy_and_updates_transform(patch: GeoTensor) -> None:
+def test_random_rotate90_matches_numpy_and_updates_transform(patch: GeoArray) -> None:
     seed = 3
     rng = np.random.default_rng(seed)
     rng.random()
@@ -84,11 +85,11 @@ def test_random_rotate90_matches_numpy_and_updates_transform(patch: GeoTensor) -
     assert out.bounds == patch.bounds
 
 
-def test_random_crop_and_shift_update_spatial_metadata(patch: GeoTensor) -> None:
+def test_random_crop_and_shift_update_spatial_metadata(patch: GeoArray) -> None:
     cropped = augment.RandomCrop(size=(3, 4), seed=0)(patch)
     assert cropped.shape == (4, 3, 4)
     assert cropped.crs == patch.crs
-    assert cropped.transform != patch.transform
+    assert affine_of(cropped) != affine_of(patch)
 
     shifted = augment.RandomShift(max_shift=(1, 1), seed=0)(patch)
     assert shifted.shape == patch.shape
@@ -96,14 +97,14 @@ def test_random_crop_and_shift_update_spatial_metadata(patch: GeoTensor) -> None
     assert shifted.dtype == patch.dtype
 
 
-def test_random_crop_rejects_invalid_size(patch: GeoTensor) -> None:
+def test_random_crop_rejects_invalid_size(patch: GeoArray) -> None:
     with pytest.raises(ValueError, match="positive"):
         augment.RandomCrop(size=(0, 4))
     with pytest.raises(ValueError, match="fit"):
         augment.RandomCrop(size=(patch.height + 1, patch.width))(patch)
 
 
-def test_seed_override_is_reproducible(patch: GeoTensor) -> None:
+def test_seed_override_is_reproducible(patch: GeoArray) -> None:
     op = augment.GaussianNoise(sigma=(0.01, 0.02), seed=1)
     first = op(patch, seed=42)
     second = op(patch, seed=42)
@@ -112,7 +113,7 @@ def test_seed_override_is_reproducible(patch: GeoTensor) -> None:
     assert not np.array_equal(np.asarray(first), np.asarray(third))
 
 
-def test_brightness_jitter_per_band_and_shared_factor(patch: GeoTensor) -> None:
+def test_brightness_jitter_per_band_and_shared_factor(patch: GeoArray) -> None:
     per_band = augment.BrightnessJitter(factor=(0.9, 1.1), per_band=True, seed=0)(patch)
     shared = augment.BrightnessJitter(factor=(0.9, 1.1), per_band=False, seed=0)(patch)
 
@@ -125,7 +126,7 @@ def test_brightness_jitter_per_band_and_shared_factor(patch: GeoTensor) -> None:
     assert per_band.shape == patch.shape
 
 
-def test_brightness_jitter_statistical_midpoint(patch: GeoTensor) -> None:
+def test_brightness_jitter_statistical_midpoint(patch: GeoArray) -> None:
     factors = []
     pixel = float(np.asarray(patch)[0, 1, 1])
     # The feature request asks for a 1000-sample statistical check.
@@ -138,7 +139,7 @@ def test_brightness_jitter_statistical_midpoint(patch: GeoTensor) -> None:
 
 
 def test_contrast_jitter_noise_and_speckle_preserve_shape_dtype(
-    patch: GeoTensor,
+    patch: GeoArray,
 ) -> None:
     ops = [
         augment.ContrastJitter(factor=(0.95, 1.05), seed=0),
@@ -149,18 +150,17 @@ def test_contrast_jitter_noise_and_speckle_preserve_shape_dtype(
         out = op(patch)
         assert out.shape == patch.shape
         assert out.dtype == patch.dtype
-        assert out.transform == patch.transform
-        assert out.crs == patch.crs
+        assert out.grid == patch.grid
 
 
-def test_negative_noise_parameters_raise(patch: GeoTensor) -> None:
+def test_negative_noise_parameters_raise(patch: GeoArray) -> None:
     with pytest.raises(ValueError, match="non-negative"):
         augment.GaussianNoise(sigma=-0.1)(patch)
     with pytest.raises(ValueError, match="non-negative"):
         augment.SpeckleNoise(sigma=-0.1)(patch)
 
 
-def test_band_dropout_identity_and_all_fill(patch: GeoTensor) -> None:
+def test_band_dropout_identity_and_all_fill(patch: GeoArray) -> None:
     identity = augment.BandDropout(p=0.0, fill_value=-1, seed=0)(patch)
     filled = augment.BandDropout(p=1.0, fill_value=-1, seed=0)(patch)
 
@@ -169,7 +169,7 @@ def test_band_dropout_identity_and_all_fill(patch: GeoTensor) -> None:
     assert filled.dtype == patch.dtype
 
 
-def test_band_jitter_disabled_and_grouped_permutation(patch: GeoTensor) -> None:
+def test_band_jitter_disabled_and_grouped_permutation(patch: GeoArray) -> None:
     disabled = augment.BandJitter()(patch)
     assert disabled is patch
 
@@ -182,19 +182,19 @@ def test_band_jitter_disabled_and_grouped_permutation(patch: GeoTensor) -> None:
     assert {tuple(b.ravel()) for b in out[:3]} == {tuple(b.ravel()) for b in source[:3]}
 
 
-def test_band_jitter_requires_names(patch: GeoTensor) -> None:
-    unnamed = GeoTensor(
+def test_band_jitter_requires_names(patch: GeoArray) -> None:
+    unnamed = GeoArray(
         np.asarray(patch),
         patch.transform,
         patch.crs,
-        patch.fill_value_default,
+        patch.fill_value,
         attrs={},
     )
     with pytest.raises(ValueError, match="band names"):
         augment.BandJitter(groups={"g": ["B02", "B03"]})(unnamed)
 
 
-def test_sun_angle_haze_and_cloud_identity_cases(patch: GeoTensor) -> None:
+def test_sun_angle_haze_and_cloud_identity_cases(patch: GeoArray) -> None:
     sun = augment.SunAngleJitter(delta_sza_deg=0.0, seed=0)(patch)
     haze = augment.AtmosphericHaze(intensity=0.0, seed=0)(patch)
     clouds = augment.SimulatedClouds(coverage=0.0, seed=0)(patch)
@@ -204,7 +204,7 @@ def test_sun_angle_haze_and_cloud_identity_cases(patch: GeoTensor) -> None:
     np.testing.assert_array_equal(np.asarray(clouds), np.asarray(patch))
 
 
-def test_haze_uses_inverse_fourth_power_spectral_weights(patch: GeoTensor) -> None:
+def test_haze_uses_inverse_fourth_power_spectral_weights(patch: GeoArray) -> None:
     out = augment.AtmosphericHaze(intensity=0.05, seed=0)(patch)
     delta = np.asarray(out) - np.asarray(patch)
     assert delta[0].mean() > delta[-1].mean()
@@ -213,35 +213,35 @@ def test_haze_uses_inverse_fourth_power_spectral_weights(patch: GeoTensor) -> No
 
 
 def test_simulated_clouds_changes_pixels_but_preserves_metadata(
-    patch: GeoTensor,
+    patch: GeoArray,
 ) -> None:
     out = augment.SimulatedClouds(coverage=0.5, feather=1, seed=0)(patch)
     assert out.shape == patch.shape
     assert out.dtype == patch.dtype
-    assert out.transform == patch.transform
+    assert out.grid == patch.grid
     assert not np.array_equal(np.asarray(out), np.asarray(patch))
 
 
-def test_cutmix_probability_shape_and_mismatch(patch: GeoTensor) -> None:
-    donor = _toy_geotensor(np.full(patch.shape, 9.0, dtype=np.float32))
+def test_cutmix_probability_shape_and_mismatch(patch: GeoArray) -> None:
+    donor = _toy_geoarray(np.full(patch.shape, 9.0, dtype=np.float32))
 
     identity = augment.CutMix(p=0.0, seed=0)(patch, donor)
     mixed = augment.CutMix(p=1.0, seed=0)(patch, donor)
 
     assert identity is patch
     assert mixed.shape == patch.shape
-    assert mixed.transform == patch.transform
+    assert mixed.grid == patch.grid
     assert np.any(np.asarray(mixed) == 9.0)
 
-    bad = _toy_geotensor(np.zeros((4, 2, 2), dtype=np.float32))
+    bad = _toy_geoarray(np.zeros((4, 2, 2), dtype=np.float32))
     with pytest.raises(ValueError, match=r"CutMix.*match"):
         augment.CutMix(p=1.0, seed=0)(patch, bad)
 
 
-def test_cutmix_pool_is_positional(patch: GeoTensor) -> None:
+def test_cutmix_pool_is_positional(patch: GeoArray) -> None:
     """Donors are positional carriers, alone or as one list (#141)."""
     donors = [
-        _toy_geotensor(np.full(patch.shape, v, dtype=np.float32)) for v in (7.0, 9.0)
+        _toy_geoarray(np.full(patch.shape, v, dtype=np.float32)) for v in (7.0, 9.0)
     ]
     spread = augment.CutMix(p=1.0, seed=0)(patch, *donors)
     listed = augment.CutMix(p=1.0, seed=0)(patch, donors)
@@ -249,7 +249,7 @@ def test_cutmix_pool_is_positional(patch: GeoTensor) -> None:
     # No donors: the input passes through.
     assert augment.CutMix(p=1.0, seed=0)(patch) is patch
     # Every donor is grid-checked, not only the one drawn.
-    bad = _toy_geotensor(np.zeros((4, 2, 2), dtype=np.float32))
+    bad = _toy_geoarray(np.zeros((4, 2, 2), dtype=np.float32))
     with pytest.raises(ValueError, match="CutMix: the donor 1 pixel grid"):
         augment.CutMix(p=0.0, seed=0)(patch, donors[0], bad)
     with pytest.raises(TypeError, match="pool"):
@@ -261,12 +261,12 @@ class _AffineTestOp(Operator):
         self.scale = scale
         self.offset = offset
 
-    def _apply(self, gt: GeoTensor, *, seed: int | None = None) -> GeoTensor:
+    def _apply(self, gt: GeoArray, *, seed: int | None = None) -> GeoArray:
         del seed
-        return gt.array_as_geotensor(np.asarray(gt) * self.scale + self.offset)
+        return gt.with_data(np.asarray(gt) * self.scale + self.offset)
 
 
-def test_compose_applies_in_order_and_respects_probability(patch: GeoTensor) -> None:
+def test_compose_applies_in_order_and_respects_probability(patch: GeoArray) -> None:
     composed = augment.Compose(
         augmentations=[
             _AffineTestOp(scale=2.0, offset=0.0),
@@ -282,24 +282,23 @@ def test_compose_applies_in_order_and_respects_probability(patch: GeoTensor) -> 
     assert skipped is patch
 
 
-def test_random_flip_is_an_involution(patch: GeoTensor) -> None:
+def test_random_flip_is_an_involution(patch: GeoArray) -> None:
     """Two horizontal flips must reproduce the original pixels and transform."""
     op = augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0, seed=0)
     once = op(patch)
     twice = op(once)
     np.testing.assert_array_equal(np.asarray(twice), np.asarray(patch))
-    assert twice.transform == patch.transform
-    assert twice.crs == patch.crs
+    assert twice.grid == patch.grid
 
 
 def test_random_rotate90_known_transform_on_unit_raster() -> None:
     """For each k in {1, 2, 3}, output (0,0) maps to the expected corner."""
     arr = np.arange(2 * 2, dtype=np.float32).reshape(1, 2, 2)
-    gt = GeoTensor(
-        values=arr,
+    gt = GeoArray(
+        data=arr,
         transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 2.0),
         crs="EPSG:32629",
-        fill_value_default=0,
+        fill_value=0,
     )
 
     # Exercise public API across many seeds so we cover all three k values
@@ -316,17 +315,17 @@ def test_random_rotate90_known_transform_on_unit_raster() -> None:
         )
 
         expected = {
-            1: gt.transform * (gt.width, 0),
-            2: gt.transform * (gt.width, gt.height),
-            3: gt.transform * (0, gt.height),
+            1: _xy(gt, gt.width, 0),
+            2: _xy(gt, gt.width, gt.height),
+            3: _xy(gt, 0, gt.height),
         }[k]
-        assert out.transform * (0, 0) == expected
+        assert _xy(out, 0, 0) == expected
         assert out.bounds == gt.bounds
         seen_corners.add(k)
     assert seen_corners == {1, 2, 3}
 
 
-def test_random_crop_translation_matches_origin(patch: GeoTensor) -> None:
+def test_random_crop_translation_matches_origin(patch: GeoArray) -> None:
     """Cropping shifts the transform translation to the new origin pixel."""
     seed = 0
     rng = np.random.default_rng(seed)
@@ -335,33 +334,33 @@ def test_random_crop_translation_matches_origin(patch: GeoTensor) -> None:
 
     out = augment.RandomCrop(size=(3, 4), seed=seed)(patch)
 
-    expected = patch.transform * (left, top)
-    assert out.transform * (0, 0) == expected
+    expected = _xy(patch, left, top)
+    assert _xy(out, 0, 0) == expected
     assert out.shape == (4, 3, 4)
 
 
-def test_cutmix_rejects_donors_off_the_input_grid(patch: GeoTensor) -> None:
+def test_cutmix_rejects_donors_off_the_input_grid(patch: GeoArray) -> None:
     arr = np.full(patch.shape, 9.0, dtype=np.float32)
-    different_crs = GeoTensor(
-        values=arr,
+    different_crs = GeoArray(
+        data=arr,
         transform=patch.transform,
         crs="EPSG:4326",
-        fill_value_default=0,
+        fill_value=0,
     )
-    different_res = GeoTensor(
-        values=arr,
+    different_res = GeoArray(
+        data=arr,
         transform=rasterio.Affine(20.0, 0.0, 500_000.0, 0.0, -20.0, 4_000_000.0),
         crs=patch.crs,
-        fill_value_default=0,
+        fill_value=0,
     )
 
     # Same resolution and CRS but a different origin: pasting it pixel-for-
     # pixel would put the donor's content at the wrong place.
-    shifted = GeoTensor(
-        values=arr,
-        transform=patch.transform * rasterio.Affine.translation(2, 0),
+    shifted = GeoArray(
+        data=arr,
+        transform=affine_of(patch) * rasterio.Affine.translation(2, 0),
         crs=patch.crs,
-        fill_value_default=0,
+        fill_value=0,
     )
 
     for donor in (different_crs, different_res, shifted):
@@ -369,7 +368,7 @@ def test_cutmix_rejects_donors_off_the_input_grid(patch: GeoTensor) -> None:
             augment.CutMix(p=1.0, seed=0)(patch, donor)
 
 
-def test_get_config_is_json_safe(patch: GeoTensor) -> None:
+def test_get_config_is_json_safe(patch: GeoArray) -> None:
     """Every public augmentation's config should serialise to JSON."""
     ops: list[Operator] = [
         augment.RandomFlip(seed=0),
@@ -429,13 +428,13 @@ def test_range_ops_reject_reversed_range_at_construction() -> None:
         augment.SpeckleNoise(sigma=(0.2, 0.1))
 
 
-def test_sun_angle_jitter_requires_sza_in_attrs(patch: GeoTensor) -> None:
+def test_sun_angle_jitter_requires_sza_in_attrs(patch: GeoArray) -> None:
     """SunAngleJitter must not silently fall back to a hard-coded 30 degrees."""
-    no_sza = GeoTensor(
+    no_sza = GeoArray(
         np.asarray(patch),
         patch.transform,
         patch.crs,
-        patch.fill_value_default,
+        patch.fill_value,
         attrs={"band_names": ["B02", "B03", "B04", "B08"]},
     )
     with pytest.raises(ValueError, match="solar_zenith_angle"):
@@ -448,11 +447,11 @@ class _NonStochasticOp(Operator):
     def __init__(self, scale: float) -> None:
         self.scale = scale
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:
-        return gt.array_as_geotensor(np.asarray(gt) * self.scale)
+    def _apply(self, gt: GeoArray) -> GeoArray:
+        return gt.with_data(np.asarray(gt) * self.scale)
 
 
-def test_compose_forwards_seed_only_to_stochastic_children(patch: GeoTensor) -> None:
+def test_compose_forwards_seed_only_to_stochastic_children(patch: GeoArray) -> None:
     """Mixing a non-stochastic child into Compose must not raise TypeError."""
     composed = augment.Compose(
         augmentations=[
@@ -484,23 +483,23 @@ def test_compose_forwards_seed_only_to_stochastic_children(patch: GeoTensor) -> 
     ids=lambda op: type(op).__name__,
 )
 def test_plain_ndarray_in_plain_ndarray_out(op: Operator) -> None:
-    """Plain ndarray in -> plain ndarray out, values equal to the GeoTensor path."""
+    """Plain ndarray in -> plain ndarray out, values equal to the GeoArray path."""
     arr = np.arange(3 * 4 * 5, dtype=np.float32).reshape(3, 4, 5) / 100.0
-    gt = toy_geotensor(arr)  # no wavelength attrs: both paths use defaults
+    gt = toy_geoarray(arr)  # no wavelength attrs: both paths use defaults
 
     # Independent copies: a seeded op's stream advances on every call.
     plain_out = copy.deepcopy(op)(arr)
     geo_out = copy.deepcopy(op)(gt)
 
     assert type(plain_out) is np.ndarray
-    assert isinstance(geo_out, GeoTensor)
+    assert isinstance(geo_out, GeoArray)
     np.testing.assert_array_equal(plain_out, np.asarray(geo_out))
 
 
 def test_metadata_dependent_ops_reject_plain_arrays() -> None:
     """Geo/attrs-dependent augmentations fail clearly on plain arrays."""
     arr = np.zeros((2, 4, 4), dtype=np.float32)
-    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+    with pytest.raises(TypeError, match="georeferenced GeoArray"):
         augment.RandomShift(max_shift=(1, 1), seed=0)(arr)
     with pytest.raises(TypeError, match="band-name metadata"):
         augment.BandJitter(groups={"g": ["B02", "B03"]}, seed=0)(arr)
@@ -540,12 +539,12 @@ def test_compose_rejects_non_operator_children() -> None:
     ids=["horizontal", "vertical", "both"],
 )
 def test_flip_preserves_footprint(
-    patch: GeoTensor, p_horizontal: float, p_vertical: float
+    patch: GeoArray, p_horizontal: float, p_vertical: float
 ) -> None:
     """A flip mirrors pixels in place: same bounds, same footprint (#126)."""
     out = augment.RandomFlip(p_horizontal=p_horizontal, p_vertical=p_vertical)(patch)
     assert out.bounds == patch.bounds
-    assert out.footprint().equals(patch.footprint())
+    assert footprint(out).equals(footprint(patch))
     # Mirrored pixels keep their world coordinates.
     unflipped = np.asarray(out)
     if p_horizontal:
@@ -567,14 +566,14 @@ def _seed_for_k(k: int) -> int:
 
 
 @pytest.mark.parametrize("k", [1, 2, 3])
-def test_rot90_preserves_footprint(patch: GeoTensor, k: int) -> None:
+def test_rot90_preserves_footprint(patch: GeoArray, k: int) -> None:
     """Every quarter-turn keeps the input bounds and footprint (#126)."""
     out = augment.RandomRotate90(p=1.0)(patch, seed=_seed_for_k(k))
     np.testing.assert_array_equal(
         np.asarray(out), np.rot90(np.asarray(patch), k=k, axes=(-2, -1))
     )
     assert out.bounds == pytest.approx(patch.bounds)
-    assert out.footprint().equals(patch.footprint())
+    assert footprint(out).equals(footprint(patch))
     assert not np.shares_memory(np.asarray(out), np.asarray(patch))
 
 
@@ -609,12 +608,12 @@ _SEEDED_OPS: list[Any] = [
 
 @pytest.mark.parametrize("make_op", _SEEDED_OPS, ids=lambda make: type(make()).__name__)
 def test_seeded_operator_varies_across_calls_and_is_reproducible(
-    patch: GeoTensor, make_op: Callable[[], Operator]
+    patch: GeoArray, make_op: Callable[[], Operator]
 ) -> None:
     """A seeded op draws a reproducible *sequence*, not one repeated draw (#134)."""
     # CutMix draws from a positional donor pool (#141).
     extra = (
-        (_toy_geotensor(np.full((4, 5, 6), 9.0, dtype=np.float32)),)
+        (_toy_geoarray(np.full((4, 5, 6), 9.0, dtype=np.float32)),)
         if isinstance(make_op(), augment.CutMix)
         else ()
     )
@@ -635,7 +634,7 @@ def test_seeded_operator_varies_across_calls_and_is_reproducible(
 
 
 def test_per_call_seed_is_one_off_and_leaves_stream_untouched(
-    patch: GeoTensor,
+    patch: GeoArray,
 ) -> None:
     op = augment.GaussianNoise(sigma=0.01, seed=5)
     reference = augment.GaussianNoise(sigma=0.01, seed=5)
@@ -647,7 +646,7 @@ def test_per_call_seed_is_one_off_and_leaves_stream_untouched(
     np.testing.assert_array_equal(np.asarray(op(patch)), np.asarray(reference(patch)))
 
 
-def test_unseeded_compose_honours_seeded_children(patch: GeoTensor) -> None:
+def test_unseeded_compose_honours_seeded_children(patch: GeoArray) -> None:
     pipe = augment.Compose(augmentations=[augment.GaussianNoise(sigma=0.01, seed=3)])
     expected = augment.GaussianNoise(sigma=0.01, seed=3)
     for _ in range(3):
@@ -696,7 +695,7 @@ def test_fill_pixels_are_excluded(make_op: Callable[[], Operator]) -> None:
     clean = np.arange(4 * 5 * 6, dtype=np.float64).reshape(4, 5, 6) / 10.0 + 1.0
     fill = fill_pixel_mask(clean.shape)
     valid = ~fill
-    gt = _toy_geotensor(clean, fill_value_default=_FILL, with_fill_pixels=True)
+    gt = _toy_geoarray(clean, fill_value=_FILL, with_fill_pixels=True)
     op = make_op()
 
     out = np.asarray(op(gt))
@@ -711,7 +710,7 @@ def test_fill_pixels_are_excluded(make_op: Callable[[], Operator]) -> None:
         # spatial mean of the reference equals the valid-only mean.
         reference_in = clean.copy()
         reference_in[:, fill] = clean[:, valid].mean(axis=1, keepdims=True)
-        expected = np.asarray(make_op()(_toy_geotensor(reference_in)))
+        expected = np.asarray(make_op()(_toy_geoarray(reference_in)))
     elif isinstance(op, augment.SimulatedClouds):
         # The cloud brightness percentile must ignore nodata: compare with the
         # fill pixels absent (NaN, which the percentile already skipped).
@@ -719,7 +718,7 @@ def test_fill_pixels_are_excluded(make_op: Callable[[], Operator]) -> None:
         reference_in[:, fill] = np.nan
         expected = make_op()(reference_in)
     else:
-        expected = np.asarray(make_op()(_toy_geotensor(clean)))
+        expected = np.asarray(make_op()(_toy_geoarray(clean)))
     np.testing.assert_allclose(out[:, valid], expected[:, valid])
 
 
@@ -740,10 +739,10 @@ def test_fill_pixels_are_excluded_nan_fill_contrast() -> None:
 
 def test_fill_pixels_are_excluded_cutmix_donor_holes() -> None:
     """Donor nodata pasted by CutMix becomes the input's fill value (#145)."""
-    base = _toy_geotensor(np.ones((4, 5, 6), dtype=np.float32))
-    donor = _toy_geotensor(
+    base = _toy_geoarray(np.ones((4, 5, 6), dtype=np.float32))
+    donor = _toy_geoarray(
         np.full((4, 5, 6), 9.0, dtype=np.float32),
-        fill_value_default=-1.0,
+        fill_value=-1.0,
         with_fill_pixels=True,
     )
     # Draw until the pasted rectangle covers a donor fill pixel.
@@ -866,7 +865,7 @@ def test_compose_forwards_seed_only_when_apply_accepts_it() -> None:
     assert unseeded.seen == [None]
 
 
-def test_compose_is_a_gated_sequential(patch: GeoTensor) -> None:
+def test_compose_is_a_gated_sequential(patch: GeoArray) -> None:
     flip = augment.RandomFlip(p_horizontal=1.0, p_vertical=0.0, seed=0)
     pipe = augment.Compose(augmentations=[flip], p=0.0, seed=0)
     assert isinstance(pipe, Sequential)
@@ -897,10 +896,10 @@ def test_compose_is_not_a_top_level_export() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _pixel_centres(gt: GeoTensor) -> dict[float, tuple[float, float]]:
+def _pixel_centres(gt: GeoArray) -> dict[float, tuple[float, float]]:
     """World coordinate of every pixel centre, keyed by its (unique) value."""
     rows, cols = np.mgrid[0 : gt.shape[-2], 0 : gt.shape[-1]]
-    xs, ys = gt.transform * (cols + 0.5, rows + 0.5)
+    xs, ys = affine_of(gt) * (cols + 0.5, rows + 0.5)
     values = np.asarray(gt)[0]
     return {
         float(v): (float(x), float(y))
@@ -930,7 +929,7 @@ def test_geometric_augments_keep_every_pixel_in_place(
     sheared and geographic grids the transform must follow exactly.
     """
     values = np.arange(4 * 6, dtype=np.float64).reshape(1, 4, 6) + 1.0
-    patch = toy_geotensor(values, grid=grid)
+    patch = toy_geoarray(values, grid=grid)
     out = make_op()(patch)
     before = _pixel_centres(patch)
     for value, xy in _pixel_centres(out).items():

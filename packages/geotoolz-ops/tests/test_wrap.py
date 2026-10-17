@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from _helpers import DEFAULT_TRANSFORM, toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import DEFAULT_TRANSFORM, toy_geoarray
+from geoarray import FrozenAttrs, GeoArray, PixelWindow
 
 from geoops._src.bands import (
     DEFAULT_BAND_KEYS,
@@ -17,12 +17,13 @@ from geoops._src.bands import (
     strip_band_attrs,
     take_band_attrs,
 )
+from geoops._src.geo import affine_of
 from geoops._src.wrap import INHERIT, adopt_attrs, rewrap_attrs, wrap_like
 
 
-def _scene(n_bands: int = 3, **extra) -> GeoTensor:
+def _scene(n_bands: int = 3, **extra) -> GeoArray:
     names = [f"b{i}" for i in range(n_bands)]
-    return toy_geotensor(
+    return toy_geoarray(
         np.ones((n_bands, 4, 4), dtype=np.float32),
         attrs={
             "band_names": names,
@@ -91,13 +92,22 @@ def test_wrap_like_plain_array_passthrough() -> None:
     assert type(out) is np.ndarray
 
 
-def test_wrap_like_attrs_are_a_fresh_copy() -> None:
+def test_wrap_like_attrs_are_derived_and_immutable() -> None:
     gt = _scene()
     out = wrap_like(gt, np.asarray(gt) * 2)
-    assert out.attrs is not gt.attrs
     assert out.attrs == gt.attrs
-    out.attrs["sensor"] = "changed"
+    with pytest.raises(TypeError):
+        out.attrs["sensor"] = "changed"  # type: ignore[index]
+    assert out.with_attrs(sensor="changed").attrs["sensor"] == "changed"
     assert gt.attrs["sensor"] == "toy"
+
+
+def test_wrap_like_refuses_a_geotensor() -> None:
+    from geoarray.interop.georeader import to_georeader
+
+    gt = to_georeader(_scene())
+    with pytest.raises(TypeError, match="from_georeader"):
+        wrap_like(gt, np.asarray(gt))
 
 
 @pytest.mark.parametrize("out_shape", [(4, 4), (1, 4, 4), (2, 4, 4)])
@@ -112,12 +122,12 @@ def test_wrap_like_drops_per_band_keys_when_band_count_changes(
 def test_wrap_like_writes_band_names_under_canonical_key() -> None:
     gt = _scene()
     out = wrap_like(gt, np.zeros((2, 4, 4)), band_names=("p", "q"))
-    assert out.attrs == {"sensor": "toy", "band_names": ["p", "q"]}
+    assert out.attrs == {"sensor": "toy", "band_names": ("p", "q")}
     # Same band count: aliases are replaced, spectral metadata survives.
     same = wrap_like(gt, np.zeros((3, 4, 4)), band_names=["x", "y", "z"])
-    assert same.attrs["band_names"] == ["x", "y", "z"]
+    assert same.attrs["band_names"] == ("x", "y", "z")
     assert "descriptions" not in same.attrs
-    assert same.attrs["wavelengths"] == [500.0, 501.0, 502.0]
+    assert same.attrs["wavelengths"] == (500.0, 501.0, 502.0)
     with pytest.raises(ValueError, match="band_names has 1 entries"):
         wrap_like(gt, np.zeros((2, 4, 4)), band_names=["p"])
 
@@ -126,32 +136,20 @@ def test_wrap_like_explicit_attrs_are_copied_verbatim() -> None:
     gt = _scene()
     attrs = {"band_names": ["a", "b"], "k": 1}
     out = wrap_like(gt, np.zeros((2, 4, 4)), attrs=attrs)
-    assert out.attrs == attrs
-    assert out.attrs is not attrs
+    assert out.attrs == {"band_names": ("a", "b"), "k": 1}
     named = wrap_like(gt, np.zeros((2, 4, 4)), attrs={"k": 1}, band_names=["x", "y"])
-    assert named.attrs == {"k": 1, "band_names": ["x", "y"]}
+    assert named.attrs == {"k": 1, "band_names": ("x", "y")}
 
 
-def test_wrap_like_fill_value_default_inherit_vs_explicit() -> None:
+def test_wrap_like_fill_value_inherit_vs_explicit() -> None:
     gt = _scene()
-    assert gt.fill_value_default == -9999
-    assert wrap_like(gt, np.asarray(gt)).fill_value_default == -9999
-    assert (
-        wrap_like(gt, np.asarray(gt), fill_value_default=INHERIT).fill_value_default
-        == -9999
-    )
-    assert (
-        wrap_like(gt, np.asarray(gt), fill_value_default=None).fill_value_default
-        is None
-    )
-    assert np.isnan(
-        wrap_like(gt, np.asarray(gt), fill_value_default=np.nan).fill_value_default
-    )
-    assert (
-        wrap_like(gt, np.asarray(gt), fill_value_default=False).fill_value_default
-        is False
-    )
-    assert wrap_like(gt, np.asarray(gt), fill_value_default=0).fill_value_default == 0
+    assert gt.fill_value == -9999
+    assert wrap_like(gt, np.asarray(gt)).fill_value == -9999
+    assert wrap_like(gt, np.asarray(gt), fill_value=INHERIT).fill_value == -9999
+    assert wrap_like(gt, np.asarray(gt), fill_value=None).fill_value is None
+    assert np.isnan(wrap_like(gt, np.asarray(gt), fill_value=np.nan).fill_value)
+    assert wrap_like(gt, np.asarray(gt), fill_value=False).fill_value is False
+    assert wrap_like(gt, np.asarray(gt), fill_value=0).fill_value == 0
 
 
 def test_wrap_like_transform_override_allows_new_grid() -> None:
@@ -160,13 +158,13 @@ def test_wrap_like_transform_override_allows_new_grid() -> None:
         wrap_like(gt, np.zeros((3, 2, 2)))
     new = DEFAULT_TRANSFORM * rasterio.Affine.translation(1, 1)
     out = wrap_like(gt, np.zeros((3, 2, 2)), transform=new)
-    assert out.transform == new
+    assert affine_of(out) == new
     assert out.crs == gt.crs
-    assert out.attrs["band_names"] == ["b0", "b1", "b2"]
+    assert out.attrs["band_names"] == ("b0", "b1", "b2")
 
 
 def test_wrap_like_four_d_uses_band_axis() -> None:
-    gt = toy_geotensor(np.zeros((2, 3, 4, 4)), attrs={"band_names": ["a", "b", "c"]})
+    gt = toy_geoarray(np.zeros((2, 3, 4, 4)), attrs={"band_names": ["a", "b", "c"]})
     assert wrap_like(gt, np.zeros((5, 3, 4, 4))).attrs == gt.attrs
     assert wrap_like(gt, np.zeros((2, 1, 4, 4))).attrs == {}
 
@@ -182,16 +180,26 @@ def test_rewrap_attrs_same_band_count_keeps_everything() -> None:
 
 def test_adopt_attrs_keeps_result_grid_and_never_mutates_input() -> None:
     gt = _scene()
-    window = rasterio.windows.Window(col_off=1, row_off=1, width=2, height=2)
-    cropped = gt.read_from_window(window, boundless=False)
-    assert cropped.attrs is gt.attrs  # georeader aliases the dict
+    window = PixelWindow(col_off=1, row_off=1, width=2, height=2)
+    cropped = gt.read_window(window, boundless=False).replace(attrs=FrozenAttrs())
     out = adopt_attrs(gt, cropped)
-    assert out.attrs is not gt.attrs
     assert out.attrs == gt.attrs
-    assert out.transform == cropped.transform
-    # georeader sometimes hands back the input itself; it must stay untouched.
+    assert out.grid == cropped.grid
     same = adopt_attrs(gt, gt, band_names=["x", "y", "z"])
     assert same is not gt
-    assert gt.attrs["band_names"] == ["b0", "b1", "b2"]
+    assert same.attrs["band_names"] == ("x", "y", "z")
+    assert gt.attrs["band_names"] == ("b0", "b1", "b2")
     plain = np.zeros((2, 2))
     assert adopt_attrs(gt, plain) is plain
+
+
+def test_adopt_attrs_converts_engine_output() -> None:
+    """A georeader GeoTensor from an engine call comes back as a GeoArray."""
+    from geoarray.interop.georeader import to_georeader
+
+    gt = _scene()
+    engine_out = to_georeader(gt[..., 1:3, 1:3].replace(attrs=FrozenAttrs()))
+    out = adopt_attrs(gt, engine_out)
+    assert isinstance(out, GeoArray)
+    assert out.attrs == gt.attrs
+    assert out.grid == gt[..., 1:3, 1:3].grid

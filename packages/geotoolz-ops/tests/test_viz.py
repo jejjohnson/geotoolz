@@ -8,11 +8,12 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio
-from _helpers import fill_pixel_mask, toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import fill_pixel_mask, toy_geoarray
+from geoarray import GeoArray
 from shapely.geometry import Point, Polygon
 
 import geoops as gz
+from geoops._src.geo import affine_of
 from geoops.viz import (
     AnnotatePoints,
     AnnotatePolygons,
@@ -34,35 +35,35 @@ from geoops.viz import (
 )
 
 
-def _toy_geotensor(
-    values: np.ndarray, attrs: dict | None = None, fill_value_default: Any = -9999
-) -> GeoTensor:
+def _toy_geoarray(
+    values: np.ndarray, attrs: dict | None = None, fill_value: Any = -9999
+) -> GeoArray:
     # The fill must not collide with the data: 0.0 is a real value in most
-    # fixtures here, and a pixel equal to ``fill_value_default`` is nodata.
-    return GeoTensor(
-        values=values,
+    # fixtures here, and a pixel equal to ``fill_value`` is nodata.
+    return GeoArray(
+        data=values,
         transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 4.0),
         crs="EPSG:32629",
-        fill_value_default=fill_value_default,
+        fill_value=fill_value,
         attrs=attrs,
     )
 
 
 def test_true_color_produces_rgb_order_and_preserves_metadata() -> None:
-    gt = _toy_geotensor(
+    gt = _toy_geoarray(
         np.stack([np.full((2, 2), value) for value in [2, 3, 4]], axis=0),
         attrs={"bands": ["B02", "B03", "B04"]},
     )
     out = TrueColor(red="B04", green="B03", blue="B02")(gt)
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
     assert out.shape == (3, 2, 2)
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert str(out.crs) == "EPSG:32629"
     np.testing.assert_array_equal(np.asarray(out)[:, 0, 0], [4, 3, 2])
 
 
 def test_false_color_and_swir_composites() -> None:
-    gt = _toy_geotensor(np.arange(5 * 2 * 2).reshape(5, 2, 2))
+    gt = _toy_geoarray(np.arange(5 * 2 * 2).reshape(5, 2, 2))
     arr = np.asarray(gt)
     np.testing.assert_array_equal(
         np.asarray(FalseColor(nir=3, red=2, green=1)(gt)), arr[[3, 2, 1]]
@@ -81,23 +82,23 @@ def test_stretch_to_uint8_lower0_upper100_matches_minmax_cast() -> None:
         stretch_to_uint8(arr, lower=0.0, upper=100.0),
         expected,
     )
-    out = StretchToUint8(lower=0.0, upper=100.0)(_toy_geotensor(arr))
+    out = StretchToUint8(lower=0.0, upper=100.0)(_toy_geoarray(arr))
     assert out.dtype == np.uint8
     np.testing.assert_array_equal(np.asarray(out), expected)
 
 
 def test_apply_colormap_outputs_rgba_and_nan_color() -> None:
-    gt = _toy_geotensor(np.array([[0.0, 1.0], [np.nan, 0.5]], dtype=np.float32))
+    gt = _toy_geoarray(np.array([[0.0, 1.0], [np.nan, 0.5]], dtype=np.float32))
     out = ApplyColormap(name="viridis", vmin=0.0, vmax=1.0)(gt)
     arr = np.asarray(out)
     assert arr.shape == (4, 2, 2)
     assert arr.dtype == np.uint8
     np.testing.assert_array_equal(arr[:, 1, 0], [0, 0, 0, 0])
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
 
 
 def test_apply_discrete_colormap_outputs_rgba() -> None:
-    gt = _toy_geotensor(np.array([[1, 2], [0, 2]], dtype=np.uint8))
+    gt = _toy_geoarray(np.array([[1, 2], [0, 2]], dtype=np.uint8))
     out = ApplyDiscreteColormap(
         mapping={1: (1.0, 0.0, 0.0, 1.0), 2: (0.0, 1.0, 0.0, 1.0)}
     )(gt)
@@ -109,7 +110,7 @@ def test_apply_discrete_colormap_outputs_rgba() -> None:
 def test_gamma_correct_identity() -> None:
     arr = np.linspace(0.0, 1.0, 5)
     np.testing.assert_allclose(gamma_correct_display(arr, gamma=1.0), arr)
-    gt = _toy_geotensor(arr.reshape(1, 1, 5))
+    gt = _toy_geoarray(arr.reshape(1, 1, 5))
     np.testing.assert_allclose(np.asarray(GammaCorrect(gamma=1.0)(gt)), np.asarray(gt))
 
 
@@ -120,10 +121,10 @@ def test_hillshade_sun_overhead_and_flat_dem_are_constant() -> None:
 
     # A flat DEM has zero slope, so the shading is sin(altitude) everywhere:
     # 255 * sin(45 deg) = 180.3 -> 180 (GDAL / LightSource reference, #124).
-    flat = _toy_geotensor(np.ones((4, 4), dtype=np.float32))
+    flat = _toy_geoarray(np.ones((4, 4), dtype=np.float32))
     out = Hillshade()(flat)
     assert np.unique(np.asarray(out)).tolist() == [180]
-    assert out.transform == flat.transform
+    assert out.grid == flat.grid
     low_sun = Hillshade(altitude_deg=30.0)(flat)
     assert np.unique(np.asarray(low_sun)).tolist() == [round(255 * 0.5)]
 
@@ -180,18 +181,18 @@ def test_hillshade_matches_matplotlib_lightsource(
 
 def test_hillshade_operator_uses_north_up_transform() -> None:
     # Hillshade inherits the fixed orientation (resolution from transform).
-    nw_facing = _toy_geotensor(_plane(1.0, 1.0).astype(np.float32))
+    nw_facing = _toy_geoarray(_plane(1.0, 1.0).astype(np.float32))
     out = Hillshade(azimuth_deg=315.0, altitude_deg=45.0)(nw_facing)
     assert np.asarray(out)[2, 2] == 251
     relief = ShadedRelief(colormap="gray")(nw_facing)
     shadow = ShadedRelief(colormap="gray")(
-        _toy_geotensor(_plane(-1.0, -1.0).astype(np.float32))
+        _toy_geoarray(_plane(-1.0, -1.0).astype(np.float32))
     )
     assert np.asarray(relief)[2, 2, :3].sum() > np.asarray(shadow)[2, 2, :3].sum()
 
 
 def test_shaded_relief_outputs_rgba() -> None:
-    dem = _toy_geotensor(np.arange(16, dtype=np.float32).reshape(4, 4))
+    dem = _toy_geoarray(np.arange(16, dtype=np.float32).reshape(4, 4))
     out = ShadedRelief(colormap="terrain")(dem)
     assert out.shape == (4, 4, 4)
     assert out.dtype == np.uint8
@@ -199,16 +200,16 @@ def test_shaded_relief_outputs_rgba() -> None:
 
 def test_overlay_alpha_zero_preserves_background_rgb() -> None:
     """alpha=0 keeps background RGB intact while promoting to RGBA."""
-    bg = _toy_geotensor(np.full((3, 2, 2), 10, dtype=np.uint8))
-    fg = _toy_geotensor(np.full((4, 2, 2), 255, dtype=np.uint8))
+    bg = _toy_geoarray(np.full((3, 2, 2), 10, dtype=np.uint8))
+    fg = _toy_geoarray(np.full((4, 2, 2), 255, dtype=np.uint8))
     out = Overlay(alpha=0.0)(bg, fg)
     assert out.shape == (4, 2, 2)
     np.testing.assert_array_equal(np.asarray(out)[:3], np.asarray(bg))
 
 
 def test_overlay_alpha_blends_to_rgba() -> None:
-    bg = _toy_geotensor(np.zeros((3, 2, 2), dtype=np.uint8))
-    fg = _toy_geotensor(np.full((4, 2, 2), 255, dtype=np.uint8))
+    bg = _toy_geoarray(np.zeros((3, 2, 2), dtype=np.uint8))
+    fg = _toy_geoarray(np.full((4, 2, 2), 255, dtype=np.uint8))
     out = Overlay(alpha=0.5)(bg, fg)
     assert out.shape == (4, 2, 2)
     np.testing.assert_array_equal(np.asarray(out)[:3], 128)
@@ -240,12 +241,12 @@ def test_ensure_rgba_byte_range_inputs_are_not_rescaled() -> None:
 
 
 def test_overlay_float_inputs_not_black() -> None:
-    bg = _toy_geotensor(np.full((3, 2, 2), 0.5, dtype=np.float32))
-    transparent_fg = _toy_geotensor(np.zeros((4, 2, 2), dtype=np.float32))
+    bg = _toy_geoarray(np.full((3, 2, 2), 0.5, dtype=np.float32))
+    transparent_fg = _toy_geoarray(np.zeros((4, 2, 2), dtype=np.float32))
     out = np.asarray(Overlay(alpha=0.5)(bg, transparent_fg))
     np.testing.assert_array_equal(out[:, 0, 0], [128, 128, 128, 255])
     # Float grayscale foreground over float RGB background blends to grey.
-    fg = _toy_geotensor(np.ones((2, 2), dtype=np.float32))
+    fg = _toy_geoarray(np.ones((2, 2), dtype=np.float32))
     out = np.asarray(Overlay(alpha=0.5)(bg, fg))
     assert np.all(out[:3] > 180)
     np.testing.assert_array_equal(out[3], 255)
@@ -254,7 +255,7 @@ def test_overlay_float_inputs_not_black() -> None:
 
 
 def test_annotate_float_inputs_not_black() -> None:
-    image = _toy_geotensor(np.full((3, 8, 8), 0.5, dtype=np.float32))
+    image = _toy_geoarray(np.full((3, 8, 8), 0.5, dtype=np.float32))
     polygon = Polygon([(1, 1), (3, 1), (3, 3), (1, 3)])
     poly = np.asarray(
         AnnotatePolygons(geometries=[polygon], color=(1.0, 0.0, 0.0, 1.0), width=1)(
@@ -272,7 +273,7 @@ def test_annotate_float_inputs_not_black() -> None:
 
 
 def test_annotate_polygons_rasterizes_polygon_outline() -> None:
-    image = _toy_geotensor(np.zeros((3, 4, 4), dtype=np.uint8))
+    image = _toy_geoarray(np.zeros((3, 4, 4), dtype=np.uint8))
     polygon = Polygon([(1, 1), (3, 1), (3, 3), (1, 3)])
     out = AnnotatePolygons(geometries=[polygon], color=(1.0, 0.0, 0.0, 1.0), width=1)(
         image
@@ -284,14 +285,14 @@ def test_annotate_polygons_rasterizes_polygon_outline() -> None:
 
 
 def test_annotate_polygons_width_zero_is_noop() -> None:
-    image = _toy_geotensor(np.zeros((3, 4, 4), dtype=np.uint8))
+    image = _toy_geoarray(np.zeros((3, 4, 4), dtype=np.uint8))
     polygon = Polygon([(1, 1), (3, 1), (3, 3), (1, 3)])
     out = AnnotatePolygons(geometries=[polygon], width=0)(image)
     np.testing.assert_array_equal(np.asarray(out), gz.viz.ensure_rgba(image))
 
 
 def test_annotate_points_draws_marker() -> None:
-    image = _toy_geotensor(np.zeros((3, 4, 4), dtype=np.uint8))
+    image = _toy_geoarray(np.zeros((3, 4, 4), dtype=np.uint8))
     out = AnnotatePoints(points=np.array([[1.5, 2.5]]), radius=0)(image)
     arr = np.asarray(out)
     np.testing.assert_array_equal(arr[:, 1, 1], [255, 255, 0, 255])
@@ -299,7 +300,7 @@ def test_annotate_points_draws_marker() -> None:
 
 def test_annotate_ops_draw_each_frame_of_a_time_stack() -> None:
     rng = np.random.default_rng(0)
-    stack = _toy_geotensor(rng.integers(0, 200, (2, 3, 4, 4)).astype(np.uint8))
+    stack = _toy_geoarray(rng.integers(0, 200, (2, 3, 4, 4)).astype(np.uint8))
     polygon = Polygon([(1, 1), (3, 1), (3, 3), (1, 3)])
     for op in (
         AnnotatePoints(points=np.array([[1.5, 2.5]]), radius=0),
@@ -308,12 +309,12 @@ def test_annotate_ops_draw_each_frame_of_a_time_stack() -> None:
         out = np.asarray(op(stack))
         assert out.shape == (2, 4, 4, 4)
         for t in range(2):
-            frame = _toy_geotensor(np.asarray(stack)[t])
+            frame = _toy_geoarray(np.asarray(stack)[t])
             np.testing.assert_array_equal(out[t], np.asarray(op(frame)))
 
 
 def test_annotate_ops_name_themselves_on_a_non_display_input() -> None:
-    image = _toy_geotensor(np.zeros((2, 4, 4), dtype=np.uint8))
+    image = _toy_geoarray(np.zeros((2, 4, 4), dtype=np.uint8))
     with pytest.raises(ValueError, match="AnnotatePoints: display arrays"):
         AnnotatePoints(points=np.array([[1.5, 2.5]]))(image)
     with pytest.raises(ValueError, match="AnnotatePolygons: display arrays"):
@@ -323,7 +324,7 @@ def test_annotate_ops_name_themselves_on_a_non_display_input() -> None:
 def test_annotate_points_accepts_geodataframe() -> None:
     import geopandas as gpd
 
-    image = _toy_geotensor(np.zeros((3, 4, 4), dtype=np.uint8))
+    image = _toy_geoarray(np.zeros((3, 4, 4), dtype=np.uint8))
     points = gpd.GeoDataFrame(geometry=[Point(1.5, 2.5)], crs="EPSG:32629")
     out = AnnotatePoints(points=points, radius=0)(image)
     np.testing.assert_array_equal(np.asarray(out)[:, 1, 1], [255, 255, 0, 255])
@@ -336,16 +337,16 @@ def test_viz_module_exported_from_top_level() -> None:
 
 def test_composite_operator_arbitrary_band_selection_by_index() -> None:
     """`Composite` is the generic band-selection op the named composites wrap."""
-    gt = _toy_geotensor(np.arange(5 * 2 * 2).reshape(5, 2, 2))
+    gt = _toy_geoarray(np.arange(5 * 2 * 2).reshape(5, 2, 2))
     arr = np.asarray(gt)
     out = Composite(bands=[4, 0, 2])(gt)
-    assert isinstance(out, GeoTensor)
-    assert out.transform == gt.transform
+    assert isinstance(out, GeoArray)
+    assert out.grid == gt.grid
     np.testing.assert_array_equal(np.asarray(out), arr[[4, 0, 2]])
 
 
 def test_composite_operator_resolves_band_names() -> None:
-    gt = _toy_geotensor(
+    gt = _toy_geoarray(
         np.stack([np.full((2, 2), v) for v in [10, 20, 30, 40]], axis=0),
         attrs={"bands": ["B02", "B03", "B04", "B08"]},
     )
@@ -363,9 +364,9 @@ def test_named_composites_subclass_generic_composite() -> None:
 def test_stretch_preserves_geometadata_no_mutation() -> None:
     """Stretching must not mutate the carrier's transform or CRS."""
     arr = np.linspace(0.0, 1.0, 4).reshape(1, 2, 2).astype(np.float32)
-    gt = _toy_geotensor(arr)
+    gt = _toy_geoarray(arr)
     out = StretchToUint8()(gt)
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert str(out.crs) == str(gt.crs)
     assert out.shape == gt.shape
 
@@ -395,8 +396,8 @@ def test_apply_colormap_get_config_references_cmap_by_name() -> None:
 
 def test_overlay_alpha_zero_returns_rgba_consistently() -> None:
     """alpha=0 must still produce 4-band RGBA so downstream shape is consistent."""
-    bg = _toy_geotensor(np.full((3, 2, 2), 10, dtype=np.uint8))
-    fg = _toy_geotensor(np.full((4, 2, 2), 255, dtype=np.uint8))
+    bg = _toy_geoarray(np.full((3, 2, 2), 10, dtype=np.uint8))
+    fg = _toy_geoarray(np.full((4, 2, 2), 255, dtype=np.uint8))
     out = Overlay(alpha=0.0)(bg, fg)
     assert out.shape == (4, 2, 2)
     # RGB channels untouched, alpha promoted to opaque.
@@ -515,11 +516,11 @@ def test_blend_rgba_uses_source_over_alpha_composition() -> None:
     ],
 )
 def test_plain_ndarray_in_plain_ndarray_out(op, values) -> None:
-    """Plain np.ndarray in -> plain np.ndarray out, matching the GeoTensor path."""
+    """Plain np.ndarray in -> plain np.ndarray out, matching the GeoArray path."""
     out = op(values)
     assert type(out) is np.ndarray
-    gt_out = op(_toy_geotensor(values))
-    assert isinstance(gt_out, GeoTensor)
+    gt_out = op(_toy_geoarray(values))
+    assert isinstance(gt_out, GeoArray)
     np.testing.assert_array_equal(out, np.asarray(gt_out))
 
 
@@ -529,7 +530,7 @@ def test_overlay_plain_ndarrays_blend_without_metadata() -> None:
     fg = np.full((4, 2, 2), 255, dtype=np.uint8)
     out = Overlay(alpha=0.5)(bg, fg)
     assert type(out) is np.ndarray
-    expected = Overlay(alpha=0.5)(_toy_geotensor(bg), _toy_geotensor(fg))
+    expected = Overlay(alpha=0.5)(_toy_geoarray(bg), _toy_geoarray(fg))
     np.testing.assert_array_equal(out, np.asarray(expected))
 
 
@@ -560,7 +561,7 @@ def test_overlay_plain_ndarrays_blend_without_metadata() -> None:
 )
 def test_geo_dependent_ops_reject_plain_arrays(op, values) -> None:
     """Geo-dependent viz ops raise a clear TypeError on plain-array input."""
-    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+    with pytest.raises(TypeError, match="georeferenced GeoArray"):
         op(values)
 
 
@@ -575,10 +576,10 @@ def test_composite_string_bands_require_attrs_metadata() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _with_fill(values: np.ndarray, fill: Any = -9999) -> GeoTensor:
+def _with_fill(values: np.ndarray, fill: Any = -9999) -> GeoArray:
     values = np.array(values, copy=True)
     values[..., fill_pixel_mask(values.shape)] = fill
-    return _toy_geotensor(values, fill_value_default=fill)
+    return _toy_geoarray(values, fill_value=fill)
 
 
 def test_fill_pixels_are_excluded() -> None:
@@ -590,7 +591,7 @@ def test_fill_pixels_are_excluded() -> None:
 
     # StretchToUint8: percentiles over valid pixels only; fill -> 0.
     out = StretchToUint8()(_with_fill(clean))
-    assert out.fill_value_default == 0
+    assert out.fill_value == 0
     np.testing.assert_array_equal(np.asarray(out)[:, fill], 0)
     expected = stretch_to_uint8(nan_clean)
     np.testing.assert_array_equal(np.asarray(out)[:, ~fill], expected[:, ~fill])
@@ -623,7 +624,7 @@ def test_fill_pixels_are_excluded() -> None:
     shade = np.asarray(Hillshade()(_with_fill(dem)))
     np.testing.assert_array_equal(shade[fill], 0)
     np.testing.assert_array_equal(
-        shade[~fill], np.asarray(Hillshade()(_toy_geotensor(dem)))[~fill]
+        shade[~fill], np.asarray(Hillshade()(_toy_geoarray(dem)))[~fill]
     )
 
     # GammaCorrect is elementwise: fill values pass through untouched.
@@ -661,24 +662,24 @@ def test_composite_output_band_attrs() -> None:
         "wavelengths": [490.0, 560.0, 665.0, 842.0],
         "sensor": "S2A",
     }
-    gt = _toy_geotensor(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2), attrs)
+    gt = _toy_geoarray(np.arange(4 * 2 * 2, dtype=np.float32).reshape(4, 2, 2), attrs)
     out = TrueColor(red="B04", green="B03", blue="B02")(gt)
     assert isinstance(Composite(bands=[0]), gz.spectral.SelectBands)
     assert out.attrs is not gt.attrs
-    assert out.attrs["band_names"] == ["B04", "B03", "B02"]
+    assert out.attrs["band_names"] == ("B04", "B03", "B02")
     np.testing.assert_array_equal(out.attrs["wavelengths"], [665.0, 560.0, 490.0])
     assert out.attrs["sensor"] == "S2A"
-    assert gt.attrs["band_names"] == ["B02", "B03", "B04", "B08"]  # not mutated
+    assert gt.attrs["band_names"] == ("B02", "B03", "B04", "B08")  # not mutated
 
     # Same band count, reordered: the names must follow the pixels too.
-    rgb = _toy_geotensor(
+    rgb = _toy_geoarray(
         np.arange(3 * 2 * 2, dtype=np.float32).reshape(3, 2, 2),
         {"band_names": ["B02", "B03", "B04"]},
     )
     out = Composite(bands=[2, 1, 0])(rgb)
-    assert out.attrs["band_names"] == ["B04", "B03", "B02"]
+    assert out.attrs["band_names"] == ("B04", "B03", "B02")
     np.testing.assert_array_equal(np.asarray(out), np.asarray(rgb)[[2, 1, 0]])
-    assert out.fill_value_default == rgb.fill_value_default
+    assert out.fill_value == rgb.fill_value
 
 
 @pytest.mark.parametrize("axis", [(-2, -1), None])
@@ -687,14 +688,14 @@ def test_stretch_to_uint8_equals_percentile_clip_pipeline(axis: Any) -> None:
     values = rng.normal(0.3, 0.1, (2, 3, 5, 5)).astype(np.float32)
     values[0, :, 1, 1] = -9999.0  # nodata pixel in frame 0
     values[1, 2, 0, 3] = np.nan
-    gt = _toy_geotensor(values)
+    gt = _toy_geoarray(values)
     out = StretchToUint8(lower=5.0, upper=95.0, reduce_axes=axis)(gt)
     stretched = gz.radiometry.PercentileClip(lower=5.0, upper=95.0, reduce_axes=axis)(
         gt
     )
     expected = np.rint(np.nan_to_num(np.asarray(stretched)) * 255.0).astype(np.uint8)
     assert out.dtype == np.uint8
-    assert out.fill_value_default == 0
+    assert out.fill_value == 0
     np.testing.assert_array_equal(np.asarray(out), expected)
     np.testing.assert_array_equal(np.asarray(out)[0, :, 1, 1], 0)
 
@@ -704,8 +705,8 @@ def test_stretch_keeps_per_frame_nodata_on_time_stacks() -> None:
     rng = np.random.default_rng(1)
     values = rng.uniform(0.1, 0.9, (2, 3, 4, 4)).astype(np.float32)
     values[0, :, 2, 2] = -9999.0  # nodata in frame 0 only
-    gt = _toy_geotensor(values)
-    frame1 = StretchToUint8()(_toy_geotensor(values[1]))
+    gt = _toy_geoarray(values)
+    frame1 = StretchToUint8()(_toy_geoarray(values[1]))
 
     out = np.asarray(StretchToUint8()(gt))
     np.testing.assert_array_equal(out[0, :, 2, 2], 0)
@@ -752,8 +753,8 @@ def test_gamma_correct_clips_floats_to_unit_interval() -> None:
     np.testing.assert_allclose(out, [1.0, 0.0, 0.5, np.nan])
     unit = np.linspace(0.0, 1.0, 7).reshape(1, 1, 7)
     np.testing.assert_allclose(
-        np.asarray(GammaCorrect(gamma=1.7)(_toy_geotensor(unit))),
-        np.asarray(gz.radiometry.Gamma(gamma=1.7)(_toy_geotensor(unit))),
+        np.asarray(GammaCorrect(gamma=1.7)(_toy_geoarray(unit))),
+        np.asarray(gz.radiometry.Gamma(gamma=1.7)(_toy_geoarray(unit))),
     )
     with pytest.raises(ValueError, match="gamma > 0"):
         gamma_correct_display(np.ones(2), gamma=0.0)
@@ -777,7 +778,7 @@ def test_annotate_polygons_matches_direct_rasterize() -> None:
     """Delegating to georeader keeps the burned outline pixel-identical."""
     from rasterio.features import rasterize
 
-    image = _toy_geotensor(np.zeros((3, 8, 8), dtype=np.uint8))
+    image = _toy_geoarray(np.zeros((3, 8, 8), dtype=np.uint8))
     polygons = [
         Polygon([(1, 1), (5, 1), (5, 3), (1, 3)]),
         Polygon([(2.5, 0.5), (6.5, 0.5), (6.5, 3.5)]),
@@ -789,7 +790,7 @@ def test_annotate_polygons_matches_direct_rasterize() -> None:
     )
     shapes = [(poly.boundary.buffer(0.5), 1) for poly in polygons]
     expected = rasterize(
-        shapes, out_shape=(8, 8), transform=image.transform, all_touched=True
+        shapes, out_shape=(8, 8), transform=affine_of(image), all_touched=True
     ).astype(bool)
     assert expected.any()
     np.testing.assert_array_equal(out[1] == 255, expected)
@@ -803,7 +804,7 @@ def test_annotate_polygons_matches_direct_rasterize() -> None:
 def test_hillshade_reads_non_square_pixel_sizes_from_the_transform() -> None:
     """10 m x 20 m pixels: each axis gradient uses its own resolution."""
     dem = _plane(5.0, 2.0, n=8)
-    out = Hillshade()(toy_geotensor(dem, grid="non_square"))
+    out = Hillshade()(toy_geoarray(dem, grid="non_square"))
     expected = hillshade(dem, x_resolution=10.0, y_resolution=20.0)
     np.testing.assert_array_equal(np.asarray(out), expected)
     # Swapped or single-resolution handling gives a different picture.
@@ -816,7 +817,7 @@ def test_hillshade_reads_non_square_pixel_sizes_from_the_transform() -> None:
 
 
 def test_hillshade_rejects_a_geographic_crs() -> None:
-    dem = toy_geotensor(_plane(5.0, 5.0, n=8), grid="geographic")
+    dem = toy_geoarray(_plane(5.0, 5.0, n=8), grid="geographic")
     with pytest.raises(ValueError, match=r"Hillshade.*projected"):
         Hillshade()(dem)
     with pytest.raises(ValueError, match=r"Hillshade.*projected"):
@@ -832,7 +833,7 @@ def test_hillshade_rejects_a_geographic_crs() -> None:
 def test_hillshade_reads_ground_pixel_steps_on_a_rotated_grid() -> None:
     """The rotated 10 m grid has |a| = |e| = 8.66; the steps are still 10 m."""
     dem = _plane(5.0, 2.0, n=8)
-    out = Hillshade()(toy_geotensor(dem, grid="rotated"))
+    out = Hillshade()(toy_geoarray(dem, grid="rotated"))
     np.testing.assert_array_equal(
         np.asarray(out), hillshade(dem, x_resolution=10.0, y_resolution=10.0)
     )
@@ -840,7 +841,7 @@ def test_hillshade_reads_ground_pixel_steps_on_a_rotated_grid() -> None:
 
 def test_hillshade_rejects_a_sheared_grid() -> None:
     with pytest.raises(ValueError, match=r"Hillshade.*sheared"):
-        Hillshade()(toy_geotensor(_plane(5.0, 2.0, n=8), grid="sheared"))
+        Hillshade()(toy_geoarray(_plane(5.0, 2.0, n=8), grid="sheared"))
 
 
 # ---------------------------------------------------------------------------
@@ -848,12 +849,12 @@ def test_hillshade_rejects_a_sheared_grid() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _named(values: dict[str, np.ndarray]) -> GeoTensor:
-    return GeoTensor(
+def _named(values: dict[str, np.ndarray]) -> GeoArray:
+    return GeoArray(
         np.stack([np.asarray(v, dtype=np.float32) for v in values.values()]),
         transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 0.0),
         crs="EPSG:32633",
-        fill_value_default=np.nan,
+        fill_value=np.nan,
         attrs={"band_names": tuple(values)},
     )
 
@@ -907,11 +908,11 @@ def test_rgb_recipe_operator_evaluates_band_expressions() -> None:
     gt = _named({"a": np.full((2, 3), 0.2), "b": np.full((2, 3), 0.6)})
     op = gz.viz.RGBRecipe(red="b", green="0.5 * a + 0.5 * b", blue=0, gamma=1.0)
     out = op(gt)
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
     assert out.shape == (3, 2, 3)
     assert out.attrs["band_names"] == ("red", "green", "blue")
-    assert out.transform == gt.transform
-    assert np.isnan(out.fill_value_default)
+    assert out.grid == gt.grid
+    assert np.isnan(out.fill_value)
     np.testing.assert_allclose(np.asarray(out)[:, 0, 0], [0.6, 0.4, 0.2], rtol=1e-6)
 
 

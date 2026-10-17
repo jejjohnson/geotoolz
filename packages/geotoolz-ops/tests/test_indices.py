@@ -7,7 +7,7 @@ Three layers:
    numpy arrays; they should agree with hand-computed formulas to
    floating-point precision.
 2. **Tier-B carrier round-trip** — ``transform``, ``crs`` and
-   ``fill_value_default`` survive ``op(gt)``.
+   ``fill_value`` survive ``op(gt)``.
 3. **Hydra-zen ``builds()`` round-trip** — every Operator's
    ``get_config()`` re-instantiates an equivalent operator.
 """
@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _helpers import fill_pixel_mask, toy_geotensor, uint16_dn_cube
-from georeader.geotensor import GeoTensor
+from _helpers import fill_pixel_mask, toy_geoarray, uint16_dn_cube
+from geoarray import GeoArray
 
 from geoops.indices import (
     ARVI,
@@ -71,19 +71,19 @@ from geoops.indices import (
 
 
 @pytest.fixture
-def reflectance_4band() -> GeoTensor:
+def reflectance_4band() -> GeoArray:
     """``(B, G, R, NIR)`` reflectance carrier, 4 x 8 x 8."""
     rng = np.random.default_rng(0)
     arr = rng.uniform(0.05, 0.6, size=(4, 8, 8)).astype(np.float32)
-    return toy_geotensor(arr)
+    return toy_geoarray(arr)
 
 
 @pytest.fixture
-def reflectance_7band() -> GeoTensor:
+def reflectance_7band() -> GeoArray:
     """``(B, G, R, NIR, SWIR1, SWIR2, ??)`` — 7-band stub for NDBI / NBR."""
     rng = np.random.default_rng(1)
     arr = rng.uniform(0.05, 0.6, size=(7, 8, 8)).astype(np.float32)
-    return toy_geotensor(arr)
+    return toy_geoarray(arr)
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +245,7 @@ def test_ndvi_uint16_dn() -> None:
 
     np.testing.assert_allclose(normalized_difference(cube, 0, 1), [[-0.5]])
     np.testing.assert_allclose(np.asarray(NDVI(nir=0, red=1)(cube)), -0.5)
-    out = NDVI(nir=0, red=1)(toy_geotensor(cube))
+    out = NDVI(nir=0, red=1)(toy_geoarray(cube))
     np.testing.assert_allclose(np.asarray(out), -0.5)
     assert np.asarray(out).dtype == np.float32
 
@@ -284,14 +284,14 @@ def test_index_primitives_uint16_match_float(fn, idx) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tier-B — Operator + GeoTensor round-trip
+# Tier-B — Operator + GeoArray round-trip
 # ---------------------------------------------------------------------------
 
 
-def test_ndvi_preserves_transform_and_crs(reflectance_4band: GeoTensor) -> None:
+def test_ndvi_preserves_transform_and_crs(reflectance_4band: GeoArray) -> None:
     out = NDVI(nir=3, red=2)(reflectance_4band)
-    assert isinstance(out, GeoTensor)
-    assert out.transform == reflectance_4band.transform
+    assert isinstance(out, GeoArray)
+    assert out.grid == reflectance_4band.grid
     assert str(out.crs) == "EPSG:32629"
     # Band axis collapsed -> 2D.
     assert out.shape == (8, 8)
@@ -301,14 +301,14 @@ def test_ndvi_preserves_transform_and_crs(reflectance_4band: GeoTensor) -> None:
 
 
 def test_normalized_difference_op_matches_named_subclass(
-    reflectance_4band: GeoTensor,
+    reflectance_4band: GeoArray,
 ) -> None:
     via_named = NDVI(nir=3, red=2, eps=0.0)(reflectance_4band)
     via_generic = NormalizedDifference(a=3, b=2, eps=0.0)(reflectance_4band)
     np.testing.assert_allclose(np.asarray(via_named), np.asarray(via_generic))
 
 
-def test_all_indices_run_without_crashing(reflectance_7band: GeoTensor) -> None:
+def test_all_indices_run_without_crashing(reflectance_7band: GeoArray) -> None:
     """Smoke test every Operator's _apply path."""
     for op in [
         ARVI(),
@@ -333,16 +333,16 @@ def test_all_indices_run_without_crashing(reflectance_7band: GeoTensor) -> None:
         NormalizedDifference(a=3, b=2),
     ]:
         out = op(reflectance_7band)
-        assert isinstance(out, GeoTensor)
+        assert isinstance(out, GeoArray)
         assert out.shape == (8, 8)
-        assert out.transform == reflectance_7band.transform
+        assert out.grid == reflectance_7band.grid
 
 
-def test_band_name_resolution_uses_geotensor_descriptions() -> None:
+def test_band_name_resolution_uses_geoarray_descriptions() -> None:
     rng = np.random.default_rng(2)
     arr = rng.uniform(0.05, 0.6, size=(4, 5, 5)).astype(np.float32)
-    gt = toy_geotensor(arr)
-    gt.attrs["descriptions"] = ("B02", "B03", "B04", "B08")
+    gt = toy_geoarray(arr)
+    gt = gt.with_attrs(descriptions=("B02", "B03", "B04", "B08"))
 
     via_names = NDVI(red="B04", nir="B08", eps=0.0)(gt)
     via_indices = NDVI(red=2, nir=3, eps=0.0)(gt)
@@ -351,8 +351,8 @@ def test_band_name_resolution_uses_geotensor_descriptions() -> None:
 
 
 def test_band_name_resolution_missing_name_raises() -> None:
-    gt = toy_geotensor(np.ones((2, 2, 2), dtype=np.float32))
-    gt.attrs["descriptions"] = ("B02", "B03")
+    gt = toy_geoarray(np.ones((2, 2, 2), dtype=np.float32))
+    gt = gt.with_attrs(descriptions=("B02", "B03"))
 
     with pytest.raises(ValueError, match="Band 'B04' was not found"):
         NDVI(red="B04", nir="B03")(gt)
@@ -363,11 +363,11 @@ def test_band_name_resolution_falls_back_to_band_names() -> None:
     resolver should fall through to ``band_names`` rather than raise."""
     rng = np.random.default_rng(5)
     arr = rng.uniform(0.05, 0.6, size=(4, 4, 4)).astype(np.float32)
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
     # ``descriptions`` has a different vocabulary than the caller is using;
     # ``band_names`` carries the names the caller expects.
-    gt.attrs["descriptions"] = ("B02", "B03", "B04", "B08")
-    gt.attrs["band_names"] = ("blue", "green", "red", "nir")
+    gt = gt.with_attrs(descriptions=("B02", "B03", "B04", "B08"))
+    gt = gt.with_attrs(band_names=("blue", "green", "red", "nir"))
 
     via_names = NDVI(red="red", nir="nir", eps=0.0)(gt)
     via_indices = NDVI(red=2, nir=3, eps=0.0)(gt)
@@ -380,11 +380,11 @@ def test_band_name_resolution_band_names_takes_precedence() -> None:
     package-wide lookup order)."""
     rng = np.random.default_rng(6)
     arr = rng.uniform(0.05, 0.6, size=(4, 4, 4)).astype(np.float32)
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
     # Same name "X" sits at index 0 in `descriptions` and index 3 in
     # `band_names`. The resolver should pick band_names -> 3.
-    gt.attrs["descriptions"] = ("X", "_", "_", "_")
-    gt.attrs["band_names"] = ("_", "_", "_", "X")
+    gt = gt.with_attrs(descriptions=("X", "_", "_", "_"))
+    gt = gt.with_attrs(band_names=("_", "_", "_", "X"))
 
     out = NDVI(red="X", nir=0)(gt)
     expected = NDVI(red=3, nir=0)(gt)
@@ -395,12 +395,12 @@ def test_band_name_resolution_skips_none_and_non_iterable_keys() -> None:
     """Missing / ``None`` / non-iterable attribute values should be
     skipped silently and fall through to the next key."""
     arr = np.ones((4, 2, 2), dtype=np.float32)
-    gt = toy_geotensor(arr)
-    gt.attrs["descriptions"] = None  # explicitly null
-    gt.attrs["band_names"] = ("B02", "B03", "B04", "B08")
+    gt = toy_geoarray(arr)
+    gt = gt.with_attrs(descriptions=None)  # explicitly null
+    gt = gt.with_attrs(band_names=("B02", "B03", "B04", "B08"))
 
     out = NDVI(red="B04", nir="B08", eps=0.0)(gt)
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
 
 
 def test_bais2_default_uses_sentinel2_named_bands() -> None:
@@ -408,18 +408,20 @@ def test_bais2_default_uses_sentinel2_named_bands() -> None:
     explicit-index BAIS2 on a stack with descriptions tagged."""
     rng = np.random.default_rng(8)
     arr = rng.uniform(0.05, 0.6, size=(10, 4, 4)).astype(np.float32)
-    gt = toy_geotensor(arr)
-    gt.attrs["descriptions"] = (
-        "B02",
-        "B03",
-        "B04",
-        "B05",
-        "B06",
-        "B07",
-        "B08",
-        "B8A",
-        "B11",
-        "B12",
+    gt = toy_geoarray(arr)
+    gt = gt.with_attrs(
+        descriptions=(
+            "B02",
+            "B03",
+            "B04",
+            "B05",
+            "B06",
+            "B07",
+            "B08",
+            "B8A",
+            "B11",
+            "B12",
+        )
     )
 
     via_names = BAIS2(
@@ -435,36 +437,36 @@ def test_bais2_default_uses_sentinel2_named_bands() -> None:
 
 def test_ciri_default_uses_sentinel2_b10_position() -> None:
     arr = np.arange(10, dtype=np.float32).reshape(10, 1, 1)
-    gt = toy_geotensor(arr)
+    gt = toy_geoarray(arr)
 
     out = CIRI()(gt)
 
     np.testing.assert_allclose(np.asarray(out), [[9.0]])
 
 
-def test_dnbr_subtracts_matching_geotensors() -> None:
-    pre = toy_geotensor(np.full((3, 3), 0.7, dtype=np.float32))
-    post = toy_geotensor(np.full((3, 3), 0.2, dtype=np.float32))
+def test_dnbr_subtracts_matching_geoarrays() -> None:
+    pre = toy_geoarray(np.full((3, 3), 0.7, dtype=np.float32))
+    post = toy_geoarray(np.full((3, 3), 0.2, dtype=np.float32))
 
     out = dNBR()(pre, post)
 
     np.testing.assert_allclose(np.asarray(out), 0.5)
-    assert out.transform == pre.transform
+    assert out.grid == pre.grid
     assert out.crs == pre.crs
 
 
 def test_dnbr_raises_on_grid_mismatch() -> None:
-    pre = toy_geotensor(np.ones((3, 3), dtype=np.float32))
-    post = toy_geotensor(np.ones((4, 4), dtype=np.float32))
+    pre = toy_geoarray(np.ones((3, 3), dtype=np.float32))
+    post = toy_geoarray(np.ones((4, 4), dtype=np.float32))
 
     with pytest.raises(ValueError, match="share shape, transform, and CRS"):
         dNBR()(pre, post)
 
 
-def test_append_index_concatenates_back(reflectance_4band: GeoTensor) -> None:
+def test_append_index_concatenates_back(reflectance_4band: GeoArray) -> None:
     op = AppendIndex(index_op=NDVI(nir=3, red=2))
     out = op(reflectance_4band)
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
     assert out.shape == (5, 8, 8)  # original 4 bands + 1 NDVI channel
     # The new last channel should equal a direct NDVI call.
     expected_ndvi = np.asarray(NDVI(nir=3, red=2)(reflectance_4band))
@@ -474,7 +476,7 @@ def test_append_index_concatenates_back(reflectance_4band: GeoTensor) -> None:
 def test_append_index_appends_band_name() -> None:
     """Band-name lists gain the index name; wavelengths are dropped (#144)."""
     names = ["B02", "B03", "B04", "B08"]
-    gt = toy_geotensor(
+    gt = toy_geoarray(
         np.full((4, 2, 2), 0.5),
         attrs={
             "band_names": names,
@@ -484,16 +486,16 @@ def test_append_index_appends_band_name() -> None:
         },
     )
     out = AppendIndex(index_op=NDVI(red="B04", nir="B08"))(gt)
-    assert out.attrs["band_names"] == [*names, "NDVI"]
-    assert out.attrs["descriptions"] == [*names, "NDVI"]
+    assert out.attrs["band_names"] == (*names, "NDVI")
+    assert out.attrs["descriptions"] == (*names, "NDVI")
     assert "wavelengths" not in out.attrs
     assert out.attrs["sensor"] == "S2"
-    assert gt.attrs["band_names"] == names
+    assert gt.attrs["band_names"] == tuple(names)
 
 
 def test_index_output_drops_band_names() -> None:
     """A collapsed index output carries no stale per-band attrs (#144)."""
-    gt = toy_geotensor(
+    gt = toy_geoarray(
         np.full((4, 2, 2), 0.5), attrs={"band_names": ["a", "b", "c", "d"], "k": 1}
     )
     out = NDVI(red=2, nir=3)(gt)
@@ -531,31 +533,31 @@ _FILL_OPS = [
 
 
 @pytest.mark.parametrize("op", _FILL_OPS, ids=lambda op: type(op).__name__)
-def test_fill_pixels_are_excluded(op: object, reflectance_7band: GeoTensor) -> None:
+def test_fill_pixels_are_excluded(op: object, reflectance_7band: GeoArray) -> None:
     """A -9999 fill pixel is not computed as data: it holds the output fill.
 
     An index is a new quantity, so the output fill is NaN, not the
     input's -9999 (#146).
     """
     clean = np.asarray(reflectance_7band)
-    gt = toy_geotensor(clean, with_fill_pixels=True)
+    gt = toy_geoarray(clean, with_fill_pixels=True)
     fill = fill_pixel_mask(gt.shape)
 
     out = op(gt)  # type: ignore[operator]
-    expected = np.asarray(op(toy_geotensor(clean)))  # type: ignore[operator]
+    expected = np.asarray(op(toy_geoarray(clean)))  # type: ignore[operator]
 
-    assert np.isnan(out.fill_value_default)
+    assert np.isnan(out.fill_value)
     assert np.isnan(np.asarray(out)[fill]).all()
     np.testing.assert_allclose(np.asarray(out)[~fill], expected[~fill])
 
 
 def test_fill_pixels_are_excluded_nan_fill_and_plain_array(
-    reflectance_7band: GeoTensor,
+    reflectance_7band: GeoArray,
 ) -> None:
-    """NaN fills (GeoTensor) and NaN pixels (plain ndarray) map to NaN."""
+    """NaN fills (GeoArray) and NaN pixels (plain ndarray) map to NaN."""
     clean = np.asarray(reflectance_7band)
     fill = fill_pixel_mask(clean.shape)
-    gt = toy_geotensor(clean, fill_value_default=np.nan, with_fill_pixels=True)
+    gt = toy_geoarray(clean, fill_value=np.nan, with_fill_pixels=True)
     assert np.isnan(np.asarray(NDVI()(gt))[fill]).all()
 
     arr = clean.copy()
@@ -568,21 +570,21 @@ def test_fill_pixels_are_excluded_nan_fill_and_plain_array(
 
 
 def test_fill_pixels_are_excluded_dnbr_and_append_index(
-    reflectance_4band: GeoTensor,
+    reflectance_4band: GeoArray,
 ) -> None:
     clean = np.asarray(reflectance_4band)
     fill = fill_pixel_mask(clean.shape)
-    pre = toy_geotensor(clean[0], with_fill_pixels=True)
-    post = toy_geotensor(clean[1])
+    pre = toy_geoarray(clean[0], with_fill_pixels=True)
+    post = toy_geoarray(clean[1])
     out = dNBR()(pre, post)
-    assert np.isnan(out.fill_value_default)
+    assert np.isnan(out.fill_value)
     assert np.isnan(np.asarray(out)[fill]).all()
     np.testing.assert_allclose(np.asarray(out)[~fill], (clean[0] - clean[1])[~fill])
 
     # AppendIndex carries the input bands, so it keeps their fill -- in
     # the appended index band too.
-    stacked = AppendIndex(index_op=NDVI())(toy_geotensor(clean, with_fill_pixels=True))
-    assert stacked.fill_value_default == -9999
+    stacked = AppendIndex(index_op=NDVI())(toy_geoarray(clean, with_fill_pixels=True))
+    assert stacked.fill_value == -9999
     np.testing.assert_array_equal(np.asarray(stacked)[-1][fill], -9999)
 
 
@@ -592,17 +594,17 @@ def test_index_of_integer_dn_declares_nan_fill() -> None:
 
     dn = uint16_dn_cube(4, size=6)
     dn[2, 1, 1] = dn[3, 1, 1]  # red == nir -> NDVI exactly 0 at a valid pixel
-    gt = toy_geotensor(dn, fill_value_default=0, with_fill_pixels=True)
+    gt = toy_geoarray(dn, fill_value=0, with_fill_pixels=True)
     fill = fill_pixel_mask(gt.shape)
 
     out = NDVI()(gt)
-    assert np.isnan(out.fill_value_default)
+    assert np.isnan(out.fill_value)
     assert np.isnan(np.asarray(out)[fill]).all()
     assert np.asarray(out)[1, 1] == 0.0
-    assert np.asarray(out.validmask())[1, 1]
+    assert np.asarray(out.valid_mask())[1, 1]
 
     stacked = AppendIndex(index_op=NDVI())(gt)
-    assert np.isnan(stacked.fill_value_default)
+    assert np.isnan(stacked.fill_value)
     assert np.isnan(np.asarray(stacked)[:, fill]).all()
 
 
@@ -626,15 +628,15 @@ def test_index_of_integer_dn_declares_nan_fill() -> None:
     ids=lambda op: type(op).__name__,
 )
 def test_plain_ndarray_in_plain_ndarray_out(op: object) -> None:
-    """Plain ndarray in -> plain ndarray out, same values as the GeoTensor path."""
+    """Plain ndarray in -> plain ndarray out, same values as the GeoArray path."""
     rng = np.random.default_rng(3)
     arr = rng.uniform(0.05, 0.6, size=(4, 6, 6)).astype(np.float32)
 
     out = op(arr)  # type: ignore[operator]
     assert type(out) is np.ndarray
 
-    via_gt = op(toy_geotensor(arr))  # type: ignore[operator]
-    assert isinstance(via_gt, GeoTensor)
+    via_gt = op(toy_geoarray(arr))  # type: ignore[operator]
+    assert isinstance(via_gt, GeoArray)
     np.testing.assert_allclose(out, np.asarray(via_gt))
 
 
@@ -654,9 +656,9 @@ def test_dnbr_plain_ndarrays_shape_mismatch_raises() -> None:
 
 
 def test_named_band_on_plain_array_raises_typeerror() -> None:
-    """Named-band resolution needs GeoTensor attrs metadata."""
+    """Named-band resolution needs GeoArray attrs metadata."""
     arr = np.ones((4, 4, 4), dtype=np.float32)
-    with pytest.raises(TypeError, match="requires a georeferenced GeoTensor"):
+    with pytest.raises(TypeError, match="requires a georeferenced GeoArray"):
         NDVI(red="B04", nir="B08")(arr)
 
 
@@ -747,7 +749,7 @@ def test_4d_time_stack() -> None:
 
     stack = time_stack()
     out = NDVI(nir=1, red=0)(stack)
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
     assert out.shape == (2, 1, 4, 4)
     for t, frame in enumerate(frames(stack)):
         np.testing.assert_allclose(
@@ -755,4 +757,4 @@ def test_4d_time_stack() -> None:
         )
     appended = AppendIndex(index_op=NDVI(nir=1, red=0))(stack)
     assert appended.shape == (2, 4, 4, 4)
-    assert appended.attrs["band_names"] == ["b0", "b1", "b2", "NDVI"]
+    assert appended.attrs["band_names"] == ("b0", "b1", "b2", "NDVI")

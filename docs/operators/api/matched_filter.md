@@ -16,7 +16,7 @@ algebra is composable.
 - **Result containers:** `NumpyLinearOperator` (dense covariance with `solve`), `AdaptiveBackground`,
   `ClusterBackground`, `StreamingBackgroundResult`, `WelfordAccumulator`
 - **Post-processing:** `DetectionThreshold`, `ValidateMFInputs`
-- **Array primitives** (no GeoTensor): `apply_image`, `apply_pixel`, `apply_adaptive_mf`, `matched_filter_snr`,
+- **Array primitives** (no GeoArray): `apply_image`, `apply_pixel`, `apply_adaptive_mf`, `matched_filter_snr`,
   `estimate_mean`, `estimate_cov_empirical`, `estimate_cov_shrunk`, `estimate_cov_lowrank`,
   `shrink_covariance`, `detection_threshold`, `validate_mf_inputs`
 

@@ -27,7 +27,7 @@ def select_bands(
         arr: Input array with the band axis at position ``axis``.
         indexes: Integer band positions to keep, in output order.
             Repeats are allowed (the band is duplicated in the output).
-        axis: Position of the band axis. Default ``-3`` (georeader's
+        axis: Position of the band axis. Default ``-3`` (the carrier's
             ``(C, H, W)`` / ``(T, C, H, W)`` layout; matches
             ``rasterio.read()`` output).
 

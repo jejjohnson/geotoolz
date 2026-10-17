@@ -70,8 +70,6 @@ def test_jit(x64: ModuleType) -> None:
 def test_parity_with_geoops(seed: int, dtype: type, fill: float) -> None:
     """GB4: the same pixels as geoops' nodata rule, on random scenes."""
     valid = pytest.importorskip("geoops._src.valid")
-    from affine import Affine
-    from georeader.geotensor import GeoTensor
 
     rng = np.random.default_rng(seed)
     data = rng.integers(0, 5, size=(3, 16, 16)).astype(dtype)
@@ -79,7 +77,7 @@ def test_parity_with_geoops(seed: int, dtype: type, fill: float) -> None:
     data[holes] = fill
     if np.issubdtype(dtype, np.floating):
         data[rng.random(data.shape) < 0.05] = np.inf
-    theirs = GeoTensor(data, Affine(*TRANSFORM), CRS, fill_value_default=fill)
-    expected = np.asarray(valid.valid_pixels(theirs))
+    # geoops' plain-array path with an explicit fill: its own implementation.
+    expected = np.asarray(valid.valid_pixels(data, fill_value=fill))
     mine = GeoArray(data, TRANSFORM, CRS, fill_value=fill).valid_mask()
     np.testing.assert_array_equal(mine, expected)

@@ -1,16 +1,22 @@
-"""I/O operators wrapping :mod:`georeader` read and write primitives.
+"""I/O operators: read rasters into a `geoarray.GeoArray`, write one out.
 
-This module provides carrier-aware :class:`Operator` wrappers around the
-file/cloud IO primitives in :mod:`georeader.read` and
-:mod:`georeader.save`. Two families:
+This module provides :class:`Operator` wrappers around file / cloud IO.
+The reads and writes are computed by :mod:`georeader.read` and
+:mod:`georeader.save` (through the engine boundary,
+:mod:`geoops._src.engine`), but no georeader type crosses the public API.
+Two families:
 
 * **Source operators** (subclasses of :class:`SourceOperator`) take a
-  raster source (path / :class:`RasterioReader` / STAC asset / EE image)
-  and produce an in-memory :class:`georeader.geotensor.GeoTensor`. They
-  override ``_apply`` with no positional input and are valid as the
-  first step of a :class:`~pipekit.Sequential`.
+  raster source and produce an in-memory `geoarray.GeoArray`. A source is
+  a path, an open rasterio dataset, a `geoarray.RasterSource` (a lazy
+  reader: a geoproducts reader, or a georeader reader wrapped with
+  ``geoarray.interop.georeader.source_from_georeader``) or a GeoArray.
+  A georeader ``GeoTensor`` / ``GeoData`` is refused with a ``TypeError``
+  naming ``from_georeader`` / ``source_from_georeader``. Sources override
+  ``_apply`` with no positional input and are valid as the first step of
+  a :class:`~pipekit.Sequential`.
 * **Sink operators** (subclasses of :class:`SinkOperator`) consume a
-  ``GeoTensor`` and write it to disk / object storage. They are marked
+  ``GeoArray`` and write it to disk / object storage. They are marked
   ``_terminal = True`` so :class:`~pipekit.Sequential` only
   accepts them as the last step.
 
@@ -18,7 +24,7 @@ Configs built from paths, bounds, windows and asset IDs are plain JSON
 and round-trip through ``Operator.from_state`` / YAML. Mapping options
 (sink ``profile`` / ``tags`` / ``chunks``) are emitted as
 ``[[key, value], ...]`` pairs and accepted in either form. A source given as
-a runtime object (an open reader, a ``GeoTensor``) stays in the config
+a runtime object (an open reader, a ``GeoArray``) stays in the config
 as-is, so ``from_state`` refuses it as non-primitive. ``LoadFromSTAC``
 (a runtime STAC item) and ``ReadReprojectLike`` (a runtime reference
 grid) always hold runtime objects and set ``forbid_in_yaml = True``.
@@ -38,9 +44,9 @@ from typing import Any, ClassVar
 
 import numpy as np
 import shapely.wkt
-from affine import Affine
+from geoarray import GeoArray, RasterSource
+from geoarray.interop.georeader import source_from_georeader
 from georeader import read, save
-from georeader.geotensor import GeoTensor
 from georeader.rasterio_reader import RasterioReader
 from pipekit import Operator
 from rasterio.errors import RasterioIOError
@@ -54,10 +60,12 @@ from geoops._src.config import (
     mapping_from_pairs,
     mapping_to_pairs,
 )
+from geoops._src.engine import from_engine, to_engine
+from geoops._src.geo import is_geotensor, reject_geotensor, require_geoarray
 from geoops.io._src.errors import GeoToolzIOError
 
 
-Source = str | PathLike[str] | Any
+Source = str | PathLike[str] | DatasetReaderBase | RasterSource | GeoArray
 Bounds = tuple[float, float, float, float]
 Resolution = float | tuple[float, float]
 
@@ -88,7 +96,7 @@ def _cloud_call(extra: str, feature: str, call: Callable[[], Any]) -> Any:
 
 
 class SourceOperator(Operator):
-    """Operator that produces a :class:`GeoTensor` without an input carrier.
+    """Operator that produces a `GeoArray` without an input carrier.
 
     Source operators are valid as the *first* step of a
     :class:`~pipekit.Sequential` because
@@ -100,17 +108,17 @@ class SourceOperator(Operator):
     (and later called with) at least one parent ``Node`` — and calling
     ``op()`` with no argument while building a graph simply reads
     eagerly. Run the source first (or as the head of a ``Sequential``
-    that wraps the graph) and feed its ``GeoTensor`` to the graph's
+    that wraps the graph) and feed its ``GeoArray`` to the graph's
     ``Input``.
     """
 
 
 class SinkOperator(Operator):
-    """Terminal operator that consumes a :class:`GeoTensor` and writes it.
+    """Terminal operator that consumes a `GeoArray` and writes it.
 
     Sink operators are marked ``_terminal = True`` so
     :class:`~pipekit.Sequential` only accepts them as the *last*
-    step (anywhere else they would break the GeoTensor → next op
+    step (anywhere else they would break the GeoArray → next op
     contract by returning ``None``).
     """
 
@@ -128,33 +136,74 @@ def _coerce_window(window: Window | tuple[float, float, float, float]) -> Window
     return Window(col_off=col_off, row_off=row_off, width=width, height=height)
 
 
-def _coerce_source(src: Source, indexes: list[int] | None = None) -> Any:
-    """Normalise a user-supplied source into something georeader can read.
+def _is_georeader_object(x: Any) -> bool:
+    """Whether ``x`` is an instance of a georeader class (checked by module)."""
+    return any(
+        cls.__module__.split(".", 1)[0] == "georeader" for cls in type(x).__mro__
+    )
 
-    Accepts a path-like, an existing :class:`RasterioReader`, an open
-    :class:`rasterio.io.DatasetReaderBase`, or any object implementing the
-    ``georeader`` ``GeoData`` protocol. When ``indexes`` is given, paths
-    and readers are reconfigured to read only those 1-indexed bands;
-    arbitrary objects without an explicit ``indexes`` are returned as-is.
+
+def _reject_georeader(x: Any, op_name: str) -> None:
+    """Refuse a georeader ``GeoTensor`` / ``GeoData`` handed in by a user.
+
+    Raises:
+        TypeError: ``x`` is a georeader object; the message names the
+            ``geoarray.interop.georeader`` bridge to convert it with.
     """
-    if isinstance(src, str | PathLike):
-        return RasterioReader(str(src), indexes=indexes)
+    reject_geotensor(x, op_name)
+    if _is_georeader_object(x) and not is_geotensor(x):
+        raise TypeError(
+            f"{op_name} takes a path, a geoarray.RasterSource or a GeoArray, not a "
+            f"georeader {type(x).__name__}; wrap the reader at the boundary with "
+            "geoarray.interop.georeader.source_from_georeader(reader)"
+        )
 
-    if isinstance(src, RasterioReader):
-        reader = src.copy()
-        if indexes is not None:
-            reader.set_indexes(indexes, relative=False)
-        return reader
+
+def _coerce_source(
+    src: Source, indexes: list[int] | None = None, op_name: str = "geoops.io"
+) -> RasterSource:
+    """Normalise a user-supplied source into a `geoarray.RasterSource`.
+
+    Accepts a path-like, an open :class:`rasterio.io.DatasetReaderBase`
+    (reopened by name), a `RasterSource` or a `GeoArray` (itself a
+    `RasterSource`). Paths and datasets are opened with georeader's
+    ``RasterioReader`` wrapped by ``source_from_georeader``. When
+    ``indexes`` is given, the source is reconfigured to read only those
+    1-indexed bands; that needs a rasterio-backed source (a path, a
+    dataset, or a ``source_from_georeader`` reader).
+
+    Raises:
+        TypeError: ``src`` is a georeader ``GeoTensor`` / ``GeoData``
+            (convert it with ``from_georeader`` / ``source_from_georeader``)
+            or not a raster source at all.
+        GeoToolzIOError: ``indexes`` is given for a source that cannot
+            select bands.
+    """
+    _reject_georeader(src, op_name)
+    if isinstance(src, str | PathLike):
+        return source_from_georeader(RasterioReader(str(src), indexes=indexes))
 
     if isinstance(src, DatasetReaderBase):
-        # An open dataset does not implement the GeoData protocol; reopen
-        # it by name through a reader.
-        return RasterioReader(src.name, indexes=indexes)
+        # An open dataset is not a raster source; reopen it by name.
+        return source_from_georeader(RasterioReader(src.name, indexes=indexes))
 
-    if indexes is not None:
-        raise GeoToolzIOError("indexes are only supported for path-like sources.")
+    if not isinstance(src, GeoArray | RasterSource):
+        raise TypeError(
+            f"{op_name} reads a path, an open rasterio dataset, a "
+            f"geoarray.RasterSource or a GeoArray; got {type(src).__name__}"
+        )
 
-    return src
+    if indexes is None:
+        return src
+
+    engine = None if isinstance(src, GeoArray) else to_engine(src)
+    if isinstance(engine, RasterioReader):
+        reader = engine.copy()
+        reader.set_indexes(indexes, relative=False)
+        return source_from_georeader(reader)
+    raise GeoToolzIOError(
+        "indexes are only supported for path-like and rasterio-backed sources."
+    )
 
 
 def _src_config(src: Source) -> str | Source:
@@ -167,8 +216,8 @@ def _read_error(src: Source, exc: Exception) -> GeoToolzIOError:
     return GeoToolzIOError(f"Unable to read raster source {src!r}: {exc}")
 
 
-def _load_or_raise(out: Any, src: Source, what: str) -> GeoTensor:
-    """Materialise a georeader read, or raise if it missed the source.
+def _load_or_raise(out: Any, src: Source, what: str) -> GeoArray:
+    """Materialise a georeader read as a `GeoArray`, or raise if it missed.
 
     georeader's ``read_from_*`` helpers return ``None`` when a
     ``boundless=False`` request (or a web-map tile) lies outside the raster.
@@ -183,7 +232,29 @@ def _load_or_raise(out: Any, src: Source, what: str) -> GeoTensor:
     """
     if out is None:
         raise GeoToolzIOError(f"{what} does not intersect {src!r}.")
-    return out.load()
+    return from_engine(out.load())
+
+
+def _hashable_attrs(value: Any) -> Any:
+    """``value`` with every multi-dimensional array turned into nested lists.
+
+    A GeoArray's attrs are frozen (hashable): 1-D numeric arrays become
+    tuples, but a 2-D array (HDF geolocation latitudes / longitudes)
+    cannot. Those are stored as nested lists, which freeze to nested
+    tuples; ``np.asarray(attrs["geolocation"]["latitude"])`` gives the
+    array back.
+    """
+    if isinstance(value, np.ndarray) and value.ndim > 1:
+        return value.tolist()
+    if isinstance(value, dict):
+        return {key: _hashable_attrs(item) for key, item in value.items()}
+    return value
+
+
+def _from_cloud_reader(gt: Any) -> GeoArray:
+    """A geotoolz-cloud reader's ``GeoTensor`` as a `GeoArray`."""
+    gt.attrs = _hashable_attrs(dict(gt.attrs or {}))
+    return from_engine(gt)
 
 
 class ReadWindow(SourceOperator):
@@ -194,9 +265,9 @@ class ReadWindow(SourceOperator):
     width, height)``.
 
     Args:
-        src: Path, :class:`RasterioReader`, or open rasterio dataset.
-            Anything implementing georeader's ``GeoData`` protocol is also
-            accepted, in which case ``indexes`` must be ``None``.
+        src: Path, open rasterio dataset, `geoarray.RasterSource` (e.g. a
+            georeader reader wrapped with ``source_from_georeader``) or
+            `GeoArray`. ``indexes`` needs a rasterio-backed source.
         window: :class:`rasterio.windows.Window` or 4-tuple
             ``(col_off, row_off, width, height)`` in source pixel space.
         indexes: 1-indexed list of bands to read. ``None`` reads all.
@@ -206,7 +277,8 @@ class ReadWindow(SourceOperator):
     Raises:
         GeoToolzIOError: If the source cannot be opened, the window does
             not intersect the source (``boundless=False``), or ``indexes``
-            is given for a non-path-like source.
+            is given for a source that cannot select bands.
+        TypeError: If ``src`` is a georeader ``GeoTensor`` / ``GeoData``.
 
     Examples:
         Read a 256 by 256 chip from the top-left corner of a GeoTIFF::
@@ -234,9 +306,9 @@ class ReadWindow(SourceOperator):
         self.indexes = indexes
         self.boundless = boundless
 
-    def _apply(self) -> GeoTensor:
+    def _apply(self) -> GeoArray:
         try:
-            data = _coerce_source(self.src, self.indexes)
+            data = to_engine(_coerce_source(self.src, self.indexes, "ReadWindow"))
             out = read.read_from_window(data, self.window, boundless=self.boundless)
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
             raise _read_error(self.src, exc) from exc
@@ -256,11 +328,11 @@ class ReadBounds(SourceOperator):
 
     Wraps :func:`georeader.read.read_from_bounds`. The bounds are
     converted from ``crs`` to the source CRS if needed; the returned
-    :class:`GeoTensor` keeps the *source* CRS and transform.
+    `GeoArray` keeps the *source* CRS and transform.
 
     Args:
-        src: Path, :class:`RasterioReader`, open rasterio dataset, or any
-            ``GeoData``-protocol object.
+        src: Path, open rasterio dataset, `geoarray.RasterSource` or
+            `GeoArray`.
         bounds: ``(xmin, ymin, xmax, ymax)`` in ``crs`` coordinates.
         crs: CRS of ``bounds`` (e.g. ``"EPSG:4326"``). ``None`` uses the
             source CRS directly.
@@ -271,7 +343,7 @@ class ReadBounds(SourceOperator):
     Raises:
         GeoToolzIOError: If the source cannot be opened, the request does
             not intersect the source (``boundless=False``), or ``indexes``
-            is given for a non-path-like source.
+            is given for a source that cannot select bands.
 
     Examples:
         Read the full extent of a GeoTIFF as a single chip::
@@ -298,9 +370,9 @@ class ReadBounds(SourceOperator):
         self.indexes = indexes
         self.boundless = boundless
 
-    def _apply(self) -> GeoTensor:
+    def _apply(self) -> GeoArray:
         try:
-            data = _coerce_source(self.src, self.indexes)
+            data = to_engine(_coerce_source(self.src, self.indexes, "ReadBounds"))
             out = read.read_from_bounds(
                 data,
                 self.bounds,
@@ -329,8 +401,8 @@ class ReadCenterCoords(SourceOperator):
     sites, ground stations).
 
     Args:
-        src: Path, :class:`RasterioReader`, open rasterio dataset, or any
-            ``GeoData``-protocol object.
+        src: Path, open rasterio dataset, `geoarray.RasterSource` or
+            `GeoArray`.
         center: ``(x, y)`` in ``crs`` coordinates.
         shape: ``(height, width)`` in pixels.
         crs: CRS of ``center`` (e.g. ``"EPSG:4326"``). ``None`` uses the
@@ -342,7 +414,7 @@ class ReadCenterCoords(SourceOperator):
     Raises:
         GeoToolzIOError: If the source cannot be opened, the request does
             not intersect the source (``boundless=False``), or ``indexes``
-            is given for a non-path-like source.
+            is given for a source that cannot select bands.
 
     Examples:
         Read a 64 by 64 chip around a longitude/latitude point::
@@ -374,11 +446,11 @@ class ReadCenterCoords(SourceOperator):
         self.indexes = indexes
         self.boundless = boundless
 
-    def _apply(self) -> GeoTensor:
+    def _apply(self) -> GeoArray:
         try:
-            data = _coerce_source(self.src, self.indexes)
+            source = _coerce_source(self.src, self.indexes, "ReadCenterCoords")
             out = read.read_from_center_coords(
-                data,
+                to_engine(source),
                 self.center,
                 self.shape,
                 crs_center_coords=self.crs,
@@ -409,8 +481,8 @@ class ReadTile(SourceOperator):
     (Slippy Map, Mapbox, Google Maps).
 
     Args:
-        src: Path, :class:`RasterioReader`, open rasterio dataset, or any
-            ``GeoData``-protocol object.
+        src: Path, open rasterio dataset, `geoarray.RasterSource` or
+            `GeoArray`.
         tile: ``(z, x, y)`` web-map tile coordinates.
         indexes: 1-indexed list of bands to read. ``None`` reads all.
         dst_crs: Target CRS for the returned tile. Default
@@ -453,10 +525,10 @@ class ReadTile(SourceOperator):
         self.out_shape = as_tuple(out_shape)
         self.resolution = as_tuple(resolution)
 
-    def _apply(self) -> GeoTensor:
+    def _apply(self) -> GeoArray:
         z, x, y = self.tile
         try:
-            data = _coerce_source(self.src, self.indexes)
+            data = to_engine(_coerce_source(self.src, self.indexes, "ReadTile"))
             out = read.read_from_tile(
                 data,
                 x=x,
@@ -489,8 +561,8 @@ class ReadPolygon(SourceOperator):
     the polygon's bounding box are not loaded.
 
     Args:
-        src: Path, :class:`RasterioReader`, open rasterio dataset, or any
-            ``GeoData``-protocol object.
+        src: Path, open rasterio dataset, `geoarray.RasterSource` or
+            `GeoArray`.
         polygon: :class:`shapely.geometry.Polygon` or
             :class:`shapely.geometry.MultiPolygon`, or its WKT string (the
             form ``get_config`` emits).
@@ -503,7 +575,7 @@ class ReadPolygon(SourceOperator):
     Raises:
         GeoToolzIOError: If the source cannot be opened, the request does
             not intersect the source (``boundless=False``), or ``indexes``
-            is given for a non-path-like source.
+            is given for a source that cannot select bands.
 
     Examples:
         Read all pixels intersecting an AOI polygon::
@@ -536,9 +608,9 @@ class ReadPolygon(SourceOperator):
         self.indexes = indexes
         self.boundless = boundless
 
-    def _apply(self) -> GeoTensor:
+    def _apply(self) -> GeoArray:
         try:
-            data = _coerce_source(self.src, self.indexes)
+            data = to_engine(_coerce_source(self.src, self.indexes, "ReadPolygon"))
             out = read.read_from_polygon(
                 data,
                 self.polygon,
@@ -565,14 +637,14 @@ class ReadReprojectLike(SourceOperator):
     """Read a source and reproject it onto another raster's grid.
 
     Wraps :func:`georeader.read.read_reproject_like`. The returned
-    :class:`GeoTensor` has the *same* CRS, transform, and shape as
+    `GeoArray` has the *same* CRS, transform, and shape as
     ``like``.
 
     Args:
-        src: Path, :class:`RasterioReader`, open rasterio dataset, or any
-            ``GeoData``-protocol object to read from.
-        like: Reference :class:`GeoTensor` / :class:`RasterioReader` /
-            path whose grid (CRS + transform + shape) defines the output.
+        src: Path, open rasterio dataset, `geoarray.RasterSource` or
+            `GeoArray` to read from.
+        like: Reference `GeoArray`, `geoarray.RasterSource` or path whose
+            grid (CRS + transform + shape) defines the output.
         indexes: 1-indexed list of bands to read from ``src``. ``None``
             reads all.
         resolution: Optional override for the output pixel size in
@@ -581,7 +653,7 @@ class ReadReprojectLike(SourceOperator):
 
     Raises:
         GeoToolzIOError: If either source cannot be opened or ``indexes``
-            is given for a non-path-like source.
+            is given for a source that cannot select bands.
 
     Examples:
         Align a single-band mask onto a reference reflectance grid::
@@ -590,7 +662,7 @@ class ReadReprojectLike(SourceOperator):
 
             aligned = io.ReadReprojectLike(
                 src="/path/to/mask.tif",
-                like=reference_geotensor,
+                like=reference,  # a GeoArray (C, H, W)
                 indexes=[1],
             )()
     """
@@ -610,26 +682,26 @@ class ReadReprojectLike(SourceOperator):
         self.indexes = indexes
         self.resolution = as_tuple(resolution)
 
-    def _apply(self) -> GeoTensor:
+    def _apply(self) -> GeoArray:
         try:
-            like = _coerce_source(self.like)
+            like = to_engine(_coerce_source(self.like, None, "ReadReprojectLike"))
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
             raise _read_error(self.like, exc) from exc
         try:
-            data = _coerce_source(self.src, self.indexes)
+            source = _coerce_source(self.src, self.indexes, "ReadReprojectLike")
             out = read.read_reproject_like(
-                data,
+                to_engine(source),
                 like,
                 resolution_dst=self.resolution,
             )
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
             raise _read_error(self.src, exc) from exc
-        return out.load()
+        return from_engine(out.load())
 
     def get_config(self) -> dict[str, Any]:
         return {
             "src": _src_config(self.src),
-            # ``like`` is often a runtime GeoTensor / reader / array — keep
+            # ``like`` is often a runtime GeoArray / reader / array — keep
             # the bare repr for debugging and rely on ``forbid_in_yaml``
             # to signal that this config cannot round-trip cleanly.
             "like": _src_config(self.like),
@@ -647,8 +719,8 @@ class ReadToCRS(SourceOperator):
     in one pass).
 
     Args:
-        src: Path, :class:`RasterioReader`, open rasterio dataset, or any
-            ``GeoData``-protocol object.
+        src: Path, open rasterio dataset, `geoarray.RasterSource` or
+            `GeoArray`.
         dst_crs: Target CRS as an authority string (e.g. ``"EPSG:4326"``)
             or anything :mod:`pyproj` can parse.
         resolution: Output pixel size in ``dst_crs`` units. ``None`` lets
@@ -660,7 +732,7 @@ class ReadToCRS(SourceOperator):
 
     Raises:
         GeoToolzIOError: If the source cannot be opened or ``indexes`` is
-            given for a non-path-like source.
+            given for a source that cannot select bands.
 
     Examples:
         Reproject a UTM tile to EPSG:4326::
@@ -689,9 +761,9 @@ class ReadToCRS(SourceOperator):
         self.bounds = as_tuple(bounds)
         self.indexes = indexes
 
-    def _apply(self) -> GeoTensor:
+    def _apply(self) -> GeoArray:
         try:
-            data = _coerce_source(self.src, self.indexes)
+            data = to_engine(_coerce_source(self.src, self.indexes, "ReadToCRS"))
             if self.bounds is None:
                 out = read.read_to_crs(
                     data,
@@ -707,7 +779,7 @@ class ReadToCRS(SourceOperator):
                 )
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
             raise _read_error(self.src, exc) from exc
-        return out.load()
+        return from_engine(out.load())
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -737,6 +809,10 @@ class ReadHDF(SourceOperator):
             to load into ``attrs["geolocation"]``.
         metadata_groups: Optional HDF5 group paths whose attributes are copied
             into ``attrs["metadata"]``.
+
+    Returns (on call):
+        A `GeoArray`. attrs are frozen, so the 2-D geolocation arrays are
+        stored as nested tuples (``np.asarray`` gives the array back).
     """
 
     def __init__(
@@ -754,8 +830,8 @@ class ReadHDF(SourceOperator):
         self.geolocation = as_tuple(geolocation)
         self.metadata_groups = metadata_groups
 
-    def _apply(self) -> GeoTensor:
-        def call() -> GeoTensor:
+    def _apply(self) -> GeoArray:
+        def call() -> Any:
             from geocloud.hdf import read_hdf
 
             return read_hdf(
@@ -767,9 +843,10 @@ class ReadHDF(SourceOperator):
             )
 
         try:
-            return _cloud_call("hdf5", "ReadHDF", call)
+            out = _cloud_call("hdf5", "ReadHDF", call)
         except (KeyError, OSError, ValueError) as exc:
             raise _read_error(self.path, exc) from exc
+        return _from_cloud_reader(out)
 
 
 class ReadNetCDF(SourceOperator):
@@ -807,8 +884,8 @@ class ReadNetCDF(SourceOperator):
         self.decode_cf = decode_cf
         self.use_cf_grid_mapping = use_cf_grid_mapping
 
-    def _apply(self) -> GeoTensor:
-        def call() -> GeoTensor:
+    def _apply(self) -> GeoArray:
+        def call() -> Any:
             from geocloud.hdf import read_netcdf
 
             return read_netcdf(
@@ -821,13 +898,14 @@ class ReadNetCDF(SourceOperator):
             )
 
         try:
-            return _cloud_call("netcdf", "ReadNetCDF", call)
+            out = _cloud_call("netcdf", "ReadNetCDF", call)
         except (KeyError, OSError, RuntimeError, ValueError) as exc:
             raise _read_error(self.path, exc) from exc
+        return _from_cloud_reader(out)
 
 
 class WriteCOG(SinkOperator):
-    """Write a :class:`GeoTensor` as a validated Cloud-Optimized GeoTIFF.
+    """Write a `GeoArray` as a validated Cloud-Optimized GeoTIFF.
 
     Delegates to `geocloud.cog.write_cog` (the ``[cloud]`` extra): staged
     in a temporary directory, translated by GDAL's ``COG`` driver, checked,
@@ -845,14 +923,15 @@ class WriteCOG(SinkOperator):
         overviews: Build overviews down to a single tile.
         resampling: Overview resampling; ``None`` picks ``"nearest"`` for
             integers and ``"average"`` for floats.
-        nodata: The nodata value; ``"auto"`` takes the tensor's fill when
-            the dtype can hold it, ``None`` writes none.
+        nodata: The nodata value; ``"auto"`` takes the carrier's
+            ``fill_value`` when the dtype can hold it, ``None`` writes none.
         descriptions: Band names (length must equal band count); ``None``
-            takes the tensor's ``band_names``.
+            takes the carrier's ``band_names``.
         tags: Rasterio tags stored as TIFF metadata.
         creation_options: Extra GDAL ``COG`` driver options, passed as is.
 
     Raises:
+        TypeError: If ``gt`` is not a `GeoArray`.
         GeoToolzIOError: If ``gt`` is not 2D or 3D (a 4-D ``(T, C, H, W)``
             stack has no GeoTIFF layout), or the file cannot be written.
 
@@ -861,7 +940,8 @@ class WriteCOG(SinkOperator):
 
             from geoops import io
 
-            io.WriteCOG(path="s3://bucket/ndvi.tif", compress="zstd")(ndvi_geotensor)
+            # ndvi: GeoArray (1, H, W) float32
+            io.WriteCOG(path="s3://bucket/ndvi.tif", compress="zstd")(ndvi)
     """
 
     def __init__(
@@ -891,11 +971,12 @@ class WriteCOG(SinkOperator):
         self.tags = mapping_from_pairs(tags)
         self.creation_options = mapping_from_pairs(creation_options)
 
-    def _apply(self, gt: GeoTensor) -> None:
-        if np.ndim(gt.values) not in (2, 3):
+    def _apply(self, gt: GeoArray) -> None:
+        require_geoarray(gt, "WriteCOG")
+        if len(gt.shape) not in (2, 3):
             raise GeoToolzIOError(
                 "WriteCOG expects 2D or 3D data ((H, W) or (C, H, W)), found shape "
-                f"{np.shape(gt.values)!r}; write each frame of a (T, C, H, W) "
+                f"{gt.shape!r}; write each frame of a (T, C, H, W) "
                 "stack separately or use WriteZarr."
             )
 
@@ -903,7 +984,7 @@ class WriteCOG(SinkOperator):
             from geocloud.cog import write_cog
 
             write_cog(
-                gt,
+                to_engine(gt),
                 self.path,
                 compress=self.compress,
                 level=self.level,
@@ -940,7 +1021,7 @@ class WriteCOG(SinkOperator):
 
 
 class WriteGeoTIFF(SinkOperator):
-    """Write a :class:`GeoTensor` as a tiled GeoTIFF (no overviews).
+    """Write a `GeoArray` as a tiled GeoTIFF (no overviews).
 
     Delegates to :func:`georeader.save.save_tiled_geotiff`. Use
     :class:`WriteCOG` instead when you need overviews / HTTP range access.
@@ -959,6 +1040,7 @@ class WriteGeoTIFF(SinkOperator):
         tags: Optional rasterio tags stored as TIFF metadata.
 
     Raises:
+        TypeError: If ``gt`` is not a `GeoArray`.
         GeoToolzIOError: If ``gt`` has neither 2D nor 3D values, or if
             the file cannot be written.
 
@@ -967,7 +1049,8 @@ class WriteGeoTIFF(SinkOperator):
 
             from geoops import io
 
-            io.WriteGeoTIFF(path="/out/result.tif")(result_geotensor)
+            # result: GeoArray (C, H, W)
+            io.WriteGeoTIFF(path="/out/result.tif")(result)
     """
 
     def __init__(
@@ -985,11 +1068,12 @@ class WriteGeoTIFF(SinkOperator):
         self.descriptions = descriptions
         self.tags = mapping_from_pairs(tags)
 
-    def _apply(self, gt: GeoTensor) -> None:
-        if np.ndim(gt.values) not in (2, 3):
+    def _apply(self, gt: GeoArray) -> None:
+        require_geoarray(gt, "WriteGeoTIFF")
+        if len(gt.shape) not in (2, 3):
             raise GeoToolzIOError(
                 "WriteGeoTIFF expects 2D or 3D data ((H, W) or (C, H, W)), found shape "
-                f"{np.shape(gt.values)!r}; write each frame of a (T, C, H, W) "
+                f"{gt.shape!r}; write each frame of a (T, C, H, W) "
                 "stack separately or use WriteZarr."
             )
         remote = "://" in self.path and not self.path.startswith("file://")
@@ -1017,9 +1101,9 @@ class WriteGeoTIFF(SinkOperator):
             ) from exc
         return None
 
-    def _save(self, gt: GeoTensor, path: str) -> None:
+    def _save(self, gt: GeoArray, path: str) -> None:
         save.save_tiled_geotiff(
-            gt,
+            to_engine(gt),
             path,
             profile_arg=self.profile,
             descriptions=self.descriptions,
@@ -1038,14 +1122,17 @@ class WriteGeoTIFF(SinkOperator):
 
 
 class WriteZarr(SinkOperator):
-    """Write a :class:`GeoTensor` to a Zarr store with spatial metadata.
+    """Write a `GeoArray` to a Zarr store with spatial metadata.
 
-    Stores the array under ``values`` and the spatial metadata (CRS as
-    a string, ``transform`` as a 6- or 9-tuple, ``fill_value_default``)
-    as group attributes. The store is opened in append mode: other
-    groups already in it are kept, while an existing ``values`` array in
-    the target group is overwritten. Requires the optional ``zarr`` extra
-    (``pip install geotoolz-ops[zarr]``, zarr-python >= 3).
+    Stores the array under ``values`` and the spatial metadata as group
+    attributes: ``crs`` (a string), ``transform`` (the six affine
+    coefficients ``(a, b, c, d, e, f)``) and ``fill_value`` (stores written
+    before the GeoArray switch call it ``fill_value_default`` and hold the
+    nine coefficients of an ``Affine``; a reader should accept both). The
+    store is opened in append mode: other groups already in it are kept,
+    while an existing ``values`` array in the target group is overwritten.
+    Requires the optional ``zarr`` extra (``pip install
+    geotoolz-ops[zarr]``, zarr-python >= 3).
 
     Args:
         store: Zarr store URI (``"/path/to/output.zarr"``,
@@ -1058,18 +1145,20 @@ class WriteZarr(SinkOperator):
             Missing axes inherit the array shape.
 
     Raises:
+        TypeError: If ``gt`` is not a `GeoArray`.
         GeoToolzIOError: If ``zarr`` is not installed or ``gt`` is not
-            2-D to 4-D.
+            2-D to 4-D (a batched carrier).
 
     Examples:
         Write a time-series result to a chunked Zarr store::
 
             from geoops import io
 
+            # ndvi: GeoArray (T, 1, H, W) float32
             io.WriteZarr(
                 store="/out/ndvi.zarr",
                 chunks={"y": 256, "x": 256},
-            )(ndvi_geotensor)
+            )(ndvi)
     """
 
     def __init__(
@@ -1087,7 +1176,8 @@ class WriteZarr(SinkOperator):
         # ``from_state`` rejects dict leaves; emit ``chunks`` as pairs.
         return {**super().get_config(), "chunks": mapping_to_pairs(self.chunks)}
 
-    def _apply(self, gt: GeoTensor) -> None:
+    def _apply(self, gt: GeoArray) -> None:
+        require_geoarray(gt, "WriteZarr")
         try:
             import zarr
         except ImportError as exc:
@@ -1098,7 +1188,7 @@ class WriteZarr(SinkOperator):
                 "with `pip install 'geotoolz-ops[zarr]'`."
             ) from exc
 
-        values = np.asarray(gt.values)
+        values = np.asarray(gt)
         all_axes = ("time", "band", "y", "x")
         if not 2 <= values.ndim <= len(all_axes):
             raise GeoToolzIOError(
@@ -1119,8 +1209,8 @@ class WriteZarr(SinkOperator):
         else:
             group.create_array("values", data=values, overwrite=True)
         group.attrs["crs"] = str(gt.crs)
-        group.attrs["transform"] = tuple(gt.transform)
-        group.attrs["fill_value_default"] = jsonable(gt.fill_value_default)
+        group.attrs["transform"] = np.asarray(gt.transform).tolist()
+        group.attrs["fill_value"] = jsonable(gt.fill_value)
         return None
 
 
@@ -1128,9 +1218,9 @@ class LoadFromSTAC(SourceOperator):
     """Load a raster asset from a STAC item by asset key.
 
     Resolves ``item.assets[asset_key].href`` and reads it. When
-    ``bounds`` is ``None`` the full asset is materialised via
-    :class:`RasterioReader`; otherwise the read is delegated to
-    :class:`ReadToCRS` (assumed in ``EPSG:4326``) so the asset is
+    ``bounds`` is ``None`` the full asset is materialised (georeader's
+    ``RasterioReader``, as a `geoarray.RasterSource`); otherwise the read
+    is delegated to :class:`ReadToCRS` (assumed in ``EPSG:4326``) so the asset is
     reprojected and cropped in one pass.
 
     Args:
@@ -1174,7 +1264,7 @@ class LoadFromSTAC(SourceOperator):
         self.bounds = as_tuple(bounds)
         self.resolution = as_tuple(resolution)
 
-    def _apply(self) -> GeoTensor:
+    def _apply(self) -> GeoArray:
         try:
             href = self.item.assets[self.asset_key].href
         except KeyError as exc:
@@ -1183,7 +1273,7 @@ class LoadFromSTAC(SourceOperator):
             ) from exc
         if self.bounds is None:
             try:
-                return RasterioReader(href).load()
+                return source_from_georeader(RasterioReader(href)).load()
             except (FileNotFoundError, OSError, RasterioIOError) as exc:
                 raise _read_error(href, exc) from exc
         return ReadToCRS(
@@ -1206,7 +1296,7 @@ class LoadFromSTAC(SourceOperator):
 
 
 class LoadFromEE(SourceOperator):
-    """Load an Earth Engine image into a :class:`GeoTensor`.
+    """Load an Earth Engine image into a `GeoArray`.
 
     Wraps :func:`georeader.readers.ee_image.export_image`. The output
     grid is derived from ``bounds`` (upper-left corner) and ``scale``
@@ -1255,7 +1345,7 @@ class LoadFromEE(SourceOperator):
         self.scale = scale
         self.bands = bands
 
-    def _apply(self) -> GeoTensor:
+    def _apply(self) -> GeoArray:
         try:
             import ee
             from affine import Affine
@@ -1271,7 +1361,7 @@ class LoadFromEE(SourceOperator):
             # ``bounds`` are in ``crs`` (georeader assumes EPSG:4326 unless
             # told otherwise). The pixel size is already encoded in
             # ``transform``, so no ``resolution_dst`` is passed.
-            return export_image(
+            out = export_image(
                 self.image_id,
                 geometry=box(*self.bounds),
                 transform=transform,
@@ -1283,6 +1373,7 @@ class LoadFromEE(SourceOperator):
             raise GeoToolzIOError(
                 f"Unable to load Earth Engine image {self.image_id!r}: {exc}"
             ) from exc
+        return from_engine(out)
 
 
 __all__ = [

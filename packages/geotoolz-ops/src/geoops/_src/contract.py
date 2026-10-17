@@ -1,4 +1,4 @@
-"""The pipekit `Operator` and `GeoTensor` carrier contracts, as assertions.
+"""The pipekit `Operator` and `GeoArray` carrier contracts, as assertions.
 
 One implementation of each check, shared by the public
 `geoops.testing.check_operator` (an operator someone writes on top of the
@@ -15,16 +15,15 @@ import json
 from typing import Any
 
 import numpy as np
+from geoarray import GeoArray
 
 
-def geotensors(value: Any) -> list[Any]:
-    """Every GeoTensor in an operator output (a carrier, list or tuple)."""
-    from georeader.geotensor import GeoTensor
-
-    if isinstance(value, GeoTensor):
+def geoarrays(value: Any) -> list[Any]:
+    """Every GeoArray in an operator output (a carrier, list or tuple)."""
+    if isinstance(value, GeoArray):
         return [value]
     if isinstance(value, list | tuple):
-        return [gt for item in value for gt in geotensors(item)]
+        return [g for item in value for g in geoarrays(item)]
     return []
 
 
@@ -114,26 +113,29 @@ def assert_graph_mode(op: Any, n_inputs: int = 1) -> None:
 
 
 def assert_same_carrier(src: Any, out: Any) -> None:
-    """A GeoTensor input gives GeoTensors on its CRS; a plain array plain arrays.
+    """A GeoArray input gives GeoArrays on its CRS; a plain array plain arrays.
 
     Applies to each carrier of a fan-out (a list of carriers). A carrier on
-    the input's pixel grid also keeps its transform.
+    the input's pixel grid also keeps its transform. No output is ever a
+    georeader ``GeoTensor``.
     """
-    from georeader.geotensor import GeoTensor
-
-    from geoops._src.geo import grid_matches
+    from geoops._src.geo import grid_matches, is_geotensor
 
     pieces = out if isinstance(out, list | tuple) else [out]
     for piece in pieces:
-        if not (isinstance(piece, np.ndarray) and piece.ndim >= 2):
+        assert not is_geotensor(piece), (
+            "an operator returned a georeader GeoTensor; convert engine output "
+            "with geoarray.interop.georeader.from_georeader"
+        )
+        if not (isinstance(piece, np.ndarray | GeoArray) and piece.ndim >= 2):
             continue
-        if not isinstance(src, GeoTensor):
-            assert not isinstance(piece, GeoTensor), (
-                "a plain-array input returned a GeoTensor"
+        if not isinstance(src, GeoArray):
+            assert not isinstance(piece, GeoArray), (
+                "a plain-array input returned a GeoArray"
             )
             continue
-        assert isinstance(piece, GeoTensor), (
-            "a GeoTensor input returned a plain array; rewrap with "
+        assert isinstance(piece, GeoArray), (
+            "a GeoArray input returned a plain array; rewrap with "
             "geoops.carrier.wrap_like"
         )
         assert piece.crs == src.crs, f"output CRS {piece.crs} is not {src.crs}"
@@ -143,21 +145,19 @@ def assert_same_carrier(src: Any, out: Any) -> None:
             )
 
 
-def assert_fresh_consistent_attrs(inputs: Any, out: Any) -> None:
-    """``out``'s attrs are new dicts whose per-band lists match the band count.
+def assert_consistent_attrs(inputs: Any, out: Any) -> None:
+    """``out``'s per-band attrs match its band count.
 
     ``inputs`` is the operator's input (a carrier or a list of carriers).
-    Returning an input object itself is allowed (a pass-through).
+    Returning an input object itself is allowed (a pass-through). attrs
+    are immutable (`geoarray.FrozenAttrs`), so sharing them is safe.
     """
     from geoops._src.bands import PER_BAND_KEYS, band_count
 
-    sources = geotensors(inputs)
-    for gt in geotensors(out):
+    sources = geoarrays(inputs)
+    for gt in geoarrays(out):
         if any(gt is src for src in sources):
             continue
-        assert all(gt.attrs is not src.attrs for src in sources), (
-            "output shares an input's attrs dict"
-        )
         n_bands = band_count(gt.shape)
         for key in PER_BAND_KEYS:
             value = gt.attrs.get(key)
@@ -175,7 +175,7 @@ def assert_fill_matches_dtype(
     gap_filler: bool = False,
     nodata: np.ndarray | None = None,
 ) -> None:
-    """``gt.fill_value_default`` suits ``gt``'s dtype and marks ``src``'s nodata.
+    """``gt.fill_value`` suits ``gt``'s dtype and marks ``src``'s nodata.
 
     * boolean outputs declare ``False``;
     * integer outputs declare an integer their dtype can hold;
@@ -189,7 +189,7 @@ def assert_fill_matches_dtype(
     """
     from geoops._src.valid import _is_nan_scalar, valid_pixels
 
-    fill = gt.fill_value_default
+    fill = gt.fill_value
     kind = gt.dtype.kind
     if kind == "b":
         assert isinstance(fill, bool | np.bool_) and not fill, (
@@ -217,6 +217,32 @@ def assert_fill_matches_dtype(
     assert n_invalid >= n_fill, (
         f"input nodata pixels are valid in the output (fill {fill!r}): "
         f"{n_invalid} invalid pixels, expected >= {n_fill}"
+    )
+
+
+def assert_rejects_geotensor(op: Any, sample: Any, *others: Any) -> None:
+    """``op`` refuses a georeader ``GeoTensor``, naming ``from_georeader``.
+
+    A ``GeoTensor`` is an ``np.ndarray`` subclass, so an operator that only
+    calls ``np.asarray`` would take it as a plain array and drop its
+    georeferencing; every operator refuses it instead (gate GD1).
+    """
+    from geoarray.interop.georeader import to_georeader
+
+    def convert(x: Any) -> Any:
+        return to_georeader(x) if isinstance(x, GeoArray) and not x.batch_shape else x
+
+    try:
+        copy.deepcopy(op)(convert(sample), *(convert(o) for o in others))
+    except TypeError as exc:
+        assert "from_georeader" in str(exc), (
+            f"{type(op).__name__} refused a GeoTensor without naming "
+            f"from_georeader: {exc}"
+        )
+        return
+    raise AssertionError(
+        f"{type(op).__name__} accepted a georeader GeoTensor; refuse it with "
+        "geoops.carrier.reject_geotensor (or rewrap with wrap_like, which does)"
     )
 
 
@@ -251,24 +277,17 @@ def time_stack_of(scene: Any) -> Any:
 
 
 def frames(stack: Any) -> list[Any]:
-    """The ``(C, H, W)`` frames of a 4-D stack (GeoTensors keep their grid).
+    """The ``(C, H, W)`` frames of a 4-D stack (GeoArrays keep their grid).
 
     Args:
-        stack: A ``(T, C, H, W)`` GeoTensor or ndarray.
+        stack: A ``(T, C, H, W)`` GeoArray or ndarray.
 
     Returns:
-        One carrier per time step (``stack.isel({"time": t})`` for a
-        GeoTensor, with a copy of its attrs).
+        One carrier per time step (``stack[t]`` for a GeoArray, with its
+        attrs).
     """
-    from georeader.geotensor import GeoTensor
-
-    if isinstance(stack, GeoTensor):
-        out = []
-        for t in range(stack.shape[0]):
-            frame = stack.isel({"time": t})
-            frame.attrs = dict(stack.attrs or {})
-            out.append(frame)
-        return out
+    if isinstance(stack, GeoArray):
+        return [stack[t] for t in range(stack.shape[0])]
     return [np.asarray(stack)[t] for t in range(np.shape(stack)[0])]
 
 

@@ -1,7 +1,7 @@
 # Feature
 
 `geoops.feature` wraps `skimage.feature` detectors as carrier-aware Operators. Inputs are
-`GeoTensor`; coordinate outputs (peaks, blobs, corners) are returned as `GeoDataFrame`s in the input
+`GeoArray`; coordinate outputs (peaks, blobs, corners) are returned as `GeoDataFrame`s in the input
 CRS so they compose with the rest of the geospatial stack.
 
 Operators in this module:

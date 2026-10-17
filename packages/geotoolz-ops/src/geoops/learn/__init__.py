@@ -1,4 +1,4 @@
-"""scikit-learn integration for GeoTensor operator pipelines.
+"""scikit-learn integration for GeoArray operator pipelines.
 
 .. warning::
 
@@ -22,7 +22,7 @@
     **Supervised estimators (classifiers / regressors) must be pre-fit**
     out-of-graph and loaded via ``state_path=``. The operator's in-graph
     fit modes (``fit_on_call`` / ``refit`` / ``fit_streaming``) take a
-    single ``GeoTensor`` and have no path for a label tensor ``y``.
+    single ``GeoArray`` and have no path for a label tensor ``y``.
     Out-of-graph fitting is the preferred pattern; in-graph fit helpers
     (``fit_pixelwise``, ``fit_pixelwise_incremental``) are not
     implemented yet.
@@ -30,7 +30,7 @@
 
 from __future__ import annotations
 
-from geoops.learn._src.estimators import GeoTensorEstimator
+from geoops.learn._src.estimators import GeoArrayEstimator
 from geoops.learn._src.operators import (
     ModelOp,
     PixelwiseGMM,
@@ -49,7 +49,7 @@ from geoops.learn._src.operators import (
 
 
 __all__ = [
-    "GeoTensorEstimator",
+    "GeoArrayEstimator",
     "ModelOp",
     "PixelwiseGMM",
     "PixelwiseIPCA",

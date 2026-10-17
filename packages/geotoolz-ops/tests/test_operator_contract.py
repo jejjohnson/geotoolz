@@ -28,6 +28,7 @@ xfail pass, so remove the entry in the same PR.
 from __future__ import annotations
 
 import ast
+import copy
 import inspect
 import json
 import textwrap
@@ -42,12 +43,12 @@ from pipekit import Input, Operator
 from geoops._src.contract import (
     assert_clear_rank_error,
     assert_config_round_trips,
+    assert_consistent_attrs,
     assert_fill_matches_dtype,
-    assert_fresh_consistent_attrs,
     assert_graph_mode,
     assert_keyword_only,
     frames,
-    geotensors,
+    geoarrays,
     same,
     time_stack_of,
 )
@@ -284,7 +285,7 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
 }
 
 #: Operators whose constructor needs a runtime object that cannot come from a
-#: config at all (a patcher, a GeoTensor, an observation model).
+#: config at all (a patcher, a GeoArray, an observation model).
 #: Their state round-trip is not checkable; they should be ``forbid_in_yaml``
 #: (see #140) or take a config-able argument instead.
 UNBUILDABLE: dict[str, str] = {
@@ -296,9 +297,9 @@ UNBUILDABLE: dict[str, str] = {
 
 
 def _grid() -> Any:
-    from _helpers import toy_geotensor
+    from _helpers import toy_geoarray
 
-    return toy_geotensor(np.random.default_rng(0).uniform(0.01, 1.0, (3, 16, 16)))
+    return toy_geoarray(np.random.default_rng(0).uniform(0.01, 1.0, (3, 16, 16)))
 
 
 def _square() -> Any:
@@ -312,7 +313,7 @@ def _runtime(**kwargs: Callable[[], Any]) -> Callable[[], dict[str, Any]]:
     return lambda: {name: make() for name, make in kwargs.items()}
 
 
-#: Runtime constructor objects (GeoTensors, geometries, callables) for the
+#: Runtime constructor objects (GeoArrays, geometries, callables) for the
 #: ``forbid_in_yaml`` / ``UNBUILDABLE`` operators. They
 #: cannot come from a config, so only the checks that never serialise the
 #: operator use them (``build(cls, runtime=True)``): graph mode, terminal
@@ -374,13 +375,11 @@ RUNTIME_CTOR_KWARGS: dict[str, Callable[[], dict[str, Any]]] = {
 
 def _on_grid_of(x: Any, values: np.ndarray, fill: Any = None) -> Any:
     """``values`` on ``x``'s pixel grid (a plain array when ``x`` is one)."""
-    from _helpers import toy_geotensor
+    from _helpers import toy_geoarray
 
     if getattr(x, "transform", None) is None:
         return values
-    return toy_geotensor(
-        values, transform=x.transform, crs=x.crs, fill_value_default=fill
-    )
+    return toy_geoarray(values, transform=x.transform, crs=x.crs, fill_value=fill)
 
 
 def _band_like(x: Any, seed: int = 3) -> Any:
@@ -430,13 +429,13 @@ def _perturbed(x: Any) -> Any:
         values = values * np.random.default_rng(5).uniform(0.8, 1.2, values.shape[-2:])
     if getattr(x, "transform", None) is None:
         return values
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
-    return GeoTensor(
+    return GeoArray(
         values,
         transform=x.transform,
         crs=x.crs,
-        fill_value_default=x.fill_value_default,
+        fill_value=x.fill_value,
         attrs=dict(x.attrs or {}),
     )
 
@@ -919,13 +918,15 @@ def test_multi_input_operator_runs_in_a_graph(cls: type) -> None:
 def _off_grid(x: Any) -> Any:
     """``x`` shifted by one pixel: same shape, another grid."""
     from affine import Affine
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
-    return GeoTensor(
+    from geoops._src.geo import affine_of
+
+    return GeoArray(
         np.asarray(x),
-        transform=x.transform * Affine.translation(1, 0),
+        transform=affine_of(x) * Affine.translation(1, 0),
         crs=x.crs,
-        fill_value_default=x.fill_value_default,
+        fill_value=x.fill_value,
         attrs=dict(x.attrs or {}),
     )
 
@@ -980,19 +981,19 @@ def test_carriers_are_not_constructor_kwargs(cls: type) -> None:
 
 
 def _scene() -> Any:
-    from _helpers import toy_geotensor
+    from _helpers import toy_geoarray
 
     values = np.random.default_rng(0).uniform(0.0, 1.0, (3, 16, 16))
-    return toy_geotensor(values, attrs={"band_names": ["b0", "b1", "b2"]})
+    return toy_geoarray(values, attrs={"band_names": ["b0", "b1", "b2"]})
 
 
 def _labels() -> Any:
-    from _helpers import toy_geotensor
+    from _helpers import toy_geoarray
 
     labels = np.zeros((16, 16), dtype=np.int32)
     labels[2:5, 2:5] = 1
     labels[2:5, 7:10] = 2
-    return toy_geotensor(labels, fill_value_default=0)
+    return toy_geoarray(labels, fill_value=0)
 
 
 def _tiles() -> Any:
@@ -1058,27 +1059,27 @@ INTERMEDIATE_OUTPUTS: dict[str, str] = {
 
 
 def _toy_inputs() -> list[Any]:
-    from _helpers import toy_geotensor
+    from _helpers import toy_geoarray
 
     rng = np.random.default_rng(0)
     labels = np.zeros((16, 16), dtype=np.int32)
     labels[2:6, 2:6] = 1
     return [
-        toy_geotensor(
+        toy_geoarray(
             rng.uniform(0.01, 1.0, (3, 16, 16)),
             attrs={"band_names": ["b0", "b1", "b2"]},
         ),
-        toy_geotensor(rng.uniform(0.01, 1.0, (16, 16))),
-        toy_geotensor(labels, fill_value_default=0),
-        toy_geotensor(labels.astype(np.uint8), fill_value_default=0),
+        toy_geoarray(rng.uniform(0.01, 1.0, (16, 16))),
+        toy_geoarray(labels, fill_value=0),
+        toy_geoarray(labels.astype(np.uint8), fill_value=0),
         np.full(3, 0.5),  # a single 1-D spectrum (per-pixel MF ops)
     ]
 
 
 def _is_carrier(value: Any) -> bool:
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
-    return isinstance(value, GeoTensor) or (
+    return isinstance(value, GeoArray) or (
         isinstance(value, np.ndarray) and value.ndim >= 2
     )
 
@@ -1118,6 +1119,64 @@ def test_non_carrier_outputs_are_terminal(cls: type) -> None:
             assert op._terminal, f"returns {type(out).__name__}"
         return
     pytest.skip("no toy input is valid for this operator")
+
+
+def _as_geotensor(value: Any) -> Any:
+    """``value`` with every GeoArray converted to a georeader GeoTensor."""
+    from geoarray import GeoArray
+    from geoarray.interop.georeader import to_georeader
+
+    if isinstance(value, GeoArray):
+        return to_georeader(value)
+    if isinstance(value, list | tuple):
+        return type(value)(_as_geotensor(v) for v in value)
+    return value
+
+
+@pytest.mark.parametrize("cls", _params("graph_mode"))
+def test_every_operator_refuses_a_geotensor(
+    cls: type, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GD1: a georeader GeoTensor raises ``TypeError`` naming ``from_georeader``.
+
+    A GeoTensor is an ``np.ndarray`` subclass, so an operator that only
+    calls ``np.asarray`` would take it as a plain array and lose its
+    georeferencing. Each operator is run on the first toy GeoArray input
+    it accepts, then on the same input as a GeoTensor.
+    """
+    monkeypatch.chdir(tmp_path)  # sinks write their relative paths here
+    op = build(cls, runtime=True)
+    if not _single_carrier_in(op):
+        pytest.skip("not a single-input operator")
+    candidates = [*_toy_inputs(), *_attributed_inputs()]
+    for scene in candidates:
+        if not _is_carrier(scene) and not isinstance(scene, list):
+            continue
+        if np.ndim(scene) < 2 and not isinstance(scene, list):
+            continue
+        try:
+            _call(copy.deepcopy(op), scene)
+        except Exception:
+            continue
+        extra = MULTI_INPUTS.get(_key(cls))
+        others = extra(scene) if extra is not None else ()
+        with pytest.raises(TypeError, match="from_georeader"):
+            copy.deepcopy(op)(_as_geotensor(scene), *_as_geotensor(list(others)))
+        return
+    pytest.skip("no toy input is valid for this operator")
+
+
+@pytest.mark.parametrize("cls", _multi_input_classes())
+def test_multi_input_operator_refuses_a_geotensor_second_input(cls: type) -> None:
+    """GD1 for the second carrier: a GeoTensor there is refused too.
+
+    A GeoTensor is an ndarray, so a grid check that only sees GeoArrays
+    would take it for a plain array and skip the CRS / transform check.
+    """
+    values = _graph_values(cls)
+    values[-1] = _as_geotensor(values[-1])
+    with pytest.raises(TypeError, match="from_georeader"):
+        _build_seeded(cls)(*values)
 
 
 def test_phase_align_is_terminal_only_without_apply() -> None:
@@ -1164,12 +1223,12 @@ def test_tuple_returning_composites_are_terminal_only_when_flagged(
 def _spectral_scene(wavelengths: list[float], *, seed: int = 0, **extra: Any) -> Any:
     """A float scene with one ``band_names`` / ``descriptions`` / ``wavelengths``
     entry per band."""
-    from _helpers import toy_geotensor
+    from _helpers import toy_geoarray
 
     n = len(wavelengths)
     names = [f"b{i}" for i in range(n)]
     values = np.random.default_rng(seed).uniform(0.01, 1.0, (n, 16, 16))
-    return toy_geotensor(
+    return toy_geoarray(
         values,
         attrs={
             "band_names": names,
@@ -1187,7 +1246,7 @@ def _attributed_inputs() -> list[Any]:
     Band counts and names are chosen so that operators with sensor-style
     defaults (indices, SRFs, QA registries, list-input composites) run.
     """
-    from _helpers import toy_geotensor
+    from _helpers import toy_geoarray
 
     rng = np.random.default_rng(0)
     labels = np.zeros((16, 16), dtype=np.int32)
@@ -1204,17 +1263,17 @@ def _attributed_inputs() -> list[Any]:
         ),
         _spectral_scene([500.0, 600.0]),
         _spectral_scene([495.0, 505.0, 595.0, 605.0]),
-        toy_geotensor(
+        toy_geoarray(
             rng.uniform(0.01, 1.0, (16, 16)),
             attrs={"band_names": ["b0"], "sensor": "toy"},
         ),
-        toy_geotensor(labels, fill_value_default=0, attrs={"band_names": ["labels"]}),
-        toy_geotensor(
-            labels.astype(np.uint8), fill_value_default=0, attrs={"band_names": ["qa"]}
+        toy_geoarray(labels, fill_value=0, attrs={"band_names": ["labels"]}),
+        toy_geoarray(
+            labels.astype(np.uint8), fill_value=0, attrs={"band_names": ["qa"]}
         ),
-        toy_geotensor(
+        toy_geoarray(
             rng.integers(0, 2**12, (4, 16, 16)).astype(np.uint16),
-            fill_value_default=0,
+            fill_value=0,
             attrs={"band_names": qa_names, "descriptions": list(qa_names)},
         ),
         [
@@ -1258,7 +1317,7 @@ def test_output_attrs_are_fresh_and_consistent(cls: type) -> None:
     """Outputs never alias the input's ``attrs`` nor carry stale band keys (#144).
 
     Runs every buildable single-input operator on toy scenes carrying
-    ``band_names`` / ``descriptions`` / ``wavelengths``; for each GeoTensor
+    ``band_names`` / ``descriptions`` / ``wavelengths``; for each GeoArray
     output, ``out.attrs is not gt.attrs`` and every per-band attrs list has
     one entry per output band.
     """
@@ -1277,7 +1336,7 @@ def test_output_attrs_are_fresh_and_consistent(cls: type) -> None:
         except Exception:
             continue
         ran = True
-        assert_fresh_consistent_attrs(scene, out)
+        assert_consistent_attrs(scene, out)
     if not ran:
         pytest.skip("no toy input is valid for this operator")
 
@@ -1321,13 +1380,13 @@ def _fill_params() -> list[Any]:
 
 def _with_fill_pixels(scene: Any) -> Any:
     """``scene`` (or each scene of a list) with nodata written into two pixels."""
-    from _helpers import toy_geotensor
+    from _helpers import toy_geoarray
 
     if isinstance(scene, list):
         return [_with_fill_pixels(s) for s in scene]
-    return toy_geotensor(
+    return toy_geoarray(
         np.asarray(scene),
-        fill_value_default=scene.fill_value_default,
+        fill_value=scene.fill_value,
         attrs=scene.attrs,
         with_fill_pixels=True,
     )
@@ -1338,7 +1397,7 @@ def test_output_fill_matches_dtype(cls: type) -> None:
     """Output fill values follow the output's dtype and meaning (#146).
 
     Runs every buildable single-input operator on toy scenes whose corner
-    pixels hold the input's fill value, and checks each GeoTensor output
+    pixels hold the input's fill value, and checks each GeoArray output
     with `geoops._src.contract.assert_fill_matches_dtype`.
     """
     op = build(cls, runtime=True)
@@ -1356,8 +1415,8 @@ def test_output_fill_matches_dtype(cls: type) -> None:
             continue
         ran = True
         src = scene[0] if isinstance(scene, list) else scene
-        sources = geotensors(scene)
-        for gt in geotensors(out):
+        sources = geoarrays(scene)
+        for gt in geoarrays(out):
             if any(gt is s for s in sources):
                 continue
             assert_fill_matches_dtype(

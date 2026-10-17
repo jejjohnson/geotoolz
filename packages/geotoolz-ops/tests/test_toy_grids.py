@@ -9,8 +9,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from _helpers import DEFAULT_CRS, DEFAULT_TRANSFORM, TOY_GRIDS, toy_geotensor
+from _helpers import DEFAULT_CRS, DEFAULT_TRANSFORM, TOY_GRIDS, toy_geoarray
 from pyproj import CRS
+
+from geoops._src.geo import affine_of
 
 
 def _pixel_sizes(t: rasterio.Affine) -> tuple[float, float]:
@@ -19,26 +21,26 @@ def _pixel_sizes(t: rasterio.Affine) -> tuple[float, float]:
 
 
 def test_default_grid_is_unchanged() -> None:
-    gt = toy_geotensor(np.zeros((2, 3, 3)))
-    assert gt.transform == DEFAULT_TRANSFORM == TOY_GRIDS["utm"][0]
+    gt = toy_geoarray(np.zeros((2, 3, 3)))
+    assert affine_of(gt) == DEFAULT_TRANSFORM == TOY_GRIDS["utm"][0]
     assert gt.crs == DEFAULT_CRS
 
 
 @pytest.mark.parametrize("grid", sorted(TOY_GRIDS))
 def test_grid_sets_transform_and_crs(grid: str) -> None:
     transform, crs = TOY_GRIDS[grid]
-    gt = toy_geotensor(np.zeros((2, 3, 3)), grid=grid)
-    assert gt.transform == transform
+    gt = toy_geoarray(np.zeros((2, 3, 3)), grid=grid)
+    assert affine_of(gt) == transform
     assert CRS.from_user_input(gt.crs) == CRS.from_user_input(crs)
     assert transform.determinant != 0.0
 
 
 def test_explicit_transform_and_crs_override_the_grid() -> None:
     other = rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 0.0)
-    gt = toy_geotensor(
+    gt = toy_geoarray(
         np.zeros((3, 3)), grid="geographic", transform=other, crs="EPSG:32630"
     )
-    assert gt.transform == other
+    assert affine_of(gt) == other
     assert gt.crs == "EPSG:32630"
 
 
@@ -76,6 +78,6 @@ def test_geographic_grid_is_geographic() -> None:
 
 
 def test_grid_composes_with_fill_pixels() -> None:
-    gt = toy_geotensor(np.ones((2, 3, 3)), grid="non_square", with_fill_pixels=True)
-    assert gt.transform == TOY_GRIDS["non_square"][0]
+    gt = toy_geoarray(np.ones((2, 3, 3)), grid="non_square", with_fill_pixels=True)
+    assert affine_of(gt) == TOY_GRIDS["non_square"][0]
     assert np.asarray(gt)[0, 0, 0] == -9999

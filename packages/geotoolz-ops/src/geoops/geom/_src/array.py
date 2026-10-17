@@ -1,11 +1,11 @@
 """Tier-A primitives for geometry operators — pure-numpy helpers.
 
 The carrier-aware Operator wrappers in
-:mod:`geoops.geom._src.operators` lift these into the ``GeoTensor``
+:mod:`geoops.geom._src.operators` lift these into the ``GeoArray``
 pipeline. Each helper here is deliberately framework-agnostic: it
 operates on ``numpy.ndarray`` (and tuples of plain ints / floats) so the
 same primitive is callable from notebooks and tests without constructing
-a ``GeoTensor``.
+a ``GeoArray``.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def resolve_resampling(name: str | Resampling) -> Resampling:
 def resolve_interpolation(name: str) -> str:
     """Translate a resampling name into a ``skimage.transform.resize`` mode.
 
-    ``GeoTensor.resize`` delegates to ``skimage.transform.resize`` whose
+    ``GeoArray.resize`` delegates to ``skimage.transform.resize`` whose
     ``interpolation`` parameter uses different names than rasterio
     (``"bicubic"`` instead of ``"cubic"``, etc.). This helper keeps the
     geom operators idiomatic from the user's side while passing the
@@ -192,7 +192,7 @@ def valid_pixel_mask(
     """Boolean mask of pixels not equal to ``fill``, collapsed over band axis.
 
     Tiles produced by ``Tile(include_incomplete=True, boundless=True)``
-    pad the right/bottom edges with the carrier's ``fill_value_default``;
+    pad the right/bottom edges with the carrier's ``fill_value``;
     blending must not aggregate those sentinel pixels into the output.
 
     Args:

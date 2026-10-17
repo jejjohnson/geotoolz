@@ -1,29 +1,29 @@
-"""Carrier-aware compositing operators for co-registered GeoTensors.
+"""Carrier-aware compositing operators for co-registered GeoArrays.
 
 All composites are N-ary reducers: they take their inputs as positional
 arguments, ``op(f1, f2, ...)``, so they wire into a ``pipekit.Graph`` as
 ``op(Input("a"), Input("b"))``, or as one sequence, ``op([f1, f2])``
 (the multi-input convention, see ``docs/concepts.md``). They are
 metadata-independent per-pixel reductions, so they accept plain
-``np.ndarray`` frames as well as GeoTensors.
+``np.ndarray`` frames as well as GeoArrays.
 The frame-sequence composites (:class:`MedianComposite`,
 :class:`MaxNDVIComposite`) also accept a single ``(T, C, H, W)`` time
-stack -- georeader's ``("time", "band", "y", "x")`` GeoTensor -- which is
-reduced over its time axis and rewrapped like ``stack.isel({"time": 0})``.
+stack -- a GeoArray with dims ``("time", "band", "y", "x")`` -- which is
+reduced over its time axis and rewrapped like ``stack.isel(time=0)``.
 Grid checks (transform / CRS equality) apply only to frames that carry
 georeferencing; plain arrays fall back to shape-equality checks. The
 output carrier follows the first frame.
 
 Nodata is judged *per frame* with :func:`geoops._src.valid.valid_pixels`
-(non-finite values, or the frame's ``fill_value_default``, in any band):
+(non-finite values, or the frame's ``fill_value``, in any band):
 an invalid frame never contributes to a reduction, a score or a
 selection at that pixel, and pixels invalid in every frame come out
 holding the output's fill value. Composites carry the frames' values, so
-they keep the first frame's ``fill_value_default`` -- switching to
+they keep the first frame's ``fill_value`` -- switching to
 ``NaN`` when integer frames are averaged into float (see
 :func:`geoops._src.valid.carried_fill`) and using ``NaN`` when the first
 frame has none. Auxiliary outputs follow their own meaning: contributor
-counts declare ``fill_value_default=0`` (a pixel no frame covers has
+counts declare ``fill_value=0`` (a pixel no frame covers has
 count ``0``), float scores use ``NaN``, and the frame-index map of
 :class:`MaxNDVIComposite` uses ``-1`` (``0`` is a valid frame index).
 
@@ -41,9 +41,10 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
+from geoarray import GeoArray
 from jaxtyping import Bool, Float, Shaped
 from pipekit import Operator
 
@@ -53,7 +54,7 @@ from geoops._src.bands import (
     resolve_band,
     strip_band_attrs,
 )
-from geoops._src.geo import require_grid_match
+from geoops._src.geo import reject_geotensor, require_grid_match
 from geoops._src.shape import gather_inputs
 from geoops._src.valid import (
     carried_fill,
@@ -81,46 +82,48 @@ from geoops.compositing._src.array import (
 from geoops.indices._src.array import ndvi
 
 
-if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
-
-
 def _validate_nan_policy(nan_policy: str) -> NanPolicy:
     if nan_policy not in {"ignore", "propagate"}:
         raise ValueError("nan_policy must be 'ignore' or 'propagate'.")
     return nan_policy  # type: ignore[return-value]
 
 
-def _as_frames(frames: tuple[Any, ...], name: str) -> Sequence[GeoTensor | np.ndarray]:
+def _as_frames(frames: tuple[Any, ...], name: str) -> Sequence[GeoArray | np.ndarray]:
     """Accept frames as arguments, one sequence, or one ``(T, C, H, W)`` stack.
 
     Several positional frames, or one list / tuple of them, are the
-    frames. A single carrier argument is a time stack: a GeoTensor stack
-    (dims ``time, band, y, x``) is split into its ``gt.isel({"time": t})``
+    frames. A single carrier argument is a time stack: a GeoArray stack
+    (dims ``time, band, y, x``) is split into its ``g.isel(time=t)``
     frames, which keep its transform, CRS, fill
     value and attrs, so the composite is rewrapped like frame 0. A plain
     ndarray stack (``(T, C, H, W)``, or ``(T, H, W)`` for single-band
-    frames) is split along axis 0. A 2-D / 3-D GeoTensor is not a time
-    stack (its leading axis is bands) and is rejected.
+    frames) is split along axis 0. A 2-D / 3-D GeoArray is not a time
+    stack (its leading axis is bands) and is rejected. A georeader
+    ``GeoTensor`` (as the stack or as a frame) raises ``TypeError``.
     """
-    if len(frames) != 1 or not isinstance(frames[0], np.ndarray):
-        return gather_inputs(frames, name)
-    frames = frames[0]
-    isel = getattr(frames, "isel", None)
-    if isel is not None and frames.ndim == 4:
-        return [isel({"time": t}) for t in range(frames.shape[0])]
-    if isel is None and frames.ndim in (3, 4):
-        return list(frames)
+    for frame in frames:
+        reject_geotensor(frame, name)
+    if len(frames) != 1 or not isinstance(frames[0], np.ndarray | GeoArray):
+        gathered = gather_inputs(frames, name)
+        for frame in gathered:
+            reject_geotensor(frame, name)
+        return gathered
+    stack = frames[0]
+    georeferenced = isinstance(stack, GeoArray)
+    if georeferenced and stack.ndim == 4:
+        return [stack.isel(time=t) for t in range(stack.shape[0])]
+    if not georeferenced and stack.ndim in (3, 4):
+        return list(stack)
     raise ValueError(
         f"{name} takes co-registered frames (as arguments or one sequence) or "
-        f"a (T, C, H, W) time stack; got a {frames.ndim}-D "
-        f"{'GeoTensor' if isel is not None else 'array'} of shape {frames.shape}"
+        f"a (T, C, H, W) time stack; got a {stack.ndim}-D "
+        f"{'GeoArray' if georeferenced else 'array'} of shape {stack.shape}"
     )
 
 
 def _require_frames(
-    frames: Sequence[GeoTensor | np.ndarray], name: str
-) -> GeoTensor | np.ndarray:
+    frames: Sequence[GeoArray | np.ndarray], name: str
+) -> GeoArray | np.ndarray:
     if not frames:
         raise ValueError(f"{name}: at least one frame is required for compositing.")
     base = frames[0]
@@ -134,22 +137,22 @@ def _require_frames(
 
 
 def _stack_frames(
-    frames: Sequence[GeoTensor | np.ndarray], name: str
-) -> tuple[GeoTensor | np.ndarray, np.ndarray]:
+    frames: Sequence[GeoArray | np.ndarray], name: str
+) -> tuple[GeoArray | np.ndarray, np.ndarray]:
     base = _require_frames(frames, name)
     return base, np.stack([np.asarray(frame) for frame in frames], axis=0)
 
 
 def _frame_validity(
-    frames: Sequence[GeoTensor | np.ndarray],
+    frames: Sequence[GeoArray | np.ndarray],
 ) -> Bool[np.ndarray, "t h w"]:
     """Per-frame ``(T, H, W)`` validity; each frame judged by its own fill.
 
     A ``(T, C, H, W)`` / ``(T, H, W)`` array carrier passed whole is judged
-    against its own ``fill_value_default`` (slicing a frame out of it could
+    against its own ``fill_value`` (slicing a frame out of it could
     drop the fill); a sequence is judged frame by frame.
     """
-    if isinstance(frames, np.ndarray):
+    if isinstance(frames, np.ndarray | GeoArray):
         invalid = invalid_values(frames)
         if invalid.ndim > 3:
             invalid = invalid.any(axis=tuple(range(1, invalid.ndim - 2)))
@@ -174,18 +177,18 @@ def _mask_array(
         return mask_arr
     raise ValueError(
         "Cloud masks must have spatial shape (H, W), (1, H, W), or match the "
-        "GeoTensor shape; got "
+        "GeoArray shape; got "
         f"{mask_arr.shape}, expected compatible with {target_shape}."
     )
 
 
 def _require_pairs(
-    pairs: Sequence[tuple[GeoTensor | np.ndarray, Any]], name: str
-) -> tuple[GeoTensor | np.ndarray, np.ndarray, np.ndarray]:
+    pairs: Sequence[tuple[GeoArray | np.ndarray, Any]], name: str
+) -> tuple[GeoArray | np.ndarray, np.ndarray, np.ndarray]:
     frames = [scene for scene, _ in pairs]
     base, stack = _stack_frames(frames, name)
     for idx, (_, mask) in enumerate(pairs):
-        if getattr(mask, "transform", None) is not None:
+        if isinstance(mask, GeoArray):
             require_grid_match(base, mask, name, names=("frame 0", f"cloud mask {idx}"))
     masks = np.stack([_mask_array(mask, base.shape) for _, mask in pairs], axis=0)
     return base, stack, masks
@@ -216,7 +219,7 @@ def _score_array(
 
 
 class MedianComposite(Operator):
-    """Per-pixel median across a stack of co-registered GeoTensors.
+    """Per-pixel median across a stack of co-registered GeoArrays.
 
     Called as ``op(f1, f2, ...)``, ``op([f1, f2, ...])`` or ``op(stack)``
     with a ``(T, C, H, W)`` time stack; every frame must share the first
@@ -249,8 +252,8 @@ class MedianComposite(Operator):
         return self.return_count
 
     def _apply(
-        self, *frames: GeoTensor | np.ndarray | Sequence[GeoTensor | np.ndarray]
-    ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
+        self, *frames: GeoArray | np.ndarray | Sequence[GeoArray | np.ndarray]
+    ) -> GeoArray | np.ndarray | tuple[GeoArray | np.ndarray, GeoArray | np.ndarray]:
         name = type(self).__name__
         frames = _as_frames(frames, name)
         base, stack = _stack_frames(frames, name)
@@ -260,11 +263,11 @@ class MedianComposite(Operator):
         values = median_composite(masked, nan_policy=self.nan_policy)
         fill = carried_fill(base, values.dtype)
         values = restore_fill(values, valid.any(axis=0), fill)
-        out = wrap_like(base, values, fill_value_default=fill)
+        out = wrap_like(base, values, fill_value=fill)
         if not self.return_count:
             return out
         count = np.sum(~np.isnan(masked), axis=0).astype(np.int64)
-        return out, wrap_like(base, count, fill_value_default=0)
+        return out, wrap_like(base, count, fill_value=0)
 
 
 class MaxNDVIComposite(Operator):
@@ -272,16 +275,16 @@ class MaxNDVIComposite(Operator):
 
     Called like :class:`MedianComposite` (frames as arguments, one
     sequence, or a ``(T, C, H, W)`` stack). Inputs must be multi-band
-    (``(C, H, W)``); 2-D GeoTensors raise because NDVI needs distinct red
+    (``(C, H, W)``); 2-D GeoArrays raise because NDVI needs distinct red
     and NIR bands. Nodata frame-pixels (non-finite or the frame's fill in
     any band) never win the selection. Pixels with
     no valid NDVI in any frame hold the first frame's
-    ``fill_value_default`` (``NaN`` for float inputs without one), so the
+    ``fill_value`` (``NaN`` for float inputs without one), so the
     output dtype is the input dtype.
 
     The per-pixel math is metadata-independent, so plain ``np.ndarray``
     frames are accepted when ``red`` / ``nir`` are integer indices; named
-    band references need GeoTensor ``attrs`` and raise ``TypeError`` for
+    band references need GeoArray ``attrs`` and raise ``TypeError`` for
     plain arrays.
 
     Args:
@@ -290,7 +293,7 @@ class MaxNDVIComposite(Operator):
         nir: NIR band reference, same conventions as ``red``.
         return_index: When true, also return a carrier holding the
             selected frame index per pixel (``int64``; ``-1``, the
-            declared ``fill_value_default``, where no frame is valid).
+            declared ``fill_value``, where no frame is valid).
             The output is then a tuple, so the operator is terminal
             (last step only) in a ``Sequential``.
         eps: Stabiliser added to the NDVI denominator.
@@ -315,25 +318,25 @@ class MaxNDVIComposite(Operator):
         return self.return_index
 
     def _apply(
-        self, *frames: GeoTensor | np.ndarray | Sequence[GeoTensor | np.ndarray]
-    ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
+        self, *frames: GeoArray | np.ndarray | Sequence[GeoArray | np.ndarray]
+    ) -> GeoArray | np.ndarray | tuple[GeoArray | np.ndarray, GeoArray | np.ndarray]:
         name = type(self).__name__
         frames = _as_frames(frames, name)
         base, stack = _stack_frames(frames, name)
-        # NDVI needs distinct red/nir bands; 2-D GeoTensors don't have a
+        # NDVI needs distinct red/nir bands; 2-D GeoArrays don't have a
         # band axis and would silently broadcast `:, red_idx, ...` into
         # nonsense. Fail loudly.
         if base.ndim < 3:
             raise ValueError(
-                "MaxNDVIComposite requires multi-band GeoTensors (C, H, W); "
+                "MaxNDVIComposite requires multi-band GeoArrays (C, H, W); "
                 f"got shape {base.shape}."
             )
-        if (isinstance(self.red, str) or isinstance(self.nir, str)) and not hasattr(
-            base, "attrs"
+        if (isinstance(self.red, str) or isinstance(self.nir, str)) and not isinstance(
+            base, GeoArray
         ):
             raise TypeError(
                 "MaxNDVIComposite with named band references requires "
-                "GeoTensor inputs carrying band-name attrs; got a plain "
+                "GeoArray inputs carrying band-name attrs; got a plain "
                 "array. Pass integer band indices instead."
             )
         red_idx = resolve_band(base, self.red)
@@ -358,21 +361,21 @@ class MaxNDVIComposite(Operator):
                 values = restore_fill(values, ~all_invalid, fill)
             else:
                 # Integer / unsigned inputs can't carry NaN. Fall back to the
-                # input's fill_value_default so the dtype is preserved.
+                # input's fill_value so the dtype is preserved.
                 if fill is None:
                     raise ValueError(
                         "MaxNDVIComposite: all NDVI scores are invalid for "
                         "some pixels and the integer-dtype input carries no "
-                        "fill_value_default to mark them; use a GeoTensor "
-                        "with fill_value_default or float frames."
+                        "fill_value to mark them; use a GeoArray "
+                        "with fill_value or float frames."
                     )
                 values[..., all_invalid] = fill
-        out = wrap_like(base, values, fill_value_default=fill)
+        out = wrap_like(base, values, fill_value=fill)
         if not self.return_index:
             return out
         # Frame 0 is a real index, so pixels no frame covers are -1.
         index = np.where(all_invalid, -1, index).astype(np.int64)
-        return out, wrap_like(base, index, fill_value_default=-1)
+        return out, wrap_like(base, index, fill_value=-1)
 
 
 class CloudFreeComposite(Operator):
@@ -421,8 +424,8 @@ class CloudFreeComposite(Operator):
         return self.return_count
 
     def _apply(
-        self, *pairs: tuple[GeoTensor | np.ndarray, Any]
-    ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
+        self, *pairs: tuple[GeoArray | np.ndarray, Any]
+    ) -> GeoArray | np.ndarray | tuple[GeoArray | np.ndarray, GeoArray | np.ndarray]:
         name = type(self).__name__
         pairs = gather_inputs(pairs, name, pairs=True)
         base, stack, cloudy = _require_pairs(pairs, name)
@@ -435,10 +438,10 @@ class CloudFreeComposite(Operator):
         )
         fill = carried_fill(base, values.dtype)
         values = restore_fill(values, frame_valid.any(axis=0), fill)
-        out = wrap_like(base, values, fill_value_default=fill)
+        out = wrap_like(base, values, fill_value=fill)
         if not self.return_count:
             return out
-        return out, wrap_like(base, count.astype(np.int64), fill_value_default=0)
+        return out, wrap_like(base, count.astype(np.int64), fill_value=0)
 
 
 class BAPComposite(Operator):
@@ -480,7 +483,7 @@ class BAPComposite(Operator):
     ``view_angle = 0``, ``opacity = 0``), except ``cloud_distance``, which
     defaults to ``0`` (next to a cloud). Every score lies in ``[0, 1]``, so
     raw and precomputed values may be mixed across frames. Each value may
-    be a scalar or a per-pixel array. Frames may be GeoTensors or plain
+    be a scalar or a per-pixel array. Frames may be GeoArrays or plain
     ``np.ndarray`` maps (the scores live in the metadata dicts, not in
     geo-metadata). A nodata frame-pixel (non-finite or the frame's fill)
     or a NaN score is never selected; pixels with no valid frame hold the
@@ -614,8 +617,8 @@ class BAPComposite(Operator):
         )
 
     def _apply(
-        self, *pairs: tuple[GeoTensor | np.ndarray, Mapping[str, Any]]
-    ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
+        self, *pairs: tuple[GeoArray | np.ndarray, Mapping[str, Any]]
+    ) -> GeoArray | np.ndarray | tuple[GeoArray | np.ndarray, GeoArray | np.ndarray]:
         name = type(self).__name__
         pairs = gather_inputs(pairs, name, pairs=True)
         frames = [scene for scene, _ in pairs]
@@ -640,12 +643,12 @@ class BAPComposite(Operator):
         values = take_by_spatial_index(stack, index)
         fill = carried_fill(base, values.dtype)
         values = restore_fill(values, any_valid, fill)
-        out = wrap_like(base, values, fill_value_default=fill)
+        out = wrap_like(base, values, fill_value=fill)
         if not self.return_score:
             return out
         best_score = np.take_along_axis(score_stack, index[None, ...], axis=0)[0]
         best_score = restore_fill(best_score, any_valid, np.nan)
-        return out, wrap_like(base, best_score, fill_value_default=np.nan)
+        return out, wrap_like(base, best_score, fill_value=np.nan)
 
 
 class MinCloudComposite(Operator):
@@ -683,8 +686,8 @@ class MinCloudComposite(Operator):
         return self.return_count
 
     def _apply(
-        self, *pairs: tuple[GeoTensor | np.ndarray, Any]
-    ) -> GeoTensor | np.ndarray | tuple[GeoTensor | np.ndarray, GeoTensor | np.ndarray]:
+        self, *pairs: tuple[GeoArray | np.ndarray, Any]
+    ) -> GeoArray | np.ndarray | tuple[GeoArray | np.ndarray, GeoArray | np.ndarray]:
         name = type(self).__name__
         pairs = gather_inputs(pairs, name, pairs=True)
         base, stack, cloudy = _require_pairs(pairs, name)
@@ -709,11 +712,11 @@ class MinCloudComposite(Operator):
         values = take_by_spatial_index(stack, index)
         fill = carried_fill(base, values.dtype)
         values = restore_fill(values, valid.any(axis=0), fill)
-        out = wrap_like(base, values, fill_value_default=fill)
+        out = wrap_like(base, values, fill_value=fill)
         if not self.return_count:
             return out
         count = np.sum(clear, axis=0).astype(np.int64)
-        return out, wrap_like(base, count, fill_value_default=0)
+        return out, wrap_like(base, count, fill_value=0)
 
 
 def _normalize_to_sequence(
@@ -777,13 +780,13 @@ def _as_band_first(
 
 def _translate_fills(
     stacked: Shaped[np.ndarray, "c h w"],
-    seq: Sequence[GeoTensor | np.ndarray],
+    seq: Sequence[GeoArray | np.ndarray],
     arrays: Sequence[np.ndarray],
     out_fill: object,
 ) -> Shaped[np.ndarray, "c h w"]:
     """Rewrite each input's nodata pixels to the output fill, in its own bands.
 
-    The output keeps the first input's ``fill_value_default`` (``NaN``
+    The output keeps the first input's ``fill_value`` (``NaN``
     when concatenation promotes integer bands to float); an input
     with a different fill would otherwise leave nodata that the output's
     fill no longer marks. When the output fill cannot be represented in
@@ -806,7 +809,7 @@ class StackMatched(Operator):
 
     Inputs are positional, ``op(a, b, ...)`` -- so the operator wires into
     a ``pipekit.Graph`` as ``StackMatched()(Input("a"), Input("b"))`` --
-    or one ``Sequence[GeoTensor]`` or ``Mapping[str, GeoTensor]`` --
+    or one ``Sequence[GeoArray]`` or ``Mapping[str, GeoArray]`` --
     typical when called on `MatchedPatch.members` -- or one ``(T, C, H, W)``
     stack whose frames are the inputs. All inputs must share spatial shape,
     transform, and CRS; the per-tensor band count may differ. Plain
@@ -839,15 +842,14 @@ class StackMatched(Operator):
         ``geoops.geom.coregister.RasterToRasterLike`` if the
         inputs aren't already on the same grid. Nodata pixels of each
         input (non-finite or that input's fill) are rewritten to the
-        output's fill (the first input's ``fill_value_default``) in that
+        output's fill (the first input's ``fill_value``) in that
         input's bands, when the output dtype can represent it.
 
-        Where :meth:`georeader.geotensor.GeoTensor.concatenate` applies
-        (3-D inputs with equal band counts and equal, non-NaN fills) the
-        output matches it. The operator does not delegate to it because
-        ``concatenate`` refuses differing band counts, 2-D inputs, and
-        NaN fills (``NaN != NaN``), and it keeps only the first input's
-        attrs.
+        Where :func:`geoarray.concatenate` applies (3-D GeoArray inputs
+        with equal fills and no nodata pixels) the output matches it. The
+        operator does not delegate to it because ``concatenate`` refuses
+        2-D inputs and plain arrays, and leaves each input's nodata
+        pixels as they are.
     """
 
     def __init__(
@@ -859,11 +861,11 @@ class StackMatched(Operator):
 
     def _apply(
         self,
-        *tensors: GeoTensor
+        *tensors: GeoArray
         | np.ndarray
-        | Sequence[GeoTensor | np.ndarray]
-        | Mapping[str, GeoTensor | np.ndarray],
-    ) -> GeoTensor | np.ndarray:
+        | Sequence[GeoArray | np.ndarray]
+        | Mapping[str, GeoArray | np.ndarray],
+    ) -> GeoArray | np.ndarray:
         seq, _names = _normalize_to_sequence(tensors, self.order, "StackMatched")
         if not seq:
             raise ValueError("StackMatched requires at least one input tensor.")
@@ -888,7 +890,7 @@ class StackMatched(Operator):
                 [arr.shape[0] for arr in arrays],
             )
         )
-        return wrap_like(base, stacked, fill_value_default=fill, attrs=attrs)
+        return wrap_like(base, stacked, fill_value=fill, attrs=attrs)
 
 
 class BlendMatched(Operator):
@@ -920,9 +922,9 @@ class BlendMatched(Operator):
     * ``"propagate"`` — any NaN at a pixel poisons the output pixel.
 
     Nodata pixels of each input (non-finite, or that input's
-    ``fill_value_default``, in any band) are treated as NaN; pixels that
+    ``fill_value``, in any band) are treated as NaN; pixels that
     are nodata in every input hold the output fill: the first input's
-    ``fill_value_default``, or ``NaN`` when it has none or is an integer
+    ``fill_value``, or ``NaN`` when it has none or is an integer
     input blended into float (see :func:`geoops._src.valid.carried_fill`).
 
     All inputs must share spatial shape, transform, and CRS. The
@@ -980,7 +982,7 @@ class BlendMatched(Operator):
     def _apply(
         self,
         *tensors: Any,
-    ) -> GeoTensor | np.ndarray:
+    ) -> GeoArray | np.ndarray:
         seq, _names = _normalize_to_sequence(
             tensors, None, "BlendMatched", pairs=self.method == "ivw"
         )
@@ -1079,7 +1081,7 @@ class BlendMatched(Operator):
 
         fill = carried_fill(base, result.dtype)
         result = restore_fill(result, source_valid.any(axis=0), fill)
-        return wrap_like(base, result, fill_value_default=fill)
+        return wrap_like(base, result, fill_value=fill)
 
 
 __all__ = [

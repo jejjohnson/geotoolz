@@ -3,14 +3,14 @@
 Thin ``pipekit.Operator`` wrappers around the Tier-A primitives in
 :mod:`geoops.matched_filter._src.array`. Matched-filter math is
 metadata-independent (covariance / Mahalanobis algebra over spectra),
-so every operator here accepts either a ``GeoTensor`` or a plain
+so every operator here accepts either a ``GeoArray`` or a plain
 ``np.ndarray`` cube. Operators whose output is an image (score maps)
 rewrap it to match the input carrier via
 :func:`geoops._src.wrap.wrap_like`; the estimator operators return
 non-carrier results (mean vectors, `NumpyLinearOperator`, background
 dataclasses) unchanged for either input kind.
 
-Band axis: the spectral axis defaults to ``-3`` (georeader's
+Band axis: the spectral axis defaults to ``-3`` (the carrier's
 ``(C, H, W)`` / ``(T, C, H, W)`` layout). A 2-D ``(H, W)`` map has no
 band axis and raises ``ValueError`` (its rows are never read as bands); a
 2-D ``(N, C)`` sample matrix needs an explicit ``axis``. On a
@@ -19,10 +19,10 @@ pixels of every frame (one background for the time series) and score maps
 come back as ``(T, 1, H, W)``.
 
 Nodata: pixels that are non-finite or equal the carrier's
-``fill_value_default`` in any band are excluded from every fitted
+``fill_value`` in any band are excluded from every fitted
 statistic (see :mod:`geoops._src.valid`); score maps are a new
 quantity, so they hold ``NaN`` at those pixels and declare
-``fill_value_default=NaN`` whatever the input's fill value.
+``fill_value=NaN`` whatever the input's fill value.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ from geoops.carrier import (
     jsonable,
     keep_band_axis,
     reject_config_summary,
+    reject_geotensor,
     require_ndim,
     restore_fill,
     wrap_like,
@@ -72,7 +73,7 @@ from geoops.matched_filter._src.array import (
 
 
 if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
 
 # Small relative perturbation for finite-difference target linearization; callers
@@ -85,7 +86,7 @@ class MatchedFilter(Operator):
 
     Computes ``y = (x - mu)^T Sigma^-1 t / (t^T Sigma^-1 t)`` for every
     pixel spectrum and returns a single-band score map. Accepts either a
-    ``GeoTensor`` (georeferencing preserved on the output) or a plain
+    ``GeoArray`` (georeferencing preserved on the output) or a plain
     ``np.ndarray`` (plain array returned) — the math is metadata-free.
 
     Fitted operator (see *Fitted operators* in the concepts guide):
@@ -104,7 +105,7 @@ class MatchedFilter(Operator):
 
     Nodata pixels (non-finite or equal to the input's fill value in any
     band) are left out of the fit and hold ``NaN`` in the score map,
-    which declares ``fill_value_default=NaN``.
+    which declares ``fill_value=NaN``.
 
     Args:
         mean: Background mean spectrum ``(c,)``; fitted from the data
@@ -183,7 +184,7 @@ class MatchedFilter(Operator):
                 )
         return np.asarray(mean, dtype=float), cov_op
 
-    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+    def fit(self, gt: GeoArray | np.ndarray) -> Self:
         """Estimate the unset background statistics from the valid pixels of ``gt``.
 
         Returns:
@@ -204,7 +205,7 @@ class MatchedFilter(Operator):
             "MatchedFilter requires mean and cov_op, fit(), or a call on data"
         )
 
-    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def transform(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Score ``gt`` against the fitted (or supplied) background.
 
         Raises:
@@ -216,11 +217,11 @@ class MatchedFilter(Operator):
 
     def _score(
         self,
-        gt: GeoTensor | np.ndarray,
+        gt: GeoArray | np.ndarray,
         mean: np.ndarray,
         cov_op: NumpyLinearOperator | np.ndarray,
         masked: tuple[np.ndarray, np.ndarray | None] | None = None,
-    ) -> GeoTensor | np.ndarray:
+    ) -> GeoArray | np.ndarray:
         if self.target is None:
             raise ValueError("target must be supplied before applying MatchedFilter")
         cube, valid = (
@@ -234,10 +235,10 @@ class MatchedFilter(Operator):
         return wrap_like(
             gt,
             keep_band_axis(_restore(gt, out, valid), gt),
-            fill_value_default=np.nan,
+            fill_value=np.nan,
         )
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         if self.fit_on_call:
             # Per-scene background: estimated locally, never stored, so
             # concurrent calls share no mutable state.
@@ -330,6 +331,7 @@ class MatchedFilterSNR(Operator):
         self.target = target
 
     def _apply(self, _input: Any | None = None) -> float:
+        reject_geotensor(_input, type(self).__name__)
         return matched_filter_snr(
             amplitude=self.amplitude, cov_op=self.cov_op, target=self.target
         )
@@ -373,6 +375,7 @@ class DetectionThreshold(Operator):
         self.target = target
 
     def _apply(self, _input: Any | None = None) -> float:
+        reject_geotensor(_input, type(self).__name__)
         return detection_threshold(
             false_alarm_rate=self.false_alarm_rate,
             cov_op=self.cov_op,
@@ -411,6 +414,7 @@ class ValidateMFInputs(Operator):
         self.target = target
 
     def _apply(self, value: Any = None) -> Any:
+        reject_geotensor(value, type(self).__name__)
         validate_mf_inputs(cov_op=self.cov_op, target=self.target)
         return value
 
@@ -424,7 +428,7 @@ class ValidateMFInputs(Operator):
 class EstimateMean(Operator):
     """Estimate a spectral background mean vector from a cube.
 
-        Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns the
+        Accepts a ``GeoArray`` or plain ``np.ndarray`` cube and returns the
         plain ``(c,)`` mean spectrum (a vector, not a carrier). See
     :func:`geoops.matched_filter._src.array.estimate_mean` for the
         estimator details. Nodata pixels (non-finite or equal to the input's
@@ -452,7 +456,7 @@ class EstimateMean(Operator):
         self.huber_c = huber_c
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> np.ndarray:
         return estimate_mean(
             _mask_invalid(gt, self.axis, type(self).__name__)[0],
             method=self.method,
@@ -465,7 +469,7 @@ class EstimateMean(Operator):
 class EstimateCovEmpirical(Operator):
     """Estimate an empirical covariance operator.
 
-    Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns a
+    Accepts a ``GeoArray`` or plain ``np.ndarray`` cube and returns a
     `NumpyLinearOperator` (not a carrier) wrapping the ``(c, c)`` sample
     covariance. Nodata pixels (non-finite or equal to the input's fill
     value in any band) are ignored.
@@ -484,7 +488,7 @@ class EstimateCovEmpirical(Operator):
         self.ridge = ridge
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> NumpyLinearOperator:
+    def _apply(self, gt: GeoArray | np.ndarray) -> NumpyLinearOperator:
         return estimate_cov_empirical(
             _mask_invalid(gt, self.axis, type(self).__name__)[0],
             mean=self.mean,
@@ -503,7 +507,7 @@ class EstimateCovEmpirical(Operator):
 class EstimateCovShrunk(Operator):
     """Estimate a diagonal-target shrinkage covariance operator.
 
-    Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns a
+    Accepts a ``GeoArray`` or plain ``np.ndarray`` cube and returns a
     `NumpyLinearOperator` (not a carrier) wrapping the covariance shrunk
     toward a scaled-identity target. Nodata pixels (non-finite or equal
     to the input's fill value in any band) are ignored.
@@ -527,7 +531,7 @@ class EstimateCovShrunk(Operator):
         self.method = method
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> NumpyLinearOperator:
+    def _apply(self, gt: GeoArray | np.ndarray) -> NumpyLinearOperator:
         return estimate_cov_shrunk(
             _mask_invalid(gt, self.axis, type(self).__name__)[0],
             mean=self.mean,
@@ -546,7 +550,7 @@ class EstimateCovShrunk(Operator):
 class EstimateCovLowRank(Operator):
     """Estimate a low-rank-plus-Tikhonov covariance operator.
 
-    Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns a
+    Accepts a ``GeoArray`` or plain ``np.ndarray`` cube and returns a
     `NumpyLinearOperator` (not a carrier) approximating the covariance
     by its top-``rank`` eigenpairs plus a Tikhonov diagonal. Nodata
     pixels (non-finite or equal to the input's fill value in any band)
@@ -581,7 +585,7 @@ class EstimateCovLowRank(Operator):
         self.n_oversamples = n_oversamples
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> NumpyLinearOperator:
+    def _apply(self, gt: GeoArray | np.ndarray) -> NumpyLinearOperator:
         return estimate_cov_lowrank(
             _mask_invalid(gt, self.axis, type(self).__name__)[0],
             mean=self.mean,
@@ -608,7 +612,7 @@ class GMMClusterBackground(Operator):
 
     Runs the deterministic diagonal-GMM clustering (k-means initialised)
     of :func:`geoops.matched_filter._src.array.gmm_cluster_background`.
-    Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns a
+    Accepts a ``GeoArray`` or plain ``np.ndarray`` cube and returns a
     `ClusterBackground` (labels plus per-cluster statistics, not a
     carrier), typically wired into :class:`ApplyClusterMF`. Nodata pixels
     (non-finite or equal to the input's fill value in any band) are left
@@ -640,7 +644,7 @@ class GMMClusterBackground(Operator):
         self.bayesian = bayesian
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> ClusterBackground:
+    def _apply(self, gt: GeoArray | np.ndarray) -> ClusterBackground:
         return gmm_cluster_background(
             _mask_invalid(gt, self.axis, type(self).__name__)[0],
             n_clusters=self.n_clusters,
@@ -654,7 +658,7 @@ class GMMClusterBackground(Operator):
 class AdaptiveWindowBackground(Operator):
     """Per-pixel local mean and diagonal variance over a square window.
 
-    Accepts a ``GeoTensor`` or plain ``np.ndarray`` 3-D cube and returns
+    Accepts a ``GeoArray`` or plain ``np.ndarray`` 3-D cube and returns
     an `AdaptiveBackground` (a pair of statistic cubes, not a carrier).
     Nodata pixels (non-finite or equal to the input's fill value in any
     band) carry no window weight and are ``NaN`` in both cubes.
@@ -674,7 +678,7 @@ class AdaptiveWindowBackground(Operator):
         self.pad_mode = pad_mode
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> AdaptiveBackground:
+    def _apply(self, gt: GeoArray | np.ndarray) -> AdaptiveBackground:
         require_ndim(gt, 3, type(self).__name__)
         return adaptive_window_background(
             _mask_invalid(gt, self.axis, type(self).__name__)[0],
@@ -687,10 +691,10 @@ class AdaptiveWindowBackground(Operator):
 class ApplyClusterMF(Operator):
     """Apply a matched filter dispatched by per-pixel cluster label.
 
-    Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and returns the
+    Accepts a ``GeoArray`` or plain ``np.ndarray`` cube and returns the
     score map as the same carrier kind. Nodata pixels (non-finite or
     equal to the input's fill value in any band, or labelled ``-1``)
-    hold ``NaN`` (``fill_value_default=NaN``).
+    hold ``NaN`` (``fill_value=NaN``).
 
     The ``cluster`` background is supplied at apply time as a runtime input
     so the operator config (``target``, ``axis``) is hydra-/YAML-safe and
@@ -713,8 +717,8 @@ class ApplyClusterMF(Operator):
         self.axis = axis
 
     def _apply(
-        self, gt: GeoTensor | np.ndarray, cluster: ClusterBackground
-    ) -> GeoTensor | np.ndarray:
+        self, gt: GeoArray | np.ndarray, cluster: ClusterBackground
+    ) -> GeoArray | np.ndarray:
         cube, valid = _mask_invalid(gt, self.axis, type(self).__name__)
         out = apply_cluster_mf(
             cube, cluster=cluster, target=self.target, axis=self.axis
@@ -722,7 +726,7 @@ class ApplyClusterMF(Operator):
         return wrap_like(
             gt,
             keep_band_axis(_restore(gt, out, valid), gt),
-            fill_value_default=np.nan,
+            fill_value=np.nan,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -736,10 +740,10 @@ class ApplyAdaptiveMF(Operator):
     ``Λ = diag(σ² + ridge)`` are the pixel's own local mean and diagonal
     variance from :class:`AdaptiveWindowBackground` (see
     :func:`geoops.matched_filter._src.array.apply_adaptive_mf`).
-    Accepts a ``GeoTensor`` or plain ``np.ndarray`` 3-D cube and returns
+    Accepts a ``GeoArray`` or plain ``np.ndarray`` 3-D cube and returns
     the score map as the same carrier kind. Nodata pixels (non-finite or
     equal to the input's fill value in any band) and pixels whose window
-    statistics are undefined hold ``NaN`` (``fill_value_default=NaN``).
+    statistics are undefined hold ``NaN`` (``fill_value=NaN``).
 
     The ``background`` is supplied at apply time as a runtime input so the
     config (``target``, ``ridge``, ``axis``) stays hydra-/YAML-safe; pair
@@ -767,8 +771,8 @@ class ApplyAdaptiveMF(Operator):
         self.axis = axis
 
     def _apply(
-        self, gt: GeoTensor | np.ndarray, background: AdaptiveBackground
-    ) -> GeoTensor | np.ndarray:
+        self, gt: GeoArray | np.ndarray, background: AdaptiveBackground
+    ) -> GeoArray | np.ndarray:
         require_ndim(gt, 3, type(self).__name__)
         cube, valid = _mask_invalid(gt, self.axis, type(self).__name__)
         out = apply_adaptive_mf(
@@ -781,7 +785,7 @@ class ApplyAdaptiveMF(Operator):
         return wrap_like(
             gt,
             keep_band_axis(_restore(gt, out, valid), gt),
-            fill_value_default=np.nan,
+            fill_value=np.nan,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -797,7 +801,7 @@ class StreamingBackground(Operator):
 
     Streams every cube through a `WelfordAccumulator` and returns a
     `StreamingBackgroundResult` (mean vector plus covariance operator,
-    not a carrier). Cubes may be ``GeoTensor`` or plain ``np.ndarray``
+    not a carrier). Cubes may be ``GeoArray`` or plain ``np.ndarray``
     and can be mixed freely. Nodata pixels (non-finite or equal to each
     cube's fill value in any band) are not accumulated.
 
@@ -824,7 +828,7 @@ class StreamingBackground(Operator):
         self.axis = axis
 
     def _apply(
-        self, cubes: Iterable[GeoTensor | np.ndarray]
+        self, cubes: Iterable[GeoArray | np.ndarray]
     ) -> StreamingBackgroundResult:
         acc: WelfordAccumulator | None = None
         for cube in cubes:
@@ -860,7 +864,7 @@ class LinearTargetFromObs(Operator):
     Perturbs the background state by a small scaled pattern, pushes both
     states through ``obs_model``, and divides the response difference by
     the perturbation size — a per-band linearised (Jacobian-action)
-    target signature ``(c,)``. Accepts a ``GeoTensor`` or plain
+    target signature ``(c,)``. Accepts a ``GeoArray`` or plain
     ``np.ndarray`` cube and returns a plain vector (not a carrier).
 
     Args:
@@ -893,7 +897,7 @@ class LinearTargetFromObs(Operator):
         self.pixel = pixel
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> np.ndarray:
         return (
             _target_from_obs(
                 self.obs_model,
@@ -928,7 +932,7 @@ class NonlinearTargetFromObs(Operator):
     perturbation ``amplitude`` and no division by it: the returned
     ``(c,)`` signature is the raw response difference, which retains the
     observation model's nonlinearity at that amplitude. Accepts a
-    ``GeoTensor`` or plain ``np.ndarray`` cube and returns a plain
+    ``GeoArray`` or plain ``np.ndarray`` cube and returns a plain
     vector (not a carrier).
 
     Args:
@@ -963,7 +967,7 @@ class NonlinearTargetFromObs(Operator):
         self.pixel = pixel
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> np.ndarray:
         return _target_from_obs(
             self.obs_model,
             gt,
@@ -995,7 +999,7 @@ class ColumnEnhancement(Operator):
     Chains :class:`EstimateMean`, a covariance estimator, an optional
     :class:`LinearTargetFromObs`, and :class:`MatchedFilter` into one
     call. With ``obs_model=None`` the target defaults to a uniform unit
-    spectrum. Accepts a ``GeoTensor`` or plain ``np.ndarray`` cube and
+    spectrum. Accepts a ``GeoArray`` or plain ``np.ndarray`` cube and
     returns the enhancement score map as the same carrier kind.
 
     Args:
@@ -1039,7 +1043,7 @@ class ColumnEnhancement(Operator):
         self.tikhonov = tikhonov
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         _check_spectral_axis(gt, self.axis, type(self).__name__)
         mean = EstimateMean(method=self.mean_method, axis=self.axis)(gt)
         if self.cov_method == "lowrank":
@@ -1110,12 +1114,12 @@ def _check_spectral_axis(gt: Any, axis: int, name: str) -> None:
 
 
 def _mask_invalid(
-    gt: GeoTensor | np.ndarray, axis: int, name: str = "matched filter"
+    gt: GeoArray | np.ndarray, axis: int, name: str = "matched filter"
 ) -> tuple[np.ndarray, np.ndarray | None]:
     """Cube with nodata pixels set to NaN in every band, plus the validity map.
 
     A pixel is invalid when any band along ``axis`` is non-finite or equals
-    the carrier's ``fill_value_default``. Returns ``(np.asarray(gt), None)``
+    the carrier's ``fill_value``. Returns ``(np.asarray(gt), None)``
     unchanged when every pixel is valid (the fast path); otherwise a float
     copy with invalid pixels NaN and the boolean validity map over the
     non-band axes (the score-map shape of :func:`apply_image`).
@@ -1132,7 +1136,7 @@ def _mask_invalid(
 
 
 def _restore(
-    gt: GeoTensor | np.ndarray, out: np.ndarray, valid: np.ndarray | None
+    gt: GeoArray | np.ndarray, out: np.ndarray, valid: np.ndarray | None
 ) -> np.ndarray:
     """Write ``NaN`` into invalid pixels of a score map."""
     if valid is None:
@@ -1142,7 +1146,7 @@ def _restore(
 
 def _target_from_obs(
     obs_model: Any,
-    gt: GeoTensor | np.ndarray,
+    gt: GeoArray | np.ndarray,
     *,
     vmr_background: np.ndarray | None,
     pattern: str | np.ndarray,
