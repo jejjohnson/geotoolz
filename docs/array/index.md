@@ -139,8 +139,9 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 | `valid_mask`, `pixel_coords`, `footprint` | find the pixels that hold data, their map coordinates, the outline (`[vector]`) | [Reference](api.md#geometry) |
 | `combine`, `stack`, `concatenate` | join carriers that share a grid | [Reference](api.md#joining-carriers) |
 | `FrozenAttrs` | keep metadata hashable, so it can key a compiled function | [Reference](api.md#frozenattrs) |
+| `RasterSource`, `AsyncRasterSource` | describe a lazy reader: its grid, and reads that return a `GeoArray` (`read_window`, `load`); a `GeoArray` is one | [Reference](api.md#lazy-readers) |
 | `set_options`, `get_options`, `HostTransferWarning` | find the NumPy steps that copy JAX data to the host | [Reference](api.md#backends-and-interop) |
-| `from_georeader`, `to_georeader` | bridge to georeader's `GeoTensor`, zero-copy (`[georeader]`) | [Reference](api.md#backends-and-interop) |
+| `from_georeader`, `to_georeader` | bridge to georeader's `GeoTensor`, zero-copy, and (`source_from_georeader` / `source_to_georeader`) its lazy readers (`[georeader]`) | [Reference](api.md#backends-and-interop) |
 | `as_transform`, `as_crs` | coerce an `affine.Affine`, six numbers, an EPSG code or WKT | [Reference](api.md#coercions) |
 
 ## Next steps
