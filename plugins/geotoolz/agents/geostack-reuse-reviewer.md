@@ -1,6 +1,6 @@
 ---
 name: geostack-reuse-reviewer
-description: Read-only reviewer for projects built on the geotoolz stack. Checks a diff or a set of files for code that re-implements what geocatalog, geoproducts, geopatcher, geotoolz, geocloud or pipekit already provide (tiling loops, mosaicking, STAC / CMR clients, object-store clients, band math, nodata handling, product parsers, retry / cache / parallel-map wrappers), and for new steps that break the pipekit Operator or GeoTensor contracts. Use proactively after writing geospatial or raster-processing code, and before committing it.
+description: Read-only reviewer for projects built on the geotoolz stack. Checks a diff or a set of files for code that re-implements what geocatalog, geoproducts, geopatcher, geotoolz, geocloud or pipekit already provide (tiling loops, mosaicking, STAC / CMR clients, object-store clients, band math, nodata handling, product parsers, retry / cache / parallel-map wrappers), and for new steps that break the pipekit Operator or GeoArray contracts. Use proactively after writing geospatial or raster-processing code, and before committing it.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -63,7 +63,7 @@ PY
    - boto3 / s3fs / obstore clients → `geocloud.store.get_obstore`, or
      `geocatalog.staging.stage` for downloads;
    - band arithmetic on raw arrays, manual nodata masks, rebuilding
-     `GeoTensor`s by hand → the `geotoolz` operator (it carries nodata,
+     `GeoArray`s by hand → the `geotoolz` operator (it carries nodata,
      dtype and georeferencing);
    - parsers for products the stack reads (GOES, Himawari, Carbon Mapper)
      → `geoproducts`;
@@ -80,8 +80,11 @@ PY
      `build-geo-pipeline` skill):
      - it is not a `pipekit.Operator`, or it overrides `__call__`;
      - its constructor takes positional arguments or a raster;
-     - it returns a bare array for a GeoTensor input;
-     - it reuses the input's `attrs` dict, or mutates its input;
+     - it returns a bare array for a GeoArray input, or accepts a
+       georeader `GeoTensor` (convert once at the boundary with
+       `geoarray.interop.georeader.from_georeader`);
+     - it mutates its input, or keeps per-band `attrs` that no longer
+       match its bands;
      - it keeps an inherited fill value that no longer means nodata;
      - it combines rasters without checking they share a grid;
      → rebuild it on `geoops.carrier` (`wrap_like`, `mask_invalid_to_nan`,

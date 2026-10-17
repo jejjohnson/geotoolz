@@ -77,9 +77,11 @@ git --no-pager diff --no-prefix --unified=100000 --minimal "$BASE_BRANCH"...HEAD
   - pipekit `Operator`: a keyword-only constructor that holds no carrier; an
     auto-derived JSON `get_config()`; `forbid_in_yaml` on live objects;
     `_terminal` on non-carrier outputs;
-  - `GeoTensor`: rewrap via `wrap_like`; fresh `attrs`; a fill that
-    matches the output; the band axis at `-3`; a grid check on every
-    second carrier.
+  - `GeoArray`: rewrap via `wrap_like`; per-band `attrs` that match the
+    output; a fill that matches the output; the band axis at `-3`; a grid
+    check on every second carrier; a georeader `GeoTensor` refused (never
+    accepted silently, never returned) and georeader reached only through
+    `geoops._src.engine` / `geoarray.interop.georeader`.
 
 ### 4. Documentation
 

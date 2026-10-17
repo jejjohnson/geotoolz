@@ -46,7 +46,9 @@ you write") and the `AGENTS.md` of each package the diff touches.
      - logging or inspection wrappers → `Tap` / `Snapshot`;
      - ad-hoc shape or dtype guards → `AssertShape` / `AssertDType`;
      - custom pipeline (de)serialisation → `dumps` / `loads`;
-   - a `GeoTensor` built by hand inside an operator (use `wrap_like`), or a
+   - a `GeoArray` built by hand inside an operator (use `wrap_like`), a
+     georeader function called on a carrier directly (use
+     `geoops._src.engine`), a `GeoTensor` accepted or returned, or a
      second carrier compared by hand (use `require_grid_match`);
    - a helper added to one module that two or more callers need (it
      belongs in the package's `_src/` toolkit);

@@ -49,7 +49,7 @@ Every Python fence is checked by `scripts/check_docs.py` (CI): it must
 parse, and every name it takes from the stack must exist.
 
 - **Typed bindings.** Annotate every name an example binds:
-  `ndvi: GeoTensor = gz.NDVI(red=0, nir=1)(scene)`. Operators and
+  `ndvi: GeoArray = gz.NDVI(red=0, nir=1)(scene)`. Operators and
   pipelines get their class (`pipe: gz.Sequential = …`).
 - **Shapes and dtypes.** Every array-valued line ends with a comment
   giving its shape and dtype: `# (2, 4500, 4000) uint16`. A line that

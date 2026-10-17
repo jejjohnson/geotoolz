@@ -32,7 +32,7 @@
       <div class="node compute" id="s1"><div class="name"><code>SelectBands</code></div><div class="desc">drop SCL, keep the 12 L2A bands</div><div class="chips"><span class="chip"><span class="t">(12, H, W)</span><span class="s">uint16</span></span></div></div>
       <div class="node compute" id="s2"><div class="name"><code>DNToReflectance</code></div><div class="desc">scale=1e-4</div><div class="chips"><span class="chip"><span class="t">(12, H, W)</span><span class="s">float64</span></span></div></div>
       <div class="node compute" id="s3"><div class="name"><code>NDVI</code></div><div class="desc">nir="B8", red="B4"</div><div class="chips"><span class="chip"><span class="t">(H, W)</span><span class="s">float64</span></span></div></div>
-      <div class="node out" id="s-out"><div class="name">ndvi</div><div class="desc">NaN where no data</div><div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(H, W) float64</span></span></div></div>
+      <div class="node out" id="s-out"><div class="name">ndvi</div><div class="desc">NaN where no data</div><div class="chips"><span class="chip"><span class="t">GeoArray</span><span class="s">(H, W) float64</span></span></div></div>
     </div>
   </div>
 
@@ -45,8 +45,8 @@
       <div class="node compute r1" id="g3"><div class="name"><code>NDVI</code></div><div class="desc">nir="B8", red="B4"</div><div class="chips"><span class="chip"><span class="t">(H, W)</span><span class="s">float64</span></span></div></div>
       <div class="node compute r2" id="g4" style="grid-column: 2 / 4;"><div class="name"><code>S2SCL</code></div><div class="desc">targets = cloud_shadow · cloud · cirrus — True means drop</div><div class="chips"><span class="chip"><span class="t">(H, W)</span><span class="s">bool</span></span></div></div>
       <div class="node compute r12" id="g5" style="grid-column: 5;"><div class="name"><code>ApplyMask</code></div><div class="desc">fill dropped pixels with NaN</div><div class="chips"><span class="chip"><span class="t">(H, W)</span><span class="s">float64</span></span></div></div>
-      <div class="node out r1" id="o1" style="grid-column: 6;"><div class="name">"ndvi"</div><div class="desc">cloud-free NDVI</div><div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(H, W) float64</span></span></div></div>
-      <div class="node out r2" id="o2" style="grid-column: 6;"><div class="name">"cloud"</div><div class="desc">the mask itself</div><div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(H, W) bool</span></span></div></div>
+      <div class="node out r1" id="o1" style="grid-column: 6;"><div class="name">"ndvi"</div><div class="desc">cloud-free NDVI</div><div class="chips"><span class="chip"><span class="t">GeoArray</span><span class="s">(H, W) float64</span></span></div></div>
+      <div class="node out r2" id="o2" style="grid-column: 6;"><div class="name">"cloud"</div><div class="desc">the mask itself</div><div class="chips"><span class="chip"><span class="t">GeoArray</span><span class="s">(H, W) bool</span></span></div></div>
     </div>
   </div>
 </div>
