@@ -1,4 +1,4 @@
-"""Tier-A primitives for :mod:`geoops.feature` -- no ``GeoTensor`` here.
+"""Tier-A primitives for :mod:`geoops.feature` -- no ``GeoArray`` here.
 
 Dense (raster-out) feature maps over a single-band ``(H, W)`` image,
 returned channel-first so the operators can rewrap them like the input.

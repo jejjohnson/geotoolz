@@ -1,6 +1,6 @@
 """Dependency rules for geotoolz, from geostack's dependency graph.
 
-geotoolz sits in GeoStack, tier 1 (operators on arrays and GeoTensors). Its
+geotoolz sits in GeoStack, tier 1 (operators on arrays and GeoArrays). Its
 packages must not import or depend on filterax, finitevolX, gauss_flows,
 gaussx, geonnax, kernellib, optax_bayes, plumax, pyrox, radtrax, somax,
 spectraldiffx, vardax, xrtoolz, xtremax: they sit above it, or beside it in the

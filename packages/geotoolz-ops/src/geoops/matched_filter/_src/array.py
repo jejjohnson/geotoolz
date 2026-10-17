@@ -42,7 +42,7 @@ vector-vector dot products (``tᵀv``) use ``@``.
 Nodata: a pixel whose spectrum has any non-finite band (``NaN`` /
 ``±inf``) is invalid. The estimators fit their statistics on valid
 pixels only, and the filters score invalid pixels as ``NaN``. The
-Operator wrappers map a carrier's ``fill_value_default`` to ``NaN``
+Operator wrappers map a carrier's ``fill_value`` to ``NaN``
 before calling in here.
 """
 

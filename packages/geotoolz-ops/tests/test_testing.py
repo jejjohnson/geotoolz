@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 import pytest
-from _helpers import toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import toy_geoarray
+from geoarray import GeoArray
 from pipekit import Operator
 
 import geoops as gz
@@ -15,11 +15,11 @@ from geoops.carrier import mask_invalid_to_nan, over_frames, wrap_like
 from geoops.testing import check_operator
 
 
-def _scene(dtype: Any = np.float32, fill: Any = 0) -> GeoTensor:
+def _scene(dtype: Any = np.float32, fill: Any = 0) -> GeoArray:
     values = np.random.default_rng(0).uniform(1, 100, (3, 6, 6)).astype(dtype)
-    return toy_geotensor(
+    return toy_geoarray(
         values,
-        fill_value_default=fill,
+        fill_value=fill,
         attrs={"band_names": ["B02", "B04", "B08"]},
         with_fill_pixels=True,
     )
@@ -36,7 +36,7 @@ class ZScore(Operator):
     def _apply(self, gt: Any) -> Any:
         values = mask_invalid_to_nan(gt)
         out = (values - self.mean) / self.std
-        return wrap_like(gt, out, fill_value_default=np.nan)
+        return wrap_like(gt, out, fill_value=np.nan)
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.uint16])
@@ -62,15 +62,20 @@ class _BareArray(ZScore):
         return np.asarray(gt, dtype=np.float32)  # drops the carrier
 
 
-class _SharedAttrs(ZScore):
+class _BuildsByHand(ZScore):
     def _apply(self, gt: Any) -> Any:
         out = np.asarray(gt, dtype=np.float32) * 2
-        return GeoTensor(
+        out[..., np.asarray(gt)[0] == getattr(gt, "fill_value", None)] = np.nan
+        if not hasattr(gt, "transform"):
+            return out
+        # Built by hand instead of wrap_like: a georeader GeoTensor input is
+        # silently accepted and comes back as a GeoArray.
+        return GeoArray(
             out,
             transform=gt.transform,
             crs=gt.crs,
-            fill_value_default=np.nan,
-            attrs=gt.attrs,  # the input's dict
+            fill_value=np.nan,
+            attrs=gt.attrs,
         )
 
 
@@ -78,7 +83,7 @@ class _Mutates(ZScore):
     def _apply(self, gt: Any) -> Any:
         np.asarray(gt)[...] = 0  # writes into the input
         return wrap_like(
-            gt, np.asarray(gt, dtype=np.float32), fill_value_default=np.nan
+            gt, np.asarray(gt, dtype=np.float32), fill_value=np.nan
         )
 
 
@@ -99,12 +104,12 @@ class _HoldsAModel(ZScore):
     [
         (_Positional(0.0, 1.0), np.float32, "positionally"),
         (_BareArray(mean=0.0, std=1.0), np.float32, "returned a plain array"),
-        (_SharedAttrs(mean=0.0, std=1.0), np.float32, "shares an input's attrs"),
+        (_BuildsByHand(mean=0.0, std=1.0), np.float32, "accepted a georeader GeoTensor"),
         (_Mutates(mean=0.0, std=1.0), np.float32, "mutated its input"),
         (_IntegerFill(mean=0.0, std=1.0), np.uint16, "expected NaN"),
         (_HoldsAModel(model=object()), np.float32, "forbid_in_yaml"),
     ],
-    ids=["positional", "bare-array", "shared-attrs", "mutates", "int-fill", "model"],
+    ids=["positional", "bare-array", "accepts-geotensor", "mutates", "int-fill", "model"],
 )
 def test_broken_operators_fail_naming_the_rule(op: Any, dtype: Any, match: str) -> None:
     with pytest.raises((AssertionError, TypeError), match=match):

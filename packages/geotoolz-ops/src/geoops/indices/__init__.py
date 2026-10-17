@@ -14,7 +14,7 @@ Examples:
 
         import geoops as gz
         ndvi = gz.indices.NDVI(nir=7, red=3)  # S2 band order
-        v = ndvi(reflectance_geotensor)               # GeoTensor (H, W)
+        v = ndvi(reflectance_geotensor)               # GeoArray (H, W)
 
     Composition::
 

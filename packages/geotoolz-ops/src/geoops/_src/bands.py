@@ -1,9 +1,9 @@
-"""Shared utilities for resolving band references against GeoTensor metadata.
+"""Shared utilities for resolving band references against GeoArray metadata.
 
 Operators accept each band reference (a :data:`BandRef`) either as an
 integer position (``red=3``) or as a sensor-style name (``red="B04"``). The helpers
 here translate names to integer positions using metadata carried on the
-``GeoTensor`` — looked up under a configurable list of attribute keys.
+``GeoArray`` — looked up under a configurable list of attribute keys.
 
 The lookup order (:data:`DEFAULT_BAND_KEYS`) is ``band_names`` (what
 geoproducts readers and geotoolz operators write), then ``descriptions`` (rasterio),
@@ -26,11 +26,11 @@ import numpy as np
 
 
 if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
 
 #: Type alias for band references — either an integer index or a string
-#: band name that needs resolution against ``GeoTensor.attrs``.
+#: band name that needs resolution against ``GeoArray.attrs``.
 BandRef = int | str
 
 
@@ -44,7 +44,7 @@ DEFAULT_BAND_KEYS: tuple[str, ...] = ("band_names", "descriptions", "bands")
 #: Sentinel-2 L2A band order (12 bands, no B10) — the layout assumed for
 #: a *plain ndarray* when an operator (``plume.SBMP``) is given S2 band
 #: names but the carrier has no ``attrs`` to resolve them against. Never
-#: used for a GeoTensor: carriers must name their bands.
+#: used for a GeoArray: carriers must name their bands.
 SENTINEL2_L2A_BANDS: tuple[str, ...] = (
     "B1",
     "B2",
@@ -231,7 +231,7 @@ def _names_under(
 
 
 def band_names(
-    gt: GeoTensor | np.ndarray | Any,
+    gt: GeoArray | np.ndarray | Any,
     *,
     keys: tuple[str, ...] = DEFAULT_BAND_KEYS,
 ) -> list[str | None] | None:
@@ -246,7 +246,7 @@ def band_names(
     When several names map to one band (aliases), the first one wins.
 
     Args:
-        gt: A GeoTensor-like carrier with ``attrs``, or a plain array.
+        gt: A GeoArray-like carrier with ``attrs``, or a plain array.
         keys: Attribute keys to consult, in precedence order.
 
     Returns:
@@ -291,7 +291,7 @@ def _slotted_names(mapping: dict[str, int], gt: Any) -> list[str | None]:
 
 
 def resolve_band(
-    gt: GeoTensor | np.ndarray | Any,
+    gt: GeoArray | np.ndarray | Any,
     ref: BandRef,
     *,
     keys: tuple[str, ...] = DEFAULT_BAND_KEYS,
@@ -314,7 +314,7 @@ def resolve_band(
     non-iterable values are skipped silently.
 
     Args:
-        gt: Carrier ``GeoTensor`` (its ``attrs`` dict is consulted for
+        gt: Carrier ``GeoArray`` (its ``attrs`` dict is consulted for
             named lookups) or a plain ndarray.
         ref: An integer index (returned as ``int``) or a band name.
         keys: Attribute keys to consult, in precedence order. Defaults
@@ -324,7 +324,7 @@ def resolve_band(
             has no ``attrs`` at all (a plain ndarray). ``plume.SBMP``
             passes :data:`SENTINEL2_L2A_BANDS` here so its ``"B11"`` /
             ``"B12"`` defaults work on a bare 12-band L2A array. A
-            GeoTensor never uses the fallback.
+            GeoArray never uses the fallback.
 
     Returns:
         The integer position of the band along the carrier's band axis.
@@ -337,14 +337,14 @@ def resolve_band(
             under any of the configured ``keys`` (or in ``fallback``).
 
     Examples:
-        >>> import numpy as np, rasterio
-        >>> from georeader.geotensor import GeoTensor
-        >>> gt = GeoTensor(
-        ...     values=np.zeros((4, 2, 2), dtype=np.float32),
-        ...     transform=rasterio.Affine.identity(),
-        ...     crs="EPSG:4326",
+        >>> import numpy as np
+        >>> from geoarray import GeoArray
+        >>> gt = GeoArray(
+        ...     np.zeros((4, 2, 2), dtype=np.float32),
+        ...     (1.0, 0.0, 0.0, 0.0, -1.0, 0.0),
+        ...     "EPSG:4326",
+        ...     attrs={"band_names": ("B02", "B03", "B04", "B08")},
         ... )
-        >>> gt.attrs["band_names"] = ("B02", "B03", "B04", "B08")
         >>> resolve_band(gt, "B04")
         2
         >>> resolve_band(gt, np.int64(7))  # integers pass through as int
@@ -366,11 +366,11 @@ def resolve_band(
                 raise ValueError(
                     f"Band {ref!r} is not one of the default band names "
                     f"{tuple(fallback)} assumed for a plain array; pass an "
-                    "integer index or a GeoTensor carrying band names."
+                    "integer index or a GeoArray carrying band names."
                 ) from None
         raise TypeError(
             f"Named-band resolution ({ref!r}) requires a georeferenced "
-            "GeoTensor input carrying band-name metadata in `attrs`; got a "
+            "GeoArray input carrying band-name metadata in `attrs`; got a "
             "plain array. Pass an integer band index instead."
         )
 
@@ -386,14 +386,14 @@ def resolve_band(
             return names.index(ref)
 
     raise ValueError(
-        f"Band {ref!r} was not found in the band names under GeoTensor attrs "
+        f"Band {ref!r} was not found in the band names under GeoArray attrs "
         + ", ".join(f"{k!r}" for k in keys)
         + "."
     )
 
 
 def resolve_bands(
-    gt: GeoTensor | np.ndarray | Any,
+    gt: GeoArray | np.ndarray | Any,
     refs: Iterable[BandRef],
     *,
     keys: tuple[str, ...] = DEFAULT_BAND_KEYS,

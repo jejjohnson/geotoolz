@@ -6,8 +6,8 @@ import json
 
 import numpy as np
 import pytest
-from _helpers import fill_pixel_mask, toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import fill_pixel_mask, toy_geoarray
+from geoarray import GeoArray
 
 import geoops as gz
 from geoops._src.valid import mask_invalid_to_nan
@@ -28,14 +28,14 @@ from geoops.normalize import (
 )
 
 
-def _toy_geotensor(values: np.ndarray) -> GeoTensor:
+def _toy_geoarray(values: np.ndarray) -> GeoArray:
     # Shared factory, but with NaN fill — the NaN-awareness tests below
     # rely on NaN marking invalid pixels.
-    return toy_geotensor(values, fill_value_default=np.nan)
+    return toy_geoarray(values, fill_value=np.nan)
 
 
 @pytest.fixture
-def scene() -> GeoTensor:
+def scene() -> GeoArray:
     arr = np.stack(
         [
             np.arange(100, dtype=float).reshape(10, 10),
@@ -43,16 +43,16 @@ def scene() -> GeoTensor:
         ]
     )
     arr[0, 0, 0] = np.nan
-    return _toy_geotensor(arr)
+    return _toy_geoarray(arr)
 
 
-def assert_metadata_preserved(out: GeoTensor, src: GeoTensor) -> None:
+def assert_metadata_preserved(out: GeoArray, src: GeoArray) -> None:
     assert out.shape == src.shape
-    assert out.transform == src.transform
+    assert out.grid == src.grid
     assert str(out.crs) == str(src.crs)
 
 
-def test_per_band_stats_caches_nan_aware_stats(scene: GeoTensor) -> None:
+def test_per_band_stats_caches_nan_aware_stats(scene: GeoArray) -> None:
     op = PerBandStats(percentiles=[2.0, 98.0])
     out = op(scene)
 
@@ -66,7 +66,7 @@ def test_per_band_stats_caches_nan_aware_stats(scene: GeoTensor) -> None:
 
 
 def test_standard_scaler_fit_inverse_state_roundtrip(
-    scene: GeoTensor,
+    scene: GeoArray,
 ) -> None:
     scaler = StandardScaler(fit_on_call=True)
     scaled = scaler(scene)
@@ -95,7 +95,7 @@ def test_standard_scaler_fixed_stats_analytic() -> None:
             np.array([[10.0, 11.0], [12.0, 13.0]]),  # mu=11.5, sd=sqrt(1.25)
         ]
     )
-    gt = _toy_geotensor(arr)
+    gt = _toy_geoarray(arr)
     mu = np.array([3.0, 11.5])
     sd = np.array([np.sqrt(5.0), np.sqrt(1.25)])
     out = np.asarray(StandardScaler(mean=mu, std=sd)(gt))
@@ -107,7 +107,7 @@ def test_standard_scaler_fixed_stats_analytic() -> None:
 def test_standard_scaler_zero_sigma_no_inf() -> None:
     """A constant band with ``sigma=0`` falls back to divisor=1."""
     arr = np.stack([np.full((4, 4), 7.0), np.arange(16, dtype=float).reshape(4, 4)])
-    gt = _toy_geotensor(arr)
+    gt = _toy_geoarray(arr)
     op = StandardScaler(fit_on_call=True)
     out = np.asarray(op(gt))
     assert np.all(np.isfinite(out))
@@ -116,7 +116,7 @@ def test_standard_scaler_zero_sigma_no_inf() -> None:
 
 
 def test_normalize_convenience_matches_standard_scaler(
-    scene: GeoTensor,
+    scene: GeoArray,
 ) -> None:
     arr = np.asarray(scene)
     mean = np.nanmean(arr, axis=(-2, -1))
@@ -128,7 +128,7 @@ def test_normalize_convenience_matches_standard_scaler(
     np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), equal_nan=True)
 
 
-def test_normalize_state_roundtrip_through_json(scene: GeoTensor) -> None:
+def test_normalize_state_roundtrip_through_json(scene: GeoArray) -> None:
     """``Normalize`` state must round-trip through JSON."""
     op = Normalize(mean=[5.0, 105.0], std=[2.0, 3.0])
     state = json.loads(json.dumps(op.state))
@@ -139,7 +139,7 @@ def test_normalize_state_roundtrip_through_json(scene: GeoTensor) -> None:
 
 
 def test_minmax_scaler_fit_on_call_yields_zero_one_non_nan(
-    scene: GeoTensor,
+    scene: GeoArray,
 ) -> None:
     out = MinMaxScaler(fit_on_call=True)(scene)
     arr = np.asarray(out)
@@ -153,13 +153,13 @@ def test_minmax_scaler_fit_on_call_yields_zero_one_non_nan(
 def test_minmax_scaler_out_range_analytic() -> None:
     """Verify ``minmax`` mapping into a non-default output range."""
     arr = np.array([[[0.0, 1.0], [2.0, 4.0]]])
-    gt = _toy_geotensor(arr)
+    gt = _toy_geoarray(arr)
     out = np.asarray(MinMaxScaler(vmin=[0.0], vmax=[4.0], out_range=(0.0, 255.0))(gt))
     # 0->0, 4->255, 1-> 63.75, 2->127.5
     np.testing.assert_allclose(out, np.array([[[0.0, 63.75], [127.5, 255.0]]]))
 
 
-def test_robust_scaler_fit_ignores_nan(scene: GeoTensor) -> None:
+def test_robust_scaler_fit_ignores_nan(scene: GeoArray) -> None:
     out = RobustScaler(fit_on_call=True)(scene)
     arr = np.asarray(out)
 
@@ -175,7 +175,7 @@ def test_robust_scaler_fixed_stats_analytic() -> None:
             np.arange(8, 16, dtype=float).reshape(2, 4),
         ]
     )
-    gt = _toy_geotensor(arr)
+    gt = _toy_geoarray(arr)
     # Band 0 median=3.5, iqr=4; band 1 median=11.5, iqr=4
     op = RobustScaler(median=[3.5, 11.5], iqr=[4.0, 4.0])
     out = np.asarray(op(gt))
@@ -183,7 +183,7 @@ def test_robust_scaler_fixed_stats_analytic() -> None:
     np.testing.assert_allclose(out, expected)
 
 
-def test_histogram_stretch_maps_to_output_range(scene: GeoTensor) -> None:
+def test_histogram_stretch_maps_to_output_range(scene: GeoArray) -> None:
     out = HistogramStretch(lower=0.0, upper=100.0, out_range=(0.0, 255.0))(scene)
 
     np.testing.assert_allclose(np.nanmin(np.asarray(out), axis=(-2, -1)), [0.0, 0.0])
@@ -193,8 +193,8 @@ def test_histogram_stretch_maps_to_output_range(scene: GeoTensor) -> None:
 
 
 def test_histogram_match_approximates_reference_cdf() -> None:
-    source = _toy_geotensor(np.linspace(0.0, 1.0, 200).reshape(1, 20, 10))
-    reference = _toy_geotensor(np.linspace(10.0, 20.0, 200).reshape(1, 20, 10))
+    source = _toy_geoarray(np.linspace(0.0, 1.0, 200).reshape(1, 20, 10))
+    reference = _toy_geoarray(np.linspace(10.0, 20.0, 200).reshape(1, 20, 10))
 
     matched = HistogramMatch(reference=reference)(source)
 
@@ -210,17 +210,18 @@ def test_histogram_match_pools_frames_per_band_on_a_time_stack() -> None:
     with one CDF over every frame -- never a frame taken for a band.
     """
     rng = np.random.default_rng(0)
-    reference = _toy_geotensor(
+    reference = _toy_geoarray(
         np.stack([rng.uniform(lo, lo + 1.0, (8, 8)) for lo in (0.0, 10.0, 100.0)])
     )
-    stack = _toy_geotensor(rng.uniform(0.0, 1.0, (2, 3, 8, 8)))
-    stack.values[1] *= 2.0
+    values = rng.uniform(0.0, 1.0, (2, 3, 8, 8))
+    values[1] *= 2.0
+    stack = _toy_geoarray(values)
     out = np.asarray(HistogramMatch(reference=reference)(stack))
     for band, lo in enumerate((0.0, 10.0, 100.0)):
         assert np.all((out[:, band] >= lo) & (out[:, band] <= lo + 1.0))
         # One CDF over both frames of the band.
         pooled = histogram_match(
-            np.asarray(stack)[None, :, band], reference.values[band]
+            np.asarray(stack)[None, :, band], np.asarray(reference)[band]
         )[0]
         np.testing.assert_array_equal(out[:, band], pooled)
     # The brighter second frame stays brighter after the pooled match.
@@ -233,7 +234,7 @@ def test_histogram_match_forbidden_in_yaml() -> None:
 
 
 def test_clahe_preserves_nan_mask_and_metadata() -> None:
-    gt = _toy_geotensor(np.linspace(0.0, 1.0, 100).reshape(1, 10, 10))
+    gt = _toy_geoarray(np.linspace(0.0, 1.0, 100).reshape(1, 10, 10))
     np.asarray(gt)[0, 0, 0] = np.nan
 
     out = CLAHE(window=(4, 4), clip_limit=0.03)(gt)
@@ -245,10 +246,10 @@ def test_clahe_preserves_nan_mask_and_metadata() -> None:
 
 
 def test_nonlinear_scales_handle_zero_without_infinity(
-    scene: GeoTensor,
+    scene: GeoArray,
 ) -> None:
-    del scene  # fixture provides a sanity GeoTensor; we use a tiny one below
-    gt = _toy_geotensor(np.array([[[0.0, 1.0], [4.0, np.nan]]]))
+    del scene  # fixture provides a sanity GeoArray; we use a tiny one below
+    gt = _toy_geoarray(np.array([[[0.0, 1.0], [4.0, np.nan]]]))
 
     for op in (LogScale(), AsinhScale(), PowerScale()):
         out = op(gt)
@@ -258,7 +259,7 @@ def test_nonlinear_scales_handle_zero_without_infinity(
         assert np.isnan(arr[0, 1, 1])
 
 
-def test_zero_one_global_and_module_export(scene: GeoTensor) -> None:
+def test_zero_one_global_and_module_export(scene: GeoArray) -> None:
     out = ZeroOne(per_band=False)(scene)
 
     assert gz.normalize.ZeroOne is ZeroOne
@@ -324,11 +325,11 @@ def test_clahe_config_normalises_tuple_kernel_to_list() -> None:
     ids=lambda op: type(op).__name__,
 )
 def test_operators_accept_plain_ndarray(op: object) -> None:
-    """Plain ndarray in -> plain ndarray out, values equal to the GeoTensor path."""
+    """Plain ndarray in -> plain ndarray out, values equal to the GeoArray path."""
     arr = np.linspace(0.0, 9.0, 2 * 4 * 4).reshape(2, 4, 4)
     out = op(arr)  # type: ignore[operator]
     assert type(out) is np.ndarray
-    gt_out = op(_toy_geotensor(arr))  # type: ignore[operator]
+    gt_out = op(_toy_geoarray(arr))  # type: ignore[operator]
     np.testing.assert_allclose(out, np.asarray(gt_out), equal_nan=True)
 
 
@@ -366,7 +367,7 @@ def test_normalize_hydra_zen_roundtrip(op: object) -> None:
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
 
 
-def test_normalize_geotensor_metadata_preserved(scene: GeoTensor) -> None:
+def test_normalize_geotensor_metadata_preserved(scene: GeoArray) -> None:
     """Tier-B operators must preserve transform / CRS / shape."""
     ops = [
         StandardScaler(mean=[5.0, 105.0], std=[2.0, 3.0]),
@@ -389,11 +390,11 @@ def test_normalize_geotensor_metadata_preserved(scene: GeoTensor) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _fill_scene() -> tuple[GeoTensor, np.ndarray, np.ndarray]:
+def _fill_scene() -> tuple[GeoArray, np.ndarray, np.ndarray]:
     """(2, 4, 5) scene with -9999 fill pixels, its clean values and fill mask."""
     rng = np.random.default_rng(0)
     values = rng.uniform(0.5, 9.0, size=(2, 4, 5))
-    gt = toy_geotensor(values, fill_value_default=-9999, with_fill_pixels=True)
+    gt = toy_geoarray(values, fill_value=-9999, with_fill_pixels=True)
     return gt, values, fill_pixel_mask(values.shape)
 
 
@@ -430,7 +431,7 @@ def test_fill_pixels_are_excluded(make_op) -> None:
     result = make_op()(gt)
     out = np.asarray(result)
 
-    assert np.isnan(result.fill_value_default)
+    assert np.isnan(result.fill_value)
     assert np.isnan(out[:, fill]).all()
     reference = values.copy()
     reference[:, fill] = np.nan
@@ -509,7 +510,7 @@ def test_scalers_satisfy_fittable_transformer(cls, fitted) -> None:
 
 @pytest.mark.parametrize(("cls", "fitted"), _SCALERS)
 def test_scaler_fit_then_transform_matches_fit_on_call(
-    cls, fitted, scene: GeoTensor
+    cls, fitted, scene: GeoArray
 ) -> None:
     op = cls()
     with pytest.raises(ValueError, match=r"fit\(\)"):
@@ -525,7 +526,7 @@ def test_scaler_fit_then_transform_matches_fit_on_call(
 
 @pytest.mark.parametrize(("cls", "fitted"), _SCALERS)
 def test_scaler_fitted_state_excluded_from_config(
-    cls, fitted, scene: GeoTensor
+    cls, fitted, scene: GeoArray
 ) -> None:
     """Statistics learned on call never reach ``get_config()`` / ``state``."""
     op = cls(fit_on_call=True)
@@ -539,7 +540,7 @@ def test_scaler_fitted_state_excluded_from_config(
 
 
 @pytest.mark.parametrize(("cls", "fitted"), _SCALERS)
-def test_scaler_inverse_round_trips(cls, fitted, scene: GeoTensor) -> None:
+def test_scaler_inverse_round_trips(cls, fitted, scene: GeoArray) -> None:
     op = cls().fit(scene)
     restored = op.inverse(op.transform(scene))
     np.testing.assert_allclose(
@@ -582,7 +583,7 @@ def test_scaler_fit_on_call_fits_once_under_thread_map(cls, fitted) -> None:
 
 
 def test_fitted_scaler_pickles_and_deep_copies_with_its_fit_lock(
-    scene: GeoTensor,
+    scene: GeoArray,
 ) -> None:
     """The per-instance fit lock must not block ``ProcessMap`` / ``deepcopy``."""
     import copy

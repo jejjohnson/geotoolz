@@ -1,6 +1,6 @@
 """Unit tests for `RasterToPoints` + `PointsToRaster`.
 
-Both operators round-trip values between a `GeoTensor` raster grid
+Both operators round-trip values between a `GeoArray` raster grid
 and a `xvec`-indexed xarray DataArray (station / matchup-point
 form). They underpin the in-situ-validation half of the matchup
 workflow: pulling raster values at AERONET / buoy / drifter
@@ -13,8 +13,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from _helpers import toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import toy_geoarray
+from geoarray import GeoArray
 from pipekit import Operator
 from shapely.geometry import Point
 
@@ -32,9 +32,9 @@ from geoops.geom.coregister import PointsToRaster, RasterToPoints
 # ---------------------------------------------------------------------------
 
 
-def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoTensor:
-    return toy_geotensor(
-        values, transform=transform, crs=crs, fill_value_default=np.nan
+def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoArray:
+    return toy_geoarray(
+        values, transform=transform, crs=crs, fill_value=np.nan
     )
 
 
@@ -131,11 +131,11 @@ class TestRasterToPoints:
         # Rotated affine (b/d nonzero) silently misinterprets x/y
         # if we use only a/c and e/f. Reject upfront.
         rotated = rasterio.Affine(8.66, 5.0, 0, -5.0, 8.66, 0)
-        raster = GeoTensor(
-            values=np.zeros((4, 4), dtype=np.float32),
+        raster = GeoArray(
+            data=np.zeros((4, 4), dtype=np.float32),
             transform=rotated,
             crs="EPSG:32629",
-            fill_value_default=np.nan,
+            fill_value=np.nan,
         )
         with pytest.raises(ValueError, match="axis-aligned"):
             RasterToPoints()(raster, [Point(0.0, 0.0)])
@@ -197,7 +197,7 @@ class TestPointsToRaster:
             crs="EPSG:32629",
         )
         result = PointsToRaster(stat="mean", attribute="v")(df, like)
-        # GeoTensor's `__getitem__` only supports slice indexing;
+        # GeoArray's `__getitem__` only supports slice indexing;
         # for element access we go through numpy.
         arr = np.asarray(result)
         # The cell (3, 2) holds mean(10, 20) = 15.
@@ -241,11 +241,11 @@ class TestPointsToRaster:
     def test_non_axis_aligned_like_rejected(self) -> None:
         gpd = pytest.importorskip("geopandas")
         rotated = rasterio.Affine(8.66, 5.0, 0, -5.0, 8.66, 0)
-        like = GeoTensor(
-            values=np.zeros((4, 4), dtype=np.float32),
+        like = GeoArray(
+            data=np.zeros((4, 4), dtype=np.float32),
             transform=rotated,
             crs="EPSG:32629",
-            fill_value_default=np.nan,
+            fill_value=np.nan,
         )
         df = gpd.GeoDataFrame({"v": [1.0]}, geometry=[Point(0, 0)], crs="EPSG:32629")
         with pytest.raises(ValueError, match="axis-aligned"):
@@ -271,11 +271,11 @@ class TestPointsToRaster:
         # decrease: c=500_100, a=-10 → first column edge 500_100,
         # last 500_000.
         west_up = rasterio.Affine(-10.0, 0.0, 500_100.0, 0.0, -10.0, 4_000_000.0)
-        like = GeoTensor(
-            values=np.zeros((10, 10), dtype=np.float32),
+        like = GeoArray(
+            data=np.zeros((10, 10), dtype=np.float32),
             transform=west_up,
             crs="EPSG:32629",
-            fill_value_default=np.nan,
+            fill_value=np.nan,
         )
         # A point at col index 0 (east edge) under this affine:
         # x_center[0] = 500_100 + (-10) * 0.5 = 500_095

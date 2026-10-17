@@ -3,8 +3,11 @@
 The one implementation of the checks every geo-aware operator family
 needs:
 
-* :func:`require_geotensor` -- reject a plain array handed to an operator
+* :func:`require_geoarray` -- reject a plain array handed to an operator
   that needs an affine ``transform`` (and CRS);
+* :func:`reject_geotensor` -- refuse a georeader ``GeoTensor``, naming
+  ``from_georeader`` (geotoolz takes `geoarray.GeoArray` only);
+* :func:`affine_of` -- a carrier's transform as an ``affine.Affine``;
 * :func:`require_projected_crs` -- reject a geographic CRS handed to an
   operator that measures lengths, areas or slopes;
 * :func:`grid_matches` -- whether two rasters sit on the same pixel grid
@@ -15,43 +18,127 @@ needs:
   along each axis, on any rotated (not sheared) grid;
 * :func:`pixel_xy` -- vectorised CRS coordinates of pixel centres.
 
-All are duck-typed on the ``transform`` / ``crs`` attributes, so any
-GeoTensor-compatible carrier passes.
+The carrier is `geoarray.GeoArray`; plain arrays pass where an operator
+accepts them (no georeferencing).
 """
 
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
+from affine import Affine
+from geoarray import GeoArray, PixelWindow, as_transform
 from jaxtyping import Float
 from pyproj import CRS
 
 
-if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
-
-
 __all__ = [
+    "affine_of",
+    "as_pixel_window",
     "grid_matches",
     "ground_pixel_size",
+    "is_geotensor",
     "pixel_xy",
-    "require_geotensor",
+    "reject_geotensor",
+    "require_geoarray",
     "require_grid_match",
     "require_projected_crs",
 ]
 
+_FROM_GEOREADER = (
+    "convert it at the boundary with "
+    "geoarray.interop.georeader.from_georeader(gt) (zero-copy)"
+)
 
-def require_geotensor(
+
+def is_geotensor(x: Any) -> bool:
+    """Whether ``x`` is a georeader ``GeoTensor`` (checked without importing it)."""
+    return any(
+        cls.__name__ == "GeoTensor" and cls.__module__.startswith("georeader")
+        for cls in type(x).__mro__
+    )
+
+
+def reject_geotensor(x: Any, op_name: str = "geotoolz") -> None:
+    """Raise ``TypeError`` for a georeader ``GeoTensor``; pass anything else.
+
+    A ``GeoTensor`` is an ``np.ndarray`` subclass, so ``np.asarray`` would
+    take it silently as a plain array and the output would lose its
+    georeferencing. geotoolz takes `geoarray.GeoArray` instead.
+
+    Args:
+        x: The value to check.
+        op_name: Who refuses it, for the message.
+
+    Raises:
+        TypeError: ``x`` is a ``GeoTensor``; the message names
+            ``from_georeader``.
+    """
+    if is_geotensor(x):
+        raise TypeError(
+            f"{op_name} takes a geoarray.GeoArray, not a georeader GeoTensor; "
+            f"{_FROM_GEOREADER}"
+        )
+
+
+def affine_of(x: Any) -> Affine:
+    """The transform of ``x`` as an ``affine.Affine`` (``~T``, ``T * (c, r)``).
+
+    Args:
+        x: A `GeoArray` (concrete, not batched), an ``Affine``, six
+            numbers or a ``(6,)`` array.
+
+    Returns:
+        The ``Affine``.
+
+    Example:
+        >>> import numpy as np
+        >>> from geoarray import GeoArray
+        >>> g = GeoArray(np.zeros((2, 2)), (10, 0, 500000, 0, -10, 4e6), 32629)
+        >>> affine_of(g).c
+        500000.0
+    """
+    if isinstance(x, GeoArray):
+        return x.grid.affine
+    return Affine(*as_transform(x))
+
+
+def as_pixel_window(window: Any) -> PixelWindow:
+    """A rasterio ``Window`` (or a `PixelWindow`) as a `geoarray.PixelWindow`.
+
+    Offsets and sizes must be whole pixels (round a rasterio window with
+    ``round_offsets`` / ``round_lengths`` first).
+
+    Raises:
+        ValueError: A fractional offset or size.
+
+    Example:
+        >>> from rasterio.windows import Window
+        >>> as_pixel_window(Window(col_off=2, row_off=3, width=4, height=5))
+        PixelWindow(col_off=2, row_off=3, width=4, height=5)
+    """
+    if isinstance(window, PixelWindow):
+        return window
+    values = {}
+    for name in ("col_off", "row_off", "width", "height"):
+        value = float(getattr(window, name))
+        if value != round(value):
+            raise ValueError(f"window {name}={value} is not a whole number of pixels")
+        values[name] = round(value)
+    return PixelWindow(**values)
+
+
+def require_geoarray(
     x: Any, op_name: str, *, arg: str = "input", hint: str = ""
-) -> GeoTensor:
-    """Return ``x`` if it is georeferenced, else raise a clear ``TypeError``.
+) -> GeoArray:
+    """Return ``x`` if it is a `GeoArray`, else raise a clear ``TypeError``.
 
     Geo-dependent operators (reprojection, rasterisation, metre-based
     measurements, ...) are only meaningful with an affine transform
-    attached. The check is duck-typed: any carrier whose ``transform``
-    attribute is present and not ``None`` passes.
+    attached, so a plain array is refused (and a ``GeoTensor`` is refused
+    naming ``from_georeader``).
 
     Args:
         x: The carrier to check.
@@ -65,12 +152,13 @@ def require_geotensor(
         ``x`` unchanged.
 
     Raises:
-        TypeError: ``"<op_name> requires a georeferenced GeoTensor
+        TypeError: ``"<op_name> requires a georeferenced GeoArray
             <arg>; got a plain array (<type>)."``
     """
-    if getattr(x, "transform", None) is None:
+    reject_geotensor(x, op_name)
+    if not isinstance(x, GeoArray):
         message = (
-            f"{op_name} requires a georeferenced GeoTensor {arg}; "
+            f"{op_name} requires a georeferenced GeoArray {arg}; "
             f"got a plain array ({type(x).__name__})."
         )
         if hint:
@@ -144,7 +232,8 @@ def ground_pixel_size(transform: Any, op_name: str) -> tuple[float, float]:
     exact; it is rejected.
 
     Args:
-        transform: Affine-like geotransform (``a, b, d, e`` attributes).
+        transform: The geotransform: an ``Affine``, six numbers, a
+            ``(6,)`` array, or a `GeoArray` (its transform).
         op_name: Operator name used in the error message.
 
     Returns:
@@ -154,6 +243,7 @@ def ground_pixel_size(transform: Any, op_name: str) -> tuple[float, float]:
     Raises:
         ValueError: If the transform is sheared or degenerate.
     """
+    transform = affine_of(transform)
     a, b, d, e = (
         float(transform.a),
         float(transform.b),
@@ -196,7 +286,7 @@ def grid_matches(
     where float round-off in derived transforms must be tolerated.
 
     Args:
-        a: First raster (GeoTensor or plain array).
+        a: First raster (GeoArray or plain array).
         b: Second raster.
         atol: Absolute tolerance on each transform coefficient, in CRS
             units. ``0.0`` means exact.
@@ -211,11 +301,10 @@ def grid_matches(
         shape_a, shape_b = shape_a[-2:], shape_b[-2:]
     if shape_a != shape_b:
         return False
-    transform_a = getattr(a, "transform", None)
-    transform_b = getattr(b, "transform", None)
-    if transform_a is None or transform_b is None:
+    if not (isinstance(a, GeoArray) and isinstance(b, GeoArray)):
         return True
-    if getattr(a, "crs", None) != getattr(b, "crs", None):
+    transform_a, transform_b = a.transform, b.transform
+    if a.crs != b.crs:
         return False
     return bool(
         np.allclose(
@@ -229,10 +318,9 @@ def grid_matches(
 
 def _describe_grid(x: Any, spatial_only: bool) -> str:
     shape = tuple(np.shape(x)[-2:] if spatial_only else np.shape(x))
-    transform = getattr(x, "transform", None)
-    if transform is None:
+    if not isinstance(x, GeoArray):
         return f"shape {shape}"
-    coeffs = tuple(round(float(c), 6) for c in tuple(transform)[:6])
+    coeffs = tuple(round(float(c), 6) for c in tuple(np.asarray(x.transform))[:6])
     return f"shape {shape}, transform {coeffs}, crs {getattr(x, 'crs', None)}"
 
 
@@ -285,8 +373,9 @@ def pixel_xy(
     same way.
 
     Args:
-        transform: Affine-like geotransform (``a, b, c, d, e, f``
-            attributes) mapping ``(col, row)`` to CRS ``(x, y)``.
+        transform: The geotransform mapping ``(col, row)`` to CRS
+            ``(x, y)``: an ``Affine``, six numbers, a ``(6,)`` array, or a
+            `GeoArray` (its transform).
         rows: Row indices (scalar or array).
         cols: Column indices, broadcastable against ``rows``.
 
@@ -294,6 +383,7 @@ def pixel_xy(
         ``(xs, ys)`` float64 arrays of the broadcast shape of ``rows`` and
         ``cols``.
     """
+    transform = affine_of(transform)
     rows = np.asarray(rows, dtype=np.float64) + 0.5
     cols = np.asarray(cols, dtype=np.float64) + 0.5
     xs = transform.c + transform.a * cols + transform.b * rows

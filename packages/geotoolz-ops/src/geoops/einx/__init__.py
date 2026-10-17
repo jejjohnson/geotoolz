@@ -1,11 +1,11 @@
-"""`geoops.einx` — universal tensor notation over GeoTensor carriers.
+"""`geoops.einx` — universal tensor notation over GeoArray carriers.
 
 Wraps [einx](https://github.com/fferflo/einx) so einstein-notation
 array ops compose inside operator pipelines while the spatial-survival
 rule decides what happens to geospatial metadata:
 
-- pattern keeps the trailing bare ``y x`` axes intact → ``GeoTensor``
-  in, ``GeoTensor`` out (transform / CRS / fill preserved);
+- pattern keeps the trailing bare ``y x`` axes intact → ``GeoArray``
+  in, ``GeoArray`` out (transform / CRS / fill preserved);
 - pattern consumes, moves, or recomposes a spatial axis → plain
   ``np.ndarray`` out;
 - `SpatialPool` is the deliberate exception: it *rescales* the

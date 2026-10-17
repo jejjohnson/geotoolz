@@ -106,7 +106,7 @@ def observation_date_correction_factor(
     - If neither is provided, returns ``None`` so the caller can defer
       to georeader's own auto-resolution (e.g.
       ``radiance_to_reflectance`` derives ``center_coords`` from the
-      GeoTensor transform when called without one).
+      GeoArray transform when called without one).
 
     Args:
         acquisition_date: UTC datetime; only the day of year matters for

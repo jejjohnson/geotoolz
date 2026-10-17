@@ -1,7 +1,7 @@
 """Pure-numpy plume detection and quantification primitives.
 
 This module hosts the Tier-A primitives (Google-style docstrings, no
-``GeoTensor``) that the Tier-B operators in ``operators.py`` wrap.
+``GeoArray``) that the Tier-B operators in ``operators.py`` wrap.
 Algorithms and unit conventions follow the trace-gas plume literature
 referenced per-function:
 

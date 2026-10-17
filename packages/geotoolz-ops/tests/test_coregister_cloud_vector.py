@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _helpers import toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import toy_geoarray
+from geoarray import GeoArray
 from pipekit import Operator
 from shapely.geometry import Point, box
 
@@ -30,9 +30,9 @@ from geoops.geom.coregister import (
 # ---------------------------------------------------------------------------
 
 
-def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoTensor:
-    return toy_geotensor(
-        values, transform=transform, crs=crs, fill_value_default=np.nan
+def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoArray:
+    return toy_geoarray(
+        values, transform=transform, crs=crs, fill_value=np.nan
     )
 
 
@@ -258,30 +258,30 @@ def test_binned_rasters_do_not_inherit_the_like_fill() -> None:
     """Empty cells are NaN (0 for counts), not ``like``'s -9999 (#146)."""
     # The binned raster is assembled with xarray (the [vector-cube] extra).
     pytest.importorskip("xarray")
-    like = toy_geotensor(np.zeros((4, 4), dtype=np.float32), fill_value_default=-9999)
+    like = toy_geoarray(np.zeros((4, 4), dtype=np.float32), fill_value=-9999)
     xy = np.array([[PX_X(1), PX_Y(1)]])
     values = np.array([5.0])
 
     mean = PointCloudToRaster(stat="mean")((xy, values), like)
-    assert np.isnan(mean.fill_value_default)
+    assert np.isnan(mean.fill_value)
     assert np.isnan(np.asarray(mean)[0, 0])
     count = PointCloudToRaster(stat="count")((xy, values), like)
-    assert count.fill_value_default == 0.0
+    assert count.fill_value == 0.0
     idw = PointCloudToRaster(method="idw", k=1, max_radius=1.0)((xy, values), like)
-    assert np.isnan(idw.fill_value_default)
+    assert np.isnan(idw.fill_value)
 
     gpd = pytest.importorskip("geopandas")
     gdf = gpd.GeoDataFrame(
         {"v": [5.0]}, geometry=[Point(PX_X(1), PX_Y(1))], crs=like.crs
     )
     binned = PointsToRaster(attribute="v")(gdf, like)
-    assert np.isnan(binned.fill_value_default)
+    assert np.isnan(binned.fill_value)
     polys = gpd.GeoDataFrame(
         {"v": [1.0]}, geometry=[box(PX_X(0), PX_Y(1), PX_X(1), PX_Y(0))], crs=like.crs
     )
-    assert VectorToRasterAgg(agg="count")(polys, like).fill_value_default == 0.0
+    assert VectorToRasterAgg(agg="count")(polys, like).fill_value == 0.0
     assert np.isnan(
-        VectorToRasterAgg(agg="mean", attribute="v")(polys, like).fill_value_default
+        VectorToRasterAgg(agg="mean", attribute="v")(polys, like).fill_value
     )
 
 
@@ -437,15 +437,15 @@ class TestGeoDependentPlainArrayRejection:
 
     def test_plain_array_raster_inputs_raise_type_error(self) -> None:
         arr = np.zeros((4, 4), dtype=np.float32)
-        with pytest.raises(TypeError, match="GeoTensor"):
+        with pytest.raises(TypeError, match="GeoArray"):
             RasterToPointCloud()(arr, np.zeros((1, 2)))
-        with pytest.raises(TypeError, match="GeoTensor"):
+        with pytest.raises(TypeError, match="GeoArray"):
             PointCloudToRaster()((np.zeros((1, 2)), np.zeros(1)), arr)
-        with pytest.raises(TypeError, match="GeoTensor"):
+        with pytest.raises(TypeError, match="GeoArray"):
             VectorToRasterAgg(agg="count")(None, arr)
-        with pytest.raises(TypeError, match="GeoTensor"):
+        with pytest.raises(TypeError, match="GeoArray"):
             RasterToPoints()(arr, [Point(0.0, 0.0)])
-        with pytest.raises(TypeError, match="GeoTensor"):
+        with pytest.raises(TypeError, match="GeoArray"):
             PointsToRaster(attribute="v")(None, arr)
 
 

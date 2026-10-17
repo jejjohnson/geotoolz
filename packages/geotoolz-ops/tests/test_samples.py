@@ -10,7 +10,7 @@ from __future__ import annotations
 import einx
 import numpy as np
 import pytest
-from _helpers import toy_geotensor
+from _helpers import toy_geoarray
 from sklearn.cluster import KMeans
 
 import geoops as gz
@@ -188,8 +188,8 @@ def test_learn_custom_sample_order_returns_input_grid_order() -> None:
     """1-D per-pixel outputs come back on the input (H, W) grid even when
     ``sample_axes`` lists the spatial axes out of order (they used to come
     back as ``(W, H)``, unlike 2-D outputs)."""
-    scene = toy_geotensor(_cube(3, 4, 5), fill_value_default=None)
-    est = gz.learn.GeoTensorEstimator(
+    scene = toy_geoarray(_cube(3, 4, 5), fill_value=None)
+    est = gz.learn.GeoArrayEstimator(
         KMeans(n_clusters=3, n_init=2, random_state=0),
         mode="custom",
         sample_axes=("W", "H"),

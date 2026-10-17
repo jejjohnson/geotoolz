@@ -2,7 +2,7 @@
 
 Every function here works on plain ``numpy.ndarray`` stacks with the
 frame (time / source) axis leading: ``(T, ..., H, W)``. No
-``GeoTensor`` knowledge, no nodata inference and no carrier rewrapping
+``GeoArray`` knowledge, no nodata inference and no carrier rewrapping
 -- the operators in :mod:`geoops.compositing._src.operators` judge
 nodata per frame, call these primitives and rewrap the result.
 

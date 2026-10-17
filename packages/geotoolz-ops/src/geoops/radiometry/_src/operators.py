@@ -2,15 +2,15 @@
 
 Each Operator wraps a primitive in
 :mod:`geoops.radiometry._src.array`. Operators accept either a
-``GeoTensor`` or a plain ``np.ndarray`` and return the same carrier
+``GeoArray`` or a plain ``np.ndarray`` and return the same carrier
 kind — the rewrap is centralised in
 :func:`geoops._src.wrap.wrap_like`. The only geo-dependent ops are
 `RadianceToReflectance` / `ReflectanceToRadiance` when the solar
 geometry must be derived from the footprint (no ``sza_deg`` /
-``center_coords`` given); those require a GeoTensor in that mode.
+``center_coords`` given); those require a GeoArray in that mode.
 
 Nodata: pixels that are non-finite or equal the input's
-``fill_value_default`` in any band (see :mod:`geoops._src.valid`) hold
+``fill_value`` in any band (see :mod:`geoops._src.valid`) hold
 the output's fill value. Unit conversions carry the input's values, so
 they keep its fill when the input is floating point -- as georeader's
 own radiance / reflectance conversions do -- and switch to ``NaN`` when
@@ -40,7 +40,8 @@ from pipekit import Operator
 
 from geoops._src.bands import resolve_wavelengths, strip_band_attrs
 from geoops._src.config import as_tuple, jsonable
-from geoops._src.geo import require_geotensor
+from geoops._src.engine import to_engine
+from geoops._src.geo import require_geoarray
 from geoops._src.shape import over_frames
 from geoops._src.valid import (
     carried_fill,
@@ -75,7 +76,7 @@ def _rewrap_carried(gt: Any, out: Any, **kwargs: Any) -> Any:
     if out.ndim < 2:
         return wrap_like(gt, out, **kwargs)
     return wrap_filled(
-        gt, out, fill_value_default=carried_fill(gt, out.dtype), **kwargs
+        gt, out, fill_value=carried_fill(gt, out.dtype), **kwargs
     )
 
 
@@ -83,8 +84,8 @@ def _rewrap_stretch(gt: Any, out: Any) -> Any:
     """Rewrap a ``[0, 1]`` display stretch of ``gt`` with ``NaN`` at nodata pixels."""
     out = np.asarray(out)
     if out.ndim < 2:
-        return wrap_like(gt, out, fill_value_default=np.nan)
-    return wrap_filled(gt, out, fill_value_default=np.nan)
+        return wrap_like(gt, out, fill_value=np.nan)
+    return wrap_filled(gt, out, fill_value=np.nan)
 
 
 def _parse_datetime(value: datetime | str) -> datetime:
@@ -95,7 +96,7 @@ def _parse_datetime(value: datetime | str) -> datetime:
 
 
 if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
 
 class ToFloat32(Operator):
@@ -108,7 +109,7 @@ class ToFloat32(Operator):
     range for reflectance.
 
     Integer input with a fill value comes back with
-    ``fill_value_default=NaN`` and ``NaN`` at its nodata pixels (an
+    ``fill_value=NaN`` and ``NaN`` at its nodata pixels (an
     integer fill such as ``0`` would be a valid float value); float input
     keeps its fill.
 
@@ -122,9 +123,9 @@ class ToFloat32(Operator):
         >>> reflectance = pipe(uint16_dn_geotensor)
     """
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
-        # `GeoTensor.astype` would alias the input's attrs dict via
-        # __array_finalize__; rewrap so the output gets its own copy.
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        # Rewrap (not `GeoArray.astype`) so integer DN promoted to float
+        # get the carried NaN fill at their nodata pixels.
         return _rewrap_carried(gt, np.asarray(gt).astype(np.float32))
 
 
@@ -176,7 +177,7 @@ class DNToRadiance(Operator):
         self.scale = scale
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr = np.asarray(gt)
         n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
         gain = _broadcast_to_band_axis(self.gain, n_bands, self.axis, arr.ndim)
@@ -237,7 +238,7 @@ class RadianceToDN(Operator):
         self.scale = scale
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr = np.asarray(gt)
         n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
         gain = _broadcast_to_band_axis(self.gain, n_bands, self.axis, arr.ndim)
@@ -306,7 +307,7 @@ class DNToReflectance(Operator):
         self.offset = offset
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr = np.asarray(gt)
         n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
         scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
@@ -344,7 +345,7 @@ class RadianceToReflectance(Operator):
 
     Geo-dependence: when neither ``sza_deg`` nor ``center_coords`` is
     provided, the solar geometry is derived from the footprint, so the
-    input must be a georeferenced GeoTensor (plain arrays raise
+    input must be a georeferenced GeoArray (plain arrays raise
     ``TypeError`` in that mode).
 
     Args:
@@ -352,7 +353,7 @@ class RadianceToReflectance(Operator):
             shape ``(C,)``.
         acquisition_date: UTC datetime of acquisition.
         center_coords: Optional ``(lon, lat)`` for the SZA computation.
-            Inferred from the GeoTensor transform if omitted.
+            Inferred from the GeoArray transform if omitted.
         sza_deg: Optional pre-computed solar zenith angle in degrees.
             If provided, ``center_coords`` and ``pysolar`` are skipped.
         crs_coords: CRS of ``center_coords``. ``None`` → EPSG:4326.
@@ -390,7 +391,7 @@ class RadianceToReflectance(Operator):
         self.units = units
 
     @over_frames
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         obs_factor = observation_date_correction_factor(
             self.acquisition_date,
             sza_deg=self.sza_deg,
@@ -398,14 +399,14 @@ class RadianceToReflectance(Operator):
             crs_coords=self.crs_coords,
         )
         if obs_factor is None:
-            require_geotensor(
+            require_geoarray(
                 gt,
                 "RadianceToReflectance",
                 hint="The solar geometry is derived from the footprint when "
                 "neither `sza_deg` nor `center_coords` is provided.",
             )
         out = radiance_to_reflectance(
-            gt,
+            to_engine(gt),
             solar_irradiance=self.solar_irradiance,
             date_of_acquisition=self.acquisition_date,
             center_coords=self.center_coords,
@@ -413,7 +414,7 @@ class RadianceToReflectance(Operator):
             observation_date_corr_factor=obs_factor,
             units=self.units,
         )
-        # georeader rebuilds the GeoTensor without ``attrs``; restore them.
+        # georeader's result carries no ``attrs``; rewrap onto the input.
         return _rewrap_carried(gt, np.asarray(out))
 
     def get_config(self) -> dict[str, Any]:
@@ -444,7 +445,7 @@ class ReflectanceToRadiance(Operator):
 
     Geo-dependence: when neither ``sza_deg`` nor ``center_coords`` is
     provided, the solar geometry is derived from the footprint, so the
-    input must be a georeferenced GeoTensor (plain arrays raise
+    input must be a georeferenced GeoArray (plain arrays raise
     ``TypeError`` in that mode).
 
     Args:
@@ -489,7 +490,7 @@ class ReflectanceToRadiance(Operator):
         self.crs_coords = crs_coords
 
     @over_frames
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         obs_factor = observation_date_correction_factor(
             self.acquisition_date,
             sza_deg=self.sza_deg,
@@ -497,21 +498,21 @@ class ReflectanceToRadiance(Operator):
             crs_coords=self.crs_coords,
         )
         if obs_factor is None:
-            require_geotensor(
+            require_geoarray(
                 gt,
                 "ReflectanceToRadiance",
                 hint="The solar geometry is derived from the footprint when "
                 "neither `sza_deg` nor `center_coords` is provided.",
             )
         out = reflectance_to_radiance(
-            gt,
+            to_engine(gt),
             solar_irradiance=self.solar_irradiance,
             date_of_acquisition=self.acquisition_date,
             center_coords=self.center_coords,
             crs_coords=self.crs_coords,
             observation_date_corr_factor=obs_factor,
         )
-        # georeader rebuilds the GeoTensor without ``attrs``; restore them.
+        # georeader's result carries no ``attrs``; rewrap onto the input.
         return _rewrap_carried(gt, np.asarray(out))
 
     def get_config(self) -> dict[str, Any]:
@@ -813,10 +814,11 @@ class ApplySRF(Operator):
     outside the source range, or a FWHM far below 1 nm -- raise
     ``ValueError`` instead of returning an all-zero band.
 
-    Nodata: the GeoTensor goes straight to ``transform_to_srf``, which
+    Nodata: the GeoArray goes to ``transform_to_srf`` (as georeader's
+    carrier, through :func:`geoops._src.engine.to_engine`), which
     marks a target pixel missing when any source band *that target reads*
     (weight above ``epsilon_srf``) equals the input's
-    ``fill_value_default``; non-finite source values propagate through the
+    ``fill_value``; non-finite source values propagate through the
     weighted sum the same way. Those pixels hold the carried fill
     (:func:`geoops._src.valid.carried_fill`: the input's fill for float
     input, ``NaN`` for integer DN promoted to float). Source bands a
@@ -882,7 +884,7 @@ class ApplySRF(Operator):
         self.extrapolate = extrapolate
 
     @over_frames
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         n_bands = np.shape(gt)[0] if np.ndim(gt) == 3 else None
         if n_bands is None:
             raise ValueError(
@@ -909,12 +911,12 @@ class ApplySRF(Operator):
             # the "uninitialized memory" warning does not apply.
             warnings.filterwarnings("ignore", message="'where' used without 'out'")
             srf_df = pd.DataFrame(srf(centers, fwhm, grid), index=grid)
-        # A NaN fill_value_default makes every georeader-detected missing
+        # A NaN fill_value makes every georeader-detected missing
         # pixel NaN, so it is found below together with pixels made
         # non-finite by NaN / inf source values.
         out = np.asarray(
             transform_to_srf(
-                gt,
+                to_engine(gt),
                 srf_df,
                 source_wavelengths.tolist(),
                 fill_value_default=np.nan,
@@ -929,7 +931,7 @@ class ApplySRF(Operator):
         return wrap_like(
             gt,
             out,
-            fill_value_default=fill,
+            fill_value=fill,
             attrs=attrs,
             band_names=self.band_names,
         )
@@ -1004,7 +1006,7 @@ class BTFromRadiance(Operator):
         self.K2 = K2
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr = np.asarray(gt)
         n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
         k1 = _broadcast_to_band_axis(self.K1, n_bands, self.axis, arr.ndim)
@@ -1072,7 +1074,7 @@ class DOS1(Operator):
     def __init__(self, *, dark_percentile: float = 1.0) -> None:
         self.dark_percentile = dark_percentile
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         # NaN out nodata so the percentile reflects only valid data.
         work = mask_invalid_to_nan(gt, dtype=float)
         out = dos1(work, dark_percentile=self.dark_percentile, reduce_axes=(-2, -1))
@@ -1113,7 +1115,7 @@ class SimpleAtmosphericCorrection(Operator):
         self.dark_percentile = dark_percentile
         self.aod = aod
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         if self.method.lower() != "dos1":
             raise NotImplementedError(
                 "SimpleAtmosphericCorrection currently supports only "
@@ -1150,7 +1152,7 @@ class MinMaxStretch(Operator):
         self.vmax = vmax
         self.clip = clip
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = min_max_normalize(np.asarray(gt), self.vmin, self.vmax, clip=self.clip)
         return _rewrap_stretch(gt, out)
 
@@ -1196,7 +1198,7 @@ class PercentileClip(Operator):
         self.upper = upper
         self.reduce_axes = as_tuple(reduce_axes)
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         # Nodata never enters the percentiles (``nanpercentile``). The mask
         # is per frame, so a pixel missing in one frame of a (T, C, H, W)
         # stack stays valid in the others.
@@ -1241,6 +1243,6 @@ class Gamma(Operator):
     def __init__(self, *, gamma: float = 1.2) -> None:
         self.gamma = gamma
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = gamma_correct(np.asarray(gt), gamma=self.gamma)
         return _rewrap_stretch(gt, out)

@@ -2,7 +2,7 @@
 
 `Einx` is the generic escape hatch: any einx function, any pattern,
 with the spatial-survival rule from ``array.py`` deciding whether a
-``GeoTensor`` carrier's metadata rides through (`wrap_like`) or the
+``GeoArray`` carrier's metadata rides through (`wrap_like`) or the
 result drops to a plain ``np.ndarray``. The presets wrap the patterns
 we reach for constantly in RS pipelines — channel-order flips, per-band
 reductions, and spatial pooling (the one op that *updates* the
@@ -11,7 +11,7 @@ geotransform instead of preserving or dropping it).
 Design notes:
 
 - Arrays are unwrapped with ``np.asarray`` *before* reaching einx, so
-  `GeoTensor.__array_ufunc__` never interacts with einx internals.
+  `GeoArray.__array_ufunc__` never interacts with einx internals.
 - Pattern validation is permissive at construction (einx itself
   validates at dispatch); the op name, bracket balance and the names of
   extra einx keyword arguments are checked eagerly.
@@ -35,9 +35,12 @@ from typing import TYPE_CHECKING, Any
 
 import einx as _einx
 import numpy as np
+from affine import Affine
+from geoarray import GeoArray
 from pipekit import Operator
 
 from geoops._src.config import mapping_from_pairs, mapping_to_pairs
+from geoops._src.geo import affine_of, reject_geotensor
 from geoops._src.valid import (
     carried_fill,
     carrier_fill_value,
@@ -52,7 +55,6 @@ from geoops.einx._src.array import _tokenize, spatial_survives
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from georeader.geotensor import GeoTensor
 
 #: einx entry points `Einx` refuses because they take callables (not
 #: YAML-serializable) or don't return an array.
@@ -198,8 +200,8 @@ class Einx(Operator):
     `geoops.einx._src.array.spatial_survives`: when the trailing two
     axes of both the output and the carrier's (first) input expression
     are the bare spatial axes (default ``("y", "x")``) and no spatial
-    axis is composed anywhere, a ``GeoTensor`` input comes
-    back as a ``GeoTensor`` (transform / CRS propagated via
+    axis is composed anywhere, a ``GeoArray`` input comes
+    back as a ``GeoArray`` (transform / CRS propagated via
     ``wrap_like``, with fresh ``attrs`` whose per-band keys are dropped
     when the band count changes); otherwise the result is a plain
     ``np.ndarray``. Plain-array input always returns a plain array.
@@ -208,13 +210,13 @@ class Einx(Operator):
     output the pixel grid is unchanged, so:
 
     - ``"id"`` / ``"rearrange"`` only move values and inherit the
-      carrier's ``fill_value_default``;
+      carrier's ``fill_value``;
     - every other op changes the values, so the output gets an explicit
       fill — ``NaN`` for float outputs, ``False`` for boolean outputs,
       the input's fill for integer outputs when representable (else
       none) — written into every pixel that was invalid in the carrier
       (non-finite or equal to its fill in any band; see
-      `geoops._src.valid`). With ``fill_value_default=0`` on the
+      `geoops._src.valid`). With ``fill_value=0`` on the
       input, 0 is nodata (georeader's convention); pass ``None`` or
       ``NaN`` on the carrier when 0 is real data.
 
@@ -253,7 +255,7 @@ class Einx(Operator):
 
     Examples:
         >>> import geoops as gz
-        >>> # Per-pixel mean over bands; spatial survives -> GeoTensor out.
+        >>> # Per-pixel mean over bands; spatial survives -> GeoArray out.
         >>> mean_map = gz.Einx(op="mean", pattern="c y x -> y x")
         >>> # Matched-filter scoring against a signature matrix.
         >>> score = gz.Einx(op="dot", pattern="band y x, sig band -> sig y x")
@@ -301,8 +303,10 @@ class Einx(Operator):
         self._survives = spatial_survives(pattern, self.spatial_axes)
 
     def _apply(
-        self, gt: GeoTensor | np.ndarray, *extra: GeoTensor | np.ndarray
-    ) -> GeoTensor | np.ndarray:
+        self, gt: GeoArray | np.ndarray, *extra: GeoArray | np.ndarray
+    ) -> GeoArray | np.ndarray:
+        for a in (gt, *extra):
+            reject_geotensor(a, type(self).__name__)
         arrays = [np.asarray(a) for a in (gt, *extra)]
         try:
             out = np.asarray(self._fn(self.pattern, *arrays, **self.op_kwargs))
@@ -318,15 +322,15 @@ class Einx(Operator):
             ) from exc
         if not self._survives:
             return out
-        if self.op in _VALUE_PRESERVING_OPS or getattr(gt, "transform", None) is None:
+        if self.op in _VALUE_PRESERVING_OPS or not isinstance(gt, GeoArray):
             return wrap_like(gt, out)
         fill = _output_fill(out.dtype, carrier_fill_value(gt))
         valid = self._valid_mask(gt, out)
         if fill is not None:
             out = restore_fill(out, valid, fill)
-        return wrap_like(gt, out, fill_value_default=fill)
+        return wrap_like(gt, out, fill_value=fill)
 
-    def _valid_mask(self, gt: GeoTensor, out: np.ndarray) -> np.ndarray:
+    def _valid_mask(self, gt: GeoArray, out: np.ndarray) -> np.ndarray:
         """Carrier validity mask broadcastable against ``out``.
 
         Per-frame ``(T, H, W)`` when a 4-D carrier's leading (time) axis
@@ -365,7 +369,7 @@ class CHWtoHWC(Einx):
     frameworks expect channels-last). Leading axes (e.g. time) are kept.
     The output is always a plain ``np.ndarray``: with channels trailing,
     the spatial axes no longer sit in the trailing-two positions a
-    ``GeoTensor`` requires.
+    ``GeoArray`` requires.
 
     Examples:
         >>> import geoops as gz
@@ -384,7 +388,7 @@ class HWCtoCHW(Einx):
 
     Inverse of `CHWtoHWC`, for bringing external channels-last arrays
     into geotoolz's channel-first convention. Input is typically a
-    plain array (channels-last carriers can't be GeoTensors), and the
+    plain array (channels-last carriers can't be GeoArrays), and the
     output is a plain array — rewrapping needs a reference carrier's
     metadata, e.g. ``wrap_like(reference_gt, out)`` downstream.
 
@@ -412,10 +416,10 @@ class PerBandReduce(Operator):
     ``np.ndarray`` regardless of carrier.
 
     NaN-aware, like `geoops.normalize.PerBandStats`: invalid pixels —
-    non-finite or equal to the carrier's ``fill_value_default`` in any
+    non-finite or equal to the carrier's ``fill_value`` in any
     band (per frame for 4-D input; see `geoops._src.valid`) — are
     excluded from every band's statistic. A band (frame) with no valid
-    pixel reduces to ``NaN``. With ``fill_value_default=0`` on the input,
+    pixel reduces to ``NaN``. With ``fill_value=0`` on the input,
     0 is nodata (georeader's convention); pass ``None`` or ``NaN`` on the
     carrier when 0 is real data.
 
@@ -438,7 +442,7 @@ class PerBandReduce(Operator):
         self._fn = _resolve_reduction(reduce, name="PerBandReduce")
         self.reduce = reduce
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> np.ndarray:
         if np.ndim(gt) < 3:
             raise ValueError(
                 "PerBandReduce: expected a (C, H, W) or (T, C, H, W) input; "
@@ -464,18 +468,18 @@ class SpatialPool(Operator):
     (``"... (y py) (x px) -> ... y x"``), so ``(H, W)``, ``(C, H, W)`` and
     ``(T, C, H, W)`` inputs all work. This is the one einx preset that
     *changes* the geotransform rather than preserving or dropping it: a
-    ``GeoTensor`` input returns a ``GeoTensor`` whose pixel size is
+    ``GeoArray`` input returns a ``GeoArray`` whose pixel size is
     scaled by the pool factors (same origin, coarser grid, fresh
     ``attrs``). Plain-array input returns a plain array.
 
     Nodata: invalid pixels — non-finite, or equal to the carrier's
-    ``fill_value_default`` in any band (per frame for 4-D input; see
+    ``fill_value`` in any band (per frame for 4-D input; see
     `geoops._src.valid`) — are excluded with a NaN-aware reduction, so
     a block pools only its valid pixels. A block with no valid pixel is
     written as the output fill, which the output also declares: ``NaN``
     for float results of an integer input or of an input without a fill,
-    otherwise the input's ``fill_value_default``. With
-    ``fill_value_default=0`` on the input, 0 is nodata (georeader's
+    otherwise the input's ``fill_value``. With
+    ``fill_value=0`` on the input, 0 is nodata (georeader's
     convention); pass ``None`` or ``NaN`` on the carrier when 0 is real
     data.
 
@@ -514,7 +518,8 @@ class SpatialPool(Operator):
         self._fn = _resolve_reduction(reduce, name="SpatialPool")
         self.reduce = reduce
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        reject_geotensor(gt, type(self).__name__)
         arr = np.asarray(gt)
         if arr.ndim < 2:
             raise ValueError(
@@ -548,12 +553,11 @@ class SpatialPool(Operator):
                 out_fill = np.nan
             out = restore_fill(out, block_valid, out_fill)
 
-        transform = getattr(gt, "transform", None)
-        if transform is None:
+        if not isinstance(gt, GeoArray):
             return out
-        pooled_transform = transform * type(transform).scale(fx, fy)
+        pooled_transform = affine_of(gt) * Affine.scale(fx, fy)
         return wrap_like(
-            gt, out, transform=pooled_transform, fill_value_default=out_fill
+            gt, out, transform=pooled_transform, fill_value=out_fill
         )
 
     def get_config(self) -> dict[str, Any]:

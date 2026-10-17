@@ -11,7 +11,7 @@ indexing, nodata handling, rescaling and georeferencing. Nothing in them
 can be reused or tested alone.
 
 `geotoolz` cuts each step into an **Operator**: a typed callable with a
-keyword-only constructor. It takes a georeader `GeoTensor` (or a plain
+keyword-only constructor. It takes a [`geoarray.GeoArray`](../array/index.md) (or a plain
 `ndarray`) and returns the same kind of carrier on the same CRS and
 transform, with band names and a fill value that match the output.
 
@@ -59,7 +59,7 @@ reflectance bands plus SCL on a real UTM grid, named through
 
 ```python
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geoops as gz
@@ -68,11 +68,11 @@ L2A: list[str] = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "
 rng: np.random.Generator = np.random.default_rng(0)
 dn: np.ndarray = rng.integers(200, 4000, size=(12, 64, 64), dtype=np.uint16)  # (12, 64, 64) uint16
 scl: np.ndarray = rng.choice([4, 5, 8, 9], size=(1, 64, 64)).astype(np.uint16) # (1, 64, 64) uint16 · 8, 9 = cloud
-scene: GeoTensor = GeoTensor(
+scene: GeoArray = GeoArray(
     np.concatenate([dn, scl]),                                                 # (13, 64, 64) uint16
     transform=from_origin(750_000, 4_350_000, 10, 10),                         # 10 m pixels
     crs="EPSG:32610",                                                          # UTM zone 10N
-    fill_value_default=0,
+    fill_value=0,
     attrs={"band_names": [*L2A, "SCL"]},
 )
 
@@ -82,7 +82,7 @@ ndvi_pipeline: gz.Sequential = (
     | gz.DNToReflectance(scale=1e-4)                                           # (12, 64, 64) uint16 → (12, 64, 64) float64
     | gz.NDVI(red="B4", nir="B8")                                              # (12, 64, 64) float64 → (64, 64) float64
 )
-ndvi: GeoTensor = ndvi_pipeline(scene)                                         # (13, 64, 64) uint16 → (64, 64) float64 · NaN = no data
+ndvi: GeoArray = ndvi_pipeline(scene)                                         # (13, 64, 64) uint16 → (64, 64) float64 · NaN = no data
 config: dict = ndvi_pipeline.get_config()  # {"operators": [{"class": "SelectBands", "config": {...}}, ...]}
 
 # Graph — the same steps, plus a cloud mask on a second branch
@@ -93,8 +93,8 @@ cloud: gz.Node = gz.S2SCL(targets=["cloud_shadow", "cloud", "cirrus"])(x)       
 clean: gz.Node = gz.ApplyMask()(ndvi_node, cloud)                                   # (64, 64) float64 · NaN under cloud
 
 graph: gz.Graph = gz.Graph(inputs={"scene": x}, outputs={"ndvi": clean, "cloud": cloud})
-out: dict[str, GeoTensor] = graph(scene=scene)  # {"ndvi": (64, 64) float64, "cloud": (64, 64) bool}
-assert out["ndvi"].crs == scene.crs and out["ndvi"].transform == scene.transform
+out: dict[str, GeoArray] = graph(scene=scene)  # {"ndvi": (64, 64) float64, "cloud": (64, 64) bool}
+assert out["ndvi"].grid == scene.grid
 ```
 
 Both results keep the scene's CRS and transform. NDVI declares `NaN` as
@@ -109,7 +109,7 @@ its fill because it is a new float quantity; the mask uses `False`.
 | chain two to six steps | `Sequential` (`a \| b \| c`) |
 | branch, fan in, or return several named outputs | `Graph` ([branching pipelines](how-to/branching-pipelines.md)) |
 | run a model tile by tile over a large raster | `geoops.patch_ops` ([tile → operate → stitch](patch_ops.md)) |
-| find and load scenes from STAC or local files | [geocatalog](../catalog/index.md), then pass the `GeoTensor` in |
+| find and load scenes from STAC or local files | [geocatalog](../catalog/index.md), then pass the `GeoArray` in |
 
 ## What's inside
 
@@ -120,7 +120,7 @@ numpy primitives (`gz.indices.ndvi`).
 | Namespace | What it does | Reference |
 |---|---|---|
 | core | `Operator`, `Sequential`, `Graph`, `Input`, `Branch`, `Switch`, `Fanout`, `Tap`, `Snapshot`, … (from pipekit) and `ModelOp` | [Core](api/core.md) |
-| `geoops.carrier`, `geoops.testing` | helpers that keep the `GeoTensor` contract, and `check_operator` | [Carrier](api/carrier.md) |
+| `geoops.carrier`, `geoops.testing` | helpers that keep the `GeoArray` contract, and `check_operator` | [Carrier](api/carrier.md) |
 | `radiometry` | DN ↔ radiance ↔ reflectance, sun geometry, brightness temperature, DOS1, stretches | [Radiometry](api/radiometry.md) |
 | `indices` | spectral indices: NDVI, EVI, NDWI, NBR, NDSI, … | [Indices](api/indices.md) |
 | `qa` | cloud and quality masks from QA bits, SCL classes and sensor presets | [QA](api/qa.md) |

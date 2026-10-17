@@ -9,8 +9,8 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio
-from _helpers import toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import toy_geoarray
+from geoarray import GeoArray
 
 import geoops as gz
 from geoops.compositing import (
@@ -22,8 +22,8 @@ from geoops.compositing import (
 )
 
 
-def _gt(values: np.ndarray, *, transform: rasterio.Affine | None = None) -> GeoTensor:
-    return toy_geotensor(values, transform=transform, fill_value_default=np.nan)
+def _gt(values: np.ndarray, *, transform: rasterio.Affine | None = None) -> GeoArray:
+    return toy_geoarray(values, transform=transform, fill_value=np.nan)
 
 
 def test_compositing_namespace_is_available() -> None:
@@ -51,7 +51,7 @@ def test_median_composite_ignores_nan_and_returns_count() -> None:
     np.testing.assert_allclose(np.asarray(median), [[[3.0, 3.0], [5.0, 6.0]]])
     np.testing.assert_array_equal(np.asarray(count), [[[3, 2], [2, 2]]])
     assert np.asarray(count).dtype == np.int64
-    assert median.transform == scenes[0].transform
+    assert median.grid == scenes[0].grid
     assert str(median.crs) == "EPSG:32629"
 
 
@@ -74,8 +74,8 @@ def test_max_ndvi_composite_returns_frame_with_peak_ndvi() -> None:
             dtype=np.float32,
         )
     )
-    low.attrs["descriptions"] = ("red", "nir")
-    high.attrs["descriptions"] = ("red", "nir")
+    low = low.with_attrs(descriptions=("red", "nir"))
+    high = high.with_attrs(descriptions=("red", "nir"))
 
     out, index = MaxNDVIComposite(red="red", nir="nir", return_index=True)([low, high])
 
@@ -92,7 +92,7 @@ def test_max_ndvi_composite_outputs_nan_when_all_ndvi_is_invalid() -> None:
     assert np.isnan(np.asarray(out)).all()
 
 
-def test_max_ndvi_composite_rejects_two_dimensional_geotensors() -> None:
+def test_max_ndvi_composite_rejects_two_dimensional_geoarrays() -> None:
     flat = _gt(np.ones((2, 2), dtype=np.float32))
 
     with pytest.raises(ValueError, match="requires multi-band"):
@@ -395,7 +395,7 @@ def test_composites_accept_plain_ndarray_frames(
     np.testing.assert_allclose(out_plain, np.asarray(out_geo), equal_nan=True)
 
 
-def test_max_ndvi_composite_named_bands_require_geotensor_attrs() -> None:
+def test_max_ndvi_composite_named_bands_require_geoarray_attrs() -> None:
     frame = np.ones((2, 2, 2), dtype=np.float32)
 
     with pytest.raises(TypeError, match="named band references"):
@@ -425,13 +425,13 @@ def test_compositing_get_config_is_json_safe() -> None:
 
 
 # ---------------------------------------------------------------------------
-# #145: nodata (fill_value_default) frame-pixels are excluded
+# #145: nodata (fill_value) frame-pixels are excluded
 # ---------------------------------------------------------------------------
 
 _FILL = -9999.0
 
 
-def _fill_frames() -> list[GeoTensor]:
+def _fill_frames() -> list[GeoArray]:
     """Three ``(2, 1, 3)`` frames with a ``-9999`` fill.
 
     Pixel 0 is valid everywhere, pixel 1 is nodata in frame 0 only, and
@@ -443,8 +443,8 @@ def _fill_frames() -> list[GeoTensor]:
     band0 = [[1.0, _FILL, _FILL], [3.0, 5.0, _FILL], [5.0, 7.0, _FILL]]
     band1 = [[2.0, _FILL, _FILL], [1.0, 1.0, _FILL], [2.0, 2.0, _FILL]]
     return [
-        toy_geotensor(
-            np.array([[b0], [b1]], dtype=np.float32), fill_value_default=_FILL
+        toy_geoarray(
+            np.array([[b0], [b1]], dtype=np.float32), fill_value=_FILL
         )
         for b0, b1 in zip(band0, band1, strict=True)
     ]
@@ -455,7 +455,7 @@ def _assert_composite(out: Any, pixel0: list[float], pixel1: list[float]) -> Non
     arr = np.asarray(out)
     np.testing.assert_allclose(arr[:, 0, :2], np.array([pixel0, pixel1]).T)
     assert (arr[:, 0, 2] == _FILL).all()
-    assert out.fill_value_default == _FILL
+    assert out.fill_value == _FILL
 
 
 def _case_median() -> None:
@@ -463,7 +463,7 @@ def _case_median() -> None:
     _assert_composite(out, [3.0, 2.0], [6.0, 1.5])
     np.testing.assert_array_equal(np.asarray(count)[:, 0], [[3, 2, 0], [3, 2, 0]])
     # A contributor count declares 0 (no frame), not the frames' fill (#146).
-    assert count.fill_value_default == 0
+    assert count.fill_value == 0
 
 
 def _case_max_ndvi() -> None:
@@ -473,7 +473,7 @@ def _case_max_ndvi() -> None:
     assert np.asarray(index)[0, 1] == 2
     # No frame is valid at pixel 2; frame 0 is a real index, so -1 marks it.
     assert np.asarray(index)[0, 2] == -1
-    assert index.fill_value_default == -1
+    assert index.fill_value == -1
     _assert_composite(out, [1.0, 2.0], [7.0, 2.0])
 
 
@@ -492,14 +492,14 @@ def _case_bap() -> None:
     # score, but its pixel 0 is unusable, so frame 1 must win there.
     values0 = np.asarray(frames[0]).copy()
     values0[1, 0, 0] = np.nan
-    frames[0] = toy_geotensor(values0, fill_value_default=_FILL)
+    frames[0] = toy_geoarray(values0, fill_value=_FILL)
     metadata = [{"view_angle": 0.0}, {"view_angle": 1.0}, {"view_angle": 2.0}]
     out, score = BAPComposite(target_doy=196, return_score=True)(
         list(zip(frames, metadata, strict=True))
     )
     _assert_composite(out, [3.0, 1.0], [5.0, 1.0])
     # A score is a new quantity: NaN nodata, never the frames' fill (#146).
-    assert np.isnan(score.fill_value_default)
+    assert np.isnan(score.fill_value)
     assert np.isnan(np.asarray(score)[0, 2])
 
 
@@ -519,14 +519,14 @@ def _case_blend_matched() -> None:
 
 
 def _case_stack_matched() -> None:
-    other = toy_geotensor(
-        np.array([[[4.0, 0.0, 6.0]]], dtype=np.float32), fill_value_default=0.0
+    other = toy_geoarray(
+        np.array([[[4.0, 0.0, 6.0]]], dtype=np.float32), fill_value=0.0
     )
     out = gz.compositing.StackMatched()([_fill_frames()[0], other])
     # The second input's nodata (its own fill, 0) is rewritten to the
     # output's fill so it stays marked as nodata.
     np.testing.assert_array_equal(np.asarray(out)[2, 0], [4.0, _FILL, 6.0])
-    assert out.fill_value_default == _FILL
+    assert out.fill_value == _FILL
 
 
 @pytest.mark.parametrize(
@@ -555,14 +555,14 @@ def test_4d_time_stack() -> None:
     for op in (MedianComposite(), MaxNDVIComposite(red=0, nir=1)):
         out = op(stack)
         expected = op(frames(stack))
-        assert isinstance(out, GeoTensor)
+        assert isinstance(out, GeoArray)
         assert out.shape == (3, 4, 4)
         np.testing.assert_array_equal(np.asarray(out), np.asarray(expected))
-        assert out.transform == stack.transform
-        assert out.fill_value_default == stack.fill_value_default
+        assert out.grid == stack.grid
+        assert out.fill_value == stack.fill_value
         assert out.attrs == stack.attrs and out.attrs is not stack.attrs
     with pytest.raises(ValueError, match="MedianComposite takes co-registered frames"):
-        MedianComposite()(stack.isel({"time": 0}))
+        MedianComposite()(stack.isel(time=0))
 
 
 # ---------------------------------------------------------------------------
