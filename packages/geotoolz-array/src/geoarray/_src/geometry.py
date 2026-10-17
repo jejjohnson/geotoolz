@@ -17,7 +17,7 @@ import numpy as np
 from geoarray._src.array import INHERIT, GeoArray, _normalize_fill
 from geoarray._src.attrs import concat_bands
 from geoarray._src.backend import backend_of, is_tracer, namespace, require_x64
-from geoarray._src.errors import GeoArrayTraceError, GridMismatchError
+from geoarray._src.errors import GridMismatchError
 from geoarray._src.grid import PixelWindow, apply_transform, shift_scale_transform
 
 
@@ -93,13 +93,15 @@ def _require_same_fill(carriers: list[GeoArray], what: str) -> None:
             )
 
 
-def _require_same_backend(carriers: list[GeoArray], what: str) -> None:
-    backends = {g.backend for g in carriers}
-    if len(backends) > 1:
-        raise TypeError(
-            f"{what}: carriers mix NumPy and JAX data; move them to one backend "
-            "with to_jax() or to_numpy() first"
-        )
+def _promote(carriers: list[GeoArray]) -> list[GeoArray]:
+    """All carriers on JAX when any is (C1: mixed inputs promote, as ``jnp``).
+
+    Raises:
+        X64Error: Promotion needs ``jax_enable_x64`` (float64 transforms).
+    """
+    if all(g.backend == "numpy" for g in carriers):
+        return carriers
+    return [g.to_jax() if g.backend == "numpy" else g for g in carriers]
 
 
 def _leading_axis(g: GeoArray, axis: int, what: str, *, new: bool = False) -> int:
@@ -123,13 +125,14 @@ def combine(f: Callable[..., Any], *carriers: GeoArray) -> GeoArray:
     Args:
         f: A function of the data arrays, returning one ``(..., H, W)``
             array (``jnp.divide``, ``lambda a, b: a - b``, …).
-        *carriers: GeoArrays on the same grid and backend.
+        *carriers: GeoArrays on the same grid; NumPy carriers join JAX ones
+            on JAX.
 
     Raises:
         GridMismatchError: The grids differ (CRS, shape, or concrete
             transform).
         ValueError: The fill values differ.
-        TypeError: The carriers mix NumPy and JAX data.
+        X64Error: A NumPy carrier must move to JAX and x64 is off.
 
     Example:
         >>> import numpy as np
@@ -140,7 +143,7 @@ def combine(f: Callable[..., Any], *carriers: GeoArray) -> GeoArray:
         np.float64(0.5)
     """
     gs = _require_carriers(carriers, "combine")
-    _require_same_backend(gs, "combine")
+    gs = _promote(gs)
     _require_same_grid(gs, "combine")
     _require_same_fill(gs, "combine")
     return gs[0].with_data(f(*(g.data for g in gs)))
@@ -165,7 +168,7 @@ def stack(carriers: Sequence[GeoArray], axis: int = 0) -> GeoArray:
         (3, 2, 4, 4)
     """
     gs = _require_carriers(carriers, "stack")
-    _require_same_backend(gs, "stack")
+    gs = _promote(gs)
     _require_same_grid(gs, "stack")
     _require_same_fill(gs, "stack")
     first = gs[0]
@@ -195,7 +198,7 @@ def concatenate(carriers: Sequence[GeoArray], axis: int = -3) -> GeoArray:
         ('B04', 'B08')
     """
     gs = _require_carriers(carriers, "concatenate")
-    _require_same_backend(gs, "concatenate")
+    gs = _promote(gs)
     _require_same_grid(gs, "concatenate")
     _require_same_fill(gs, "concatenate")
     first = gs[0]
@@ -401,7 +404,8 @@ def write_window(g: GeoArray, values: Any, window: PixelWindow) -> GeoArray:
     """A copy of ``g`` with ``values`` written into ``window``.
 
     The part of ``window`` outside the array is ignored, and ``values``
-    are cast to the carrier's dtype. JAX data is
+    are cast to the carrier's dtype. JAX values promote a NumPy carrier to
+    JAX (C1), so this works inside ``jit``. JAX data is
     immutable, so this always returns a new carrier (the NumPy input is
     not modified either).
 
@@ -416,7 +420,8 @@ def write_window(g: GeoArray, values: Any, window: PixelWindow) -> GeoArray:
             shape.
         TypeError: ``values`` would change kind when cast (float into
             integer data, say).
-        GeoArrayTraceError: Traced values for a NumPy carrier.
+        X64Error: JAX values for a NumPy carrier, which then moves to JAX,
+            with x64 off.
 
     Example:
         >>> import numpy as np
@@ -451,12 +456,9 @@ def write_window(g: GeoArray, values: Any, window: PixelWindow) -> GeoArray:
             f"write_window: {part.dtype} values cannot be written into "
             f"{g.dtype} data without changing their kind; cast them first"
         )
+    if g.backend == "numpy" and backend_of(part) == "jax":
+        g = g.to_jax()
     if g.backend == "numpy":
-        if is_tracer(part):
-            raise GeoArrayTraceError(
-                "write_window: traced values cannot be written into NumPy data; "
-                "move the carrier to JAX with to_jax() first"
-            )
         data = np.array(g.data, copy=True)
         data[..., rows, cols] = np.asarray(part)
     else:

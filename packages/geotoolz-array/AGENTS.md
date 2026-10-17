@@ -3,8 +3,10 @@
 The georeferenced array every package of the stack will share. The root
 [`AGENTS.md`](../../AGENTS.md) applies too; this file adds what is specific
 to `geoarray`. It is the bottom of the workspace: it depends on numpy,
-pyproj and affine only, and never imports another workspace package,
-rasterio or georeader (ruff's `TID251` rejects it).
+pyproj and affine only, and never imports another workspace package or
+rasterio. georeader is imported by one module only, the `[georeader]`
+adapter `_src/georeader.py`, and lazily (ruff's `TID251` rejects it
+anywhere else).
 
 ## What lives here
 
@@ -25,7 +27,12 @@ rasterio or georeader (ruff's `TID251` rejects it).
   `write_window`, `pad`, `pixel_coords`, `footprint`, and the joins
   `combine` / `stack` / `concatenate` (`GridMismatchError`).
 - **The backend dispatch** (`_src/backend.py`) — the one place that tells
-  NumPy from JAX and imports JAX on demand.
+  NumPy from JAX and imports JAX on demand; `_src/options.py` holds
+  `set_options` (``warn_on_transfer``).
+- **The georeader adapter** (`_src/georeader.py`, public as
+  `geoarray.interop.georeader`) — `from_georeader` / `to_georeader`, the
+  one module that imports georeader (lazily, `[georeader]` extra), mapping
+  public attributes only.
 
 The design is
 [geostack's `docs/design/01_geoarray.md`](https://github.com/jejjohnson/geostack/blob/main/docs/design/01_geoarray.md);
@@ -65,6 +72,10 @@ interpolates belong in `geoops.functional`.
 - **A 4-D carrier never loses its band axis alone**: an integer band
   index or a squeeze that would turn `(T, C, H, W)` into `(T, H, W)`
   raises, because `(T, H, W)` reads as `(C, H, W)`.
+- **NumPy and JAX mix eagerly (design decision C1).** Mixed inputs promote
+  to JAX (`_promote` in `_src/geometry.py`); output stays where the
+  computation ran; `__array__` copies JAX data to the host eagerly and
+  raises `GeoArrayTraceError` under a trace.
 - JAX is optional. Import it through `_src/backend.py` (`import_jax`,
   `is_jax_array`, `is_tracer`); a NumPy-only install never loads it.
   The pytree is registered at import whenever JAX is installed.

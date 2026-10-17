@@ -25,6 +25,7 @@ gradients reach the georeferencing.
 pip install geotoolz-array              # NumPy carriers, Grid, PixelWindow
 pip install 'geotoolz-array[jax]'       # + JAX carriers and the pytree
 pip install 'geotoolz-array[vector]'    # + footprint as a shapely polygon
+pip install 'geotoolz-array[georeader]' # + GeoTensor <-> GeoArray
 ```
 
 | Extra | Pulls in | Needed for |
@@ -32,6 +33,7 @@ pip install 'geotoolz-array[vector]'    # + footprint as a shapely polygon
 | *(base)* | numpy, pyproj, affine | `GeoArray` on NumPy data, `Grid`, `PixelWindow`, `FrozenAttrs` |
 | `[jax]` | jax | JAX data, `GeoArray.to_jax`, `jit` / `grad` / `vmap` over carriers |
 | `[vector]` | shapely | `footprint` |
+| `[georeader]` | georeader-spaceml | `geoarray.interop.georeader` (`from_georeader`, `to_georeader`) |
 
 A JAX carrier keeps its transform in float64, so it needs
 `jax.config.update("jax_enable_x64", True)`. The data keeps its own dtype.
@@ -94,6 +96,36 @@ patches.batch_shape  # (3,): (N, C, 256, 256) data, one (6,) transform per patch
 valid = scene.valid_mask()  # (H, W) bool: every band finite and not the fill
 ```
 
+## Backends and georeader
+
+NumPy and JAX carriers mix eagerly, as NumPy and `jnp` arrays do. Inside
+`jit`, `grad` or `vmap` the data are tracers, and NumPy code on them raises
+`GeoArrayTraceError` instead of JAX's generic error.
+
+| Call | NumPy carrier | JAX carrier |
+|---|---|---|
+| `np.asarray(g)` | the data, no copy | a host copy; raises under a trace; warns with `set_options(warn_on_transfer=True)` |
+| `combine`, `stack`, `concatenate`, `write_window` with mixed inputs | — | NumPy inputs move to JAX (needs x64) |
+| `from_georeader(gt)` / `to_georeader(g)` | `GeoTensor` ↔ `GeoArray`, sharing memory | `to_georeader` needs `g.to_numpy()` first |
+
+```python
+import numpy as np
+from affine import Affine
+from georeader.geotensor import GeoTensor
+
+from geoarray import GeoArray
+from geoarray.interop.georeader import from_georeader, to_georeader
+
+gt: GeoTensor = GeoTensor(
+    np.zeros((2, 600, 600), dtype=np.float32),  # (C, H, W) float32
+    Affine(20.0, 0.0, 600000.0, 0.0, -20.0, 3550000.0),
+    "EPSG:32613",
+    fill_value_default=np.nan,
+)
+g: GeoArray = from_georeader(gt)  # (C, H, W) float32, the same memory
+back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
+```
+
 ## What's inside
 
 | Name | Use it to… | Guide |
@@ -107,6 +139,8 @@ valid = scene.valid_mask()  # (H, W) bool: every band finite and not the fill
 | `valid_mask`, `pixel_coords`, `footprint` | find the pixels that hold data, their map coordinates, the outline (`[vector]`) | [Reference](api.md#geometry) |
 | `combine`, `stack`, `concatenate` | join carriers that share a grid | [Reference](api.md#joining-carriers) |
 | `FrozenAttrs` | keep metadata hashable, so it can key a compiled function | [Reference](api.md#frozenattrs) |
+| `set_options`, `get_options`, `HostTransferWarning` | find the NumPy steps that copy JAX data to the host | [Reference](api.md#backends-and-interop) |
+| `from_georeader`, `to_georeader` | bridge to georeader's `GeoTensor`, zero-copy (`[georeader]`) | [Reference](api.md#backends-and-interop) |
 | `as_transform`, `as_crs` | coerce an `affine.Affine`, six numbers, an EPSG code or WKT | [Reference](api.md#coercions) |
 
 ## Next steps

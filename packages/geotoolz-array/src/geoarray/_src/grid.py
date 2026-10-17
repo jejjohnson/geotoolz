@@ -34,6 +34,7 @@ __all__ = [
     "apply_transform",
     "as_crs",
     "as_transform",
+    "crs_string",
     "shift_scale_transform",
 ]
 
@@ -109,7 +110,7 @@ def as_crs(crs: Any) -> pyproj.CRS | None:
         raise ValueError(f"not a CRS: {crs!r}") from exc
 
 
-def _crs_string(crs: pyproj.CRS | None) -> str | None:
+def crs_string(crs: pyproj.CRS | None) -> str | None:
     """The shortest exact string for ``crs``: ``"EPSG:32613"`` or its WKT."""
     if crs is None:
         return None
@@ -482,7 +483,7 @@ class Grid:
         """
         return {
             "transform": list(self.transform),
-            "crs": _crs_string(self.crs),
+            "crs": crs_string(self.crs),
             "shape": list(self.shape),
         }
 

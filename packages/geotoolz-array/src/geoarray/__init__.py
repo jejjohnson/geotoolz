@@ -21,6 +21,12 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   `stack` / `concatenate`, `footprint` (``[vector]``).
 - `as_transform` / `as_crs` — coerce an ``affine.Affine``, six numbers, an
   EPSG code or WKT.
+- Backends (C1): NumPy and JAX carriers mix eagerly. ``np.asarray(g)``
+  copies JAX data to the host (and raises `GeoArrayTraceError` under a
+  trace); joins and writes promote NumPy inputs to JAX. `set_options`
+  (``warn_on_transfer``) / `get_options`, `HostTransferWarning`.
+- `geoarray.interop.georeader` — ``from_georeader`` / ``to_georeader``,
+  zero-copy bridges to georeader's ``GeoTensor`` (``[georeader]``).
 - Errors: `GeoArrayError` and its subclasses `X64Error`,
   `GeoArrayTraceError` and `GridMismatchError`.
 
@@ -50,6 +56,7 @@ from geoarray._src.geometry import (
     write_window,
 )
 from geoarray._src.grid import Grid, PixelWindow, as_crs, as_transform
+from geoarray._src.options import HostTransferWarning, get_options, set_options
 
 
 __version__ = "0.0.0"  # x-release-please-version
@@ -63,6 +70,7 @@ __all__ = [
     "GeoArrayTraceError",
     "Grid",
     "GridMismatchError",
+    "HostTransferWarning",
     "PixelWindow",
     "X64Error",
     "__version__",
@@ -72,9 +80,11 @@ __all__ = [
     "concatenate",
     "crop",
     "footprint",
+    "get_options",
     "pad",
     "pixel_coords",
     "read_window",
+    "set_options",
     "stack",
     "write_window",
 ]

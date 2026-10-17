@@ -11,7 +11,6 @@ from conftest import CRS, TRANSFORM
 
 from geoarray import (
     GeoArray,
-    GeoArrayTraceError,
     Grid,
     GridMismatchError,
     PixelWindow,
@@ -223,13 +222,16 @@ class TestReadWriteWindow:
         out = write_window(ints, np.ones((2, 2), dtype=np.int64), window)
         assert out.dtype == np.int16
 
-    def test_write_window_traced_values_into_numpy(self, x64: ModuleType) -> None:
+    def test_write_window_jax_values_promote(self, x64: ModuleType) -> None:
         g = _scene((3, 3))
         window = PixelWindow(col_off=0, row_off=0, width=2, height=2)
-        with pytest.raises(GeoArrayTraceError, match="to_jax"):
-            x64.jit(lambda v: write_window(g, v, window).data)(
-                x64.numpy.zeros((2, 2), dtype=x64.numpy.float32)
-            )
+        out = x64.jit(lambda v: write_window(g, v, window).data)(
+            x64.numpy.zeros((2, 2), dtype=x64.numpy.float32)
+        )
+        assert float(out[0, 0]) == 0.0
+        assert float(out[2, 2]) == float(g.data[2, 2])
+        eager = write_window(g, x64.numpy.ones((2, 2), dtype=x64.numpy.float32), window)
+        assert eager.backend == "jax"
 
     def test_write_window_jax(self, x64: ModuleType) -> None:
         g = _scene().to_jax()
@@ -350,10 +352,24 @@ class TestJoins:
         assert stack([single, single], axis=1).shape == (2, 2, 4, 4)
         assert stack([single, single], axis=1).batch_shape == (2,)
 
-    def test_combine_rejects_mixed_backends(self, x64: ModuleType) -> None:
+    def test_mixed_backends_promote_to_jax(self, x64: ModuleType) -> None:
         g = _scene()
-        with pytest.raises(TypeError, match="mix NumPy and JAX"):
-            combine(np.add, g, g.to_jax())
+        out = combine(x64.numpy.add, g, g.to_jax())
+        assert out.backend == "jax"
+        # Output stays where the computation ran: a NumPy function -> NumPy.
+        assert combine(np.add, g, g.to_jax()).backend == "numpy"
+        assert stack([g, g.to_jax()]).backend == "jax"
+        assert concatenate([g.to_jax(), g]).backend == "jax"
+
+    def test_promotion_needs_x64(self, x64: ModuleType) -> None:
+        g = _scene()
+        on_jax = g.to_jax()
+        x64.config.update("jax_enable_x64", False)
+        try:
+            with pytest.raises(X64Error):
+                stack([g, on_jax])
+        finally:
+            x64.config.update("jax_enable_x64", True)
 
     def test_combine_under_jit(self, x64: ModuleType) -> None:
         jnp = x64.numpy
