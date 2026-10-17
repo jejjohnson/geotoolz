@@ -1,6 +1,6 @@
 [project]
 name = "geotoolz"
-version = "0.10.3"
+version = "0.11.0"
 description = "The geostack in one install: geotoolz-ops, -patcher, -catalog, -cloud and -products."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

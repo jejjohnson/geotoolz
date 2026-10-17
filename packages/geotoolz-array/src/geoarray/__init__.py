@@ -59,7 +59,7 @@ from geoarray._src.grid import Grid, PixelWindow, as_crs, as_transform
 from geoarray._src.options import HostTransferWarning, get_options, set_options
 
 
-__version__ = "0.0.0"  # x-release-please-version
+__version__ = "0.1.0"  # x-release-please-version
 
 __all__ = [
     "DIMS",

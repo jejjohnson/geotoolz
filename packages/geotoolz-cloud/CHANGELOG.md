@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.4.1...geotoolz-cloud-v0.5.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* `import geotoolz` no longer provides the operators. Use `import geoops` (distribution `geotoolz-ops`). `pip install geotoolz` now installs the whole stack.
+
+### Bug Fixes
+
+* **build:** ship a LICENSE in each package so it builds ([#491](https://github.com/jejjohnson/geotoolz/issues/491)) ([48a705a](https://github.com/jejjohnson/geotoolz/commit/48a705a382a53ec0125c52817f3b4f29353de2aa))
+
+
+### Code Refactoring
+
+* rename the operator package to geotoolz-ops (import geoops) ([#489](https://github.com/jejjohnson/geotoolz/issues/489)) ([278b8af](https://github.com/jejjohnson/geotoolz/commit/278b8afbc675b9e082ac75488200a4729da38097))
+
 ## [0.4.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.4.0...geotoolz-cloud-v0.4.1) (2026-10-12)
 
 
