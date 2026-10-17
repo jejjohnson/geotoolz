@@ -259,12 +259,9 @@ class TestPad:
             pad(g, ((-1, 0), (0, 0)))
         with pytest.raises(ValueError, match=">= 0"):
             pad(g, -1)
-        nan_ints = GeoArray(
-            np.zeros((2, 2), dtype=np.int16), TRANSFORM, CRS, fill_value=np.nan
-        )
-        with pytest.raises(ValueError, match="NaN fill"):
-            pad(nan_ints, 1)
         ints = GeoArray(np.zeros((2, 2), dtype=np.int16), TRANSFORM, CRS)
+        with pytest.raises(ValueError, match="NaN fill"):
+            pad(ints, 1, fill_value=np.nan)
         assert pad(ints, np.int64(1), fill_value=7).data[0, 0] == 7
 
     def test_explicit_fill_becomes_the_result_fill(self) -> None:

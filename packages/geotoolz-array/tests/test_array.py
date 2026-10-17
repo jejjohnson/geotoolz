@@ -232,3 +232,53 @@ def test_pickle_round_trip_keeps_identity(chip: GeoArray) -> None:
     assert back.identical(chip)
     assert back.fill_value is math.nan
     assert back.attrs == chip.attrs
+
+
+@pytest.mark.parametrize(
+    ("dtype", "fill"),
+    [
+        (np.uint16, -9999.0),
+        (np.uint16, 70000),
+        (np.uint8, 0.5),
+        (np.int16, np.nan),
+        (np.bool_, 2),
+        (np.bool_, np.nan),
+    ],
+)
+def test_a_fill_the_dtype_cannot_hold_is_refused(dtype: type, fill: float) -> None:
+    """Such a fill would be written as another value that reads as data."""
+    with pytest.raises(ValueError, match="cannot be held"):
+        GeoArray(np.zeros((2, 2), dtype=dtype), TRANSFORM, CRS, fill_value=fill)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "fill"),
+    [
+        (np.uint16, 0.0),
+        (np.uint16, 65535),
+        (np.int16, -9999),
+        (np.bool_, False),
+        (np.bool_, 1),
+        (np.float32, np.nan),
+        (np.float32, -9999.0),
+    ],
+)
+def test_a_fill_the_dtype_holds_is_kept(dtype: type, fill: float) -> None:
+    g = GeoArray(np.zeros((2, 2), dtype=dtype), TRANSFORM, CRS, fill_value=fill)
+    assert g.fill_value == fill or math.isnan(g.fill_value)
+
+
+def test_with_data_checks_the_fill_against_the_new_dtype() -> None:
+    g = GeoArray(np.zeros((2, 2), np.float32), TRANSFORM, CRS, fill_value=np.nan)
+    with pytest.raises(ValueError, match="cannot be held"):
+        g.with_data(np.zeros((2, 2), np.uint8))
+    assert g.with_data(np.zeros((2, 2), np.uint8), fill_value=255).fill_value == 255
+
+
+def test_astype_takes_a_new_fill() -> None:
+    g = GeoArray(np.zeros((2, 2), np.float32), TRANSFORM, CRS, fill_value=np.nan)
+    with pytest.raises(ValueError, match="cannot be held"):
+        g.astype(np.uint8)
+    out = g.astype(np.uint8, fill_value=255)
+    assert out.dtype == np.uint8
+    assert out.fill_value == 255

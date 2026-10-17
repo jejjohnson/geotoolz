@@ -77,6 +77,34 @@ def _normalize_fill(fill: Any) -> _FillValue:
     raise TypeError(f"fill_value must be a number, a bool or None, got {fill!r}")
 
 
+def _check_fill_fits(fill: _FillValue, dtype: Any) -> None:
+    """Raise unless ``dtype`` data can hold ``fill`` exactly.
+
+    A fill the dtype cannot hold (``-9999.0`` or ``0.5`` in ``uint16``) would
+    be written as some other value, which `valid_mask` then reads as data.
+    Float and complex data hold any fill, NaN included.
+    """
+    if fill is None:
+        return
+    dtype = np.dtype(dtype)
+    if dtype.kind == "b":
+        fits = fill in (0, 1)
+    elif dtype.kind in "iu":
+        info = np.iinfo(dtype.str)
+        fits = (
+            not (isinstance(fill, float) and not fill.is_integer())
+            and info.min <= fill <= info.max
+        )
+    else:
+        return
+    if not fits:
+        raise ValueError(
+            f"fill_value={fill!r} cannot be held by {dtype} data, so filled "
+            f"pixels would read as data: pass a fill {dtype} can hold, or "
+            "fill_value=None"
+        )
+
+
 def _coerce_transform(transform: Any, backend: Backend) -> Any:
     """The transform as a ``(6,)`` float64 array of the data's backend."""
     if backend == "numpy":
@@ -228,6 +256,7 @@ class GeoArray[A: SupportsArray]:
         object.__setattr__(self, "transform", transform)
         object.__setattr__(self, "crs", as_crs(self.crs))
         object.__setattr__(self, "fill_value", _normalize_fill(self.fill_value))
+        _check_fill_fits(self.fill_value, self.data.dtype)
         if not isinstance(self.attrs, FrozenAttrs):
             object.__setattr__(self, "attrs", FrozenAttrs(self.attrs or {}))
 
@@ -404,9 +433,26 @@ class GeoArray[A: SupportsArray]:
         """A copy without the given attrs keys (see `FrozenAttrs.drop`)."""
         return dataclasses.replace(self, attrs=self.attrs.drop(*keys))
 
-    def astype(self, dtype: Any) -> GeoArray:
-        """A copy with the data cast to ``dtype``; geometry unchanged."""
-        return dataclasses.replace(self, data=self.data.astype(dtype))
+    def astype(self, dtype: Any, *, fill_value: Any = INHERIT) -> GeoArray:
+        """A copy with the data cast to ``dtype``; geometry unchanged.
+
+        Args:
+            dtype: The new dtype.
+            fill_value: The new fill; omitted keeps this carrier's, which
+                ``dtype`` must be able to hold (a NaN fill cannot be cast to
+                integers, for example).
+
+        Raises:
+            ValueError: ``dtype`` cannot hold the fill.
+
+        Example:
+            >>> import numpy as np
+            >>> g = GeoArray(np.ones((4, 4)), (1, 0, 0, 0, -1, 0), None, np.nan)
+            >>> g.astype(np.uint8, fill_value=255).fill_value
+            255
+        """
+        fill = self.fill_value if fill_value is INHERIT else fill_value
+        return dataclasses.replace(self, data=self.data.astype(dtype), fill_value=fill)
 
     def map(self, f: Any) -> GeoArray:
         """Apply ``f`` to the data and keep the geometry.
