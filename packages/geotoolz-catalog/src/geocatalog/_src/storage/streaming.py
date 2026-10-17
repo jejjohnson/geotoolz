@@ -53,7 +53,7 @@ if TYPE_CHECKING:
 from loguru import logger as log
 
 from geocatalog._src._deprecation import renamed_kwargs
-from geocatalog._src._schema import CatalogKind
+from geocatalog._src._schema import CatalogKind, state_arrow_types
 from geocatalog._src.base import INTERNAL_COLUMNS, RESERVED_COLUMNS
 from geocatalog._src.storage.parquet import (
     SCHEMA_VERSION_CURRENT as _SCHEMA_VERSION,
@@ -219,7 +219,7 @@ class StreamingParquetWriter:
         kind: The catalog kind, copied to the reserved ``_backend``
             column on every row (preserves loader-dispatch on reopen).
         schema_version: Value for the reserved ``_schema_version`` column.
-            Bump from 0 on first substantive schema change.
+            Defaults to `SCHEMA_VERSION_CURRENT`.
         write_bbox: Emit the GeoParquet 1.1 ``bbox`` covering struct. Default
             True; turn off only if a downstream consumer chokes on 1.1.
         batch_size: Rows per Arrow record batch. Default 10 000 → peak
@@ -234,6 +234,8 @@ class StreamingParquetWriter:
             first batch, so a key first seen later — or a column that
             was all-null in the first batch and gains values — raises
             rather than being dropped; pass ``schema=`` for such streams.
+            The reserved state columns (`STATE_COLUMNS`) are never
+            inferred: they keep their v1 Arrow types.
 
     ``start_time`` / ``end_time`` are stored as ``timestamp("ns")`` in
     naive UTC — the catalog's time-axis contract (tz-aware inputs are
@@ -370,7 +372,13 @@ class StreamingParquetWriter:
             keys: dict[str, None] = {}
             for row in rows:
                 keys.update(dict.fromkeys(k for k in row if k not in _WRITER_OWNED))
+            # The reserved state columns have fixed types: an all-null
+            # `member` in the first batch (analyses) must not seal as null.
+            state_types = state_arrow_types()
             for key in keys:
+                if key in state_types:
+                    fields.append(pa.field(key, state_types[key]))
+                    continue
                 values = [row.get(key) for row in rows]
                 fields.append(pa.field(key, _column_array(key, values).type))
         fields.append(pa.field("_backend", pa.string()))

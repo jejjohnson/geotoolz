@@ -30,6 +30,7 @@ from geocatalog._src._schema import (
     SCHEMA_VERSION_CURRENT,
     CatalogKind,
     check_schema_versions,
+    coerce_state_columns,
 )
 from geocatalog._src.backends.memory import InMemoryGeoCatalog
 from geocatalog._src.base import CatalogMetadataError, CatalogSchemaError
@@ -40,15 +41,27 @@ from geocatalog._src.utils.retry import retry_transient_io
 # Forward migrations keyed by *source* version. `_MIGRATIONS[k]` takes a
 # v_k gdf and returns a v_(k+1) gdf. The chain
 # ``_MIGRATIONS[v_artifact] ∘ … ∘ _MIGRATIONS[v_current - 1]`` brings an
-# old artifact up to the current version. Empty today (current schema
-# is v0); populate when shipping v1.
+# old artifact up to the current version.
 #
 # Input shape contract for migration authors: migrations run inside
 # `from_geoparquet` AFTER the internal `_backend` / `_schema_version`
 # columns are dropped and BEFORE the (start_time, end_time)
 # IntervalIndex is rebuilt — a migration sees plain `start_time` /
 # `end_time` columns, never the interval index.
-_MIGRATIONS: dict[int, Callable[[gpd.GeoDataFrame], gpd.GeoDataFrame]] = {}
+def _v0_to_v1(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """v0 → v1: reserve the state columns (`STATE_COLUMNS`).
+
+    A v0 catalog without any of the five names is unchanged. One whose
+    extras already use them (filled by hand before v1) gets all five,
+    typed: ``run_time`` as ``datetime64[us]``, ``member`` as text, the
+    missing ones as nulls.
+    """
+    return coerce_state_columns(gdf)
+
+
+_MIGRATIONS: dict[int, Callable[[gpd.GeoDataFrame], gpd.GeoDataFrame]] = {
+    0: _v0_to_v1,
+}
 
 
 def _staging_name(path: Path) -> Path:
@@ -189,7 +202,7 @@ def to_geoparquet(
             existing one.
         schema_version: Value written to the reserved
             ``_schema_version`` column. Defaults to
-            `SCHEMA_VERSION_CURRENT` (today: 0).
+            `SCHEMA_VERSION_CURRENT` (today: 1).
         write_covering_bbox: Emit the per-row ``bbox`` covering struct
             that GeoParquet 1.1 readers (DuckDB, geopandas ≥0.14) use
             for predicate pushdown. Default True; turn off only if a
@@ -319,6 +332,9 @@ def from_geoparquet(
     )
     if v_artifact < SCHEMA_VERSION_CURRENT:
         gdf = _apply_migrations(gdf, from_version=v_artifact)
+    # Parquet hands `list<string>` back as numpy arrays; the state columns
+    # get the same Python types every builder writes.
+    gdf = coerce_state_columns(gdf)
     if "start_time" in gdf.columns and "end_time" in gdf.columns:
         idx = pd.IntervalIndex.from_arrays(
             gdf.pop("start_time"),

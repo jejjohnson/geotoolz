@@ -8,7 +8,7 @@ drift apart.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
 
@@ -53,9 +53,29 @@ def check_kind(kind: object, where: str) -> None:
 StorageEngine = Literal["memory", "duckdb"]
 """Where a built or opened catalog lives: in RAM, or a DuckDB relation."""
 
-SCHEMA_VERSION_CURRENT: int = 0
+StateKind = Literal["analysis", "forecast", "reanalysis"]
+"""What a model state is: the reserved ``kind`` column of a state catalog."""
+
+STATE_KINDS: tuple[str, ...] = get_args(StateKind)
+
+STATE_COLUMNS: tuple[str, ...] = ("kind", "run_time", "member", "producer", "parents")
+"""Row columns reserved, with fixed types, for model states (schema v1).
+
+``kind`` (string, a `StateKind`), ``run_time`` (``datetime64[us]``, naive
+UTC: the run's initialisation time), ``member`` (string: a CF realization
+number written as text, or a CMIP variant label such as ``r1i1p1f1``),
+``producer`` (string) and ``parents`` (``list<string>``: the URIs the
+state was computed from). A catalog carries all five or none of them;
+lead time is not stored, it is the row's valid time minus ``run_time``.
+They stay ordinary row columns (and `CatalogRow.extras` keys), unlike
+`RESERVED_COLUMNS`, which every artifact carries.
+"""
+
+SCHEMA_VERSION_CURRENT: int = 1
 """The reader's schema version. Bump on every substantive schema change
-and register the ``previous → this`` migration in `parquet._MIGRATIONS`."""
+and register the ``previous → this`` migration in `parquet._MIGRATIONS`.
+
+v1 reserves `STATE_COLUMNS`."""
 
 LEGACY_UNVERSIONED: int = 0
 """Version assumed for artifacts written before ``_schema_version`` existed.
@@ -65,8 +85,34 @@ migrates those legacy files instead of silently skipping them.
 """
 
 
+MIGRATION_TOUCHES: dict[int, frozenset[str]] = {0: frozenset(STATE_COLUMNS)}
+"""The columns the ``v → v+1`` migration reads, by source version ``v``.
+
+An artifact with none of them is already at ``v+1`` in all but its
+stamp, so a reader that cannot migrate (DuckDB) may open it as is.
+v0 → v1 only types the state columns: every v0 raster, vector or
+xarray catalog without them, and every external GeoParquet, opens.
+"""
+
+
+def migration_is_noop(lo: int, reader: int, columns: Collection[str]) -> bool:
+    """True when migrating an artifact with ``columns`` from ``lo`` changes nothing."""
+    present = set(columns)
+    for version in range(lo, reader):
+        touched = MIGRATION_TOUCHES.get(version)
+        if touched is None or touched & present:
+            return False
+    return True
+
+
 def check_schema_versions(
-    source: object, lo: int, hi: int, *, reader: int, can_migrate: bool
+    source: object,
+    lo: int,
+    hi: int,
+    *,
+    reader: int,
+    can_migrate: bool,
+    columns: Collection[str] | None = None,
 ) -> None:
     """Raise `CatalogSchemaError` for versions this reader cannot open.
 
@@ -79,6 +125,10 @@ def check_schema_versions(
         can_migrate: Whether the caller runs forward migrations itself
             (the in-memory reader does; DuckDB does not, so an older
             artifact is rejected with a pointer to ``geocatalog migrate``).
+        columns: The artifact's column names. When given, an older
+            artifact that the migrations would leave unchanged
+            (`migration_is_noop`) is accepted even without
+            ``can_migrate``.
     """
     from geocatalog._src.base import CatalogSchemaError
 
@@ -95,7 +145,11 @@ def check_schema_versions(
             f"v{reader}. Upgrade `geotoolz-catalog` to read "
             "this artifact."
         )
-    if hi < reader and not can_migrate:
+    if (
+        hi < reader
+        and not can_migrate
+        and not (columns is not None and migration_is_noop(lo, reader, columns))
+    ):
         raise CatalogSchemaError(
             f"artifact {source} has _schema_version={hi} < reader "
             f"v{reader}. The DuckDB backend does not run "
@@ -148,16 +202,122 @@ def empty_frame(crs: Any, columns: Mapping[str, str] | None = None) -> gpd.GeoDa
     return gdf
 
 
+def state_arrow_types() -> dict[str, Any]:
+    """The Arrow type of each of `STATE_COLUMNS`, for the streaming writer."""
+    import pyarrow as pa
+
+    return {
+        "kind": pa.string(),
+        "run_time": pa.timestamp("us"),
+        "member": pa.string(),
+        "producer": pa.string(),
+        "parents": pa.list_(pa.string()),
+    }
+
+
+def _missing(value: Any) -> bool:
+    """True for ``None`` and scalar NA (``NaN``, ``NaT``, ``pd.NA``)."""
+    import pandas as pd
+
+    if value is None:
+        return True
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):  # arrays and other non-scalars
+        return False
+
+
+def state_text(value: Any) -> str | None:
+    """A ``kind`` / ``member`` / ``producer`` value as text, or ``None``.
+
+    Integral numbers lose their ``.0`` (a realization read back from a
+    float column is ``"0"``, not ``"0.0"``).
+    """
+    import numbers
+
+    if _missing(value):
+        return None
+    if isinstance(value, bytes):
+        return value.decode()
+    if isinstance(value, numbers.Integral) and not isinstance(value, bool):
+        return str(int(value))
+    if isinstance(value, numbers.Real) and float(value).is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def state_parents(value: Any) -> list[str] | None:
+    """A ``parents`` value as a list of URIs: one string becomes a list of one."""
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)):
+        return [state_text(value) or ""]
+    if _missing(value):
+        return None
+    return [str(v) for v in value]
+
+
+def coerce_state_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Give a frame's `STATE_COLUMNS` their v1 types; add the missing ones as nulls.
+
+    A frame with none of the five names is returned unchanged: it is not a
+    state catalog. One with any of them (a v0 catalog whose extras were
+    filled by hand, or rows read back from Parquet or DuckDB) gets all
+    five, typed: ``run_time`` as naive-UTC ``datetime64[us]``, ``member``
+    as text (``0`` becomes ``"0"``), ``parents`` as lists of strings.
+
+    Args:
+        gdf: A catalog frame.
+
+    Returns:
+        A new frame (or ``gdf`` itself when it carries no state column).
+    """
+    import pandas as pd
+
+    from geocatalog._src.utils.timeutil import naive_utc_datetimes
+
+    if not any(name in gdf.columns for name in STATE_COLUMNS):
+        return gdf
+    gdf = gdf.copy()
+    n = len(gdf)
+    for name in ("kind", "member", "producer"):
+        values = gdf[name] if name in gdf.columns else [None] * n
+        gdf[name] = pd.Series(
+            [state_text(v) for v in values], index=gdf.index, dtype="str"
+        )
+    if "run_time" in gdf.columns:
+        times = naive_utc_datetimes(
+            pd.Series(pd.to_datetime(gdf["run_time"], utc=False), index=gdf.index)
+        )
+    else:
+        times = pd.Series(pd.NaT, index=gdf.index)
+    gdf["run_time"] = times.astype("datetime64[us]")
+    values = gdf["parents"] if "parents" in gdf.columns else [None] * n
+    gdf["parents"] = pd.Series(
+        [state_parents(v) for v in values], index=gdf.index, dtype=object
+    )
+    return gdf
+
+
 __all__ = [
     "BACKEND_TAGS",
     "INTERNAL_COLUMNS",
     "LEGACY_UNVERSIONED",
+    "MIGRATION_TOUCHES",
     "RESERVED_COLUMNS",
     "SCHEMA_VERSION_CURRENT",
+    "STATE_COLUMNS",
+    "STATE_KINDS",
     "CatalogKind",
+    "StateKind",
     "StorageEngine",
     "check_kind",
     "check_schema_versions",
+    "coerce_state_columns",
     "crs_config_string",
     "empty_frame",
+    "migration_is_noop",
+    "state_arrow_types",
+    "state_parents",
+    "state_text",
 ]

@@ -23,8 +23,12 @@ import pandas as pd
 from geocatalog._src._schema import (
     INTERNAL_COLUMNS as INTERNAL_COLUMNS,
     RESERVED_COLUMNS as RESERVED_COLUMNS,
+    STATE_COLUMNS,
     CatalogKind,
+    state_parents,
+    state_text,
 )
+from geocatalog._src.utils.timeutil import to_naive_utc
 
 
 if TYPE_CHECKING:
@@ -106,6 +110,57 @@ class CatalogRow:
     interval: pd.Interval
     crs: pyproj.CRS
     extras: dict[str, Any] = dataclasses.field(default_factory=dict)
+
+    @property
+    def state(self) -> StateFields | None:
+        """The row's model-state fields, typed; ``None`` for a non-state row.
+
+        Reads the reserved state columns (`STATE_COLUMNS`) out of
+        ``extras``, with nulls as ``None`` whatever the backend returned
+        (``NaN``, ``NaT``, a numpy array for ``parents``).
+        """
+        if not any(name in self.extras for name in STATE_COLUMNS):
+            return None
+        get = self.extras.get
+        run_time = get("run_time")
+        run_ts = (
+            None if run_time is None or pd.isna(run_time) else pd.Timestamp(run_time)
+        )
+        return StateFields(
+            kind=state_text(get("kind")),
+            run_time=None if run_ts is None else to_naive_utc(run_ts),
+            member=state_text(get("member")),
+            producer=state_text(get("producer")),
+            parents=tuple(state_parents(get("parents")) or ()),
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class StateFields:
+    """The model-state fields of one catalog row (`CatalogRow.state`).
+
+    Attributes:
+        kind: ``"analysis"``, ``"forecast"`` or ``"reanalysis"``, or
+            ``None`` when the file did not say.
+        run_time: The run's initialisation time (naive UTC), or ``None``.
+        member: The ensemble member as text (``"0"``, ``"r1i1p1f1"``), or
+            ``None`` for a deterministic run.
+        producer: What made the state (a pipeline hash, a model id), or
+            ``None``.
+        parents: URIs of the states this one was computed from; empty
+            when none are recorded.
+
+    Example:
+        >>> row = next(catalog.iter_rows())
+        >>> row.state.run_time, row.state.member
+        (Timestamp('2026-01-02 00:00:00'), '0')
+    """
+
+    kind: str | None
+    run_time: pd.Timestamp | None
+    member: str | None
+    producer: str | None
+    parents: tuple[str, ...] = ()
 
 
 class _GeoCatalogMeta(type(Protocol)):  # type: ignore[misc]

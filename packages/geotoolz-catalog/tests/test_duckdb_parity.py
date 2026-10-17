@@ -123,10 +123,16 @@ def test_unversioned_artifact_needs_migration_on_both_engines(
     _cat(LEFT).gdf.reset_index(drop=True).to_parquet(path)
     from geocatalog._src.storage import parquet
 
-    monkeypatch.setattr(parquet, "SCHEMA_VERSION_CURRENT", 1)
+    # v0 → v1 only types the state columns, which this file lacks: both
+    # engines open it (memory runs the migration, DuckDB needs none).
+    n_rows = len(_cat(LEFT))
+    assert len(DuckDBGeoCatalog.open(path, kind="raster")) == n_rows
+    assert len(open_catalog(path, engine="memory", kind="raster")) == n_rows
+    # One version further, with no migration registered for it.
+    monkeypatch.setattr(parquet, "SCHEMA_VERSION_CURRENT", 2)
     with pytest.raises(CatalogSchemaError, match="geocatalog migrate"):
         DuckDBGeoCatalog.open(path, kind="raster")
-    with pytest.raises(CatalogSchemaError, match="missing migration v0"):
+    with pytest.raises(CatalogSchemaError, match="missing migration v1"):
         open_catalog(path, engine="memory", kind="raster")
 
 
