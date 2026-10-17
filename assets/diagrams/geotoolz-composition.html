@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>geotoolz composition</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1540px; }
+  .panel { position: relative; border-radius: 16px; border: 1.5px solid #e2e8f0; background: #fff; padding: 18px 22px 22px; }
+  .panel + .panel { margin-top: 22px; }
+  .panel-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 18px; }
+  .panel-head .k { font-size: 15px; font-weight: 700; }
+  .panel-head .d { font-size: 13px; color: var(--muted); }
+  .panel-head code { font-family: var(--mono); font-size: 12.5px; background: var(--compute-bg); padding: 2px 6px; border-radius: 6px; }
+  .seq { display: flex; align-items: center; gap: 64px; }
+  .node.compute { --accent: var(--compute); }
+  .node.io { --accent: #475569; background: var(--base-bg); }
+  .node.out { --accent: var(--out); background: var(--out-bg); }
+  .dag { display: grid; grid-template-columns: 170px 190px 210px 170px 190px 230px; column-gap: 50px; row-gap: 40px; align-items: center; }
+  .r1 { grid-row: 1; } .r2 { grid-row: 2; } .r12 { grid-row: 1 / 3; }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">Two composition shapes, one protocol</div>
+  <div class="subtitle">Every box is an <b>Operator</b>; <b>Sequential</b> and <b>Graph</b> are Operators too, so they nest. Each chip is the output shape and dtype of that step.</div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="k">Sequential</span><span class="d">a linear chain — built with <code>a | b | c</code> or <code>Sequential([a, b, c])</code></span></div>
+    <div class="seq">
+      <div class="node io" id="s-in"><div class="name">scene</div><div class="desc">Sentinel-2 L2A</div><div class="chips"><span class="chip"><span class="t">(13, H, W)</span><span class="s">uint16</span></span></div></div>
+      <div class="node compute" id="s1"><div class="name"><code>SelectBands</code></div><div class="desc">drop SCL, keep the 12 L2A bands</div><div class="chips"><span class="chip"><span class="t">(12, H, W)</span><span class="s">uint16</span></span></div></div>
+      <div class="node compute" id="s2"><div class="name"><code>DNToReflectance</code></div><div class="desc">scale=1e-4</div><div class="chips"><span class="chip"><span class="t">(12, H, W)</span><span class="s">float64</span></span></div></div>
+      <div class="node compute" id="s3"><div class="name"><code>NDVI</code></div><div class="desc">nir="B8", red="B4"</div><div class="chips"><span class="chip"><span class="t">(H, W)</span><span class="s">float64</span></span></div></div>
+      <div class="node out" id="s-out"><div class="name">ndvi</div><div class="desc">NaN where no data</div><div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(H, W) float64</span></span></div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><span class="k">Graph</span><span class="d">a named DAG — fan-out from one input, fan-in at <code>ApplyMask</code>, several named outputs</span></div>
+    <div class="dag">
+      <div class="node io r12" id="g-in"><div class="name"><code>Input("scene")</code></div><div class="desc">bands B1…B12 + SCL</div><div class="chips"><span class="chip"><span class="t">(13, H, W)</span><span class="s">uint16</span></span></div></div>
+      <div class="node compute r1" id="g1"><div class="name"><code>SelectBands</code></div><div class="desc">12 L2A bands</div><div class="chips"><span class="chip"><span class="t">(12, H, W)</span><span class="s">uint16</span></span></div></div>
+      <div class="node compute r1" id="g2"><div class="name"><code>DNToReflectance</code></div><div class="desc">scale=1e-4</div><div class="chips"><span class="chip"><span class="t">(12, H, W)</span><span class="s">float64</span></span></div></div>
+      <div class="node compute r1" id="g3"><div class="name"><code>NDVI</code></div><div class="desc">nir="B8", red="B4"</div><div class="chips"><span class="chip"><span class="t">(H, W)</span><span class="s">float64</span></span></div></div>
+      <div class="node compute r2" id="g4" style="grid-column: 2 / 4;"><div class="name"><code>S2SCL</code></div><div class="desc">targets = cloud_shadow · cloud · cirrus — True means drop</div><div class="chips"><span class="chip"><span class="t">(H, W)</span><span class="s">bool</span></span></div></div>
+      <div class="node compute r12" id="g5" style="grid-column: 5;"><div class="name"><code>ApplyMask</code></div><div class="desc">fill dropped pixels with NaN</div><div class="chips"><span class="chip"><span class="t">(H, W)</span><span class="s">float64</span></span></div></div>
+      <div class="node out r1" id="o1" style="grid-column: 6;"><div class="name">"ndvi"</div><div class="desc">cloud-free NDVI</div><div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(H, W) float64</span></span></div></div>
+      <div class="node out r2" id="o2" style="grid-column: 6;"><div class="name">"cloud"</div><div class="desc">the mask itself</div><div class="chips"><span class="chip"><span class="t">GeoTensor</span><span class="s">(H, W) bool</span></span></div></div>
+    </div>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  const C = "#cf9418", G = "#64748b";
+  const L = (t, s) => `<span class='t'>${t}</span><span class='s'>${s}</span>`;
+  wire("s-in", "s1", { color: G });
+  wire("s1", "s2", { color: C });
+  wire("s2", "s3", { color: C });
+  wire("s3", "s-out", { color: C });
+
+  wire("g-in", "g1", { color: G, fromShift: -30, bend: 50 });
+  wire("g-in", "g4", { color: G, fromShift: 30, bend: 50 });
+  wire("g1", "g2", { color: C });
+  wire("g2", "g3", { color: C });
+  wire("g3", "g5", { color: C, toShift: -18 });
+  wire("g4", "g5", { color: C, toShift: 18 });
+  wire("g5", "o1", { color: "#c2474f" });
+  wire("g4", "o2", { from: "bottom", to: "left", color: "#c2474f", fromShift: 120, toShift: 14, bend: 70 });
+  ready();
+</script>
+</body>
+</html>

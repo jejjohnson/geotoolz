@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>geoarray carrier</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1300px; }
+  .row1 { display: grid; grid-template-columns: 470px 560px; column-gap: 150px; align-items: center; }
+  .row2 { display: grid; grid-template-columns: 470px 560px; column-gap: 150px; align-items: start; margin-top: 46px; }
+  .stackcol { display: flex; flex-direction: column; gap: 18px; }
+  .group { font-size: 11.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 2px 0 8px; }
+  .fields { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .fields span { font-family: var(--mono); font-size: 12px; background: var(--base-bg); border: 1px solid #cbd5e1;
+                 border-radius: 8px; padding: 5px 8px; color: var(--base-ink); }
+  .fields span b { font-weight: 700; color: var(--ink); }
+  .fields span em { font-style: normal; color: var(--muted); font-family: var(--sans); font-size: 11.5px; margin-left: 4px; }
+  .node.leaf { --accent: var(--cut); }
+  .node.static { --accent: var(--find); }
+  .node.geom { --accent: var(--base); }
+  .node.jax { --accent: var(--compute); }
+  .node.np { --accent: var(--read); }
+  .colhead { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">geoarray — one georeferenced carrier for NumPy and JAX</div>
+  <div class="subtitle">A GeoArray holds its array (composition, not a subclass). As a JAX pytree, its leaves are traced and its static fields key the compile cache.</div>
+
+  <div class="row1">
+    <div class="lane base" id="lane-carrier">
+      <div class="lane-head"><span class="verb">carrier</span><span class="pkg">GeoArray</span><span class="imp">geoarray</span></div>
+      <div class="stackcol">
+        <div>
+          <div class="group">leaves · traced</div>
+          <div class="node leaf" id="leaves"><div class="name">data and transform</div>
+            <div class="fields">
+              <span><b>data</b> (…, H, W)<em>numpy.ndarray or jax.Array</em></span>
+              <span><b>transform</b> (6,) float64<em>(a, b, c, d, e, f)</em></span>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="group">static · hashed</div>
+          <div class="node static" id="static"><div class="name">crs, fill_value, attrs</div>
+            <div class="fields">
+              <span><b>crs</b> pyproj.CRS</span>
+              <span><b>fill_value</b> NaN · 0 · False · None</span>
+              <span><b>attrs</b> FrozenAttrs<em>band_names, wavelengths, …</em></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="colhead">what the split buys</div>
+      <div class="stackcol" style="gap:26px">
+        <div class="node jax" id="trace"><div class="name"><code>jax.jit</code> · <code>jax.grad</code> · <code>jax.vmap</code></div><div class="desc">gradients reach the georeferencing; vmap batches carriers with one transform each, (P, 6)</div></div>
+        <div class="node static" id="cache"><div class="name">the compile cache</div><div class="desc">a new transform (another scene, another patch) reuses the compiled code; a new CRS, shape or attrs compiles once more</div></div>
+        <div class="node np" id="np"><div class="name">NumPy</div><div class="desc"><code>np.asarray(g)</code> is the data, so NumPy code keeps working; <code>to_jax</code> / <code>to_numpy</code> move between backends</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row2">
+    <div class="node geom" id="grid"><div class="name"><code>Grid</code> · geometry without pixels</div><div class="desc">transform, CRS and (H, W): hashable, so a warp target or static config · <code>bounds</code> · <code>res</code> · <code>shift</code> · <code>isclose</code></div></div>
+    <div class="node geom" id="window"><div class="name"><code>PixelWindow</code></div><div class="desc">a rectangle of pixels on a grid: row_off, col_off, height, width — rasterio's Window without rasterio</div></div>
+  </div>
+
+  <div class="legend">
+    <span><i></i> traced / derived</span>
+    <span><i class="dash"></i> keys or locates</span>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  const S = "#475569";
+  wire("leaves", "trace", { from: "right", to: "left", color: "#cf9418" });
+  wire("static", "cache", { from: "right", to: "left", color: "#7b6bb5", dashed: true });
+  wire("lane-carrier", "grid", { from: "bottom", to: "top", color: S, label: '<span class="chip">g.grid</span>' });
+  wire("grid", "window", { from: "right", to: "left", color: S, dashed: true });
+  ready();
+</script>
+</body>
+</html>
