@@ -68,7 +68,7 @@ from geoproducts.carbonmapper.download import _request
 
 
 if TYPE_CHECKING:
-    from georeader.rasterio_reader import RasterioReader
+    from geoarray import RasterSource
     from shapely.geometry.base import BaseGeometry
 
 #: Asset-proxy base. Bearer-aware mirror of the signed CDN (no
@@ -437,7 +437,12 @@ class CMProduct:
 
 
 class CMRasterProduct(CMProduct):
-    """A georeferenced raster product (GeoTIFF) → ``RasterioReader``."""
+    """A georeferenced raster product (GeoTIFF) → a lazy `geoarray.RasterSource`.
+
+    georeader's ``RasterioReader`` reads it (the internal engine), wrapped
+    with ``geoarray.interop.georeader.source_from_georeader``, so reads
+    return a `geoarray.GeoArray`.
+    """
 
     def open(
         self,
@@ -446,15 +451,9 @@ class CMRasterProduct(CMProduct):
         token: str | None = None,
         overview_level: int | None = None,
         http_timeout: float = 30.0,
-    ) -> RasterioReader:
+    ) -> RasterSource:
         del http_timeout  # GDAL applies its own HTTP timeouts
-        from georeader.rasterio_reader import RasterioReader
-
-        return RasterioReader(
-            str(path_or_url),
-            overview_level=overview_level,
-            rio_env_options=rio_env_options_for(str(path_or_url), token),
-        )
+        return _open_raster(path_or_url, token=token, overview_level=overview_level)
 
 
 class CMVectorProduct(CMProduct):
@@ -572,6 +571,45 @@ def rio_env_options_for(path: str, token: str | None) -> dict[str, Any] | None:
         **RIO_ENV_OPTIONS_DEFAULT,
         "GDAL_HTTP_HEADERS": f"Authorization: Bearer {token}",
     }
+
+
+def _open_raster(
+    path_or_url: str | Path,
+    *,
+    token: str | None = None,
+    overview_level: int | None = None,
+) -> RasterSource:
+    """Open a Carbon Mapper GeoTIFF as a lazy `geoarray.RasterSource`.
+
+    georeader's ``RasterioReader`` reads the file (GDAL, authenticated per
+    read with :func:`rio_env_options_for`); the result is wrapped with
+    ``geoarray.interop.georeader.source_from_georeader``, so its
+    ``read_window`` / ``load`` return a `geoarray.GeoArray`. Opening reads
+    the header (one range request for a remote file).
+
+    Args:
+        path_or_url: Local path or URL of the GeoTIFF.
+        token: Bearer token for Carbon Mapper's asset proxy (sent only for
+            that host, inside the read's ``rasterio.Env``).
+        overview_level: ``None`` for full resolution, else a COG overview.
+
+    Returns:
+        The lazy source; ``source.grid`` describes the file's pixel grid.
+
+    Raises:
+        rasterio.errors.RasterioIOError: The file cannot be opened.
+
+    """
+    from geoarray.interop.georeader import source_from_georeader
+    from georeader.rasterio_reader import RasterioReader
+
+    return source_from_georeader(
+        RasterioReader(
+            str(path_or_url),
+            overview_level=overview_level,
+            rio_env_options=rio_env_options_for(str(path_or_url), token),
+        )
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────

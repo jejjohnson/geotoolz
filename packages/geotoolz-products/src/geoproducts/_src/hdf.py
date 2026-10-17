@@ -26,7 +26,7 @@ from types import ModuleType
 from typing import IO, TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
-from rasterio.windows import Window
+from geoarray import PixelWindow
 
 from geoproducts._src.base import ProductReader
 from geoproducts._src.extras import missing_extra, require
@@ -212,7 +212,7 @@ class PackedGridReader(ProductReader):
     def _band_attrs(self) -> dict[str, Any]:
         return {"units": tuple(v.units for v in self._vars)}
 
-    def _read_window(self, window: Window) -> np.ndarray:
+    def _read_window(self, window: PixelWindow) -> np.ndarray:
         def read(rows: slice, cols: slice) -> np.ndarray:
             with self._open() as f:
                 return self._decode([f[v.name][rows, cols] for v in self._vars])

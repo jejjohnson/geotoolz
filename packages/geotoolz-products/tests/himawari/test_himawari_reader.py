@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 from _hsd import CFAC, IR_CALIBRATION, OFFSET, SIZE, VIS_CALIBRATION
-from rasterio.windows import Window
+from geoarray import PixelWindow, RasterSource
 
 from geoproducts import ProductReader, himawari
 from geoproducts._src.geostationary import FixedGrid
@@ -24,6 +24,7 @@ def test_segments_assemble_in_any_order(full_disk) -> None:
     paths = full_disk(segments=4)
     reader = himawari.Reader(paths[::-1], calibration="counts")
     assert isinstance(reader, ProductReader)
+    assert isinstance(reader, RasterSource)
     assert reader.segments == (1, 2, 3, 4)
     assert reader.paths == tuple(paths)
     assert reader.shape == (1, SIZE, SIZE)
@@ -53,23 +54,31 @@ def test_windows_decode_only_the_segments_they_touch(full_disk, monkeypatch) -> 
         return real(path, header, rows, cols)
 
     monkeypatch.setattr("geoproducts.himawari.reader.read_lines", spy)
-    tile = reader.read_from_window(Window(10, 20, 30, 10))  # rows 20-29
+    tile = reader.read_window(
+        PixelWindow(col_off=10, row_off=20, width=30, height=10)
+    )  # rows 20-29
     assert sorted(set(touched)) == [1, 2]
     expected = _counts(
         *np.meshgrid(np.arange(20, 30), np.arange(10, 40), indexing="ij")
     )
     np.testing.assert_array_equal(np.asarray(tile)[0], expected)
     # Boundless: the part past the grid is fill.
-    edge = np.asarray(reader.read_from_window(Window(95, 95, 10, 10)))[0]
+    edge = np.asarray(
+        reader.read_window(PixelWindow(col_off=95, row_off=95, width=10, height=10))
+    )[0]
     assert (edge[5:, :] == 65535).all() and (edge[:, 5:] == 65535).all()
     assert edge[0, 0] == _counts(95, 95)
 
 
 def test_compressed_segments_cache_one_decompressed_segment(full_disk) -> None:
     reader = himawari.Reader(full_disk(segments=4, bz2=True), calibration="counts")
-    first = np.asarray(reader.read_from_window(Window(0, 30, 50, 5)))
+    first = np.asarray(
+        reader.read_window(PixelWindow(col_off=0, row_off=30, width=50, height=5))
+    )
     assert reader._cache is not None and reader._cache[0] == 1  # segment 2
-    again = np.asarray(reader.read_from_window(Window(0, 30, 50, 5)))
+    again = np.asarray(
+        reader.read_window(PixelWindow(col_off=0, row_off=30, width=50, height=5))
+    )
     np.testing.assert_array_equal(first, again)
     clone = pickle.loads(pickle.dumps(reader))
     assert clone._cache is None
@@ -111,7 +120,9 @@ def test_metadata_and_attrs(full_disk) -> None:
     assert reader.wavelength_um == pytest.approx(IR_CALIBRATION["wavelength_um"])
     assert reader.start_time < reader.end_time
     assert reader.units == "K"
-    attrs = reader.read_from_window(Window(40, 40, 2, 2)).attrs
+    attrs = reader.read_window(
+        PixelWindow(col_off=40, row_off=40, width=2, height=2)
+    ).attrs
     assert attrs["band_names"] == ("B13",)
     assert attrs["units"] == ("K",)
     assert attrs["wavelengths"] == (pytest.approx(10407.3),)
@@ -127,15 +138,13 @@ def _single(hsd, value: int, *, band: int = 13, **kwargs) -> np.ndarray:
 
 def test_radiance_and_brightness_temperature(hsd) -> None:
     path = _single(hsd, 3000)
-    centre = Window(48, 48, 4, 4)
-    radiance = np.asarray(himawari.Reader(path).read_from_window(centre))
+    centre = PixelWindow(col_off=48, row_off=48, width=4, height=4)
+    radiance = np.asarray(himawari.Reader(path).read_window(centre))
     c = IR_CALIBRATION
     expected_l = 3000 * c["gain"] + c["offset"]
     np.testing.assert_allclose(radiance, expected_l, rtol=1e-6)
     bt = np.asarray(
-        himawari.Reader(path, calibration="brightness_temperature").read_from_window(
-            centre
-        )
+        himawari.Reader(path, calibration="brightness_temperature").read_window(centre)
     )
     # Planck inversion at the band's central wavelength, by hand.
     speed, planck, boltzmann = c["planck"]
@@ -150,16 +159,16 @@ def test_radiance_and_brightness_temperature(hsd) -> None:
 
 def test_reflectance_uses_the_updated_visible_calibration(hsd) -> None:
     path = _single(hsd, 500, band=3)
-    centre = Window(48, 48, 4, 4)
+    centre = PixelWindow(col_off=48, row_off=48, width=4, height=4)
     refl = np.asarray(
-        himawari.Reader(path, calibration="reflectance").read_from_window(centre)
+        himawari.Reader(path, calibration="reflectance").read_window(centre)
     )
     gain, offset = VIS_CALIBRATION["updated"]
     np.testing.assert_allclose(
         refl, (500 * gain + offset) * VIS_CALIBRATION["albedo"], rtol=1e-6
     )
     nominal = _single(hsd, 500, band=3, updated_vis=False)
-    plain = np.asarray(himawari.Reader(nominal).read_from_window(centre))
+    plain = np.asarray(himawari.Reader(nominal).read_window(centre))
     expected = 500 * VIS_CALIBRATION["gain"] + VIS_CALIBRATION["offset"]
     np.testing.assert_allclose(plain, expected, rtol=1e-6)
 

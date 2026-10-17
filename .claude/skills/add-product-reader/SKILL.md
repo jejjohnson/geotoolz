@@ -25,14 +25,21 @@ the minimal one.
 
 ## 2. Build the subpackage
 
-Follow the layout on the docs page. What a read returns is the
-`GeoTensor` carrier contract (root `AGENTS.md`):
+Follow the layout on the docs page. A reader is a `geoarray.RasterSource`
+and every read returns a `geoarray.GeoArray` (`packages/geotoolz-array/AGENTS.md`):
 
+- `_read_window(window)` takes a `geoarray.PixelWindow` and returns the
+  pixels as a numpy array (use `_read_boundless`);
 - bands on axis `-3`;
-- `fill_value_default` set to the product's nodata;
+- `_fill_value` (read as `fill_value`) set to the product's nodata,
+  explicitly — never left to a default;
 - band names under `attrs["band_names"]` (the base class sets them from
   `_bands`);
-- per-band extras (units, `wavelengths` in nm) through `_band_attrs`.
+- per-band extras (units, `wavelengths` in nm) through `_band_attrs`;
+- no georeader `GeoTensor` / `GeoData` in the public API: georeader may be
+  an internal engine, converting at the boundary with
+  `geoarray.interop.georeader`, and a georeader object passed in is
+  refused (`_src/carrier.py`).
 
 That is what lets every geotoolz operator consume the read unchanged.
 Calibrate with the file's own coefficients; document units and the
@@ -48,6 +55,8 @@ in `geoproducts/__init__.py`.
   reference.
 - Real downloads: `@pytest.mark.integration` (public data) or
   `@pytest.mark.live` (needs credentials).
+- Assert that the reader is a `geoarray.RasterSource` and that
+  `read_window`, `load` and `read_from_bounds` agree on the same pixels.
 - Coverage gate: 80 %.
 
 ## 4. Docs and checklist

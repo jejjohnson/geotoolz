@@ -4,54 +4,62 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
-from typing import Any, Literal
+from functools import cached_property
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from affine import Affine
-from georeader import read
-from georeader.abstract_reader import GeoData
-from georeader.geotensor import GeoTensor
-from rasterio.windows import Window, transform as window_transform
+from geoarray import FrozenAttrs, GeoArray, Grid, PixelWindow
+
+
+if TYPE_CHECKING:
+    import pyproj
 
 
 Track = Literal["A", "B"]
 
 
-class ProductReader(GeoData, ABC):
-    """ABC for georeader-compatible product readers.
+class ProductReader(ABC):
+    """ABC for product readers: each one a lazy `geoarray.RasterSource`.
 
     Subclasses provide sensor-specific metadata and implement
-    :meth:`_read_window`; the base class supplies the small GeoData surface
-    needed by geotoolz operators.
+    :meth:`_read_window`; the base class supplies the `RasterSource`
+    surface (``grid``, ``shape``, ``dtype``, ``fill_value``, ``attrs``,
+    ``read_window``, ``load``) and georeader's map-coordinate reads
+    (``read_from_bounds``, ``read_from_center_coords``), all returning a
+    `geoarray.GeoArray`.
 
     Examples:
         Implement a file-backed product reader::
 
             class Reader(ProductReader):
                 def __init__(self, path): ...
-                def _read_window(self, window): ...
+                def _read_window(self, window: PixelWindow) -> np.ndarray: ...
 
-        Load a full scene into a ``GeoTensor``::
+        Load a full scene into a ``GeoArray``::
 
-            scene = Reader("scene.dat").load()
+            scene = Reader("scene.dat").load()  # (C, H, W)
 
         Read a tile without changing the reader::
 
-            tile = Reader("scene.dat").read_from_window(Window(0, 0, 256, 256))
+            window = PixelWindow(col_off=0, row_off=0, width=256, height=256)
+            tile = Reader("scene.dat").read_window(window)  # (C, 256, 256)
     """
 
     @abstractmethod
-    def _read_window(self, window: Window) -> np.ndarray:
+    def _read_window(self, window: PixelWindow) -> np.ndarray:
         """Read a sensor-native pixel window into a numpy array.
 
-        Implementations receive clipped windows when ``boundless=False`` and
-        may receive out-of-bounds windows when ``boundless=True``.
+        Implementations receive windows clipped to the grid when
+        ``boundless=False`` and may receive windows partly or wholly
+        outside it when ``boundless=True`` (:meth:`_read_boundless`
+        handles both).
         """
 
     @property
     @abstractmethod
     def _crs(self) -> Any:
-        """Reader CRS."""
+        """Reader CRS (anything `geoarray.as_crs` accepts)."""
 
     @property
     @abstractmethod
@@ -76,36 +84,63 @@ class ProductReader(GeoData, ABC):
     @property
     @abstractmethod
     def _fill_value(self) -> Any:
-        """Default fill value for boundless reads."""
+        """Fill value for nodata and out-of-grid pixels."""
 
     @property
     @abstractmethod
     def _track(self) -> Track:
         """Track A for clean affine grids, Track B for irregular geolocation."""
 
+    # -- RasterSource metadata ---------------------------------------------
+
+    @cached_property
+    def grid(self) -> Grid:
+        """The pixel grid: transform, CRS and ``(H, W)``."""
+        return Grid.from_affine(self._transform, self._crs, self._shape[-2:])
+
     @property
-    def crs(self) -> Any:
-        """Reader CRS."""
-        return self._crs
+    def crs(self) -> pyproj.CRS | None:
+        """Reader CRS (``grid.crs``)."""
+        return self.grid.crs
 
     @property
     def transform(self) -> Affine:
-        """Affine transform for Track A readers."""
-        return self._transform
+        """Affine transform of the grid (``grid.affine``), for Track A readers."""
+        return self.grid.affine
+
+    @property
+    def res(self) -> tuple[float, float]:
+        """Pixel size ``(x, y)`` in CRS units (``grid.res``)."""
+        return self.grid.res
+
+    @property
+    def bounds(self) -> tuple[float, float, float, float]:
+        """``(minx, miny, maxx, maxy)`` of the grid (``grid.bounds``)."""
+        return self.grid.bounds
 
     @property
     def shape(self) -> tuple[int, ...]:
         """Array shape as ``(..., height, width)``."""
-        return self._shape
+        return tuple(self._shape)
 
     @property
-    def dtype(self) -> Any:
+    def width(self) -> int:
+        """Grid width in pixels."""
+        return int(self.shape[-1])
+
+    @property
+    def height(self) -> int:
+        """Grid height in pixels."""
+        return int(self.shape[-2])
+
+    @property
+    def dtype(self) -> np.dtype:
         """Numpy dtype read by this reader."""
-        return self._dtype
+        return np.dtype(self._dtype)
 
     @property
     def dims(self) -> tuple[str, ...]:
-        """Dimension names, mirroring ``georeader.GeoTensor.dims``.
+        """Dimension names, as `geoarray.GeoArray.dims`.
 
         ``("time", "band", "y", "x")[-ndim:]`` — i.e. ``("y", "x")`` for 2-D,
         ``("band", "y", "x")`` for 3-D and ``("time", "band", "y", "x")``
@@ -127,8 +162,8 @@ class ProductReader(GeoData, ABC):
         return tuple(self._bands)
 
     @property
-    def fill_value_default(self) -> Any:
-        """Default fill value for out-of-bounds pixels."""
+    def fill_value(self) -> Any:
+        """Fill value of nodata and out-of-grid pixels."""
         return self._fill_value
 
     @property
@@ -136,10 +171,12 @@ class ProductReader(GeoData, ABC):
         """Reader track classification."""
         return self._track
 
-    def load(self, boundless: bool = True) -> GeoTensor:
-        """Load the reader's full extent into a ``GeoTensor``."""
-        window = Window(col_off=0, row_off=0, width=self.width, height=self.height)
-        return self.read_from_window(window, boundless=boundless)
+    @property
+    def attrs(self) -> FrozenAttrs:
+        """Metadata every read carries: ``band_names`` plus :meth:`_band_attrs`."""
+        # `band_names` is the canonical key every band resolver reads first
+        # (see geoops._src.bands.DEFAULT_BAND_KEYS).
+        return FrozenAttrs({"band_names": self.bands, **self._band_attrs()})
 
     def _band_attrs(self) -> dict[str, Any]:
         """Extra ``attrs`` every read carries (per-band ``units``, ``wavelengths``, …).
@@ -148,40 +185,82 @@ class ProductReader(GeoData, ABC):
         """
         return {}
 
-    def read_from_window(self, window: Window, boundless: bool = True) -> GeoTensor:
-        """Read a pixel window as a ``GeoTensor``.
+    # -- RasterSource reads ------------------------------------------------
 
-        ``attrs`` carry ``band_names`` plus whatever :meth:`_band_attrs`
-        adds.
+    def read_window(self, window: PixelWindow, *, boundless: bool = True) -> GeoArray:
+        """Read a pixel window as a ``GeoArray`` on the window's grid.
+
+        Args:
+            window: The pixels to read; may extend past the grid.
+            boundless: ``True`` returns exactly ``window.shape``, filled with
+                `fill_value` outside the grid; ``False`` returns only the
+                part inside.
+
+        Returns:
+            ``(..., h, w)`` carrier whose ``attrs`` are :attr:`attrs`.
+
+        Raises:
+            TypeError: ``window`` is not a `geoarray.PixelWindow` (convert a
+                rasterio ``Window`` with
+                ``PixelWindow(col_off=..., row_off=..., width=..., height=...)``).
+            ValueError: ``boundless=False`` and the window misses the grid.
         """
+        if not isinstance(window, PixelWindow):
+            raise TypeError(
+                f"{type(self).__name__}.read_window takes a geoarray.PixelWindow, "
+                f"got {type(window).__name__}; build one with PixelWindow("
+                "col_off=..., row_off=..., width=..., height=...)"
+            )
         if not boundless:
-            window = self._clip_window(window)
+            whole = PixelWindow(
+                col_off=0, row_off=0, width=self.width, height=self.height
+            )
+            inside = window.intersection(whole)
+            if inside is None:
+                raise ValueError(
+                    f"window {window} does not overlap the grid "
+                    f"{(self.height, self.width)}"
+                )
+            window = inside
         values = self._read_window(window)
-        # The canonical key every band resolver reads first (see
-        # geoops._src.bands.DEFAULT_BAND_KEYS).
-        attrs = {"band_names": self.bands, **self._band_attrs()}
-        return GeoTensor(
+        return GeoArray(
             values,
-            transform=window_transform(window, self.transform),
-            crs=self.crs,
-            fill_value_default=self.fill_value_default,
-            attrs=attrs,
+            self.grid.crop(window).transform,
+            self.grid.crs,
+            fill_value=self.fill_value,
+            attrs=self.attrs,
+        )
+
+    def load(self) -> GeoArray:
+        """Load the reader's full extent into a ``GeoArray`` of `shape`."""
+        return self.read_window(
+            PixelWindow(col_off=0, row_off=0, width=self.width, height=self.height)
         )
 
     def read_from_bounds(
         self,
         bounds: tuple[float, float, float, float],
+        *,
         boundless: bool = True,
         crs_bounds: Any = None,
-    ) -> GeoTensor:
-        """Read map-coordinate bounds as a ``GeoTensor``.
+    ) -> GeoArray:
+        """Read map-coordinate bounds as a ``GeoArray``.
 
-        Thin wrapper over :func:`georeader.read.read_from_bounds` so the
-        window maths (outward rounding, CRS transform of ``bounds``) match
-        georeader exactly.
+        georeader's :func:`georeader.read.read_from_bounds` computes the
+        window (outward rounding, CRS transform of ``bounds``), so the
+        window maths match georeader exactly; the pixels come from
+        :meth:`read_window`.
         """
-        return read.read_from_bounds(
-            self, bounds, crs_bounds=crs_bounds, boundless=boundless
+        from geoarray.interop.georeader import from_georeader, source_to_georeader
+        from georeader import read
+
+        return from_georeader(
+            read.read_from_bounds(
+                source_to_georeader(self),
+                bounds,
+                crs_bounds=crs_bounds,
+                boundless=boundless,
+            )
         )
 
     def read_from_center_coords(
@@ -190,32 +269,39 @@ class ProductReader(GeoData, ABC):
         y: float,
         width: int,
         height: int,
+        *,
         boundless: bool = True,
         crs_center_coords: Any = None,
-    ) -> GeoTensor:
+    ) -> GeoArray:
         """Read a ``height x width`` window centered on map coordinates.
 
-        Thin wrapper over :func:`georeader.read.read_from_center_coords`
-        so the window placement matches georeader exactly.
+        georeader's :func:`georeader.read.read_from_center_coords` places
+        the window, so the placement matches georeader exactly; the pixels
+        come from :meth:`read_window`.
         """
-        return read.read_from_center_coords(
-            self,
-            (x, y),
-            (height, width),
-            crs_center_coords=crs_center_coords,
-            boundless=boundless,
+        from geoarray.interop.georeader import from_georeader, source_to_georeader
+        from georeader import read
+
+        return from_georeader(
+            read.read_from_center_coords(
+                source_to_georeader(self),
+                (x, y),
+                (height, width),
+                crs_center_coords=crs_center_coords,
+                boundless=boundless,
+            )
         )
 
     def _read_boundless(
-        self, window: Window, read: Callable[[slice, slice], np.ndarray]
+        self, window: PixelWindow, read: Callable[[slice, slice], np.ndarray]
     ) -> np.ndarray:
         """Read ``window`` through ``read``, padding outside the grid with the fill.
 
         The shared body of a ``_read_window``: allocates the output filled
-        with ``fill_value_default``, asks ``read(rows, cols)`` only for the
-        part of the window inside the grid (returning ``(..., h, w)``), and
-        pastes it in place. Windows partly or wholly outside the grid
-        (boundless reads) are handled here once for every reader.
+        with `fill_value`, asks ``read(rows, cols)`` only for the part of
+        the window inside the grid (returning ``(..., h, w)``), and pastes
+        it in place. Windows partly or wholly outside the grid (boundless
+        reads) are handled here once for every reader.
 
         Args:
             window: Pixel window, possibly extending past the grid.
@@ -224,12 +310,10 @@ class ProductReader(GeoData, ABC):
         Returns:
             ``(..., window.height, window.width)`` array of ``self.dtype``.
         """
-        row0, col0 = int(window.row_off), int(window.col_off)
-        n_rows, n_cols = int(window.height), int(window.width)
+        row0, col0 = window.row_off, window.col_off
+        n_rows, n_cols = window.height, window.width
         out = np.full(
-            (*self.shape[:-2], n_rows, n_cols),
-            self.fill_value_default,
-            dtype=self.dtype,
+            (*self.shape[:-2], n_rows, n_cols), self.fill_value, dtype=self.dtype
         )
         r_start, r_stop = max(row0, 0), min(row0 + n_rows, self.height)
         c_start, c_stop = max(col0, 0), min(col0 + n_cols, self.width)
@@ -240,10 +324,6 @@ class ProductReader(GeoData, ABC):
         )
         return out
 
-    def _clip_window(self, window: Window) -> Window:
-        base = Window(col_off=0, row_off=0, width=self.width, height=self.height)
-        return window.intersection(base)
-
 
 def resolve_fill_value(
     fill_value: float | None, dtype: np.dtype, *, owner: str = "reader"
@@ -253,8 +333,7 @@ def resolve_fill_value(
     ``None`` defaults to ``NaN`` for inexact dtypes and ``0`` otherwise.
     An explicit value that would change when cast to ``dtype`` (``NaN``,
     fractional or out-of-range values for integer data) raises instead of
-    silently padding with a different value than ``fill_value_default``
-    reports.
+    silently padding with a different value than ``fill_value`` reports.
 
     Args:
         fill_value: Requested fill, or ``None`` for the default.
@@ -282,7 +361,7 @@ def resolve_fill_value(
         ok = False
     if not ok:
         raise ValueError(
-            f"{owner}: fill_value_default={fill_value!r} is not "
+            f"{owner}: fill_value={fill_value!r} is not "
             f"representable in data dtype {dtype}; pass a value that "
             "survives the cast (e.g. 0) or use floating-point data."
         )

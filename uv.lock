@@ -1971,6 +1971,7 @@ source = { editable = "packages/geotoolz-products" }
 dependencies = [
     { name = "affine" },
     { name = "georeader-spaceml" },
+    { name = "geotoolz-array", extra = ["georeader"] },
     { name = "numpy" },
     { name = "rasterio" },
     { name = "typing-extensions" },
@@ -2011,6 +2012,7 @@ requires-dist = [
     { name = "affine", specifier = ">=2.4" },
     { name = "geopandas", marker = "extra == 'carbonmapper'", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
+    { name = "geotoolz-array", extras = ["georeader"], editable = "packages/geotoolz-array" },
     { name = "geotoolz-cloud", extras = ["hdf5"], marker = "extra == 'goes'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-cloud", extras = ["hdf5"], marker = "extra == 'himawari'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-ops", marker = "extra == 'operators'", editable = "packages/geotoolz-ops" },

@@ -13,10 +13,10 @@
 [![Type Check](https://github.com/jejjohnson/geotoolz/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jejjohnson/geotoolz/actions/workflows/typecheck.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Every Earth-observation product, read as a georeader `GeoTensor`.**
-> One reader per mission or provider; what comes out is what every geotoolz operator and geopatcher field takes.
+> **Every Earth-observation product, read as a `geoarray.GeoArray`.**
+> One reader per mission or provider, each a lazy `geoarray.RasterSource`; what comes out is what every geotoolz operator and geopatcher field takes.
 
-<p align="center"><img src="../../docs/assets/diagrams/products-architecture.png" alt="geoproducts: one namespace per product (Reader, bucket or API helpers, BANDS, recipes, presets), built on a shared toolkit and the ProductReader contract, produces GeoTensors for geoops and geopatcher" width="100%"></p>
+<p align="center"><img src="../../docs/assets/diagrams/products-architecture.png" alt="geoproducts: one namespace per product (Reader, bucket or API helpers, BANDS, recipes, presets), built on a shared toolkit and the ProductReader contract, produces GeoArrays for geoops and geopatcher" width="100%"></p>
 
 ## 30-second pitch
 
@@ -24,19 +24,21 @@ Every mission ships its own format, band naming, calibration tables and,
 for provider APIs, its own authentication and catalogue quirks. That
 churn belongs in one place, not scattered across analysis code.
 `geoproducts` gives each product a reader that hides it: `ProductReader`
-is a georeader `GeoData` with a lazy windowed read, named bands and an
+is a `geoarray.RasterSource` with a lazy windowed read, named bands and an
 optional pooled cloud byte-range path, and each sensor ships as a small
 namespace (`Reader`, `BANDS`, `CONSTANTS`, `presets`). Mission readers
 such as **GOES-R ABI** and **Himawari AHI** recover the native grid and calibrate from the
 file's own coefficients; provider clients such as **Carbon Mapper** turn
-REST and STAC responses into typed records and lazy rasters. The package depends on georeader only — never on
-geotoolz — so readers release on their own schedule while their output
-drops straight into the operators, the patcher and the catalog loaders.
+REST and STAC responses into typed records and lazy rasters. The package
+never depends on the operator library, so readers release on their own
+schedule while their output drops straight into the operators and the
+patcher. georeader stays inside, as the engine for map-coordinate windows
+and reprojection; no `GeoTensor` crosses the public API.
 
 ## Install
 
 ```bash
-pip install geotoolz-products                    # readers (georeader only)
+pip install geotoolz-products                    # readers (geoarray; georeader as the engine)
 pip install 'geotoolz-products[operators]'       # sensor presets (geotoolz operators)
 pip install 'geotoolz-products[goes]'            # GOES-R ABI readers + goes.aws (geotoolz-cloud[hdf5])
 pip install 'geotoolz-products[himawari]'        # Himawari L2 products + himawari.aws (geotoolz-cloud[hdf5])
@@ -45,7 +47,7 @@ pip install 'geotoolz-products[carbonmapper]'    # Carbon Mapper plume catalogue
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
-| *(base)* | georeader, numpy, rasterio | `ProductReader`, `toy_sensor` |
+| *(base)* | geotoolz-array, georeader, numpy, rasterio | `ProductReader`, `toy_sensor`, `stack` |
 | `[operators]` | `geotoolz-ops` | per-sensor `presets` (e.g. `toy_sensor.presets.NDVI`) |
 | `[goes]` | geotoolz-cloud with h5py | `geoproducts.goes.Reader` (local or `s3://`, ranged reads), the `goes.aws` bucket helpers |
 | `[himawari]` | h5py, geotoolz-cloud | `geoproducts.himawari.L2Reader`, the `himawari.aws` bucket helpers (the HSD `Reader` needs no extra) |
@@ -58,21 +60,26 @@ pip install 'geotoolz-products[carbonmapper]'    # Carbon Mapper plume catalogue
 
 ```python
 import numpy as np
-from georeader.geotensor import GeoTensor
-from rasterio.windows import Window
+from geoarray import GeoArray, PixelWindow
 
 from geoproducts import ProductReader, toy_sensor
 
 data: np.ndarray = np.random.default_rng(0).random((4, 256, 256), dtype=np.float32)  # (4, 256, 256)
 reader: ProductReader = toy_sensor.Reader("scene", data=data)   # shape (4, 256, 256) · crs EPSG:4326
 
-chip: GeoTensor = reader.read_from_window(Window(0, 0, 64, 64)).load()  # (4, 64, 64) float32
+window = PixelWindow(col_off=0, row_off=0, width=64, height=64)
+chip: GeoArray = reader.read_window(window)                      # (4, 64, 64) float32
 chip.attrs["band_names"]                                         # ('blue', 'green', 'red', 'nir')
+scene: GeoArray = reader.load()                                  # (4, 256, 256) float32
 ```
 
 Because `chip` names its bands, geotoolz operators resolve them by name
 (`gz.NDVI(nir="nir", red="red")(chip)` → `(64, 64)`), and because
-`reader` is a `GeoData`, `geopatcher.RasterField(reader)` tiles it.
+`reader` is a `geoarray.RasterSource` (`grid`, `read_window`, `load`),
+geopatcher tiles it window by window without loading the scene. A
+georeader `GeoTensor` / `GeoData` is refused with a `TypeError`: convert
+it with `geoarray.interop.georeader.from_georeader` /
+`source_from_georeader`.
 
 ## GOES-R ABI
 
@@ -84,7 +91,7 @@ grid; windows decompress only the chunks they touch:
 from datetime import datetime
 from pathlib import Path
 
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geoproducts import goes, stack
 from geoproducts.goes import aws
@@ -97,15 +104,15 @@ files: list[aws.ABIFile] = aws.list_files(
 reader: goes.Reader = goes.Reader(
     aws.download(files[0], "data/goes"), calibration="brightness_temperature"
 )                                                             # (1, 1500, 2500) · 2 km
-bt: GeoTensor = reader.read_from_bounds(
+bt: GeoArray = reader.read_from_bounds(
     (-100.0, 30.0, -95.0, 35.0), crs_bounds="EPSG:4326"
 )                                                             # (1, 219, 266) float32 K
 
 cmi: goes.L2Reader = goes.L2Reader(mcmip_path)                # (16, 500, 500) C01 … C16, calibrated
 acm: goes.L2Reader = goes.L2Reader(acm_path)                  # (2, 500, 500) uint8 BCM, ACM
 acha: goes.L2Reader = goes.L2Reader(acha_path)                # (1, 250, 250) cloud-top height, 4 km
-scene: GeoTensor = stack([cmi, acm, acha])               # (19, 500, 500) on one grid
-rgb: GeoTensor = goes.DayCloudPhase()(scene)                  # (3, 500, 500) float32 in [0, 1]
+scene: GeoArray = stack([cmi, acm, acha])                     # (19, 500, 500) on one grid
+rgb: GeoArray = goes.DayCloudPhase()(scene)                   # (3, 500, 500) float32 in [0, 1]
 ```
 
 <p align="center"><img src="../../docs/assets/figures/goes-recipes.jpg" alt="True colour, natural colour, day cloud phase and fire temperature RGBs of one GOES-19 mesoscale scan" width="100%"></p>
@@ -133,7 +140,7 @@ segments: list[aws.Segment] = aws.list_segments(
 reader: himawari.Reader = himawari.Reader(
     [aws.download(s, "data/ahi") for s in segments], calibration="brightness_temperature"
 )                                                             # (1, 5500, 5500) · 2 km
-bt: GeoTensor = reader.read_from_bounds(
+bt: GeoArray = reader.read_from_bounds(
     (110.0, -5.0, 120.0, 5.0), crs_bounds="EPSG:4326"
 )                                                             # (1, 546, 477) float32 K
 mask: himawari.L2Reader = himawari.L2Reader(cmsk_path)        # (2, 5500, 5500) int8 NOAA cloud mask
@@ -148,7 +155,7 @@ The same presets as GOES — `himawari.TrueColor()` (with a hybrid green),
 ## Carbon Mapper
 
 ```python
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geoproducts import carbonmapper as cm
 
@@ -157,10 +164,10 @@ token: str = config.get_token() or config.refresh_access_token()
 
 plumes: list[cm.CMRawPlume] = cm.list_plumes(token, bbox=(-104.5, 31.5, -103.5, 32.5), limit=50)
 image: cm.CMPlumeImage = cm.CMPlumeImage.from_plume_id(plumes[0].plume_id, token=token)
-cmf: GeoTensor = image.tile_cmf(pad_px=64)                       # (1, h, w) — L2B retrieval around the plume
+cmf: GeoArray = image.tile_cmf(pad_px=64)                        # (1, h, w) — L2B retrieval around the plume
 
 sources: list[cm.CMSource] = cm.list_sources(token, bbox=(-104.5, 31.5, -103.5, 32.5), sectors=["1B2"])
-labels: GeoTensor = cm.rasterize_sources_like(sources, cmf, buffer_m=150.0)  # (h, w) uint8 on cmf's grid
+labels: GeoArray = cm.rasterize_sources_like(sources, cmf, buffer_m=150.0)  # (h, w) uint8 on cmf's grid
 ```
 
 Credentials resolve from `~/.geoproducts/auth_carbonmapper.json`, or from

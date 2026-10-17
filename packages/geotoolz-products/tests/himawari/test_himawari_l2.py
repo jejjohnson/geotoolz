@@ -8,7 +8,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
-from rasterio.windows import Window
+from geoarray import PixelWindow, RasterSource
 
 from geoproducts import himawari, stack
 from geoproducts.himawari.l2 import full_disk_grid, product_code
@@ -76,14 +76,17 @@ def test_cloud_mask_defaults_and_flags(cmsk: Path) -> None:
     assert reader.variables == ("CloudMaskBinary", "CloudMask")
     assert reader.shape == (2, 5500, 5500)
     assert reader.dtype == np.int8
-    assert reader.fill_value_default == -128
+    assert reader.fill_value == -128
+    assert isinstance(reader, RasterSource)
     assert reader.available_variables == (
         "CloudMask",
         "CloudMaskBinary",
         "CloudProbability",
     )
     assert reader.flags("CloudMask")[3] == "cloudy"
-    tile = reader.read_from_window(Window(2748, 2748, 4, 4))
+    tile = reader.read_window(
+        PixelWindow(col_off=2748, row_off=2748, width=4, height=4)
+    )
     values = np.asarray(tile)
     assert values[0, 0, 0] == -128  # outside the data block
     assert values[1, 2, 2] == 0 and values[1, 3, 3] == 3
@@ -105,7 +108,9 @@ def test_grid_is_the_l1b_full_disk(cmsk: Path) -> None:
 
 def test_float_variable_decodes_with_nan(cmsk: Path) -> None:
     reader = himawari.L2Reader(cmsk, variables="CloudProbability")
-    values = np.asarray(reader.read_from_window(Window(2749, 2749, 2, 2)))[0]
+    values = np.asarray(
+        reader.read_window(PixelWindow(col_off=2749, row_off=2749, width=2, height=2))
+    )[0]
     assert reader.dtype == np.float32
     assert np.isnan(values[0, 0]) and values[1, 1] == pytest.approx(0.75)
 
