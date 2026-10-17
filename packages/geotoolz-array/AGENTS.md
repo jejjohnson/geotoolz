@@ -3,8 +3,10 @@
 The georeferenced array every package of the stack will share. The root
 [`AGENTS.md`](../../AGENTS.md) applies too; this file adds what is specific
 to `geoarray`. It is the bottom of the workspace: it depends on numpy,
-pyproj and affine only, and never imports another workspace package,
-rasterio or georeader (ruff's `TID251` rejects it).
+pyproj and affine only, and never imports another workspace package or
+rasterio. georeader is imported by one module only, the `[georeader]`
+adapter `_src/georeader.py`, and lazily (ruff's `TID251` rejects it
+anywhere else).
 
 ## What lives here
 

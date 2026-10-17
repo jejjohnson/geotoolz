@@ -420,6 +420,8 @@ def write_window(g: GeoArray, values: Any, window: PixelWindow) -> GeoArray:
             shape.
         TypeError: ``values`` would change kind when cast (float into
             integer data, say).
+        X64Error: JAX values for a NumPy carrier, which then moves to JAX,
+            with x64 off.
 
     Example:
         >>> import numpy as np

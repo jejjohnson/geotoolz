@@ -22,8 +22,10 @@ class HostTransferWarning(UserWarning):
     """A JAX carrier's data was copied to the host for NumPy code.
 
     Raised only with ``set_options(warn_on_transfer=True)``. Python's default
-    warning filter shows it once per calling line, so each NumPy-only step
-    reports once.
+    warning filter shows it once per location: the line that called
+    ``np.asarray(g)``, or, through a NumPy function such as ``np.sum(g)``, a
+    line inside NumPy. To see every copy, add
+    ``warnings.simplefilter("always", HostTransferWarning)``.
     """
 
 

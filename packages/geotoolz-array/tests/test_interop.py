@@ -105,6 +105,21 @@ class TestNumpyInterop:
         with pytest.raises(ValueError, match="without a copy"):
             _scene().to_jax().__array__(copy=False)
 
+    def test_requested_copies_are_writable(self, x64: ModuleType) -> None:
+        on_jax = _scene().to_jax()
+        copied = np.array(on_jax)
+        assert copied.flags.writeable
+        copied[0, 0, 0] = 5.0
+        assert float(on_jax.data[0, 0, 0]) != 5.0
+        g = _scene()
+        assert not np.shares_memory(np.array(g), g.data)
+
+    def test_copy_false_with_a_cast_is_refused(self) -> None:
+        g = _scene().astype(np.float32)
+        with pytest.raises(ValueError, match="needs a copy"):
+            np.asarray(g, dtype=np.float64, copy=False)
+        assert np.asarray(g, dtype=np.float32, copy=False) is g.data
+
     def test_numpy_data_is_not_copied(self) -> None:
         g = _scene()
         assert np.asarray(g) is g.data

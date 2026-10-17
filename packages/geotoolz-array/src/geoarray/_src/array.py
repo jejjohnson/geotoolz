@@ -674,11 +674,17 @@ class GeoArray[A: SupportsArray]:
 
         Raises:
             GeoArrayTraceError: The data are traced.
-            ValueError: ``copy=False`` for JAX data, which needs a copy.
+            ValueError: ``copy=False`` for JAX data or a cast, which need a
+                copy.
         """
         if self.backend == "numpy":
             if copy:
                 return np.array(self.data, dtype=dtype, copy=True)
+            if copy is False and dtype is not None and np.dtype(dtype) != self.dtype:
+                raise ValueError(
+                    f"casting {self.dtype} data to {np.dtype(dtype)} needs a copy, "
+                    "but copy=False was passed"
+                )
             return np.asarray(self.data, dtype=dtype)
         if is_tracer(self.data):
             raise GeoArrayTraceError(
@@ -691,6 +697,10 @@ class GeoArray[A: SupportsArray]:
                 "a JAX GeoArray cannot become a NumPy array without a copy"
             )
         warn_host_transfer("np.asarray(GeoArray)", stacklevel=2)
+        if copy:
+            # np.asarray of a CPU JAX array can be a read-only view; a copy
+            # the caller asked for must be writable.
+            return np.array(self.data, dtype=dtype, copy=True)
         return np.asarray(self.data, dtype=dtype)
 
     # -- comparison and display ----------------------------------------------
