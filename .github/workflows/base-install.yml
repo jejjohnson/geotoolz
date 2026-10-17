@@ -358,10 +358,10 @@ jobs:
         working-directory: packages/geotoolz-cloud
         run: uv run --no-sync pytest -q --no-cov
 
-  # `pip install geotoolz-array` without extras: NumPy carriers, Grid and
-  # Window work, JAX is never imported, and to_jax fails only when used,
-  # naming the `[jax]` extra; the test suite passes with the JAX tests
-  # skipping.
+  # `pip install geotoolz-array` without extras: NumPy carriers, Grid,
+  # windows and crops work, JAX is never imported, and to_jax / footprint
+  # fail only when used, naming the `[jax]` / `[vector]` extra; the test
+  # suite passes with the JAX, shapely and oracle tests skipping.
   geotoolz-array-base:
     runs-on: ubuntu-latest
     steps:
@@ -398,6 +398,15 @@ jobs:
               assert "geotoolz-array[jax]" in str(exc), exc
           else:
               raise AssertionError("to_jax ran without jax")
+          patch = geoarray.crop(chip, (1, 1), (2, 2))
+          assert patch.bounds[:2] == (600020.0, 3549940.0), patch.bounds
+          assert "jax" not in sys.modules
+          try:
+              geoarray.footprint(chip)
+          except ImportError as exc:
+              assert "geotoolz-array[vector]" in str(exc), exc
+          else:
+              raise AssertionError("footprint ran without shapely")
           print("geotoolz-array base install OK", geoarray.__version__)
           PY
       - name: Test geotoolz-array (base install)

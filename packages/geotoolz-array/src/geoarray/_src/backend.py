@@ -42,6 +42,8 @@ class SupportsArray(Protocol):
 
     def astype(self, dtype: Any, /) -> Any: ...
 
+    def __getitem__(self, key: Any, /) -> Any: ...
+
 
 _JAX_HINT = "JAX data needs the jax extra: pip install 'geotoolz-array[jax]'"
 

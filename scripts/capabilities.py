@@ -64,6 +64,11 @@ ALLOWED_SHARED_NAMES: dict[str, str] = {
         "one verb at two levels: geocloud.files.download fetches any URI; each "
         "sensor's `aws.download` takes that sensor's file records"
     ),
+    "stack": (
+        "one verb at two levels: geoarray.stack joins carriers already on one "
+        "grid along a new axis; geoproducts.stack reads several product readers "
+        "onto one grid first"
+    ),
 }
 
 

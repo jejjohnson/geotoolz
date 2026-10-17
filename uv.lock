@@ -1342,6 +1342,9 @@ dependencies = [
 jax = [
     { name = "jax" },
 ]
+vector = [
+    { name = "shapely" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -1361,8 +1364,9 @@ requires-dist = [
     { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.30" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pyproj", specifier = ">=3.6" },
+    { name = "shapely", marker = "extra == 'vector'", specifier = ">=2.0" },
 ]
-provides-extras = ["jax"]
+provides-extras = ["jax", "vector"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1598,7 +1602,7 @@ source = { editable = "." }
 
 [package.dev-dependencies]
 dev = [
-    { name = "geotoolz-array", extra = ["jax"] },
+    { name = "geotoolz-array", extra = ["jax", "vector"] },
     { name = "geotoolz-catalog" },
     { name = "geotoolz-cloud", extra = ["cog"] },
     { name = "geotoolz-ops", extra = ["hydra", "netcdf", "vector-cube", "zarr"] },
@@ -1642,7 +1646,7 @@ typecheck = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "geotoolz-array", extras = ["jax"], editable = "packages/geotoolz-array" },
+    { name = "geotoolz-array", extras = ["jax", "vector"], editable = "packages/geotoolz-array" },
     { name = "geotoolz-catalog", editable = "packages/geotoolz-catalog" },
     { name = "geotoolz-cloud", extras = ["cog"], editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-ops", extras = ["hydra", "vector-cube", "netcdf", "zarr"], editable = "packages/geotoolz-ops" },

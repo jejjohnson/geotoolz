@@ -10,13 +10,19 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   `GeoArray.with_data` to rewrap a result.
 - `Grid` — a pixel grid with no data: transform, CRS and ``(H, W)``;
   hashable, so it can be a warp target or static config.
-- `PixelWindow` — a rectangle of pixels (``row_off``, ``col_off``,
-  ``height``, ``width``): rasterio's ``Window`` without rasterio.
-- `FrozenAttrs` — the immutable, hashable metadata mapping.
+- `PixelWindow` — a rectangle of pixels (``col_off``, ``row_off``,
+  ``width``, ``height``): rasterio's ``Window`` without rasterio.
+- `FrozenAttrs` — the immutable, hashable metadata mapping;
+  `PER_BAND_KEYS` names the keys that hold one entry per band.
+- Geometry (re-index or re-describe pixels, never compute new values):
+  `GeoArray.__getitem__` / `GeoArray.isel` (slices move the transform),
+  `crop` (traced offsets), `pad`, `read_window` / `write_window`,
+  `pixel_coords`, `GeoArray.valid_mask`, `GeoArray.map`, `combine`,
+  `stack` / `concatenate`, `footprint` (``[vector]``).
 - `as_transform` / `as_crs` — coerce an ``affine.Affine``, six numbers, an
   EPSG code or WKT.
-- Errors: `GeoArrayError` and its subclasses `X64Error` and
-  `GeoArrayTraceError`.
+- Errors: `GeoArrayError` and its subclasses `X64Error`,
+  `GeoArrayTraceError` and `GridMismatchError`.
 
 JAX is optional (``geotoolz-array[jax]``); without it, geoarray never
 imports JAX.
@@ -25,8 +31,24 @@ imports JAX.
 from __future__ import annotations
 
 from geoarray._src.array import DIMS, GeoArray
-from geoarray._src.attrs import FrozenAttrs
-from geoarray._src.errors import GeoArrayError, GeoArrayTraceError, X64Error
+from geoarray._src.attrs import PER_BAND_KEYS, FrozenAttrs
+from geoarray._src.errors import (
+    GeoArrayError,
+    GeoArrayTraceError,
+    GridMismatchError,
+    X64Error,
+)
+from geoarray._src.geometry import (
+    combine,
+    concatenate,
+    crop,
+    footprint,
+    pad,
+    pixel_coords,
+    read_window,
+    stack,
+    write_window,
+)
 from geoarray._src.grid import Grid, PixelWindow, as_crs, as_transform
 
 
@@ -34,14 +56,25 @@ __version__ = "0.0.0"  # x-release-please-version
 
 __all__ = [
     "DIMS",
+    "PER_BAND_KEYS",
     "FrozenAttrs",
     "GeoArray",
     "GeoArrayError",
     "GeoArrayTraceError",
     "Grid",
+    "GridMismatchError",
     "PixelWindow",
     "X64Error",
     "__version__",
     "as_crs",
     "as_transform",
+    "combine",
+    "concatenate",
+    "crop",
+    "footprint",
+    "pad",
+    "pixel_coords",
+    "read_window",
+    "stack",
+    "write_window",
 ]

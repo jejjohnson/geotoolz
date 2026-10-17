@@ -24,8 +24,18 @@ import numpy as np
 import pyproj
 from affine import Affine
 
+from geoarray._src.backend import namespace
 
-__all__ = ["Grid", "PixelWindow", "Transform", "as_crs", "as_transform"]
+
+__all__ = [
+    "Grid",
+    "PixelWindow",
+    "Transform",
+    "apply_transform",
+    "as_crs",
+    "as_transform",
+    "shift_scale_transform",
+]
 
 Transform = tuple[float, float, float, float, float, float]
 
@@ -119,6 +129,71 @@ def _as_index(value: Any, name: str) -> int:
     if value < 0:
         raise ValueError(f"{name} must be >= 0, got {value}")
     return value
+
+
+def apply_transform(transform: Any, cols: Any, rows: Any) -> tuple[Any, Any]:
+    """Map pixel positions to map coordinates: (x, y) = T(cols, rows).
+
+    x = a·j + b·i + c, y = d·j + e·i + f, for a column j and a row i
+    (corners at integers, centres at + ½). Works on a tuple or a ``(6,)``
+    NumPy / JAX transform and on scalars or arrays of positions.
+    """
+    a, b, c, d, e, f = (transform[k] for k in range(6))
+    return (a * cols + b * rows + c, d * cols + e * rows + f)
+
+
+def shift_scale_transform(
+    transform: Any,
+    row0: Any,
+    col0: Any,
+    row_step: Any = 1,
+    col_step: Any = 1,
+) -> Any:
+    """The transform of a slice starting at (row0, col0) with the given steps.
+
+    a′ = a·s_c, b′ = b·s_r, c′ = c + a·c₀ + b·r₀,
+    d′ = d·s_c, e′ = e·s_r, f′ = f + d·c₀ + e·r₀.
+
+    Works on ``(6,)`` and batched ``(*batch, 6)`` NumPy or JAX transforms,
+    with traced offsets.
+    """
+    xp = namespace(transform)
+    a, b, c, d, e, f = (transform[..., i] for i in range(6))
+    columns = (
+        a * col_step,
+        b * row_step,
+        c + a * col0 + b * row0,
+        d * col_step,
+        e * row_step,
+        f + d * col0 + e * row0,
+    )
+    return xp.stack(columns, axis=-1)
+
+
+def _snap(value: float, atol: float) -> float:
+    """``value`` rounded to the nearest integer when within ``atol`` of it."""
+    nearest = round(value)
+    return float(nearest) if abs(value - nearest) <= atol else value
+
+
+def _invert(transform: Transform) -> Transform:
+    """The inverse affine: map coordinates → (column, row).
+
+    Raises:
+        ValueError: The transform is singular (a·e − b·d = 0).
+    """
+    a, b, c, d, e, f = transform
+    det = a * e - b * d
+    if det == 0.0:
+        raise ValueError(f"a singular transform cannot be inverted: {transform}")
+    return (
+        e / det,
+        -b / det,
+        (b * f - c * e) / det,
+        -d / det,
+        a / det,
+        (c * d - a * f) / det,
+    )
 
 
 @dataclass(frozen=True)
@@ -271,10 +346,11 @@ class Grid:
     @property
     def bounds(self) -> tuple[float, float, float, float]:
         """``(x_min, y_min, x_max, y_max)`` of the grid's outer edges."""
-        a, b, c, d, e, f = self.transform
         h, w = self.shape
-        xs = (c, c + a * w, c + b * h, c + a * w + b * h)
-        ys = (f, f + d * w, f + e * h, f + d * w + e * h)
+        corners = [
+            apply_transform(self.transform, j, i) for j in (0, w) for i in (0, h)
+        ]
+        xs, ys = zip(*corners, strict=True)
         return (min(xs), min(ys), max(xs), max(ys))
 
     @classmethod
@@ -293,12 +369,91 @@ class Grid:
             >>> grid.shift(1, 2).transform
             (20.0, 0.0, 40.0, 0.0, -20.0, -20.0)
         """
-        a, b, c, d, e, f = self.transform
-        return Grid(
-            (a, b, c + a * cols + b * rows, d, e, f + d * cols + e * rows),
-            self.crs,
-            self.shape,
-        )
+        a, b, _, d, e, _ = self.transform
+        c, f = apply_transform(self.transform, cols, rows)
+        return Grid((a, b, c, d, e, f), self.crs, self.shape)
+
+    @classmethod
+    def from_bounds(
+        cls,
+        bounds: Sequence[float],
+        res: float | Sequence[float],
+        crs: Any,
+        *,
+        atol: float = 1e-6,
+    ) -> Grid:
+        """The north-up grid that covers ``bounds`` with square-edged pixels.
+
+        The origin is the top-left corner (x_min, y_max); the shape rounds
+        up to whole pixels, ignoring overshoots below ``atol`` pixels.
+
+        Args:
+            bounds: ``(x_min, y_min, x_max, y_max)`` in CRS units.
+            res: Pixel size, one number or ``(x, y)``, positive.
+            crs: The CRS (anything `as_crs` accepts).
+            atol: Tolerance, in pixels, for a size that is almost whole.
+
+        Example:
+            >>> Grid.from_bounds((600000, 3538000, 612000, 3550000), 20, 32613).shape
+            (600, 600)
+        """
+        x_min, y_min, x_max, y_max = (float(v) for v in bounds)
+        rx, ry = (float(v) for v in np.broadcast_to(np.asarray(res, float), (2,)))
+        if rx <= 0 or ry <= 0 or x_max <= x_min or y_max <= y_min:
+            raise ValueError(
+                f"need positive res and non-empty bounds, got {bounds}, {res}"
+            )
+        width = math.ceil(_snap((x_max - x_min) / rx, atol))
+        height = math.ceil(_snap((y_max - y_min) / ry, atol))
+        return cls((rx, 0.0, x_min, 0.0, -ry, y_max), crs, (height, width))
+
+    def window(self, bounds: Sequence[float], *, atol: float = 1e-6) -> PixelWindow:
+        """The pixels that cover ``bounds``, rounded outward to whole pixels.
+
+        Corners within ``atol`` pixels of a pixel edge snap to it, so bounds
+        on the grid map to exactly the pixels inside them. The window may
+        extend outside the grid; `PixelWindow.intersection` clips it.
+
+        Args:
+            bounds: ``(x_min, y_min, x_max, y_max)`` in this grid's CRS.
+            atol: Snapping tolerance, in pixels.
+
+        Example:
+            >>> transform = (20.0, 0.0, 600000.0, 0.0, -20.0, 3550000.0)
+            >>> grid = Grid(transform, None, (600, 600))
+            >>> grid.window((600100, 3549000, 600400, 3549900))
+            PixelWindow(col_off=5, row_off=5, width=15, height=45)
+        """
+        x_min, y_min, x_max, y_max = (float(v) for v in bounds)
+        corners = ((x_min, y_min), (x_min, y_max), (x_max, y_min), (x_max, y_max))
+        ia, ib, ic, id_, ie, if_ = _invert(self.transform)
+        cols = [ia * x + ib * y + ic for x, y in corners]
+        rows = [id_ * x + ie * y + if_ for x, y in corners]
+        r0 = math.floor(_snap(min(rows), atol))
+        r1 = math.ceil(_snap(max(rows), atol))
+        c0 = math.floor(_snap(min(cols), atol))
+        c1 = math.ceil(_snap(max(cols), atol))
+        return PixelWindow(col_off=c0, row_off=r0, width=c1 - c0, height=r1 - r0)
+
+    def crop(self, window: PixelWindow) -> Grid:
+        """The grid of ``window``: its origin and its shape.
+
+        Example:
+            >>> grid = Grid((20.0, 0.0, 0.0, 0.0, -20.0, 0.0), None, (8, 8))
+            >>> window = PixelWindow(col_off=3, row_off=2, width=4, height=4)
+            >>> grid.crop(window).transform
+            (20.0, 0.0, 60.0, 0.0, -20.0, -40.0)
+        """
+        shifted = self.shift(window.row_off, window.col_off)
+        return Grid(shifted.transform, self.crs, window.shape)
+
+    def bounds_of(self, window: PixelWindow) -> tuple[float, float, float, float]:
+        """``(x_min, y_min, x_max, y_max)`` of ``window`` on this grid.
+
+        The inverse of `window` for bounds on pixel edges:
+        ``grid.bounds_of(grid.window(b)) == b``.
+        """
+        return self.crop(window).bounds
 
     def isclose(self, other: Grid, atol: float = 1e-6) -> bool:
         """Equal CRS and shape, and transforms within ``atol`` (map units).
