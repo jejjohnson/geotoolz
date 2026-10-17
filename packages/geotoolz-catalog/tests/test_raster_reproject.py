@@ -79,9 +79,9 @@ def test_cross_crs_slice_returns_source_values(tmp_path: Path) -> None:
     gt = load_raster(cat, slc)
     values = np.asarray(gt)[0]
 
-    assert gt.crs == pyproj.CRS.from_epsg(4326)
+    assert gt.grid == slc.grid  # on the slice grid, in EPSG:4326
     assert values.shape == slc.shape
-    assert not (values == gt.fill_value_default).any()
+    assert not (values == gt.fill_value).any()
     # Pixel (30, 30)'s centre is (lon + 0.5 px, lat - 0.5 px). It matches the
     # source at that point within one source row of the gradient
     # (bilinear resampling of ~10 m pixels).
@@ -115,7 +115,7 @@ def test_same_crs_path_is_exact(tmp_path: Path) -> None:
     np.testing.assert_array_equal(values, expected)
 
 
-def test_fill_value_default_is_the_nodata_used(tmp_path: Path) -> None:
+def test_fill_value_is_the_nodata_used(tmp_path: Path) -> None:
     path = _tile(tmp_path, "A", "EPSG:32629", (-8.5, 38.0), nodata=-9999.0)
     cat = build_raster_catalog([path], filename_regex=REGEX)
     with rasterio.open(path) as src:
@@ -126,7 +126,7 @@ def test_fill_value_default_is_the_nodata_used(tmp_path: Path) -> None:
     )
     gt = load_raster(cat, slc)
     values = np.asarray(gt)[0]
-    assert gt.fill_value_default == -9999.0
+    assert gt.fill_value == -9999.0
     assert (values[:, :50] == -9999.0).all()
     assert (values[:, 50:] != -9999.0).all()
 

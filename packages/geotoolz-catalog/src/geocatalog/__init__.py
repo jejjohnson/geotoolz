@@ -54,7 +54,7 @@ aoi = GeoSlice(
     crs="EPSG:32630",
 )
 june = catalog.query(aoi)         # the rows overlapping the slice
-tensor = load_raster(june, aoi)   # (C, 1000, 1000) GeoTensor
+scene = load_raster(june, aoi)    # (C, 1000, 1000) geoarray.GeoArray
 ```
 """
 

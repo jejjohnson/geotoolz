@@ -1,14 +1,14 @@
 [project]
 name = "geotoolz-catalog"
 version = "0.6.0"
-description = "Spatiotemporal catalog over geospatial files — the GeoSlice-driven index extracted from geoops."
+description = "Spatiotemporal catalog over geospatial files — a GeoSlice-driven index whose loaders return geoarray.GeoArray."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]
 license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
-keywords = ["geospatial", "catalog", "geoparquet", "duckdb", "geoslice", "remote-sensing"]
+keywords = ["geospatial", "catalog", "geoparquet", "duckdb", "geoslice", "remote-sensing", "geoarray"]
 requires-python = ">=3.12"
 classifiers = [
     "Topic :: Scientific/Engineering",
@@ -21,14 +21,13 @@ classifiers = [
     "Development Status :: 2 - Pre-Alpha",
 ]
 dependencies = [
-    # GeoTensor and the GeoData / AsyncGeoData protocols. Pinning to >=2.1
-    # so the v2.0 numpy-subclass GeoTensor (with __array_ufunc__) is
-    # available — that's the substrate the raster/vector loaders return.
-    "georeader-spaceml>=2.1",
+    # The carrier: `load_raster` / `load_raster_timeseries` / `load_vector`
+    # return a `geoarray.GeoArray` built straight from rasterio's output,
+    # and `GeoSlice.grid` is a `geoarray.Grid`. No georeader on the base
+    # install: only `field_for(materialize=False)` reads through it (the
+    # [patch] extra).
+    "geotoolz-array>=0.1.1",
     "numpy>=1.26",
-    # `georeader.geotensor` imports `Self` from typing_extensions without
-    # declaring it as a dep (upstream packaging bug in >=2.1).
-    "typing-extensions>=4.0",
     # pandas IntervalIndex + pyproj.CRS underpin GeoSlice and the catalog
     # primitives; both are part of the base surface.
     "pandas>=2.1",
@@ -95,8 +94,15 @@ gee = ["earthengine-api>=0.1.380"]
 # into a `geopatcher.SpatialPatcher` without manual `RasterField`
 # construction. Lower bound only: geotoolz-patcher is a workspace sibling
 # released in lockstep, so an upper cap would break `uv lock` on the next
-# release-please bump.
-patch = ["geotoolz-patcher>=0.6"]
+# release-please bump. `field_for(materialize=False)` reads each file
+# lazily through georeader's `RasterioReader`, presented as a
+# `geoarray.RasterSource` by the geoarray adapter ([georeader]); declared
+# here rather than relied on through geotoolz-patcher.
+patch = [
+    "geotoolz-array[georeader]>=0.1.1",
+    "georeader-spaceml>=2.1",
+    "geotoolz-patcher>=0.6",
+]
 sources-all = ["geotoolz-catalog[earthaccess,stac,gee]"]
 # The one-shot install that lights up every public surface. Composed from
 # the extras above so it cannot drift from them.
@@ -176,6 +182,7 @@ ignore = ["E402", "E721", "E731", "E741"]
 # packages are used through their public API, and object-store clients
 # come from the one pool in geocloud.store.
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
+"geoarray._src".msg = "private to geoarray: import its public API (docs/capabilities.md), or make the helper public there first"
 "geoops._src".msg = "private to geoops: import its public API (docs/capabilities.md), or make the helper public there first"
 "geopatcher._src".msg = "private to geopatcher: import its public API (docs/capabilities.md), or make the helper public there first"
 "geocloud._src".msg = "private to geocloud: import its public API (docs/capabilities.md), or make the helper public there first"

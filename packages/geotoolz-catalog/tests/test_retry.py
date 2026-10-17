@@ -180,7 +180,7 @@ def test_load_raster_retries_data_open(
     tensor = load_raster(catalog, sl, retries=2)
 
     assert attempts == 3
-    np.testing.assert_array_equal(tensor.values, 7)
+    np.testing.assert_array_equal(np.asarray(tensor), 7)
 
 
 def test_duckdb_open_retries_read_parquet_sql(

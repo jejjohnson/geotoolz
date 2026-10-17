@@ -3,7 +3,7 @@
 `build_raster_catalog` reads each file's bounds via ``rasterio`` (lazy
 via `WarpedVRT`) and assembles them into a `InMemoryGeoCatalog`.
 `load_raster` opens the matching rows for a `GeoSlice` and mosaics
-them into a single `GeoTensor`.
+them into a single `geoarray.GeoArray` on the slice grid.
 
 This is the bedrock backend; xarray and vector builders mirror its
 shape.
@@ -26,7 +26,7 @@ import pandas as pd
 import pyproj
 import rasterio
 import shapely.geometry
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from loguru import logger as log
 from rasterio.enums import Resampling
 from rasterio.merge import merge as rio_merge
@@ -501,14 +501,14 @@ def load_raster(
     retries: int = 3,
     max_open_workers: int = 8,
     storage_options: dict[str, Any] | None = None,
-) -> GeoTensor:
-    """Read + mosaic the catalog rows matching ``slice_`` into one `GeoTensor`.
+) -> GeoArray:
+    """Read + mosaic the catalog rows matching ``slice_`` into one `GeoArray`.
 
     Filters the catalog with ``catalog.query(slice_)``, opens every
     surviving row, and calls `rasterio.merge.merge` to produce a single
     array clipped to ``slice_.bounds`` at ``slice_.resolution``. The
-    returned `GeoTensor` carries the right transform + CRS for
-    downstream operators.
+    returned `geoarray.GeoArray` is on the slice grid (``slice_.grid``),
+    ready for downstream operators.
 
     Sources whose CRS differs from ``slice_.crs`` are warped on the fly
     (`rasterio.vrt.WarpedVRT` with ``resampling``), so the output is
@@ -549,10 +549,17 @@ def load_raster(
             uses GDAL's native VSI handling for ``s3://``-style paths.
 
     Returns:
-        A `GeoTensor` of shape ``(bands, H, W)`` with ``transform`` and
-        ``crs`` set from ``slice_``. ``fill_value_default`` is the nodata
-        value the mosaic actually used: ``nodata`` if supplied, else the
-        first source nodata found, else 0.
+        A `geoarray.GeoArray` of shape ``(bands, H, W)`` on the slice grid
+        (its ``grid`` equals ``slice_.grid``). ``fill_value`` is the
+        nodata value the mosaic actually used: ``nodata`` if supplied,
+        else the first source nodata found, else 0 (what the mosaic
+        writes where no source covers a pixel).
+
+    Example:
+        The hits of a query, mosaicked onto the slice grid::
+
+            scene = load_raster(catalog, slice_, band_indexes=[1, 2, 3])
+            scene.shape, scene.grid == slice_.grid  # (3, H, W), True
 
     Raises:
         ValueError: If no catalog rows match the slice, if
@@ -671,11 +678,13 @@ def load_raster(
         for h in resolved_handles:
             _close_resolved_uri(h)
 
-    return GeoTensor(
-        values=merged,
-        transform=transform,
-        crs=slice_.crs,
-        fill_value_default=out_nodata if out_nodata is not None else 0,
+    # rasterio.merge writes 0 where no source covers a pixel when no
+    # source declares a nodata, so 0 is the fill the mosaic used.
+    return GeoArray(
+        merged,  # (bands, H, W)
+        transform,
+        slice_.crs,
+        fill_value=out_nodata if out_nodata is not None else 0,
     )
 
 
@@ -691,7 +700,7 @@ async def aload_raster(
     retries: int = 3,
     max_open_workers: int = 8,
     storage_options: dict[str, Any] | None = None,
-) -> GeoTensor:
+) -> GeoArray:
     """Async mirror of `load_raster` for event-loop consumers.
 
     Runs `load_raster` in a worker thread via `asyncio.to_thread` so the
@@ -742,7 +751,7 @@ def load_raster_timeseries(
     n_workers: int = 4,
     on_missing_day: Literal["skip", "raise"] = "skip",
     storage_options: dict[str, Any] | None = None,
-) -> GeoTensor:
+) -> GeoArray:
     """Stack daily mosaics across the slice's interval into ``(time, b, h, w)``.
 
     For each distinct day on which a matching row's time window begins
@@ -774,8 +783,9 @@ def load_raster_timeseries(
             propagates the first such error.
 
     Returns:
-        A `GeoTensor` of shape ``(T, bands, H, W)`` where ``T`` is the
-        number of distinct days with coverage.
+        A `geoarray.GeoArray` of shape ``(T, bands, H, W)`` on the slice
+        grid, where ``T`` is the number of distinct days with coverage;
+        its ``fill_value`` is the last day's.
 
     Raises:
         ValueError: If no catalog rows match the slice, or if every
@@ -794,7 +804,7 @@ def load_raster_timeseries(
 
     days = _timeseries_days(filtered.gdf.index, slice_.interval)
 
-    def load_day(day: pd.Timestamp) -> tuple[pd.Timestamp, GeoTensor] | None:
+    def load_day(day: pd.Timestamp) -> tuple[pd.Timestamp, GeoArray] | None:
         # Clip the day to the slice: a sub-day slice stays sub-day (#219).
         day_interval = pd.Interval(
             max(day, slice_.interval.left),
@@ -819,7 +829,7 @@ def load_raster_timeseries(
                 return None
             raise
 
-    results: list[tuple[pd.Timestamp, GeoTensor]] = []
+    results: list[tuple[pd.Timestamp, GeoArray]] = []
     if n_workers == 1:
         for day in days:
             result = load_day(day)
@@ -847,12 +857,8 @@ def load_raster_timeseries(
     if not results:
         raise ValueError("load_raster_timeseries: no usable days in interval")
 
-    ordered = [tensor for _, tensor in sorted(results, key=lambda item: item[0])]
-    last = ordered[-1]
-    stacked = np.stack([tensor.values for tensor in ordered], axis=0)
-    return GeoTensor(
-        values=stacked,
-        transform=last.transform,
-        crs=last.crs,
-        fill_value_default=last.fill_value_default,
-    )
+    ordered = [scene for _, scene in sorted(results, key=lambda item: item[0])]
+    # (T, bands, H, W); not `geoarray.stack`, which refuses days whose
+    # mosaics declare different nodata values: the last day's is kept.
+    stacked = np.stack([np.asarray(scene) for scene in ordered], axis=0)
+    return ordered[-1].with_data(stacked)

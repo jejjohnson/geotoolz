@@ -5,11 +5,15 @@ the data resampled onto that slice's grid (its bounds, resolution and
 CRS):
 
 - `load_raster` / `aload_raster` — one mosaicked ``(C, H, W)``
-  `GeoTensor` (``aload_raster`` is the async twin).
-- `load_raster_timeseries` — one ``(T, C, H, W)`` `GeoTensor`, a time
-  step per day in the slice's interval.
+  `geoarray.GeoArray` (``aload_raster`` is the async twin).
+- `load_raster_timeseries` — one ``(T, C, H, W)`` `geoarray.GeoArray`,
+  a time step per day in the slice's interval.
 - `load_xarray` — an xarray Dataset (``[xarray-raster]`` extra; lazy).
-- `load_vector` — a GeoDataFrame (``[vector]`` extra; lazy).
+- `load_vector` — the features rasterised into a ``(1, H, W)`` int64
+  label `geoarray.GeoArray` (lazy).
+
+Every `GeoArray` a loader returns is on ``slice_.grid`` and declares its
+nodata in ``fill_value``.
 
 ```python
 import pandas as pd
@@ -25,7 +29,7 @@ aoi = GeoSlice(
     resolution=(10.0, 10.0),
     crs="EPSG:32630",
 )
-tensor = load_raster(catalog, aoi)   # (C, 1000, 1000)
+scene = load_raster(catalog, aoi)   # (C, 1000, 1000) GeoArray on aoi.grid
 ```
 """
 

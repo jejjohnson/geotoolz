@@ -4,14 +4,15 @@ A catalog is an index of files, not of pixels. Each row holds one file's
 footprint, time interval, CRS and path. A query reads only that index, and
 a loader opens only the files that overlap.
 
-![geocatalog: sources are built into an InMemory or DuckDB catalog, queried with a GeoSlice, and only the hits are loaded as a GeoTensor or a geopatcher RasterField](../assets/diagrams/catalog-flow.png)
+![geocatalog: sources are built into an InMemory or DuckDB catalog, queried with a GeoSlice, and only the hits are loaded as a GeoArray or a geopatcher RasterField](../assets/diagrams/catalog-flow.png)
 
 Work moves through three layers:
 
 1. **Discover and build.** A `Source` adapter or a local builder turns
    files into rows.
 2. **Index.** A `GeoCatalog` holds the rows and answers queries.
-3. **Load.** A loader reads the hits onto a `GeoSlice` grid.
+3. **Load.** A loader reads the hits onto a `GeoSlice` grid and returns
+   a `geoarray.GeoArray` (pixels, grid, nodata in `fill_value`).
 
 ## GeoSlice
 
@@ -23,6 +24,7 @@ patchers produce it.
 import dataclasses
 
 import pandas as pd
+from geoarray import Grid
 
 import geocatalog as gc
 
@@ -33,6 +35,7 @@ aoi: gc.GeoSlice = gc.GeoSlice(
     crs="EPSG:32611",
 )
 shape: tuple[int, int] = aoi.shape                                   # (300, 500) = (H, W)
+grid: Grid = aoi.grid                                                # transform, CRS and (H, W)
 wider: gc.GeoSlice = dataclasses.replace(aoi, bounds=(499_000, 4_300_000, 505_000, 4_303_000))
 ```
 
@@ -46,6 +49,10 @@ The rules of the contract:
   catalog rows. Convert with `geocatalog.utils.to_naive_utc`.
 - **Rounded shape.** `shape` rounds `extent / resolution` half up. For an
   exact pixel grid, see [Grid alignment](how-to/grid-alignment.md).
+- **One output grid.** `grid` is the `geoarray.Grid` of `transform`,
+  `crs` and `shape`. Every loader returns its `GeoArray` on it, so
+  `load_raster(cat, aoi).grid == aoi.grid`, and imagery and labels loaded
+  on one slice line up pixel for pixel.
 
 ## Row schema
 

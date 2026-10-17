@@ -79,7 +79,7 @@ def test_representable_nodata_accepted(tmp_path: Path) -> None:
     path = _tile(tmp_path, "A")
     cat = build_raster_catalog([path], filename_regex=REGEX)
     gt = load_raster(cat, _upsampling_slice(path), nodata=65535)
-    assert gt.fill_value_default == 65535
+    assert gt.fill_value == 65535
 
 
 def test_build_without_target_crs_reprojects_foreign_rows(tmp_path: Path) -> None:

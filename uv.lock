@@ -1389,7 +1389,7 @@ source = { editable = "packages/geotoolz-catalog" }
 dependencies = [
     { name = "cyclopts" },
     { name = "geopandas" },
-    { name = "georeader-spaceml" },
+    { name = "geotoolz-array" },
     { name = "loguru" },
     { name = "numpy" },
     { name = "pandas" },
@@ -1398,7 +1398,6 @@ dependencies = [
     { name = "rasterio" },
     { name = "shapely" },
     { name = "tenacity" },
-    { name = "typing-extensions" },
 ]
 
 [package.optional-dependencies]
@@ -1415,6 +1414,8 @@ full = [
     { name = "duckdb" },
     { name = "earthaccess" },
     { name = "earthengine-api" },
+    { name = "georeader-spaceml" },
+    { name = "geotoolz-array", extra = ["georeader"] },
     { name = "geotoolz-cloud", extra = ["fsspec"] },
     { name = "geotoolz-patcher" },
     { name = "h5netcdf" },
@@ -1429,6 +1430,8 @@ gee = [
     { name = "earthengine-api" },
 ]
 patch = [
+    { name = "georeader-spaceml" },
+    { name = "geotoolz-array", extra = ["georeader"] },
     { name = "geotoolz-patcher" },
 ]
 sources-all = [
@@ -1489,7 +1492,9 @@ requires-dist = [
     { name = "earthaccess", marker = "extra == 'earthaccess'", specifier = ">=0.10" },
     { name = "earthengine-api", marker = "extra == 'gee'", specifier = ">=0.1.380" },
     { name = "geopandas", specifier = ">=0.14" },
-    { name = "georeader-spaceml", specifier = ">=2.1" },
+    { name = "georeader-spaceml", marker = "extra == 'patch'", specifier = ">=2.1" },
+    { name = "geotoolz-array", editable = "packages/geotoolz-array" },
+    { name = "geotoolz-array", extras = ["georeader"], marker = "extra == 'patch'", editable = "packages/geotoolz-array" },
     { name = "geotoolz-catalog", extras = ["earthaccess", "stac", "gee"], marker = "extra == 'sources-all'", editable = "packages/geotoolz-catalog" },
     { name = "geotoolz-catalog", extras = ["xarray-raster", "duckdb", "cloud", "streaming", "sources-all", "patch"], marker = "extra == 'full'", editable = "packages/geotoolz-catalog" },
     { name = "geotoolz-cloud", extras = ["fsspec"], marker = "extra == 'cloud'", editable = "packages/geotoolz-cloud" },
@@ -1507,7 +1512,6 @@ requires-dist = [
     { name = "rioxarray", marker = "extra == 'xarray-raster'", specifier = ">=0.15" },
     { name = "shapely", specifier = ">=2.0" },
     { name = "tenacity", specifier = ">=8.0" },
-    { name = "typing-extensions", specifier = ">=4.0" },
     { name = "xarray", marker = "extra == 'xarray-raster'", specifier = ">=2024.1" },
     { name = "zarr", marker = "extra == 'xarray-raster'", specifier = ">=3.0" },
 ]
