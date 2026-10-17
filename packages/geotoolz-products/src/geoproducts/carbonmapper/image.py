@@ -42,9 +42,7 @@ from urllib.parse import urlparse
 
 import numpy as np
 import requests
-from georeader import read, window_utils
-from georeader.geotensor import GeoTensor
-from georeader.rasterio_reader import RasterioReader
+from geoarray import GeoArray
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
@@ -73,6 +71,8 @@ if TYPE_CHECKING:
     # for typing. Imported under ``TYPE_CHECKING`` to keep the module
     # importable without dragging in the L2B raster machinery for
     # callers who only use the L3A products.
+    from geoarray import RasterSource
+
     from geoproducts.carbonmapper.rasters import CMImageRaster
 
 _log = logging.getLogger(__name__)
@@ -249,7 +249,7 @@ class CMPlumeImage:
 
         img = CMPlumeImage.from_plume_id(plume_id, token=token)
         outline = img.outline                        # MultiPolygon in EPSG:4326
-        crop    = img.tile_cmf(pad_px=64)            # GeoTensor, full L2B res
+        crop    = img.tile_cmf(pad_px=64)            # GeoArray (1, h, w), full L2B res
         rgb     = img.tile_rgb(pad_px=64)            # 3-band context image
 
     Attributes:
@@ -266,8 +266,8 @@ class CMPlumeImage:
             proxy is always Bearer-gated). May be ``None`` for L3A-only
             usage if :attr:`urls` already point at signed CDN URLs or
             local files.
-        overview_level: Forwarded to :class:`RasterioReader` —
-            ``None`` for full resolution, integer for COG overviews.
+        overview_level: ``None`` for full resolution, integer for COG
+            overviews.
         http_timeout: Per-request timeout (seconds) for the outline
             GeoJSON fetch. Defaults to 30s.
         products: The explicit product selection this bundle exposes
@@ -301,8 +301,8 @@ class CMPlumeImage:
     def product(self, product: CMProduct) -> Any:
         """Open one selected product (cached per product key).
 
-        Returns the product-kind-specific object — a
-        :class:`RasterioReader` for raster products, a shapely geometry
+        Returns the product-kind-specific object — a lazy
+        `geoarray.RasterSource` for raster products, a shapely geometry
         for vector products, ``bytes`` for PNG quicklooks. Returns
         ``None`` when the product was selected but its URL was not
         available from the source (e.g. :meth:`from_stac_item` with a
@@ -478,7 +478,7 @@ class CMPlumeImage:
     # ---- Lazy raster properties (delegate to the product registry) ----
 
     @property
-    def mask(self) -> RasterioReader | None:
+    def mask(self) -> RasterSource | None:
         """L3A pre-cropped RGBA GeoTIFF — band 4 alpha is the binary mask.
 
         **Thumbnail-grade.** Typically a small per-plume window
@@ -486,14 +486,14 @@ class CMPlumeImage:
         native resolution, prefer :meth:`tile_cmf` cropped by
         :attr:`outline`.
 
-        Backed by :class:`RasterioReader`. Returns ``None`` if
+        A lazy `geoarray.RasterSource`. Returns ``None`` if
         ``plume.tif`` URL is absent; raises
         :class:`CMProductNotSelected` if ``PLUME_TIF`` wasn't selected.
         """
         return self.product(PLUME_TIF)
 
     @property
-    def concentrations(self) -> RasterioReader | None:
+    def concentrations(self) -> RasterSource | None:
         """L3A pre-cropped CH4 column density thumbnail (ppm·m).
 
         **Thumbnail-grade — typically ~41 × 48 px.** Covers the full
@@ -507,7 +507,7 @@ class CMPlumeImage:
         return self.product(PLUME_CONCENTRATIONS)
 
     @property
-    def ime_concentrations(self) -> RasterioReader | None:
+    def ime_concentrations(self) -> RasterSource | None:
         """L3A IME-clipped CH4 column density (ppm·m).
 
         **Thumbnail-grade — typically ~11 × 11 px.** Only
@@ -527,7 +527,7 @@ class CMPlumeImage:
         return self.product(IME_CONCENTRATIONS)
 
     @property
-    def rgb(self) -> RasterioReader | None:
+    def rgb(self) -> RasterSource | None:
         """L3A pre-cropped 3-band uint8 true-colour GeoTIFF.
 
         **Thumbnail-grade** per-plume crop. For full-resolution true
@@ -537,7 +537,7 @@ class CMPlumeImage:
         return self.product(RGB_TIF)
 
     @property
-    def ime_mask(self) -> RasterioReader | None:
+    def ime_mask(self) -> RasterSource | None:
         """L3A binary mask of pixels that contributed to ``emission_auto``.
 
         From ``ime-cmf-mask.tif`` — a tighter subset of
@@ -656,7 +656,7 @@ class CMPlumeImage:
         ...     "tan20260331t181625c77s4001-A", token=tok,
         ... )
         >>> img.tile.cmf  # doctest: +SKIP
-        <RasterioReader …/l2b-ch4-mfa-v3c/2026/03/31/…/cmf.tif>
+        source_from_georeader(<RasterioReader …/l2b-ch4-mfa-v3c/2026/03/31/…/cmf.tif>)
         """
         if self.token is None:
             msg = (
@@ -694,7 +694,7 @@ class CMPlumeImage:
             raise RuntimeError(msg)
         return ir
 
-    def tile_cmf(self, *, pad_px: int = 64) -> GeoTensor:
+    def tile_cmf(self, *, pad_px: int = 64) -> GeoArray:
         """L2B CH4 retrieval cropped to :attr:`outline`, full L2B resolution.
 
         This is the headline workflow: the analysis-grade
@@ -710,7 +710,7 @@ class CMPlumeImage:
                 a tight crop, larger for more context.
 
         Returns:
-            :class:`GeoTensor` — eagerly loaded, ready to plot.
+            `geoarray.GeoArray` — eagerly loaded, ready to plot.
 
         Raises:
             ValueError: If :attr:`outline` is ``None`` (canonical fetch
@@ -719,12 +719,12 @@ class CMPlumeImage:
                 resolved (see :attr:`tile`).
 
         >>> crop = img.tile_cmf(pad_px=64)  # doctest: +SKIP
-        >>> crop.values.shape  # doctest: +SKIP
+        >>> crop.shape  # doctest: +SKIP
         (1, 168, 152)
         """
         return self._crop_tile_band("cmf", pad_px=pad_px)
 
-    def tile_rgb(self, *, pad_px: int = 64) -> GeoTensor:
+    def tile_rgb(self, *, pad_px: int = 64) -> GeoArray:
         """L2B true-colour RGB sibling cropped to :attr:`outline`.
 
         See :meth:`tile_cmf` for the cropping semantics. Returns the
@@ -737,7 +737,7 @@ class CMPlumeImage:
         """
         return self._crop_tile_band("rgb", pad_px=pad_px)
 
-    def tile_uncertainty(self, *, pad_px: int = 64) -> GeoTensor:
+    def tile_uncertainty(self, *, pad_px: int = 64) -> GeoArray:
         """L2B per-pixel uncertainty cropped to :attr:`outline`.
 
         Companion to :meth:`tile_cmf` — the uncertainty raster shares
@@ -746,7 +746,7 @@ class CMPlumeImage:
         """
         return self._crop_tile_band("uncertainty", pad_px=pad_px)
 
-    def _crop_tile_band(self, band: str, *, pad_px: int) -> GeoTensor:
+    def _crop_tile_band(self, band: str, *, pad_px: int) -> GeoArray:
         """Shared crop pipeline for the ``tile_*`` methods.
 
         Cropping rule: take the plume polygon's bounding rectangle in
@@ -773,11 +773,14 @@ class CMPlumeImage:
             )
             raise KeyError(msg)
 
+        from geoarray.interop.georeader import from_georeader, source_to_georeader
+        from georeader import read
+
         # `boundless=False` returns None on zero-overlap windows. The
         # outline is derived from this plume, which came from this
         # tile, so non-overlap implies a data bug — surface it loudly.
         result = read.read_from_polygon(
-            reader,
+            source_to_georeader(reader),
             polygon=outline,
             crs_polygon="EPSG:4326",
             pad_add=(pad_px, pad_px),
@@ -791,29 +794,24 @@ class CMPlumeImage:
                 "This indicates upstream data inconsistency."
             )
             raise RuntimeError(msg)
-        # `trigger_load=True` materialises into a GeoTensor.
-        if isinstance(result, GeoTensor):
-            return result
-        # Fall-back path: result is a GeoData reader, load explicitly.
-        return result.load()  # ty: ignore[unresolved-attribute]
+        # `trigger_load=True` materialises the read (a georeader
+        # GeoTensor); a lazy window reader would be loaded here.
+        if hasattr(result, "load") and not isinstance(result, np.ndarray):
+            result = result.load()
+        return from_georeader(result)
 
     # ---- Auxiliary -----------------------------------------------------
 
-    def load_alpha_mask(self) -> GeoTensor | None:
-        """Load just band 4 of :attr:`mask` as a boolean GeoTensor."""
+    def load_alpha_mask(self) -> GeoArray | None:
+        """Load just band 4 of :attr:`mask` as a boolean ``(H, W)`` GeoArray."""
         reader = self.mask
         if reader is None:
             return None
         geo = reader.load()
-        arr = np.asarray(geo.values)
+        arr = np.asarray(geo)
         if arr.ndim != 3 or arr.shape[0] < 4:
             return None
-        return GeoTensor(
-            values=(arr[3] > 0),
-            transform=geo.transform,
-            crs=geo.crs,
-            fill_value_default=False,
-        )
+        return GeoArray(arr[3] > 0, geo.transform, geo.crs, fill_value=False)
 
     # ---- Internals -----------------------------------------------------
 
@@ -827,7 +825,7 @@ class CMPlumeImage:
         if reader is None:
             return None
         geo = reader.load()
-        arr = np.asarray(geo.values)
+        arr = np.asarray(geo)
         if arr.ndim != 3 or arr.shape[0] < 4:
             return None
         alpha = arr[3]
@@ -844,16 +842,18 @@ class CMPlumeImage:
             for geom, val in rasterio.features.shapes(
                 mask,
                 mask=mask.astype(bool),
-                transform=geo.transform,
+                transform=geo.grid.affine,
             )
             if val == 1
         ]
         if not polys:
             return None
         merged = unary_union(polys)
+        from georeader import window_utils
+
         return window_utils.polygon_to_crs(
             merged,
-            crs_polygon=str(geo.crs),
+            crs_polygon=geo.crs.to_wkt() if geo.crs is not None else None,
             dst_crs="EPSG:4326",
         )
 

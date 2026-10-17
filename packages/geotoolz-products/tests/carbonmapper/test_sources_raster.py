@@ -5,12 +5,16 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from shapely.geometry import Point
+from affine import Affine
+from geoarray import GeoArray
+from shapely.geometry import Point, box
 
+from geoproducts import toy_sensor
 from geoproducts.carbonmapper.source import CMSource
 from geoproducts.carbonmapper.sources_raster import (
     CMSourceRaster,
     rasterize_sources,
+    rasterize_sources_like,
 )
 
 
@@ -60,14 +64,14 @@ def test_empty_sources_returns_zero_mask():
     out = rasterize_sources([], **g)
     assert out.shape == g["shape"]
     assert out.dtype == np.uint8
-    assert int(out.sum()) == 0
+    assert int(np.asarray(out).sum()) == 0
 
 
 def test_single_source_no_buffer_stamps_one_pixel():
     g = _utm_grid()
     lon, lat = _grid_lonlat_at(g, row=42, col=17)
     out = rasterize_sources([_make_source(lon, lat)], **g)
-    assert int(out.sum()) == 1
+    assert int(np.asarray(out).sum()) == 1
     assert int(np.asarray(out)[42, 17]) == 1
 
 
@@ -75,7 +79,7 @@ def test_multiple_sources_stamp_distinct_pixels():
     g = _utm_grid()
     pts = [_grid_lonlat_at(g, r, c) for r, c in [(10, 10), (50, 50), (80, 20)]]
     out = rasterize_sources([_make_source(lo, la) for lo, la in pts], **g)
-    assert int(out.sum()) == 3
+    assert int(np.asarray(out).sum()) == 3
     for r, c in [(10, 10), (50, 50), (80, 20)]:
         assert int(np.asarray(out)[r, c]) == 1
 
@@ -84,7 +88,7 @@ def test_source_outside_grid_is_dropped():
     g = _utm_grid()
     # Way outside (different hemisphere)
     out = rasterize_sources([_make_source(0.0, -45.0)], **g)
-    assert int(out.sum()) == 0
+    assert int(np.asarray(out).sum()) == 0
 
 
 def test_accepts_shapely_point():
@@ -109,7 +113,7 @@ def test_buffer_in_metres_paints_disk():
     lon, lat = _grid_lonlat_at(g, row=50, col=50)
     out = rasterize_sources([_make_source(lon, lat)], buffer_m=120.0, **g)
     # 120 m disk on 30 m grid: diameter ~8 px, area ~ pi*4^2 ≈ 50 px.
-    n_set = int(out.sum())
+    n_set = int(np.asarray(out).sum())
     assert 30 <= n_set <= 90, f"unexpected pixel count {n_set}"
     # Centre is set, far corner is not.
     assert int(np.asarray(out)[50, 50]) == 1
@@ -123,7 +127,7 @@ def test_buffer_converts_metres_for_feet_crs():
     g = _utm_grid(origin_xy=(2_296_583.0, 10_000_000.0), res=30.0 / ft, crs="EPSG:2277")
     lon, lat = _grid_lonlat_at(g, row=50, col=50)
     out = rasterize_sources([_make_source(lon, lat)], buffer_m=120.0, **g)
-    n_set = int(out.sum())
+    n_set = int(np.asarray(out).sum())
     assert 30 <= n_set <= 90, f"unexpected pixel count {n_set}"
 
 
@@ -149,19 +153,20 @@ def test_zero_buffer_allows_geographic_crs():
         crs="EPSG:4326",
         buffer_m=0.0,
     )
-    assert int(out.sum()) == 1
+    assert int(np.asarray(out).sum()) == 1
 
 
 # ─── rasterize_sources — output type ─────────────────────────────────
 
 
-def test_output_is_geotensor_with_crs_and_transform():
+def test_output_is_geoarray_with_crs_and_transform():
     g = _utm_grid()
-    out = rasterize_sources([], **g)
-    assert out.transform == g["transform"]
-    # CRS may be stored as rasterio.CRS — compare via to_epsg.
-    assert rasterio.crs.CRS.from_user_input(out.crs).to_epsg() == 32613
-    assert out.fill_value_default == 0
+    for sources in ([], [_make_source(*_grid_lonlat_at(g, 3, 4))]):
+        out = rasterize_sources(sources, **g)
+        assert isinstance(out, GeoArray)
+        assert out.grid.affine == g["transform"]
+        assert out.crs.to_epsg() == 32613
+        assert out.fill_value == 0
 
 
 def test_invalid_shape_raises():
@@ -190,7 +195,7 @@ def test_cmsourceraster_load_matches_function():
     )
     out = raster.load()
     assert int(np.asarray(out)[10, 20]) == 1
-    assert int(out.sum()) == 1
+    assert int(np.asarray(out).sum()) == 1
 
 
 def test_cmsourceraster_repr_mentions_count():
@@ -207,11 +212,11 @@ def test_cmsourceraster_repr_mentions_count():
     assert "buffer_m=50" in s
 
 
-def test_cmsourceraster_from_geodata_inherits_grid():
-    """``from_geodata`` should copy transform/shape/crs from a template."""
+def test_cmsourceraster_from_source_inherits_grid():
+    """``from_source`` should copy transform/shape/crs from a template."""
     g = _utm_grid()
-    template = rasterize_sources([], **g)  # zero GeoTensor as a template
-    raster = CMSourceRaster.from_geodata(
+    template = rasterize_sources([], **g)  # zero GeoArray as a template
+    raster = CMSourceRaster.from_source(
         sources=[_make_source(-100.0, 30.0)],
         template=template,
         buffer_m=15.0,
@@ -315,3 +320,56 @@ def test_cmsourceraster_read_window_rejects_antimeridian_bbox():
     )
     with pytest.raises(ValueError, match="antimeridian"):
         raster.read_window((179.0, -1.0, -179.0, 1.0))
+
+
+def test_rasterize_sources_like_takes_any_raster_source():
+    g = _utm_grid(shape=(10, 12))
+    reader = toy_sensor.Reader(
+        "toy",
+        data=np.zeros((4, 10, 12), np.float32),
+        transform=g["transform"],
+        crs=g["crs"],
+    )
+    lon, lat = _grid_lonlat_at(g, row=3, col=7)
+    out = rasterize_sources_like([_make_source(lon, lat)], reader)
+    assert isinstance(out, GeoArray)
+    assert out.grid == reader.grid
+    assert np.argwhere(np.asarray(out)).tolist() == [[3, 7]]
+    empty = rasterize_sources_like([], reader.load())
+    assert empty.grid == reader.grid and not np.asarray(empty).any()
+
+
+def test_georeader_templates_are_refused():
+    from geoarray.interop.georeader import source_to_georeader, to_georeader
+
+    g = _utm_grid()
+    template = rasterize_sources([], **g)
+    with pytest.raises(TypeError, match="from_georeader"):
+        rasterize_sources_like([], to_georeader(template))
+    with pytest.raises(TypeError, match="from_georeader"):
+        CMSourceRaster.from_source([], to_georeader(template))
+    reader = toy_sensor.Reader("toy", transform=g["transform"], crs=g["crs"])
+    with pytest.raises(TypeError, match="source_from_georeader"):
+        CMSourceRaster.from_source([], source_to_georeader(reader))
+
+
+def test_cmsourceraster_reads_return_geoarrays():
+    g = _utm_grid()
+    raster = CMSourceRaster(
+        sources=[_make_source(*_grid_lonlat_at(g, row=50, col=50))],
+        transform=g["transform"],
+        shape=g["shape"],
+        crs=rasterio.crs.CRS.from_user_input(g["crs"]),
+    )
+    assert raster.grid == raster.load().grid
+    lon, lat = _grid_lonlat_at(g, row=50, col=50)
+    bbox = (lon - 0.005, lat - 0.005, lon + 0.005, lat + 0.005)
+    crop = raster.read_window(bbox)
+    assert isinstance(crop, GeoArray)
+    assert crop.grid.res == (30.0, 30.0)
+    assert np.asarray(crop).sum() == 1
+    assert isinstance(raster.read_polygon(box(*bbox)), GeoArray)
+    warped = raster.read_window_to_crs(bbox, "EPSG:4326")
+    assert isinstance(warped, GeoArray)
+    assert warped.crs.to_epsg() == 4326
+    assert Affine(*warped.grid.transform).a > 0

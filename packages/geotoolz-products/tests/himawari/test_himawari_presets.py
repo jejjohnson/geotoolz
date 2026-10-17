@@ -7,19 +7,19 @@ import sys
 import numpy as np
 import pytest
 from affine import Affine
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geoproducts import himawari
 from geoproducts.himawari import constants, recipes
 
 
-def _stack(values: dict[str, float]) -> GeoTensor:
+def _stack(values: dict[str, float]) -> GeoArray:
     data = np.stack([np.full((4, 4), v, dtype=np.float32) for v in values.values()])
-    return GeoTensor(
+    return GeoArray(
         data,
-        transform=Affine(0.01, 0.0, 140.0, 0.0, -0.01, 35.0),
-        crs="EPSG:4326",
-        fill_value_default=np.nan,
+        Affine(0.01, 0.0, 140.0, 0.0, -0.01, 35.0),
+        "EPSG:4326",
+        fill_value=np.nan,
         attrs={"band_names": tuple(values)},
     )
 
@@ -63,10 +63,10 @@ def test_mask_clouds_reads_the_cloud_mask() -> None:
     )
     data[0, 0, 0] = constants.CLOUD_MASK_BINARY_CLEAR
     data[1, 0, 0] = constants.CLOUD_MASK_PROBABLY_CLEAR
-    scene = GeoTensor(
+    scene = GeoArray(
         data,
-        transform=Affine(0.01, 0.0, 140.0, 0.0, -0.01, 35.0),
-        crs="EPSG:4326",
+        Affine(0.01, 0.0, 140.0, 0.0, -0.01, 35.0),
+        "EPSG:4326",
         attrs={"band_names": ("CloudMaskBinary", "CloudMask")},
     )
     default = np.asarray(himawari.MaskClouds()(scene))

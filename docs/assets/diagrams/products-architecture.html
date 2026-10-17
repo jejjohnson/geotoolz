@@ -21,8 +21,8 @@
 </head>
 <body>
 <div id="diagram">
-  <div class="title">geoproducts — every product becomes a GeoTensor</div>
-  <div class="subtitle">Readers depend on georeader, never on geoops; what they return is what every operator and patcher takes.</div>
+  <div class="title">geoproducts — every product becomes a GeoArray</div>
+  <div class="subtitle">Readers are geoarray RasterSources, never depending on geoops; what they return is what every operator and patcher takes.</div>
 
   <div class="lane read" id="lane-products">
     <div class="lane-head"><span class="verb">products</span><span class="pkg">geoproducts.&lt;product&gt;</span></div>
@@ -54,12 +54,12 @@
       </div>
 
       <div class="node read abc" id="abc">
-        <div class="name"><code>ProductReader</code> <span style="font-weight:500;color:var(--muted)">(georeader GeoData, ABC)</span></div>
+        <div class="name"><code>ProductReader</code> <span style="font-weight:500;color:var(--muted)">(geoarray RasterSource, ABC)</span></div>
         <div class="surface">
-          <code>crs · transform · shape · bounds</code>
-          <code>band_names · dtype · fill value</code>
-          <code>read_from_window / read_from_bounds</code>
-          <code>_read_window() — lazy, boundless</code>
+          <code>grid · crs · transform · shape · bounds</code>
+          <code>band_names · dtype · fill_value</code>
+          <code>read_window / load / read_from_bounds</code>
+          <code>_read_window(PixelWindow) — lazy, boundless</code>
           <code>files via geocloud — local or s3://</code>
         </div>
       </div>
@@ -67,9 +67,9 @@
   </div>
 
   <div class="bottom">
-    <div class="node solid" id="gt" style="--accent: var(--read);"><div class="name">GeoTensor</div><div class="desc">CRS · transform · band_names · fill value — the one carrier the rest of the stack takes</div></div>
+    <div class="node solid" id="gt" style="--accent: var(--read);"><div class="name">GeoArray</div><div class="desc">CRS · transform · band_names · fill_value — the one carrier the rest of the stack takes</div></div>
     <div class="node compute" id="to-gz"><div class="name">geoops operators</div><div class="desc">indices · viz.RGBRecipe · plume · …</div></div>
-    <div class="node cut" id="to-gp"><div class="name">geopatcher fields</div><div class="desc">RasterField(reader) → split / merge</div></div>
+    <div class="node cut" id="to-gp"><div class="name">geopatcher fields</div><div class="desc">a reader is a RasterSource → split / merge</div></div>
   </div>
 </div>
 <script src="_connect.js"></script>
@@ -78,7 +78,7 @@
   wire("toolkit", "ns", { color: R, label: "<span class='t'>built on</span>" });
   wire("ns", "abc", { color: R, label: "<span class='t'>subclass</span>" });
   wire("lane-products", "gt", { from: "bottom", to: "top", color: R, bend: 40,
-        label: "<span class='t'>read_from_window(…)</span><span class='s'>· stack(…)</span>" });
+        label: "<span class='t'>read_window(…)</span><span class='s'>· stack(…)</span>" });
   wire("gt", "to-gz", { color: "#cf9418" });
   wire("to-gz", "to-gp", { color: "#3f6fb5", dashed: true, label: "<span class='t'>patch_ops</span>" });
   ready();

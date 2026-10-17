@@ -261,7 +261,7 @@ jobs:
           import pkgutil
 
           import numpy as np
-          from rasterio.windows import Window
+          from geoarray import GeoArray, PixelWindow, RasterSource
 
           import geoproducts
 
@@ -287,9 +287,15 @@ jobs:
                   importlib.import_module(info.name)
 
           data = np.arange(4 * 8 * 8, dtype="float32").reshape(4, 8, 8)
-          reader = geoproducts.toy_sensor.Reader("toy", data=data)
-          chip = reader.read_from_window(Window(0, 0, 4, 4)).load()
-          assert chip.shape == (4, 4, 4), chip.shape
+          from affine import Affine
+
+          reader = geoproducts.toy_sensor.Reader(
+              "toy", data=data, transform=Affine(10, 0, 0, 0, -10, 80), crs="EPSG:32631"
+          )
+          assert isinstance(reader, RasterSource)
+          chip = reader.read_window(PixelWindow(col_off=0, row_off=0, width=4, height=4))
+          assert isinstance(chip, GeoArray) and chip.shape == (4, 4, 4), chip.shape
+          assert reader.read_from_bounds(chip.grid.bounds).grid == chip.grid
 
           # Extra-backed features fail only on use, naming the extra.
           try:

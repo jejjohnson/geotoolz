@@ -3,8 +3,10 @@
 :class:`CMImageRaster` exposes every loadable L2B scene asset
 (``cmf`` / ``cmf-unortho`` / ``uncertainty`` /
 ``uncertainty-unortho`` / ``artifact-mask`` / ``rgb`` / ``uas``) as
-lazy properties backed by :class:`~georeader.rasterio_reader.RasterioReader`
-(or plain text for the ``uas.txt`` sidecar).
+lazy `geoarray.RasterSource` properties whose reads return a
+`geoarray.GeoArray` (or plain text for the ``uas.txt`` sidecar).
+georeader's ``RasterioReader`` and ``georeader.read`` do the I/O and the
+window maths internally; no georeader object leaves this module.
 
 Per-plume L3A products (mask, concentrations, IME-clipped
 concentrations, RGB, outline) live in
@@ -30,20 +32,15 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING
 
-from georeader import read
-from georeader.abstract_reader import GeoData
-from georeader.geotensor import GeoTensor
-from georeader.rasterio_reader import RasterioReader
+from affine import Affine
+from geoarray import Grid
 from rasterio.errors import RasterioIOError
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 
 from geoproducts._src.query import validate_lonlat_bbox
-
-# Lazy reads return a windowed `GeoData` (georeader's protocol — covers
-# both ``RasterioReader`` and ``GeoTensor``).
 from geoproducts.carbonmapper.api_queries import (
     CMSceneNotPublished,
     CMTileItem,
@@ -55,9 +52,13 @@ from geoproducts.carbonmapper.products import (
     CMCollectionSpec,
     CMProduct,
     CMProductFamily,
+    _open_raster,
     bearer_headers_for,
-    rio_env_options_for,
 )
+
+
+if TYPE_CHECKING:
+    from geoarray import GeoArray, RasterSource
 
 
 BBox = tuple[float, float, float, float]  # (W, S, E, N) in WGS-84
@@ -352,7 +353,7 @@ def _probe_l2b_collection(
 
 @dataclass(repr=False)
 class CMImageRaster:
-    """L2B scene exposed as four georeader-backed rasters.
+    """L2B scene exposed as lazy `geoarray.RasterSource` rasters.
 
     Lazy: instantiating the dataclass does NOT issue HTTP / blob reads;
     access ``.cmf`` / ``.rgb`` / etc. or call :meth:`read_window` /
@@ -365,8 +366,8 @@ class CMImageRaster:
             ``rgb``, the ``*-unortho`` variants) may be missing from the
             mapping **or** from the server — either way the accessor
             returns ``None``.
-        overview_level: Forwarded to ``RasterioReader``. ``None`` for
-            full resolution; integer for COG overviews (faster previews).
+        overview_level: ``None`` for full resolution; integer for COG
+            overviews (faster previews).
         token: Bearer token for asset-proxy URLs. Applied per read
             (scoped GDAL env), never exported process-wide. ``None``
             falls back to whatever ``GDAL_HTTP_HEADERS`` the caller set.
@@ -534,7 +535,7 @@ class CMImageRaster:
             pinned by ``spec`` / ``rgb_collection``). When ``False``,
             ``self.rgb`` will be ``None``.
         overview_level:
-            Forwarded to :class:`RasterioReader`.
+            ``None`` for full resolution; integer for a COG overview.
         http_timeout:
             Per-probe range-GET timeout (seconds).
 
@@ -565,7 +566,7 @@ class CMImageRaster:
         ...     spec=CMCollectionSpec(version="v3d"),
         ... )
         >>> tile.cmf  # doctest: +SKIP
-        <RasterioReader …/l2b-ch4-mfa-v3d/2026/06/23/…>
+        source_from_georeader(<RasterioReader …/l2b-ch4-mfa-v3d/2026/06/23/…>)
         """
         # The spec's composed ids probe FIRST (the record's own version
         # — usually the right one) with same-gas backups; an explicit
@@ -656,38 +657,38 @@ class CMImageRaster:
     # ---- Lazy band readers --------------------------------------------
 
     @cached_property
-    def cmf(self) -> RasterioReader:
+    def cmf(self) -> RasterSource:
         """CH4 matched-filter retrieval, orthorectified (ppm·m).
         Always present on L2B-CH4 items."""
         return self._open("cmf")
 
     @cached_property
-    def cmf_unortho(self) -> RasterioReader | None:
+    def cmf_unortho(self) -> RasterSource | None:
         """CH4 retrieval in raw sensor frame (pre-orthorectification).
         ``None`` for older collection variants (e.g. ``mfm-v1``) that
         don't ship the unortho sibling."""
         return self._open_optional("cmf-unortho")
 
     @cached_property
-    def rgb(self) -> RasterioReader | None:
+    def rgb(self) -> RasterSource | None:
         """3-band uint8 RGB. ``None`` for L2B-CH4 collections (RGB lives
         in a separate STAC collection — fetch and pass via
         ``asset_paths`` or compose via :meth:`with_rgb`)."""
         return self._open_optional("rgb")
 
     @cached_property
-    def uncertainty(self) -> RasterioReader:
+    def uncertainty(self) -> RasterSource:
         """Companion uncertainty raster aligned with ``cmf``."""
         return self._open("uncertainty")
 
     @cached_property
-    def uncertainty_unortho(self) -> RasterioReader | None:
+    def uncertainty_unortho(self) -> RasterSource | None:
         """Per-pixel uncertainty in raw sensor frame. ``None`` for
         older collection variants without the unortho sibling."""
         return self._open_optional("uncertainty-unortho")
 
     @cached_property
-    def artifact_mask(self) -> RasterioReader | None:
+    def artifact_mask(self) -> RasterSource | None:
         """Artefact mask (covers ~25% of scene). Flags un-orthorectified
         strip pixels and geometric anomalies — **not** a cloud mask.
         ``None`` if absent — which is common: Carbon Mapper publishes it
@@ -731,23 +732,32 @@ class CMImageRaster:
     # ---- Geometric metadata (pulled from cmf as the canonical band) ---
 
     @property
-    def crs(self) -> str:
-        return str(self.cmf.crs)
+    def grid(self) -> Grid:
+        """The ``cmf`` pixel grid (transform, CRS, ``(H, W)``)."""
+        return self.cmf.grid
 
     @property
-    def transform(self):
-        return self.cmf.transform
+    def crs(self) -> str:
+        """The ``cmf`` CRS as a string (``"EPSG:…"`` when it has a code)."""
+        crs = self.grid.crs
+        return "" if crs is None else crs.to_string()
+
+    @property
+    def transform(self) -> Affine:
+        """The ``cmf`` affine transform."""
+        return self.grid.affine
 
     @property
     def bounds(self) -> BBox:
-        b = self.cmf.bounds
-        return (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
+        """``(minx, miny, maxx, maxy)`` of the ``cmf`` grid, in :attr:`crs`."""
+        return self.grid.bounds
 
     @property
     def shape(self) -> tuple[int, int]:
-        return (self.cmf.height, self.cmf.width)
+        """``(H, W)`` of the ``cmf`` grid."""
+        return self.grid.shape
 
-    # ---- Read helpers (delegate to georeader.read) --------------------
+    # ---- Read helpers (georeader.read is the engine) -------------------
 
     def read_polygon(
         self,
@@ -755,7 +765,7 @@ class CMImageRaster:
         *,
         crs_polygon: str = "EPSG:4326",
         bands: Iterable[str] = CM_L2B_BANDS,
-    ) -> dict[str, GeoData | None]:
+    ) -> dict[str, RasterSource | None]:
         """Read a polygon clip from the requested bands.
 
         Args:
@@ -767,12 +777,17 @@ class CMImageRaster:
                 overlap return ``None``.
 
         Returns:
-            ``{"cmf": <GeoData>, "rgb": <GeoData>, ...}`` — windowed
-            ``RasterioReader`` instances (lazy, satisfying the
-            :class:`GeoData` protocol). Call ``.load()`` to materialise
-            as :class:`GeoTensor`.
+            ``{"cmf": <RasterSource>, "rgb": <RasterSource>, ...}`` — lazy
+            windowed sources (`geoarray.RasterSource`); ``.load()``
+            materialises one as a `geoarray.GeoArray`.
         """
-        out: dict[str, GeoData | None] = {}
+        from geoarray.interop.georeader import (
+            source_from_georeader,
+            source_to_georeader,
+        )
+        from georeader import read
+
+        out: dict[str, RasterSource | None] = {}
         for band in bands:
             if self.asset_paths.get(band) is None:
                 out[band] = None
@@ -794,18 +809,15 @@ class CMImageRaster:
             # errors are left to propagate — the prior bare
             # `except Exception` swallowed those silently.
             #
-            # `read_from_polygon` returns ``GeoData | NDArray``; with
-            # ``return_only_data=False`` the GeoData arm is the one we
-            # always hit. ``RasterioReader`` satisfies the ``GeoData``
-            # protocol structurally, but ty doesn't currently infer
-            # that — cast for clarity.
+            # With ``return_only_data=False`` the result is a windowed
+            # (lazy) georeader reader, wrapped back as a RasterSource.
             result = read.read_from_polygon(
-                cast(GeoData, reader),
+                source_to_georeader(reader),
                 polygon=polygon,
                 crs_polygon=crs_polygon,
                 boundless=False,
             )
-            out[band] = cast(GeoData, result) if result is not None else None
+            out[band] = source_from_georeader(result) if result is not None else None
         return out
 
     def read_window(
@@ -813,8 +825,8 @@ class CMImageRaster:
         bounds_4326: BBox,
         *,
         bands: Iterable[str] = CM_L2B_BANDS,
-    ) -> dict[str, GeoData | None]:
-        """Read a WGS-84 bbox window from the requested bands.
+    ) -> dict[str, RasterSource | None]:
+        """Read a WGS-84 bbox window from the requested bands (lazy).
 
         Raises:
             ValueError: If ``bounds_4326`` is malformed or crosses the
@@ -829,18 +841,19 @@ class CMImageRaster:
         crs_dst: str,
         *,
         bands: Iterable[str] = CM_L2B_BANDS,
-    ) -> dict[str, GeoTensor | None]:
+    ) -> dict[str, GeoArray | None]:
         """Read a window then reproject each band to ``crs_dst``.
 
         Reprojection materialises the data — values are
-        :class:`GeoTensor`, not lazy readers.
+        `geoarray.GeoArray`, not lazy sources.
         """
+        from geoarray.interop.georeader import from_georeader, source_to_georeader
+        from georeader import read
+
         crops = self.read_window(bounds_4326, bands=bands)
-        # `read_to_crs` returns ``GeoTensor | NDArray``; same narrowing
-        # rationale as ``read_from_polygon`` above.
         return {
             band: (
-                cast(GeoTensor, read.read_to_crs(geo, crs_dst))
+                from_georeader(read.read_to_crs(source_to_georeader(geo), crs_dst))
                 if geo is not None
                 else None
             )
@@ -849,17 +862,13 @@ class CMImageRaster:
 
     # ---- Internals -----------------------------------------------------
 
-    def _open(self, band: str) -> RasterioReader:
+    def _open(self, band: str) -> RasterSource:
         path = self.asset_paths.get(band)
         if path is None:
             raise KeyError(f"Asset {band!r} not present on {self.scene_id}")
-        return RasterioReader(
-            str(path),
-            overview_level=self.overview_level,
-            rio_env_options=rio_env_options_for(str(path), self.token),
-        )
+        return _open_raster(path, token=self.token, overview_level=self.overview_level)
 
-    def _open_optional(self, band: str) -> RasterioReader | None:
+    def _open_optional(self, band: str) -> RasterSource | None:
         """Open an optional band; ``None`` when it has no path **or** the
         server says it doesn't exist (403/404). Auth, throttling and
         server errors still raise."""
@@ -873,7 +882,7 @@ class CMImageRaster:
             _log.info("Optional L2B asset %r absent for %s", band, self.scene_id)
             return None
 
-    def _reader(self, band: str) -> RasterioReader | None:
+    def _reader(self, band: str) -> RasterSource | None:
         """Reader for ``band`` through its cached accessor (so optional
         bands resolve to ``None`` and each band is opened once); bands
         without an accessor are opened directly."""

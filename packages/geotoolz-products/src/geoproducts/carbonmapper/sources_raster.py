@@ -6,16 +6,17 @@ it is useful to project them onto the same grid as an L2B scene as a
 binary mask. This module provides:
 
 - :func:`rasterize_sources` — one-shot function: list of points →
-  :class:`~georeader.geotensor.GeoTensor` mask.
+  `geoarray.GeoArray` mask.
 - :class:`CMSourceRaster` — lazy wrapper that mirrors
   :class:`~geoproducts.carbonmapper.rasters.CMImageRaster` shape
   (``read_polygon`` / ``read_window`` / ``read_window_to_crs``) so
   callers can compose the source mask with the L2B rasters.
 
-Both delegate the actual burn-in to
+Both delegate the actual burn-in to georeader (the internal engine:
 :func:`georeader.rasterize.rasterize_geopandas_like` /
-:func:`~georeader.rasterize.rasterize_from_geopandas` — no custom
-rasterio.features call lives in this module.
+:func:`~georeader.rasterize.rasterize_from_geopandas`) and return a
+`geoarray.GeoArray` — no custom rasterio.features call lives in this
+module.
 
 The Carbon Mapper API does not publish a sources raster — these helpers
 build it client-side from :func:`list_sources` (or any iterable of
@@ -26,19 +27,19 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import cast
 
 import geopandas as gpd
 import numpy as np
 import rasterio
 import rasterio.windows
+from geoarray import GeoArray, Grid, RasterSource
+from geoarray.interop.georeader import from_georeader, source_to_georeader
 from georeader import read
-from georeader.abstract_reader import GeoData
-from georeader.geotensor import GeoTensor
 from georeader.rasterize import rasterize_from_geopandas, rasterize_geopandas_like
 from shapely.geometry import Point, box
 from shapely.geometry.base import BaseGeometry
 
+from geoproducts._src.carrier import require_source
 from geoproducts._src.query import validate_lonlat_bbox
 from geoproducts.carbonmapper.api_queries import CMTileItem
 from geoproducts.carbonmapper.products import rio_env_options_for
@@ -96,7 +97,7 @@ def rasterize_sources(
     shape: tuple[int, int],
     crs: str | rasterio.crs.CRS,
     buffer_m: float = 0.0,
-) -> GeoTensor:
+) -> GeoArray:
     """Rasterize source points onto a target grid as a binary mask.
 
     Each source contributes a value of ``1`` at its pixel; if
@@ -124,8 +125,8 @@ def rasterize_sources(
 
     Returns
     -------
-    GeoTensor
-        2D mask of ``shape`` with values in ``{0, 1}``.
+    GeoArray
+        2D ``uint8`` mask of ``shape`` with values in ``{0, 1}`` (fill ``0``).
 
     Raises
     ------
@@ -139,11 +140,8 @@ def rasterize_sources(
 
     gdf = _sources_gdf(sources)
     if len(gdf) == 0:
-        return GeoTensor(
-            np.zeros(shape, dtype=np.uint8),
-            transform=transform,
-            crs=crs_obj,
-            fill_value_default=0,
+        return GeoArray(
+            np.zeros(shape, dtype=np.uint8), transform, crs_obj, fill_value=0
         )
 
     if buffer_m > 0:
@@ -157,8 +155,7 @@ def rasterize_sources(
     window_out = rasterio.windows.Window(
         col_off=0, row_off=0, width=width, height=height
     )
-    return cast(
-        GeoTensor,
+    return from_georeader(
         rasterize_from_geopandas(
             gdf,
             column="value",
@@ -167,29 +164,41 @@ def rasterize_sources(
             crs_out=crs_obj,
             fill=0,
             all_touched=all_touched,
-        ),
+        )
     )
 
 
 def rasterize_sources_like(
     sources: Iterable[SourceLike],
-    data_like: GeoData,
+    data_like: RasterSource,
     *,
     buffer_m: float = 0.0,
-) -> GeoTensor:
-    """Rasterize sources onto an existing :class:`GeoData` grid.
+) -> GeoArray:
+    """Rasterize sources onto the grid of an existing raster.
 
     Thin wrapper around
     :func:`georeader.rasterize.rasterize_geopandas_like`.
+
+    Args:
+        sources: Source points (see :func:`rasterize_sources`).
+        data_like: The raster whose grid the mask takes: any
+            `geoarray.RasterSource` (a reader, a lazy CM band, a GeoArray).
+        buffer_m: Disk radius in metres around each point (``0``: one pixel).
+
+    Returns:
+        ``(H, W)`` ``uint8`` mask on ``data_like.grid``, values in ``{0, 1}``.
+
+    Raises:
+        TypeError: ``data_like`` is a georeader ``GeoTensor`` / ``GeoData``
+            (convert it with ``from_georeader`` / ``source_from_georeader``).
     """
-    crs_obj = rasterio.crs.CRS.from_user_input(data_like.crs)
+    require_source(data_like, "rasterize_sources_like")
+    grid = data_like.grid
+    crs_obj = rasterio.crs.CRS.from_user_input(grid.crs)
     gdf = _sources_gdf(sources)
     if len(gdf) == 0:
-        return GeoTensor(
-            np.zeros(data_like.shape[-2:], dtype=np.uint8),
-            transform=data_like.transform,
-            crs=crs_obj,
-            fill_value_default=0,
+        return GeoArray(
+            np.zeros(grid.shape, dtype=np.uint8), grid.transform, grid.crs, fill_value=0
         )
 
     if buffer_m > 0:
@@ -199,15 +208,14 @@ def rasterize_sources_like(
         gdf = gdf.to_crs(crs_obj)
         all_touched = True
 
-    return cast(
-        GeoTensor,
+    return from_georeader(
         rasterize_geopandas_like(
             gdf,
-            data_like=data_like,
+            data_like=source_to_georeader(data_like),
             column="value",
             fill=0,
             all_touched=all_touched,
-        ),
+        )
     )
 
 
@@ -230,7 +238,7 @@ class CMSourceRaster:
         Source points to rasterize.
     transform, shape, crs:
         Target grid spec. Use :meth:`from_cmtileitem` or
-        :meth:`from_geodata` to inherit the spec from an existing
+        :meth:`from_source` to inherit the spec from an existing
         raster.
     buffer_m:
         Per-point disk radius in metres. ``0`` → single pixel.
@@ -245,19 +253,32 @@ class CMSourceRaster:
     # ---- Constructors ----
 
     @classmethod
-    def from_geodata(
+    def from_source(
         cls,
         sources: Sequence[SourceLike],
-        template: GeoData,
+        template: RasterSource,
         *,
         buffer_m: float = 0.0,
     ) -> CMSourceRaster:
-        """Build a source raster aligned to an existing :class:`GeoData`."""
+        """Build a source raster on the grid of an existing raster.
+
+        Args:
+            sources: Source points to rasterize.
+            template: Any `geoarray.RasterSource` (a reader, a lazy CM
+                band such as ``CMImageRaster.cmf``, a GeoArray).
+            buffer_m: Per-point disk radius in metres.
+
+        Raises:
+            TypeError: ``template`` is a georeader ``GeoTensor`` /
+                ``GeoData`` (convert it with ``from_georeader`` /
+                ``source_from_georeader``).
+        """
+        grid = require_source(template, "CMSourceRaster.from_source").grid
         return cls(
             sources=sources,
-            transform=template.transform,
-            shape=(template.shape[-2], template.shape[-1]),
-            crs=rasterio.crs.CRS.from_user_input(template.crs),
+            transform=grid.affine,
+            shape=grid.shape,
+            crs=rasterio.crs.CRS.from_user_input(grid.crs),
             buffer_m=buffer_m,
         )
 
@@ -297,8 +318,13 @@ class CMSourceRaster:
 
     # ---- Eager render ----
 
-    def load(self) -> GeoTensor:
-        """Rasterize all sources onto the full grid."""
+    @property
+    def grid(self) -> Grid:
+        """The target pixel grid."""
+        return Grid.from_affine(self.transform, self.crs, self.shape)
+
+    def load(self) -> GeoArray:
+        """Rasterize all sources onto the full grid: ``(H, W)`` ``uint8``."""
         return rasterize_sources(
             self.sources,
             transform=self.transform,
@@ -314,22 +340,18 @@ class CMSourceRaster:
         polygon: BaseGeometry,
         *,
         crs_polygon: str = "EPSG:4326",
-    ) -> GeoTensor:
+    ) -> GeoArray:
         """Read a polygon clip of the source mask."""
         full = self.load()
-        # `read_from_polygon` returns ``GeoData | NDArray``; with the
-        # default ``return_only_data=False`` the GeoData arm is the one
-        # we always hit.
-        return cast(
-            GeoTensor,
+        return from_georeader(
             read.read_from_polygon(
-                cast(GeoData, full),
+                source_to_georeader(full),
                 polygon=polygon,
                 crs_polygon=crs_polygon,
-            ),
+            )
         )
 
-    def read_window(self, bounds_4326: BBox) -> GeoTensor:
+    def read_window(self, bounds_4326: BBox) -> GeoArray:
         """Read a WGS-84 bbox window of the source mask.
 
         Raises:
@@ -343,10 +365,10 @@ class CMSourceRaster:
         self,
         bounds_4326: BBox,
         crs_dst: str,
-    ) -> GeoTensor:
+    ) -> GeoArray:
         """Read a window then reproject the mask to ``crs_dst``."""
         crop = self.read_window(bounds_4326)
-        return cast(GeoTensor, read.read_to_crs(crop, crs_dst))
+        return from_georeader(read.read_to_crs(source_to_georeader(crop), crs_dst))
 
     # ---- Repr ----
 
