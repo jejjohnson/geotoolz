@@ -34,9 +34,7 @@ def _gt(
     transform: rasterio.Affine | None = None,
     crs: str = "EPSG:32629",
 ) -> GeoArray:
-    return toy_geoarray(
-        values, transform=transform, crs=crs, fill_value=np.nan
-    )
+    return toy_geoarray(values, transform=transform, crs=crs, fill_value=np.nan)
 
 
 # ---------------------------------------------------------------------------
@@ -131,9 +129,7 @@ class TestStackMatchedSequence:
     def test_band_names_are_concatenated(self) -> None:
         """Per-band attrs stack in order; partial keys are dropped (#144)."""
         a = _gt(np.zeros((2, 4, 4), dtype=np.float32)).replace(
-            attrs=FrozenAttrs(
-                band_names=["m1", "m2"], wavelengths=[1.0, 2.0], id="a"
-            )
+            attrs=FrozenAttrs(band_names=["m1", "m2"], wavelengths=[1.0, 2.0], id="a")
         )
         b = _gt(np.ones((4, 4), dtype=np.float32)).replace(
             attrs=FrozenAttrs(band_names=["s1"])

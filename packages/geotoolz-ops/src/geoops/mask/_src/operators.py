@@ -8,7 +8,7 @@ import tempfile
 from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 from urllib.request import urlopen
 from zipfile import ZipFile
 
@@ -16,10 +16,12 @@ import geopandas as gpd
 import numpy as np
 import shapely.geometry
 import shapely.geometry.base
+from geoarray import GeoArray
 from georeader import rasterize
 from pipekit import Operator
 
 from geoops._src.config import jsonable, nested_config
+from geoops._src.engine import to_engine
 from geoops._src.geo import (
     ground_pixel_size,
     require_geoarray,
@@ -48,10 +50,6 @@ from geoops.mask._src.array import (
     remove_small_objects,
     slope_mask,
 )
-
-
-if TYPE_CHECKING:
-    from geoarray import GeoArray
 
 
 _NATURAL_EARTH_URLS = {
@@ -441,9 +439,7 @@ class SlopeMask(Operator):
         self.max_slope_deg = max_slope_deg
         self.keep = _check_keep(keep, "SlopeMask")
 
-    def _apply(
-        self, gt: GeoArray | np.ndarray, dem: GeoArray
-    ) -> GeoArray | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray, dem: GeoArray) -> GeoArray | np.ndarray:
         dem = require_geoarray(dem, "SlopeMask", arg="dem")
         require_projected_crs(dem, "SlopeMask", what="slopes", metres=False)
         require_grid_match(gt, dem, "SlopeMask", names=("scene", "dem"))
@@ -585,7 +581,7 @@ class BufferMask(Operator):
 
     def _apply(self, mask: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         if self.unit in {"meter", "meters"}:
-            if not hasattr(mask, "transform"):
+            if not isinstance(mask, GeoArray):
                 raise ValueError(
                     "BufferMask(unit='meters') requires a GeoArray with a "
                     f"transform; got {type(mask).__name__}."
@@ -709,7 +705,7 @@ class InvertMask(Operator):
     """Invert a boolean mask element-wise.
 
     The one complement operator (wraps :func:`geoops.mask.invert_mask`):
-    turns a keep-polarity mask (True = keep, e.g. ``validmask()``) into
+    turns a keep-polarity mask (True = keep, e.g. ``valid_mask()``) into
     the package's drop polarity, and back. Accepts a GeoArray or a
     plain ndarray and returns the same carrier kind. Takes no parameters.
     """
@@ -731,7 +727,7 @@ class ApplyMask(Operator):
     Convention: the mask is True where pixels should be *masked out* —
     the polarity every ``geoops.mask`` and ``geoops.qa`` producer
     returns, so geometry masks keep their area of interest by default.
-    Flip a keep-polarity mask (e.g. ``validmask()``) with
+    Flip a keep-polarity mask (e.g. ``valid_mask()``) with
     :class:`InvertMask` / :func:`~geoops.mask.invert_mask` first.
 
     Called as ``op(gt, mask)`` with the boolean mask carrier (GeoArray
@@ -749,9 +745,8 @@ class ApplyMask(Operator):
             integer carrier is not upcast), and ``NaN`` otherwise. The
             output declares this value as its ``fill_value``, and
             the input's own nodata pixels are rewritten to it, so
-            ``validmask()`` marks every dropped and nodata pixel.
-            Note that georeader treats the fill value as nodata even when
-            it is ``0``.
+            ``valid_mask()`` marks every dropped and nodata pixel.
+            Note that the fill value marks nodata even when it is ``0``.
 
     Examples:
         >>> import geoops as gz, numpy as np
@@ -833,12 +828,16 @@ def _rasterize_geometry_like(
             gdf = gdf.set_crs(crs)
         gdf["__mask__"] = 1
         burned = rasterize.rasterize_geopandas_like(
-            gdf, gt, column="__mask__", all_touched=all_touched, return_only_data=True
+            gdf,
+            to_engine(gt),
+            column="__mask__",
+            all_touched=all_touched,
+            return_only_data=True,
         )
     else:
         burned = rasterize.rasterize_geometry_like(
             geometry,
-            gt,
+            to_engine(gt),
             value=1,
             dtype=np.uint8,
             crs_geometry=crs,

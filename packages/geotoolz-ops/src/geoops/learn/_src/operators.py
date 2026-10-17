@@ -27,6 +27,7 @@ from pipekit.protocols import Predictor
 
 from geoops._src.config import jsonable
 from geoops._src.fitted import fit_lock, fit_once
+from geoops._src.geo import reject_geotensor
 from geoops.learn._src.estimators import (
     GeoArrayEstimator,
     NanStrategy,
@@ -559,6 +560,7 @@ class ModelOp(Operator):
         return getattr(self.model, self.method)
 
     def _apply(self, gt: Carrier) -> Any:
+        reject_geotensor(gt, type(self).__name__)
         arr = np.asarray(gt)
         fn = self._resolve_callable()
         if self.batch_size is None:

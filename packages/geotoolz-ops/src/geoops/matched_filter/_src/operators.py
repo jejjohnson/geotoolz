@@ -41,6 +41,7 @@ from geoops.carrier import (
     jsonable,
     keep_band_axis,
     reject_config_summary,
+    reject_geotensor,
     require_ndim,
     restore_fill,
     wrap_like,
@@ -330,6 +331,7 @@ class MatchedFilterSNR(Operator):
         self.target = target
 
     def _apply(self, _input: Any | None = None) -> float:
+        reject_geotensor(_input, type(self).__name__)
         return matched_filter_snr(
             amplitude=self.amplitude, cov_op=self.cov_op, target=self.target
         )
@@ -373,6 +375,7 @@ class DetectionThreshold(Operator):
         self.target = target
 
     def _apply(self, _input: Any | None = None) -> float:
+        reject_geotensor(_input, type(self).__name__)
         return detection_threshold(
             false_alarm_rate=self.false_alarm_rate,
             cov_op=self.cov_op,
@@ -411,6 +414,7 @@ class ValidateMFInputs(Operator):
         self.target = target
 
     def _apply(self, value: Any = None) -> Any:
+        reject_geotensor(value, type(self).__name__)
         validate_mf_inputs(cov_op=self.cov_op, target=self.target)
         return value
 

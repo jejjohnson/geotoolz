@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any, Literal
 import einx
 import numpy as np
 import rasterio.windows
-from georeader import read
 from geoarray import GeoArray
+from georeader import read
 
 from geoops._src.engine import to_engine
 from geoops._src.geo import affine_of

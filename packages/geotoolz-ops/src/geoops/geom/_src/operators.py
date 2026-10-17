@@ -25,9 +25,11 @@ import warnings
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
+import geoarray
 import numpy as np
 import rasterio.windows
 from affine import Affine
+from geoarray import GeoArray
 from georeader import (
     griddata,
     mosaic,
@@ -37,8 +39,6 @@ from georeader import (
     vectorize,
     window_utils,
 )
-import geoarray
-from geoarray import GeoArray
 from pipekit import Operator
 from pyproj import CRS
 from rasterio.warp import transform_bounds
@@ -159,8 +159,7 @@ def _require_carrier_list(items: Any, op_name: str, what: str) -> None:
     reject_geotensor(items, op_name)
     if isinstance(items, GeoArray | np.ndarray) or not isinstance(items, Sequence):
         raise TypeError(
-            f"{op_name} takes a list of GeoArray {what}; got "
-            f"{type(items).__name__}."
+            f"{op_name} takes a list of GeoArray {what}; got {type(items).__name__}."
         )
 
 
@@ -1869,9 +1868,7 @@ class Mosaic(Operator):
         _require_carrier_list(gts, "Mosaic", "rasters")
         for gt in gts:
             require_geoarray(gt, "Mosaic")
-        if self.method == "first" and all(
-            gt.fill_value is not None for gt in gts
-        ):
+        if self.method == "first" and all(gt.fill_value is not None for gt in gts):
             return adopt_attrs(
                 gts[0],
                 mosaic.spatial_mosaic(
@@ -1919,7 +1916,7 @@ class Mosaic(Operator):
 
 
 class Georeference(Operator):
-    """Georeference swath data using a `georeader` GLT `GeoArray`.
+    """Georeference swath data using a GLT (geolocation lookup table) `GeoArray`.
 
     Thin wrapper around :func:`georeader.griddata.georreference` (note
     the upstream spelling), called through the engine boundary. The GLT (Geolocation Lookup Table) maps

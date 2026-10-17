@@ -358,7 +358,7 @@ def test_apply_mask_explicit_fill_is_declared_and_marks_nodata() -> None:
     # The input's own nodata is rewritten to the declared fill.
     assert np.all(arr[:, 1, 0] == 0.0)
     np.testing.assert_array_equal(
-        np.asarray(out.valid_mask()).all(axis=0), [[False, True], [False, True]]
+        np.asarray(out.valid_mask()), [[False, True], [False, True]]
     )
 
 

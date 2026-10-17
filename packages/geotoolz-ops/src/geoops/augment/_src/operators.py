@@ -500,9 +500,9 @@ class RandomCrop(Operator):
     """Randomly crop a spatial window and update the transform.
 
     Slices the GeoArray (``gt[..., rows, cols]``), so the output
-    transform's translation reflects the crop origin (i.e. ``transform * (left, top)`` equals the new
-    upper-left world coordinate). CRS, dtype and band metadata are
-    preserved.
+    transform's translation reflects the crop origin (``affine_of(gt) *
+    (left, top)`` is the new upper-left world coordinate). CRS, dtype and
+    band metadata are preserved.
 
     The crop itself is pixel-space math, so a plain ``np.ndarray`` input
     is also accepted and returns the cropped plain array.

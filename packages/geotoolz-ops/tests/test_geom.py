@@ -17,8 +17,8 @@ import geopandas as gpd
 import numpy as np
 import pytest
 from affine import Affine
-from geopatcher import spatial
 from geoarray import FrozenAttrs, GeoArray
+from geopatcher import spatial
 from rasterio.enums import Resampling
 from rasterio.windows import WindowError
 from shapely.geometry import box
@@ -278,9 +278,7 @@ def test_crop_to_bounds_matches_read_from_bounds(crs: str | None) -> None:
     cropped = gz.geom.CropToBounds(bounds=bounds, crs=crs)(gt)
     # georeader is the oracle here.
     expected = from_georeader(
-        read.read_from_bounds(
-            to_georeader(gt), bounds, crs_bounds=crs, boundless=False
-        )
+        read.read_from_bounds(to_georeader(gt), bounds, crs_bounds=crs, boundless=False)
     )
 
     assert cropped.shape == expected.shape == (1, 4, 4)

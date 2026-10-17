@@ -33,9 +33,7 @@ from geoops.geom.coregister import PointsToRaster, RasterToPoints
 
 
 def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoArray:
-    return toy_geoarray(
-        values, transform=transform, crs=crs, fill_value=np.nan
-    )
+    return toy_geoarray(values, transform=transform, crs=crs, fill_value=np.nan)
 
 
 # Pixel-center coords for a (10, 10) raster with 10 m pixels starting

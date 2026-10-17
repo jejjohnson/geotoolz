@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import importlib
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 import pytest
-from geoarray import GeoArray
+from geoarray import GeoArray, Grid, PixelWindow
+from geoarray.interop.georeader import (
+    source_from_georeader,
+    to_georeader,
+)
 from georeader.rasterio_reader import RasterioReader
 from pipekit import Identity, Operator, Sequential
 from pyproj import CRS
-from rasterio.transform import array_bounds, from_origin
+from rasterio.transform import from_origin
 from rasterio.windows import Window
 from shapely.geometry import box
 
@@ -25,17 +31,13 @@ from geoops.io._src import operators as io_operators
 def _sample_geotensor() -> GeoArray:
     values = np.arange(2 * 4 * 5, dtype=np.int16).reshape(2, 4, 5)
     transform = from_origin(100.0, 200.0, 10.0, 10.0)
-    return GeoArray(
-        values, transform=transform, crs="EPSG:32631", fill_value=-9999
-    )
+    return GeoArray(values, transform=transform, crs="EPSG:32631", fill_value=-9999)
 
 
 def _cog_test_geotensor() -> GeoArray:
     values = np.arange(64 * 64, dtype=np.int16).reshape(1, 64, 64)
     transform = from_origin(100.0, 740.0, 10.0, 10.0)
-    return GeoArray(
-        values, transform=transform, crs="EPSG:32631", fill_value=-9999
-    )
+    return GeoArray(values, transform=transform, crs="EPSG:32631", fill_value=-9999)
 
 
 def test_io_module_is_exported() -> None:
@@ -52,13 +54,13 @@ def test_write_geotiff_then_read_bounds_roundtrips(
     path = tmp_path / "sample.tif"
 
     assert io.WriteGeoTIFF(path=path)(gt) is None
-    bounds = array_bounds(gt.shape[-2], gt.shape[-1], gt.transform)
+    bounds = gt.bounds
     out = io.ReadBounds(src=path, bounds=bounds, crs="EPSG:32631", indexes=[2, 1])()
 
-    np.testing.assert_array_equal(out.values, gt.values[[1, 0]])
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt)[[1, 0]])
+    assert isinstance(out, GeoArray)
     assert out.shape == (2, 4, 5)
-    assert out.transform == gt.transform
-    assert out.crs == gt.crs
+    assert out.grid == gt.grid
     assert out.fill_value == -9999
 
 
@@ -67,10 +69,10 @@ def test_read_bounds_without_indexes_reads_all_bands_in_order(tmp_path: Path) ->
     path = tmp_path / "sample.tif"
     io.WriteGeoTIFF(path=path)(gt)
 
-    bounds = array_bounds(gt.shape[-2], gt.shape[-1], gt.transform)
+    bounds = gt.bounds
     out = io.ReadBounds(src=path, bounds=bounds, crs="EPSG:32631")()
 
-    np.testing.assert_array_equal(out.values, gt.values)
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt))
 
 
 def test_read_hdf5_reads_dataset_indexes_and_metadata(tmp_path: Path) -> None:
@@ -93,7 +95,7 @@ def test_read_hdf5_reads_dataset_indexes_and_metadata(tmp_path: Path) -> None:
         metadata_groups=["metadata"],
     )()
 
-    np.testing.assert_array_equal(out.values, values[1:2])
+    np.testing.assert_array_equal(np.asarray(out), values[1:2])
     assert out.fill_value == -9999
     assert out.attrs["metadata"]["metadata"]["sensor"] == "MODIS"
     np.testing.assert_array_equal(
@@ -150,7 +152,9 @@ def test_read_netcdf_decodes_cf_and_recovers_grid_mapping(tmp_path: Path) -> Non
         indexes=[2],
     )()
 
-    np.testing.assert_allclose(out.values, np.arange(6, 12).reshape(1, 2, 3) * 0.5 + 10)
+    np.testing.assert_allclose(
+        np.asarray(out), np.arange(6, 12).reshape(1, 2, 3) * 0.5 + 10
+    )
     assert out.crs == CRS.from_epsg(4326)
     assert tuple(out.transform)[:6] == (1.0, 0.0, 10.0, 0.0, -1.0, 20.0)
     # Decoded values are scaled floats, so the fill sentinel is NaN, not -9999.
@@ -177,11 +181,11 @@ def test_read_netcdf_decodes_fill_value_to_nan(tmp_path: Path) -> None:
 
     out = io.ReadNetCDF(path=path, variable="values", indexes=[1])()
 
-    assert out.values.dtype.kind == "f"
-    assert np.isnan(out.values[0, 0, 1])
-    assert out.values[0, 0, 0] == 1 * 0.5 + 1.0
-    assert out.values[0, 1, 0] == 3 * 0.5 + 1.0
-    assert out.values[0, 1, 1] == 4 * 0.5 + 1.0
+    assert np.asarray(out).dtype.kind == "f"
+    assert np.isnan(np.asarray(out)[0, 0, 1])
+    assert np.asarray(out)[0, 0, 0] == 1 * 0.5 + 1.0
+    assert np.asarray(out)[0, 1, 0] == 3 * 0.5 + 1.0
+    assert np.asarray(out)[0, 1, 1] == 4 * 0.5 + 1.0
 
 
 def test_read_netcdf_allows_indexes_on_two_dim_variable(tmp_path: Path) -> None:
@@ -195,7 +199,7 @@ def test_read_netcdf_allows_indexes_on_two_dim_variable(tmp_path: Path) -> None:
 
     out = io.ReadNetCDF(path=path, variable="values", indexes=[1])()
     np.testing.assert_array_equal(
-        out.values, np.arange(6, dtype=np.float32).reshape(2, 3)
+        np.asarray(out), np.arange(6, dtype=np.float32).reshape(2, 3)
     )
 
 
@@ -229,7 +233,7 @@ def test_source_operator_can_start_sequential_without_input(tmp_path: Path) -> N
         ]
     )()
 
-    np.testing.assert_array_equal(out.values, gt.values[:1, 1:3, 1:3])
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt)[:1, 1:3, 1:3])
 
 
 def test_read_window_accepts_reader_source_and_rejects_indexed_objects(
@@ -238,31 +242,103 @@ def test_read_window_accepts_reader_source_and_rejects_indexed_objects(
     gt = _sample_geotensor()
     path = tmp_path / "sample.tif"
     io.WriteGeoTIFF(path=path)(gt)
-    reader = RasterioReader(str(path))
+    reader = source_from_georeader(RasterioReader(str(path)))
 
     out = io.ReadWindow(src=reader, window=Window(0, 0, 2, 2), indexes=[2])()
-    np.testing.assert_array_equal(out.values, gt.values[1:2, :2, :2])
+    assert isinstance(out, GeoArray)
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt)[1:2, :2, :2])
 
-    with pytest.raises(io.GeoToolzIOError, match="indexes are only supported"):
-        io.ReadWindow(src=object(), window=Window(0, 0, 1, 1), indexes=[1])()
+    # A source that cannot select bands (a GeoArray, any other RasterSource).
+    for source in (gt, _ArraySource(gt)):
+        with pytest.raises(io.GeoToolzIOError, match="indexes are only supported"):
+            io.ReadWindow(src=source, window=Window(0, 0, 1, 1), indexes=[1])()
+    with pytest.raises(TypeError, match="RasterSource"):
+        io.ReadWindow(src=object(), window=Window(0, 0, 1, 1))()
+
+
+class _ArraySource:
+    """A minimal `geoarray.RasterSource` that is not backed by georeader."""
+
+    def __init__(self, g: GeoArray) -> None:
+        self.g = g
+        self.reads: list[PixelWindow] = []
+
+    @property
+    def grid(self) -> Grid:
+        return self.g.grid
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        return self.g.shape
+
+    @property
+    def dtype(self) -> np.dtype:
+        return self.g.dtype
+
+    @property
+    def fill_value(self) -> float | None:
+        return self.g.fill_value
+
+    @property
+    def attrs(self) -> Mapping[str, Any]:
+        return self.g.attrs
+
+    def read_window(self, window: PixelWindow, *, boundless: bool = True) -> GeoArray:
+        self.reads.append(window)
+        return self.g.read_window(window, boundless=boundless)
+
+    def load(self) -> GeoArray:
+        return self.g
+
+
+def test_read_window_refuses_georeader_objects(tmp_path: Path) -> None:
+    """A georeader reader or GeoTensor is converted at the boundary, not here."""
+    gt = _sample_geotensor()
+    path = tmp_path / "sample.tif"
+    io.WriteGeoTIFF(path=path)(gt)
+    window = Window(0, 0, 2, 2)
+
+    with pytest.raises(TypeError, match="source_from_georeader"):
+        io.ReadWindow(src=RasterioReader(str(path)), window=window)()
+    with pytest.raises(TypeError, match="from_georeader"):
+        io.ReadWindow(src=to_georeader(gt), window=window)()
+    with pytest.raises(TypeError, match="from_georeader"):
+        io.ReadReprojectLike(src=path, like=to_georeader(gt))()
+    with pytest.raises(TypeError, match="from_georeader"):
+        io.WriteGeoTIFF(path=tmp_path / "x.tif")(to_georeader(gt))
 
 
 def test_read_window_delegates_custom_sources_without_indexes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     gt = _sample_geotensor()
-    source = object()
+    source = _ArraySource(gt)
     window = Window(0, 0, 1, 1)
 
     def fake_read_from_window(src, window_arg, boundless=True):
-        assert src is source
+        # georeader sees the RasterSource through a GeoData view.
+        assert src.source is source
         assert window_arg == window
         assert boundless is True
-        return gt
+        return to_georeader(gt)
 
     monkeypatch.setattr(io_operators.read, "read_from_window", fake_read_from_window)
 
-    assert io.ReadWindow(src=source, window=window)() is gt
+    out = io.ReadWindow(src=source, window=window)()
+    assert isinstance(out, GeoArray)
+    assert out.identical(gt)
+
+
+def test_read_window_reads_a_raster_source_lazily() -> None:
+    """A RasterSource is read window by window, never loaded whole."""
+    gt = _sample_geotensor()
+    source = _ArraySource(gt)
+
+    out = io.ReadWindow(src=source, window=Window(1, 1, 2, 3))()
+
+    assert source.reads == [PixelWindow(col_off=1, row_off=1, width=2, height=3)]
+    assert out.grid == gt[..., 1:4, 1:3].grid
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt)[:, 1:4, 1:3])
 
 
 def test_read_window_outside_source_raises_clear_error(tmp_path: Path) -> None:
@@ -286,7 +362,7 @@ def test_read_window_accepts_tuple_config(tmp_path: Path) -> None:
     op = io.ReadWindow(src=path, window=(1, 1, 2, 2), indexes=[1])
     out = op()
 
-    np.testing.assert_array_equal(out.values, gt.values[:1, 1:3, 1:3])
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt)[:1, 1:3, 1:3])
     assert op.get_config()["window"] == (1, 1, 2, 2)
 
 
@@ -309,15 +385,15 @@ def test_read_center_coords_and_polygon(tmp_path: Path) -> None:
         indexes=[1],
     )()
 
-    np.testing.assert_array_equal(centered.values, gt.values[:1, 1:3, 1:3])
-    np.testing.assert_array_equal(polygon.values, gt.values[:1, 1:3, 1:3])
+    np.testing.assert_array_equal(np.asarray(centered), np.asarray(gt)[:1, 1:3, 1:3])
+    np.testing.assert_array_equal(np.asarray(polygon), np.asarray(gt)[:1, 1:3, 1:3])
 
 
 def test_reprojecting_readers_match_reference_grid(tmp_path: Path) -> None:
     gt = _sample_geotensor()
     path = tmp_path / "sample.tif"
     io.WriteGeoTIFF(path=path)(gt)
-    bounds = array_bounds(gt.shape[-2], gt.shape[-1], gt.transform)
+    bounds = gt.bounds
 
     like = io.ReadReprojectLike(src=path, like=gt, indexes=[1])()
     to_crs = io.ReadToCRS(
@@ -329,9 +405,9 @@ def test_reprojecting_readers_match_reference_grid(tmp_path: Path) -> None:
     )()
     whole = io.ReadToCRS(src=path, dst_crs="EPSG:32631", indexes=[1])()
 
+    assert isinstance(like, GeoArray)
     assert like.shape == (1, 4, 5)
-    assert like.transform == gt.transform
-    assert like.crs == gt.crs
+    assert like.grid == gt.grid
     assert to_crs.crs == gt.crs
     assert to_crs.shape[-2:] == gt.shape[-2:]
     assert whole.crs == gt.crs
@@ -345,11 +421,11 @@ def test_write_cog_writes_readable_cog(tmp_path: Path) -> None:
     assert io.WriteCOG(path=path, compress="deflate")(gt) is None
     out = io.ReadBounds(
         src=path,
-        bounds=array_bounds(gt.shape[-2], gt.shape[-1], gt.transform),
+        bounds=gt.bounds,
         crs="EPSG:32631",
     )()
 
-    np.testing.assert_array_equal(out.values, gt.values)
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt))
 
 
 def test_write_geotiff_handles_2d_data_profile_and_invalid_shapes(
@@ -357,7 +433,7 @@ def test_write_geotiff_handles_2d_data_profile_and_invalid_shapes(
 ) -> None:
     gt = _sample_geotensor()
     two_dim = GeoArray(
-        gt.values[0],
+        np.asarray(gt)[0],
         transform=gt.transform,
         crs=gt.crs,
         fill_value=None,
@@ -367,17 +443,12 @@ def test_write_geotiff_handles_2d_data_profile_and_invalid_shapes(
     io.WriteGeoTIFF(path=path, profile={"compress": "lzw"})(two_dim)
     out = io.ReadBounds(
         src=path,
-        bounds=array_bounds(two_dim.shape[-2], two_dim.shape[-1], two_dim.transform),
+        bounds=two_dim.bounds,
         crs="EPSG:32631",
     )()
-    np.testing.assert_array_equal(out.values, two_dim.values[np.newaxis, ...])
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(two_dim)[np.newaxis, ...])
 
-    invalid = SimpleNamespace(
-        values=np.zeros((1, 1, 1, 1), dtype=np.uint8),
-        crs=gt.crs,
-        transform=gt.transform,
-        fill_value=None,
-    )
+    invalid = GeoArray(np.zeros((1, 1, 1, 1), dtype=np.uint8), gt.transform, gt.crs)
     with pytest.raises(io.GeoToolzIOError, match="expects 2D or 3D"):
         io.WriteGeoTIFF(path=tmp_path / "invalid.tif")(invalid)
 
@@ -403,8 +474,8 @@ def test_load_from_stac_reads_asset_href(tmp_path: Path) -> None:
 
     out = io.LoadFromSTAC(item=item, asset_key="visual")()
 
-    np.testing.assert_array_equal(out.values, gt.values)
-    assert out.transform == gt.transform
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt))
+    assert out.grid == gt.grid
 
 
 def test_operator_configs_are_serializable_for_common_values() -> None:
@@ -445,7 +516,6 @@ def test_write_zarr_reports_missing_optional_dependency(
     gt = _sample_geotensor()
 
     import builtins
-    from typing import Any
 
     real_import = builtins.__import__
 
@@ -802,7 +872,7 @@ def test_read_hdf_array_fill_value_scalar(tmp_path: Path) -> None:
 
     assert out.fill_value == -9999
     assert np.ndim(out.fill_value) == 0
-    np.testing.assert_array_equal(out.validmask().values, values != -9999)
+    np.testing.assert_array_equal(out.valid_mask(), (values != -9999)[0])
 
 
 def test_read_netcdf_nan_fill_consistent(tmp_path: Path) -> None:
@@ -824,11 +894,11 @@ def test_read_netcdf_nan_fill_consistent(tmp_path: Path) -> None:
 
     decoded = io.ReadNetCDF(path=path, variable="values")()
     assert np.isnan(decoded.fill_value)
-    np.testing.assert_array_equal(np.isnan(decoded.values), raw == -9999)
+    np.testing.assert_array_equal(np.isnan(np.asarray(decoded)), raw == -9999)
 
     undecoded = io.ReadNetCDF(path=path, variable="values", decode_cf=False)()
     assert undecoded.fill_value == -9999
-    np.testing.assert_array_equal(undecoded.values, raw)
+    np.testing.assert_array_equal(np.asarray(undecoded), raw)
 
 
 @pytest.mark.parametrize("indexes", [None, [2]])
@@ -844,8 +914,9 @@ def test_read_window_open_dataset_source(
     with rasterio.open(path) as dataset:
         out = io.ReadWindow(src=dataset, window=Window(0, 0, 2, 2), indexes=indexes)()
 
-    expected = gt.values if indexes is None else gt.values[[i - 1 for i in indexes]]
-    np.testing.assert_array_equal(out.values, expected[:, :2, :2])
+    values = np.asarray(gt)
+    expected = values if indexes is None else values[[i - 1 for i in indexes]]
+    np.testing.assert_array_equal(np.asarray(out), expected[:, :2, :2])
 
 
 def test_read_reproject_like_path(tmp_path: Path) -> None:
@@ -856,9 +927,8 @@ def test_read_reproject_like_path(tmp_path: Path) -> None:
     out = io.ReadReprojectLike(src=path, like=str(path), indexes=[1])()
 
     assert out.shape == (1, 4, 5)
-    assert out.transform == gt.transform
-    assert out.crs == gt.crs
-    np.testing.assert_array_equal(out.values, gt.values[:1])
+    assert out.grid == gt.grid
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(gt)[:1])
 
 
 def test_read_reproject_like_missing_path_raises_io_error(tmp_path: Path) -> None:
@@ -879,7 +949,7 @@ def test_write_zarr_two_groups_coexist(tmp_path: Path) -> None:
     store = str(tmp_path / "out.zarr")
     gt = _sample_geotensor()
     other = GeoArray(
-        gt.values[:1] + 100,
+        np.asarray(gt)[:1] + 100,
         transform=gt.transform,
         crs=gt.crs,
         fill_value=-1,
@@ -889,8 +959,8 @@ def test_write_zarr_two_groups_coexist(tmp_path: Path) -> None:
     io.WriteZarr(store=store, group="b", chunks={"y": 2, "x": 2})(other)
 
     root = zarr.open_group(store, mode="r")
-    np.testing.assert_array_equal(root["a/values"][...], gt.values)
-    np.testing.assert_array_equal(root["b/values"][...], other.values)
+    np.testing.assert_array_equal(root["a/values"][...], np.asarray(gt))
+    np.testing.assert_array_equal(root["b/values"][...], np.asarray(other))
     assert root["b/values"].chunks == (1, 2, 2)
     assert root["a"].attrs["crs"] == str(gt.crs)
     assert tuple(root["a"].attrs["transform"]) == tuple(gt.transform)
@@ -903,7 +973,7 @@ def test_write_zarr_overwrites_same_group(tmp_path: Path) -> None:
     store = str(tmp_path / "out.zarr")
     gt = _sample_geotensor()
     doubled = GeoArray(
-        gt.values[:1] * 2,
+        np.asarray(gt)[:1] * 2,
         transform=gt.transform,
         crs=gt.crs,
         fill_value=np.int16(-1),
@@ -913,7 +983,7 @@ def test_write_zarr_overwrites_same_group(tmp_path: Path) -> None:
     io.WriteZarr(store=store)(doubled)
 
     root = zarr.open_group(store, mode="r")
-    np.testing.assert_array_equal(root["values"][...], doubled.values)
+    np.testing.assert_array_equal(root["values"][...], np.asarray(doubled))
     # numpy-scalar fills are stored as JSON scalars.
     assert root.attrs["fill_value"] == -1
 
@@ -939,11 +1009,11 @@ def test_write_zarr_4d(tmp_path: Path) -> None:
 def test_write_zarr_rejects_unsupported_ndim(tmp_path: Path) -> None:
     pytest.importorskip("zarr")
     store = tmp_path / "bad.zarr"
-    invalid = SimpleNamespace(
-        values=np.zeros((1, 1, 1, 1, 1), dtype=np.uint8),
-        crs="EPSG:32631",
-        transform=from_origin(0.0, 0.0, 1.0, 1.0),
-        fill_value=None,
+    # A batched carrier (one transform per element) is 5-D.
+    invalid = GeoArray(
+        np.zeros((1, 1, 1, 1, 1), dtype=np.uint8),
+        np.asarray([from_origin(0.0, 0.0, 1.0, 1.0)[:6]], dtype=np.float64),
+        "EPSG:32631",
     )
 
     with pytest.raises(io.GeoToolzIOError, match="2D to 4D"):
