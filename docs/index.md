@@ -36,7 +36,7 @@ an operator — *tile → predict → stitch* is one more `Sequential`.
 | `geotoolz-cloud` | `geocloud` | reach object storage: one client pool, file verbs, credentials, COG reads and writes | [Cloud](cloud/index.md) |
 | `geotoolz-products` | `geoproducts` | read Earth-observation products (GOES-R ABI, Himawari AHI, Carbon Mapper, …) as `GeoTensor`s | [Products](products/index.md) |
 
-![Dependency layers: the five packages stand on georeader; object storage in geotoolz-cloud; geotoolz on pipekit; cross-package links are opt-in extras](assets/diagrams/stack-layers.png)
+![Dependency layers: the five packages stand on georeader; object storage in geotoolz-cloud; geotoolz-ops on pipekit; cross-package links are opt-in extras](assets/diagrams/stack-layers.png)
 
 Solid arrows are hard dependencies, dotted ones opt-in extras, and nothing
 points back up: install only the packages you need. [How the packages

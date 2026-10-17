@@ -16,7 +16,7 @@
 > **Every Earth-observation product, read as a georeader `GeoTensor`.**
 > One reader per mission or provider; what comes out is what every geotoolz operator and geopatcher field takes.
 
-<p align="center"><img src="../../docs/assets/diagrams/products-architecture.png" alt="geoproducts: one namespace per product (Reader, bucket or API helpers, BANDS, recipes, presets), built on a shared toolkit and the ProductReader contract, produces GeoTensors for geotoolz and geopatcher" width="100%"></p>
+<p align="center"><img src="../../docs/assets/diagrams/products-architecture.png" alt="geoproducts: one namespace per product (Reader, bucket or API helpers, BANDS, recipes, presets), built on a shared toolkit and the ProductReader contract, produces GeoTensors for geoops and geopatcher" width="100%"></p>
 
 ## 30-second pitch
 

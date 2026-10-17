@@ -18,7 +18,7 @@ bands and calibrated values. The package depends on georeader only.
 Readers release on their own schedule, and their output drops straight
 into the operators, the patcher and the catalog loaders.
 
-![geoproducts: one namespace per product (Reader, bucket or API helpers, BANDS, recipes, presets), built on a shared toolkit and the ProductReader contract, produces GeoTensors for geotoolz operators and geopatcher fields](../assets/diagrams/products-architecture.png)
+![geoproducts: one namespace per product (Reader, bucket or API helpers, BANDS, recipes, presets), built on a shared toolkit and the ProductReader contract, produces GeoTensors for geoops operators and geopatcher fields](../assets/diagrams/products-architecture.png)
 
 ## Install
 
