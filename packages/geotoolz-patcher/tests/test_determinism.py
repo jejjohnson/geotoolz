@@ -31,7 +31,7 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from hypothesis import given, settings, strategies as st
 
 from geopatcher import RasterField, spatial, temporal
@@ -41,8 +41,8 @@ from geopatcher import RasterField, spatial, temporal
 def domain() -> RasterField:
     arr = np.zeros((64, 64), dtype=np.float32)
     return RasterField(
-        GeoTensor(
-            values=arr,
+        GeoArray(
+            data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
         )
@@ -201,8 +201,8 @@ def test_spatial_random_bit_identical_for_any_int_seed(seed: int) -> None:
     # RNG state that example-based tests might miss.
     arr = np.zeros((32, 32), dtype=np.float32)
     field = RasterField(
-        GeoTensor(
-            values=arr,
+        GeoArray(
+            data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
         )
@@ -217,8 +217,8 @@ def test_spatial_random_bit_identical_for_any_int_seed(seed: int) -> None:
 def test_jittered_stride_bit_identical_for_any_int_seed(seed: int) -> None:
     arr = np.zeros((64, 64), dtype=np.float32)
     field = RasterField(
-        GeoTensor(
-            values=arr,
+        GeoArray(
+            data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
         )

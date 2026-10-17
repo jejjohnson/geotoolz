@@ -2,22 +2,60 @@
 
 Each `Domain` carries just enough metadata for `spatial.sampler.Sampler.anchors` and
 `spatial.geometry.Geometry.neighborhood` to do their work without touching the
-underlying data. `RasterDomain` is reused from `georeader.GeoDataBase`
-(every `RasterioReader` / `GeoTensor` already satisfies it); the other
-three are introduced here.
+underlying data. `RasterDomain` is a protocol satisfied by every
+`geoarray.RasterSource` (a `GeoArray`, a lazy reader, a COG) — its ``grid``
+and ``shape`` are metadata, known before any pixel is read — so a raster
+field's domain is its source; the other three are dataclasses.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
 import numpy as np
 
-# RasterDomain is the existing `GeoDataBase` Protocol from georeader.
-# Re-exported here under the geopatcher name so user code can spell it
-# uniformly with the new Grid/Vector/Point domains.
-from georeader.abstract_reader import GeoDataBase as RasterDomain  # noqa: F401
+from geopatcher._src.carrier import raster_grid, reject_georeader
+
+
+if TYPE_CHECKING:
+    from geoarray import Grid
+
+
+@runtime_checkable
+class RasterDomain(Protocol):
+    """A raster domain: a `geoarray.Grid` plus the full array shape.
+
+    The samplers and geometries plan windows on ``grid`` (transform, CRS,
+    ``(H, W)``); the aggregations size their output from ``shape``
+    (``(..., H, W)``, leading band / time axes included). Every
+    `geoarray.RasterSource` satisfies it, so `RasterField.domain` is the
+    source itself and costs no read; so do `geocloud.cog.CogDomain` and the
+    reprojected / rioxarray domain views. A bare `geoarray.Grid` is also
+    accepted wherever a raster domain is (its shape is ``(H, W)``), to plan
+    anchors before any data exists.
+
+    Attributes:
+        grid: The pixel grid.
+        shape: ``(..., H, W)``; the last two entries equal ``grid.shape``.
+
+    Example:
+        >>> import numpy as np
+        >>> from geoarray import GeoArray
+        >>> scene = GeoArray(
+        ...     np.zeros((4, 64, 64), np.float32),
+        ...     (10.0, 0.0, 500000.0, 0.0, -10.0, 4600000.0),
+        ...     "EPSG:32630",
+        ... )
+        >>> isinstance(scene, RasterDomain), scene.grid.shape
+        (True, (64, 64))
+    """
+
+    @property
+    def grid(self) -> Grid: ...
+
+    @property
+    def shape(self) -> tuple[int, ...]: ...
 
 
 @dataclass(eq=False)
@@ -116,18 +154,23 @@ class PointDomain:
         Points falling outside the raster extent return ``NaN``.
 
         Args:
-            raster: A raster-shaped object — anything carrying an affine
-                ``transform`` plus pixel values under ``.values`` (a
-                `georeader.GeoTensor`) or as the object itself. The
-                raster is assumed to share this domain's CRS.
+            raster: A `geoarray.GeoArray` (``(..., H, W)``), assumed to
+                share this domain's CRS.
 
         Returns:
             ``(N,)`` float array of sampled values for 2-D rasters, or
             ``(..., N)`` for rasters with leading band dims.
         """
-        values = np.asarray(getattr(raster, "values", raster), dtype=float)
+        reject_georeader(raster, "PointDomain.sample")
+        grid = raster_grid(raster)
+        if grid is None:
+            raise TypeError(
+                "PointDomain.sample takes a geoarray.GeoArray, got "
+                f"{type(raster).__name__}"
+            )
+        values = np.asarray(raster, dtype=float)
         h, w = values.shape[-2], values.shape[-1]
-        inv = ~raster.transform
+        inv = ~grid.affine
         xs = self.coords[:, 0].astype(float)
         ys = self.coords[:, 1].astype(float)
         # Fractional pixel coords, measured from the raster's UL corner.

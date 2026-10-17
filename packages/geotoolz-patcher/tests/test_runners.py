@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geopatcher import RasterField, SpatialPatcher, spatial
 from geopatcher._src.runners import _resolve_mp_context
@@ -263,26 +263,29 @@ def test_process_backend_does_not_fork_a_threaded_process(
     for patch in patches:
         r, c = patch.anchor
         np.testing.assert_array_equal(
-            patch.data, _double(field.reader.values)[r : r + 8, c : c + 8]
+            patch.data, _double(np.asarray(field.reader))[r : r + 8, c : c + 8]
         )
 
 
 def _georeferenced_double(data: Any) -> Any:
     # Runs in a worker process: the chip must arrive georeferenced.
-    if not isinstance(data, GeoTensor) or data.transform is None:
+    if not isinstance(data, GeoArray) or data.crs is None:
         raise TypeError(f"chip lost its georeferencing: {type(data)}")
-    return data * 2
+    return data.with_data(np.asarray(data) * 2)
 
 
 @pytest.mark.parametrize("backend", ["thread", "process"])
-def test_process_backend_keeps_geotensor_georeferencing(
+def test_process_backend_keeps_geoarray_georeferencing(
     patcher: SpatialPatcher, field: RasterField, backend: str
 ) -> None:
-    """GeoTensor chips and outputs keep transform / CRS through the pool.
+    """GeoArray chips and outputs keep transform / CRS / attrs through the pool.
 
-    georeader's GeoTensor pickles as a bare-metadata ndarray subclass, so
-    the runner ships it in a wire form and rebuilds it on both sides.
+    The runner ships a GeoArray in a compact wire form and rebuilds it
+    through the constructor on both sides, so it compares equal to one
+    built in the receiving process (attrs included).
     """
+    scene = field.reader.with_attrs(sensor="toy", band_names=("ramp",))
+    field = RasterField(scene)
     expected = {p.anchor: p.data for p in patcher.split(field)}
 
     out = parallel_map(
@@ -292,13 +295,14 @@ def test_process_backend_keeps_geotensor_georeferencing(
     assert len(out) == len(expected)
     for patch in out:
         want = expected[patch.anchor]
-        assert isinstance(patch.data, GeoTensor)
-        assert patch.data.transform == want.transform
+        assert isinstance(patch.data, GeoArray)
+        assert patch.data.grid.affine == want.grid.affine
         assert patch.data.crs == want.crs
-        assert patch.data.fill_value_default == want.fill_value_default
+        assert patch.data.fill_value == want.fill_value
+        assert patch.data.attrs == want.attrs
         np.testing.assert_array_equal(np.asarray(patch.data), np.asarray(want) * 2)
     merged = patcher.merge(out, field.domain)
-    np.testing.assert_array_equal(merged, np.asarray(field.reader.values) * 2)
+    np.testing.assert_array_equal(merged, np.asarray(field.reader) * 2)
 
 
 def test_process_backend_accepts_explicit_spawn(

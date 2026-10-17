@@ -260,12 +260,12 @@ class TestGetConfig:
 def test_rasterio_reader_field_split_merge_pad(tmp_path: Any) -> None:
     """File-backed `RasterioReader` field: split → merge → pad (issue #177).
 
-    Every chip must be a materialised `GeoTensor` matching rasterio's own
+    Every chip must be a materialised `GeoArray` matching rasterio's own
     read (pixels, nodata fill past the edge, window transform), and an
     overlap-add merge must reproduce the file exactly.
     """
     import rasterio
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
     from rasterio.windows import Window, transform as window_transform
 
     path = tmp_path / "scene.tif"
@@ -283,7 +283,7 @@ def test_rasterio_reader_field_split_merge_pad(tmp_path: Any) -> None:
         )
         tiles = list(tiler.split(field))
         assert len(tiles) == 25
-        assert all(isinstance(t.data, GeoTensor) for t in tiles)
+        assert all(isinstance(t.data, GeoArray) for t in tiles)
         merged = tiler.merge(tiles, field.domain)
         np.testing.assert_array_equal(merged, reference)
 
@@ -298,31 +298,31 @@ def test_rasterio_reader_field_split_merge_pad(tmp_path: Any) -> None:
         chips = list(padder.split(field))
         assert len(chips) == 25
         for chip in chips:
-            assert isinstance(chip.data, GeoTensor)
+            assert isinstance(chip.data, GeoArray)
             row, col = chip.anchor
             window = Window(col_off=col, row_off=row, width=16, height=16)
             expected = src.read(window=window, boundless=True, fill_value=-1.0)
             np.testing.assert_array_equal(np.asarray(chip.data), expected)
-            assert chip.data.transform == window_transform(window, src_transform)
+            assert chip.data.grid.affine == window_transform(window, src_transform)
 
     out = field.with_data(merged)
-    assert out.fill_value_default == -1.0
-    assert out.transform == src_transform
+    assert out.fill_value == -1.0
+    assert out.grid.affine == src_transform
 
 
 @pytest.mark.parametrize("adapter", ["raster", "reproject"])
 def test_with_data_preserves_nodata_and_attrs(adapter: str) -> None:
-    """`with_data` keeps the source's ``fill_value_default`` and ``attrs``."""
+    """`with_data` keeps the source's ``fill_value`` and ``attrs``."""
     import rasterio
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
     from geopatcher.fields import ReprojectingRasterField
 
-    source = GeoTensor(
-        values=np.ones((8, 8), dtype=np.float32),
+    source = GeoArray(
+        data=np.ones((8, 8), dtype=np.float32),
         transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0),
         crs="EPSG:32630",
-        fill_value_default=-1.0,
+        fill_value=-1.0,
         attrs={"k": 1},
     )
     field: Any = (
@@ -331,10 +331,12 @@ def test_with_data_preserves_nodata_and_attrs(adapter: str) -> None:
         else ReprojectingRasterField(source, dst_crs="EPSG:3857")
     )
     out = field.with_data(np.zeros((8, 8), dtype=np.float32))
-    assert out.fill_value_default == -1.0
+    assert isinstance(out, GeoArray)
+    assert out.fill_value == -1.0
     assert out.attrs == {"k": 1}
-    # A copy — mutating the output must not leak back into the source.
-    out.attrs["k"] = 2
+    # Immutable: a changed output is a new carrier, the source is untouched.
+    changed = out.with_attrs(k=2)
+    assert changed.attrs == {"k": 2}
     assert source.attrs == {"k": 1}
 
 

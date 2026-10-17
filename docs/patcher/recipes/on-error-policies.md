@@ -23,7 +23,7 @@ from typing import Any
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.windows import Window
 
 import geopatcher as gp
@@ -39,18 +39,18 @@ class FlakyField:
     def domain(self) -> Any:
         return self.inner.domain
 
-    def select(self, indexer: Window) -> GeoTensor:
+    def select(self, indexer: Window) -> GeoArray:
         if indexer.col_off == 128:
             raise OSError(f"read failed at {indexer}")
         return self.inner.select(indexer)
 
-    def with_data(self, data: np.ndarray) -> GeoTensor:
+    def with_data(self, data: np.ndarray) -> GeoArray:
         return self.inner.with_data(data)
 
 
 field: FlakyField = FlakyField(
     gp.RasterField(
-        GeoTensor(
+        GeoArray(
             np.ones((1, 256, 256), dtype=np.float32),   # (1, 256, 256) float32
             transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
             crs="EPSG:32611",
@@ -82,9 +82,9 @@ failures in `stp.spatial.errors`.
 `"mask"` yields a NaN patch of the geometry's shape in place of each
 failure, so every anchor keeps its slot. The placeholder is flagged
 `Patch.masked` and keeps the carrier of a successful read where the field
-allows: a `GeoTensor` on the window's grid for a raster field, a
+allows: a `GeoArray` on the window's grid for a raster field, a
 `DataArray` with the chip's coords for `fields.XarrayField` /
-`fields.RioXarrayField`. Operators that read `.transform` or `.rio` work on
+`fields.RioXarrayField`. Operators that read `.grid` or `.rio` work on
 it unchanged, and `merge_to_field` stitches it like any other patch.
 
 ```python
@@ -92,7 +92,7 @@ from typing import Any
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.windows import Window
 
 import geopatcher as gp
@@ -108,18 +108,18 @@ class FlakyField:
     def domain(self) -> Any:
         return self.inner.domain
 
-    def select(self, indexer: Window) -> GeoTensor:
+    def select(self, indexer: Window) -> GeoArray:
         if indexer.col_off == 128:
             raise OSError(f"read failed at {indexer}")
         return self.inner.select(indexer)
 
-    def with_data(self, data: np.ndarray) -> GeoTensor:
+    def with_data(self, data: np.ndarray) -> GeoArray:
         return self.inner.with_data(data)
 
 
 field: FlakyField = FlakyField(
     gp.RasterField(
-        GeoTensor(
+        GeoArray(
             np.ones((1, 256, 256), dtype=np.float32),   # (1, 256, 256) float32
             transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
             crs="EPSG:32611",
@@ -136,7 +136,7 @@ patcher: gp.SpatialPatcher = gp.SpatialPatcher(
 
 patches: list[gp.Patch] = list(patcher.split(field))  # 16 × (1, 64, 64), 4 all-NaN
 holes: int = sum(p.masked for p in patches)  # 4
-hole: GeoTensor = next(p.data for p in patches if p.masked)  # (1, 64, 64) float64 · all NaN, window transform
+hole: GeoArray = next(p.data for p in patches if p.masked)  # (1, 64, 64) float64 · all NaN, window transform
 stitched: np.ndarray = patcher.merge(patches, field.domain)  # (1, 256, 256) float64 · NaN = masked
 ```
 
@@ -146,8 +146,8 @@ Where overlapping patches cover it, their values fill it in.
 A field adapter of your own can shape its placeholder too: give it a
 `placeholder(indexer, data)` method that returns `data` (the NaN array) in
 the carrier its `select(indexer)` returns, without reading. Fields with
-neither a `placeholder` nor a raster domain (`transform` and `crs`) get the
-bare NaN array.
+neither a `placeholder` nor a georeferenced raster domain (a `grid` with a
+CRS) get the bare NaN array.
 
 ## Retry transient errors
 
@@ -160,7 +160,7 @@ from typing import Any
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.windows import Window
 
 import geopatcher as gp
@@ -177,20 +177,20 @@ class OnceFlakyField:
     def domain(self) -> Any:
         return self.inner.domain
 
-    def select(self, indexer: Window) -> GeoTensor:
+    def select(self, indexer: Window) -> GeoArray:
         key = (indexer.row_off, indexer.col_off)
         self.attempts[key] += 1
         if self.attempts[key] == 1:
             raise TimeoutError(f"slow read at {key}")
         return self.inner.select(indexer)
 
-    def with_data(self, data: np.ndarray) -> GeoTensor:
+    def with_data(self, data: np.ndarray) -> GeoArray:
         return self.inner.with_data(data)
 
 
 field: OnceFlakyField = OnceFlakyField(
     gp.RasterField(
-        GeoTensor(
+        GeoArray(
             np.ones((1, 256, 256), dtype=np.float32),   # (1, 256, 256) float32
             transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
             crs="EPSG:32611",
@@ -231,14 +231,14 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 from geopatcher.observe import PatchJournal
 from geopatcher.run import parallel_map
 
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.ones((1, 256, 256), dtype=np.float32),       # (1, 256, 256) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",
@@ -254,12 +254,12 @@ patcher: gp.SpatialPatcher = gp.SpatialPatcher(
 )
 
 
-def model(chip: GeoTensor) -> np.ndarray:
+def model(chip: GeoArray) -> np.ndarray:
     """Stand-in model that fails on one patch."""
     a: np.ndarray = np.asarray(chip)                    # (1, 64, 64) float32
-    if chip.transform.c == 500_000 + 10 * 192:
+    if chip.grid.affine.c == 500_000 + 10 * 192:      # the column at x = 192 px
         raise ValueError("model diverged")
-    return a * 2.0                                      # (1, 64, 64) float64
+    return a * 2.0                                      # (1, 64, 64) float32
 
 
 Path("out").mkdir(exist_ok=True)
@@ -269,7 +269,7 @@ outputs: list[gp.Patch] = parallel_map(
     n_workers=4,
     journal=journal,                                    # skip "ok" anchors, commit every result
     on_error="skip",                                    # operator failures
-)                                                       # 12 × (1, 64, 64) float64
+)                                                       # 12 × (1, 64, 64) float32
 ```
 
 | Setting | Governs | Failures land in |

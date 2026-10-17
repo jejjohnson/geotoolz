@@ -37,7 +37,7 @@ import warnings
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from geopatcher import RasterField, SpatialPatcher, spatial
@@ -58,8 +58,8 @@ def _field(shape: tuple[int, int], fill: float | None = None) -> RasterField:
     # Hypothesis-generated tiny fills (~3e-120) to zero, masking the
     # constant-field property.
     return RasterField(
-        GeoTensor(
-            values=arr,
+        GeoArray(
+            data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
         )
@@ -90,7 +90,7 @@ def test_disjoint_sum_reconstructs_field(sp: tuple[int, int]) -> None:
     )
     patches = [
         type(p)(
-            data=_identity(p.data.values),
+            data=_identity(np.asarray(p.data)),
             anchor=p.anchor,
             indices=p.indices,
             weights=p.weights,
@@ -99,7 +99,7 @@ def test_disjoint_sum_reconstructs_field(sp: tuple[int, int]) -> None:
     ]
     result = patcher.merge(patches, field.domain)
     np.testing.assert_allclose(
-        result, np.asarray(field.reader.values, dtype=np.float64)
+        result, np.asarray(np.asarray(field.reader), dtype=np.float64)
     )
 
 
@@ -118,7 +118,7 @@ def test_disjoint_mean_reconstructs_field(sp: tuple[int, int]) -> None:
     )
     patches = [
         type(p)(
-            data=_identity(p.data.values),
+            data=_identity(np.asarray(p.data)),
             anchor=p.anchor,
             indices=p.indices,
             weights=p.weights,
@@ -127,7 +127,7 @@ def test_disjoint_mean_reconstructs_field(sp: tuple[int, int]) -> None:
     ]
     result = patcher.merge(patches, field.domain)
     np.testing.assert_allclose(
-        result, np.asarray(field.reader.values, dtype=np.float64)
+        result, np.asarray(np.asarray(field.reader), dtype=np.float64)
     )
 
 
@@ -147,7 +147,7 @@ def test_disjoint_overlap_add_reconstructs_field(sp: tuple[int, int]) -> None:
     )
     patches = [
         type(p)(
-            data=_identity(p.data.values),
+            data=_identity(np.asarray(p.data)),
             anchor=p.anchor,
             indices=p.indices,
             weights=p.weights,
@@ -156,7 +156,7 @@ def test_disjoint_overlap_add_reconstructs_field(sp: tuple[int, int]) -> None:
     ]
     result = patcher.merge(patches, field.domain)
     np.testing.assert_allclose(
-        result, np.asarray(field.reader.values, dtype=np.float64)
+        result, np.asarray(np.asarray(field.reader), dtype=np.float64)
     )
 
 
@@ -185,7 +185,7 @@ def test_constant_field_preserves_constant(
     )
     patches = [
         type(p)(
-            data=_identity(p.data.values),
+            data=_identity(np.asarray(p.data)),
             anchor=p.anchor,
             indices=p.indices,
             weights=p.weights,
@@ -291,7 +291,7 @@ def test_overlapping_stride_overlap_add_reconstructs(
         aggregation=spatial.aggregation.OverlapAdd(),
     )
     merged = patcher.merge(patcher.split(field), field.domain)
-    np.testing.assert_allclose(merged, np.asarray(field.reader.values))
+    np.testing.assert_allclose(merged, np.asarray(field.reader))
 
 
 @settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
@@ -332,7 +332,7 @@ def test_hann_overlap_add_identity(normalize_by_window: bool) -> None:
         0.37 * rows - 1.21 * cols + np.random.default_rng(0).standard_normal(_C1_SHAPE)
     )  # (H, W) float64
     field = RasterField(
-        GeoTensor(values=x, transform=rasterio.Affine.identity(), crs="EPSG:32630")
+        GeoArray(data=x, transform=rasterio.Affine.identity(), crs="EPSG:32630")
     )
     patcher = SpatialPatcher(
         geometry=spatial.geometry.Rectangular(size=(_C1_SIZE, _C1_SIZE)),

@@ -2,7 +2,7 @@
 
 What every patching job touches: the patchers, the patch carriers, the
 `Field` / `Domain` protocols and `RasterField`, the adapter for any
-georeader reader.
+`geoarray.RasterSource` (a `GeoArray` or a lazy reader).
 
 ```python
 from geopatcher import RasterField, SpatialPatcher, spatial

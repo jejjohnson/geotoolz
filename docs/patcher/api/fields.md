@@ -1,6 +1,6 @@
 # Fields — `geopatcher.fields`
 
-Field adapters for every substrate other than a georeader reader
+Field adapters for every substrate other than a `geoarray.RasterSource`
 (`RasterField`, at the root), and the domain types samplers plan over.
 The extras-gated adapters resolve lazily, so importing the module never
 needs an optional dependency.
@@ -38,9 +38,7 @@ async paths automatically.
 
 ## Domains
 
-`RasterDomain` is georeader's `GeoDataBase` protocol, re-exported; see
-[georeader](https://github.com/IPL-UV/georeader) for its members.
-
+::: geopatcher.fields.RasterDomain
 ::: geopatcher.fields.GridDomain
 ::: geopatcher.fields.VectorDomain
 ::: geopatcher.fields.PointDomain

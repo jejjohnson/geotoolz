@@ -516,18 +516,18 @@ class TestRealSpatialPatcherIntegration:
     def _build_mfield(self):
         import numpy as np
         import rasterio
-        from georeader.geotensor import GeoTensor
+        from geoarray import GeoArray
 
         from geopatcher._src.fields.raster import RasterField
 
         # A tiny in-memory raster — shared across primary and
         # secondary so the identity coreg is well-defined.
         values = np.arange(64, dtype=np.float32).reshape(8, 8)
-        tensor = GeoTensor(
-            values=values,
+        tensor = GeoArray(
+            data=values,
             transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
             crs="EPSG:32629",
-            fill_value_default=np.nan,
+            fill_value=np.nan,
         )
         primary = RasterField(tensor)
         secondary = RasterField(tensor)
@@ -575,27 +575,27 @@ class TestRealSpatialPatcherIntegration:
 def _raster_mfield(coreg: Any = None, *, values: Any = None) -> MatchedField:
     import numpy as np
     import rasterio
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
     from geopatcher._src.fields.raster import RasterField
 
     if values is None:
         values = np.arange(64, dtype=np.float32).reshape(8, 8)
-    tensor = GeoTensor(
-        values=values,
+    tensor = GeoArray(
+        data=values,
         transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
         crs="EPSG:32629",
-        fill_value_default=np.nan,
+        fill_value=np.nan,
     )
     return MatchedField(
         primary=RasterField(tensor),
         secondaries={
             "sec": RasterField(
-                GeoTensor(
-                    values=values + 1000.0,
-                    transform=tensor.transform,
+                GeoArray(
+                    data=values + 1000.0,
+                    transform=tensor.grid.affine,
                     crs=tensor.crs,
-                    fill_value_default=np.nan,
+                    fill_value=np.nan,
                 )
             )
         },

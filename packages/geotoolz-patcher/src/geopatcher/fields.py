@@ -2,19 +2,21 @@
 
 A `Field` is what a patcher reads from: a ``domain`` (the I/O-free
 metadata a sampler plans anchors over) plus ``select(window)``. The
-GeoTIFF / georeader adapter, `RasterField`, lives at the package root;
+`geoarray.RasterSource` adapter, `RasterField`, lives at the package root;
 this module holds the rest:
 
-- `AsyncRasterField` / `ReprojectingRasterField` — georeader readers read
-  asynchronously, or warped onto another grid as they are read.
+- `AsyncRasterField` / `ReprojectingRasterField` — a
+  `geoarray.AsyncRasterSource` read asynchronously, or a `RasterSource`
+  warped onto another grid as it is read.
 - `CogField` — a Cloud-Optimized GeoTIFF on object storage, with batched
   tile fetches (``[cog]`` extra, on geotoolz-cloud).
 - `XarrayField`, `RioXarrayField`, `DaskField` — gridded N-D data
   (``[grid]`` / ``[xarray-raster]`` / ``[dask]``).
 - `GeoPandasField`, `XvecField` — vector features and point cubes
   (``[vector]`` / ``[point]``).
-- `RasterDomain`, `GridDomain`, `VectorDomain`, `PointDomain` — the
-  domain shapes the samplers understand.
+- `RasterDomain` (a protocol: a `geoarray.Grid` plus the array shape,
+  satisfied by every `RasterSource`), `GridDomain`, `VectorDomain`,
+  `PointDomain` — the domain shapes the samplers understand.
 
 The extras-gated adapters resolve lazily: importing this module never
 needs an optional dependency, and using an adapter whose extra is missing

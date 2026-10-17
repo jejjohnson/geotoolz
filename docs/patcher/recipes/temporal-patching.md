@@ -83,14 +83,14 @@ every time anchor.
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 from geopatcher import temporal
 
 # Shapes: T = 24 days, C = 1 band, H × W = 64 × 64 pixels.
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.random.default_rng(0).random((24, 1, 64, 64), dtype=np.float32),  # (T, C, H, W) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",

@@ -2,8 +2,8 @@
 
 Each adapter is a thin shim that exposes the unified `Field` Protocol
 (`domain`, `select`, `with_data`) on top of a backend-specific carrier.
-The raster adapter is essentially free — georeader's `GeoData` already
-covers it, the wrapper just renames `read_from_window` → `select`.
+The raster adapter is essentially free — a `geoarray.RasterSource` already
+covers it, the wrapper just renames `read_window` → `select`.
 
 Non-raster adapters guard their optional-extra import at top-of-module:
 import the adapter and you get a friendly error pointing at the right

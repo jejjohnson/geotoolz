@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray, Grid
 
 from geopatcher import RasterField
 
@@ -32,8 +32,8 @@ def make_raster_field(
     """
     arr = np.arange(size * size, dtype=dtype).reshape(size, size)
     return RasterField(
-        GeoTensor(
-            values=arr,
+        GeoArray(
+            data=arr,
             transform=rasterio.Affine.identity(),
             crs=crs,
         )
@@ -104,6 +104,11 @@ class ArrayField:
         self.crs = "EPSG:32630"
 
     @property
+    def grid(self) -> Grid:
+        """The `RasterDomain` surface: a grid from the transform and CRS."""
+        return Grid.from_affine(self.transform, self.crs, self.shape[-2:])
+
+    @property
     def domain(self) -> ArrayField:
         return self
 
@@ -159,14 +164,16 @@ def make_rasterio_reader_field(path: Any, **kwargs: Any) -> RasterField:
     """File-backed `RasterField` over a `RasterioReader` (lazy, real GeoTIFF).
 
     Writes the GeoTIFF via `write_test_geotiff` (``kwargs`` forwarded) and
-    wraps a `georeader.rasterio_reader.RasterioReader` over it — the
+    wraps a `georeader.rasterio_reader.RasterioReader` over it (through
+    `geoarray.interop.georeader.source_from_georeader`) — the
     quickstart's file-backed case, as opposed to the in-memory
-    `GeoTensor` fixtures above.
+    `GeoArray` fixtures above.
     """
+    from geoarray.interop.georeader import source_from_georeader
     from georeader.rasterio_reader import RasterioReader
 
     write_test_geotiff(path, **kwargs)
-    return RasterField(RasterioReader(str(path)))
+    return RasterField(source_from_georeader(RasterioReader(str(path))))
 
 
 # Spawn-worker entry points for `test_pickle.py`. They live here, not in a

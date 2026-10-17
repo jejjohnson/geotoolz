@@ -31,7 +31,7 @@ from collections.abc import Iterator
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.windows import Window
 
 from geopatcher import Patch, spatial
@@ -50,9 +50,9 @@ def _needs_zarr() -> None:
 
 
 @pytest.fixture
-def domain() -> GeoTensor:
-    return GeoTensor(
-        values=np.zeros((64, 64), dtype=np.float32),
+def domain() -> GeoArray:
+    return GeoArray(
+        data=np.zeros((64, 64), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
     )
@@ -99,7 +99,7 @@ def overlapping_patches() -> list[Patch]:
     ],
 )
 def test_overlap_add_streaming_matches_in_memory(
-    domain: GeoTensor,
+    domain: GeoArray,
     overlapping_patches: list[Patch],
     tmp_path,
     chunks: tuple[int, int],
@@ -121,7 +121,7 @@ def test_overlap_add_streaming_matches_in_memory(
 
 
 def test_overlap_add_streaming_empty_patches_returns_fill_array(
-    domain: GeoTensor, tmp_path
+    domain: GeoArray, tmp_path
 ) -> None:
     # No patches at all should yield a fill-valued zarr of the domain's shape.
     _needs_zarr()
@@ -134,7 +134,7 @@ def test_overlap_add_streaming_empty_patches_returns_fill_array(
 
 
 def test_overlap_add_streaming_chunk_size_invariant(
-    domain: GeoTensor,
+    domain: GeoArray,
     overlapping_patches: list[Patch],
     tmp_path,
 ) -> None:
@@ -179,7 +179,7 @@ def test_overlap_add_streaming_chunk_size_invariant(
     ids=lambda a: type(a).__name__,
 )
 def test_exactly_commutative_aggregations_are_bit_identical_under_permutation(
-    domain: GeoTensor, overlapping_patches: list[Patch], agg
+    domain: GeoArray, overlapping_patches: list[Patch], agg
 ) -> None:
     # `Max` and `Min` are exactly commutative-and-associative on
     # float64, so reordering the inputs must yield the bit-identical
@@ -204,7 +204,7 @@ def test_exactly_commutative_aggregations_are_bit_identical_under_permutation(
     ids=lambda a: type(a).__name__,
 )
 def test_summation_aggregations_are_permutation_invariant_to_fp(
-    domain: GeoTensor, overlapping_patches: list[Patch], agg
+    domain: GeoArray, overlapping_patches: list[Patch], agg
 ) -> None:
     # `Sum`, `Mean`, `WeightedSum` are mathematically commutative but
     # IEEE-754 float64 addition isn't bit-associative, so the order of
@@ -221,7 +221,7 @@ def test_summation_aggregations_are_permutation_invariant_to_fp(
 
 
 def test_variance_permutation_invariant_under_overlap(
-    domain: GeoTensor, overlapping_patches: list[Patch]
+    domain: GeoArray, overlapping_patches: list[Patch]
 ) -> None:
     # Welford's running mean update is the order-sensitive step:
     # `mean += (x - mean) / count` and `M2 += delta * (x - new_mean)`
@@ -250,7 +250,7 @@ def test_variance_permutation_invariant_under_overlap(
 
 
 def test_welford_variance_no_worse_than_naive_on_ill_conditioned_data(
-    domain: GeoTensor,
+    domain: GeoArray,
 ) -> None:
     # Classic ill-conditioned fixture: very large mean, very small
     # spread. `Sum(x^2)/N - (Sum(x)/N)^2` (the naive two-pass form, in

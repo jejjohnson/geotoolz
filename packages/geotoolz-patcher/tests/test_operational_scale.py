@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.windows import Window
 
 from geopatcher import Patch, RasterField, SpatialPatcher, spatial
@@ -178,8 +178,8 @@ def test_hyperloglog_sketches_merge_disjoint_sets() -> None:
 
 @pytest.fixture
 def stitch_field() -> RasterField:
-    gt = GeoTensor(
-        values=np.arange(16 * 16, dtype=np.float32).reshape(16, 16),
+    gt = GeoArray(
+        data=np.arange(16 * 16, dtype=np.float32).reshape(16, 16),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
     )
@@ -241,8 +241,8 @@ class TestCogWriter:
         pytest.importorskip("zarr")  # streams via a scratch zarr store
         target = str(tmp_path / "rgb.tif")
         data = np.random.default_rng(0).random((3, 8, 8)).astype(np.float32)
-        domain = GeoTensor(
-            values=data, transform=rasterio.Affine.identity(), crs="EPSG:32630"
+        domain = GeoArray(
+            data=data, transform=rasterio.Affine.identity(), crs="EPSG:32630"
         )
         patch = Patch(data=data, anchor=(0, 0), indices=Window(0, 0, 8, 8))
         agg = spatial.aggregation.OverlapAdd(
@@ -257,8 +257,8 @@ class TestCogWriter:
         pytest.importorskip("zarr")  # streams via a scratch zarr store
         target = tmp_path / "a" / "b" / "out.tif"
         data = np.random.default_rng(0).random((1, 8, 8)).astype(np.float32)
-        domain = GeoTensor(
-            values=data, transform=rasterio.Affine.identity(), crs="EPSG:32630"
+        domain = GeoArray(
+            data=data, transform=rasterio.Affine.identity(), crs="EPSG:32630"
         )
         patch = Patch(data=data, anchor=(0, 0), indices=Window(0, 0, 8, 8))
         agg = spatial.aggregation.OverlapAdd(
@@ -313,8 +313,8 @@ class TestCogWriter:
         pytest.importorskip("zarr")  # streams via a scratch zarr store
         values = np.random.default_rng(1).random((64, 64)).astype(np.float32)
         field = RasterField(
-            GeoTensor(
-                values=values,
+            GeoArray(
+                data=values,
                 transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 640.0),
                 crs="EPSG:32630",
             )
@@ -325,7 +325,7 @@ class TestCogWriter:
             window=spatial.window.Hann(),
             aggregation=spatial.aggregation.OverlapAdd(),
         )
-        patches = [p.with_data(np.asarray(p.data.values)) for p in patcher.split(field)]
+        patches = [p.with_data(np.asarray(p.data)) for p in patcher.split(field)]
         reference = spatial.aggregation.OverlapAdd().merge(patches, field.domain)
         target = str(tmp_path / "out.tif")
         agg = spatial.aggregation.OverlapAdd(
@@ -340,7 +340,7 @@ class TestCogWriter:
             assert src.overviews(1), "a COG carries internal overviews"
             assert np.isnan(src.nodata)
             assert src.crs == field.domain.crs
-            assert src.transform == field.domain.transform
+            assert src.transform == field.domain.grid.affine
             written = src.read(1)
         # Every pixel is covered with a non-zero Hann weight → the input back.
         np.testing.assert_allclose(written, reference, rtol=1e-6)
@@ -354,8 +354,8 @@ class TestCogWriter:
         agg = spatial.aggregation.OverlapAdd(
             streaming=True, target_path=str(target), writer="cog"
         )
-        domain = GeoTensor(
-            values=np.zeros((8, 8)), transform=rasterio.Affine.identity(), crs=None
+        domain = GeoArray(
+            data=np.zeros((8, 8)), transform=rasterio.Affine.identity(), crs=None
         )
         with pytest.raises(FileExistsError, match="overwrite=True"):
             agg.merge([], domain)

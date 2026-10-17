@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geopatcher import RasterField, SpatialPatcher, spatial
 
@@ -28,8 +28,8 @@ def field(raster_field_factory) -> RasterField:
     return raster_field_factory(32)
 
 
-def test_unbatch_round_trips_geotensor_carriers(field: RasterField) -> None:
-    """#196: unbatch rebuilds GeoTensor chips with their georeferencing."""
+def test_unbatch_round_trips_geoarray_carriers(field: RasterField) -> None:
+    """#196: unbatch rebuilds GeoArray chips with their georeferencing."""
     patcher = _patcher()
     expected = list(patcher.split(field))
     batches = list(batch_split(patcher, field, batch_size=5))
@@ -38,13 +38,13 @@ def test_unbatch_round_trips_geotensor_carriers(field: RasterField) -> None:
 
     assert [p.anchor for p in patches] == [p.anchor for p in expected]
     for got, want in zip(patches, expected, strict=True):
-        assert isinstance(got.data, GeoTensor)
-        assert got.data.transform == want.data.transform
+        assert isinstance(got.data, GeoArray)
+        assert got.data.grid.affine == want.data.grid.affine
         assert got.data.crs == want.data.crs
-        assert got.data.fill_value_default == want.data.fill_value_default
+        assert got.data.fill_value == want.data.fill_value
         np.testing.assert_array_equal(np.asarray(got.data), np.asarray(want.data))
     merged = patcher.merge(patches, field.domain)
-    np.testing.assert_array_equal(merged, np.asarray(field.reader.values))
+    np.testing.assert_array_equal(merged, np.asarray(field.reader))
 
 
 def test_unbatch_wraps_model_output_with_new_band_axis(field: RasterField) -> None:
@@ -56,9 +56,9 @@ def test_unbatch_wraps_model_output_with_new_band_axis(field: RasterField) -> No
     patches = unbatch(batch, out)
 
     first = next(iter(patcher.split(field)))
-    assert isinstance(patches[0].data, GeoTensor)
+    assert isinstance(patches[0].data, GeoArray)
     assert patches[0].data.shape == (2, 8, 8)
-    assert patches[0].data.transform == first.data.transform
+    assert patches[0].data.grid.affine == first.data.grid.affine
 
 
 def test_unbatch_leaves_non_spatial_output_bare(field: RasterField) -> None:
@@ -68,7 +68,7 @@ def test_unbatch_leaves_non_spatial_output_bare(field: RasterField) -> None:
 
     patches = unbatch(batch, logits)
 
-    assert not isinstance(patches[0].data, GeoTensor)
+    assert not isinstance(patches[0].data, GeoArray)
     assert patches[0].data.shape == (3,)
 
 
@@ -94,7 +94,7 @@ def test_batched_patch_is_a_pytree(field: RasterField) -> None:
     np.testing.assert_array_equal(doubled.data, batch.data * 2)
     placed = jax.device_put(batch)
     assert isinstance(placed, BatchedPatch)
-    assert isinstance(unbatch(placed)[0].data, GeoTensor)
+    assert isinstance(unbatch(placed)[0].data, GeoArray)
 
 
 def test_padded_entries_are_dropped(field: RasterField) -> None:

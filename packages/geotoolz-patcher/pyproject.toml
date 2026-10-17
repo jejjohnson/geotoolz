@@ -1,14 +1,14 @@
 [project]
 name = "geotoolz-patcher"
 version = "0.11.0"
-description = "Four-axis Patcher framework for geospatial fields — split a field into local patches, run an operator per patch, stitch the outputs back into a global result."
+description = "Four-axis Patcher framework for geospatial fields — split a field (a geoarray.GeoArray or any lazy RasterSource) into local patches, run an operator per patch, stitch the outputs back into a global result."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]
 license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
-keywords = ["remote-sensing", "geospatial", "patching", "tiling", "stitching", "georeader"]
+keywords = ["remote-sensing", "geospatial", "patching", "tiling", "stitching", "geoarray"]
 requires-python = ">=3.12"
 classifiers = [
     "Topic :: Scientific/Engineering",
@@ -22,9 +22,16 @@ classifiers = [
     "Development Status :: 2 - Pre-Alpha",
 ]
 dependencies = [
-    # GeoTensor and the GeoData / AsyncGeoData protocols. Pinning to >=2.1
-    # so the v2.0 numpy-subclass GeoTensor (with __array_ufunc__) is
-    # available — the substrate the raster path depends on.
+    # The carrier: raster fields take a `geoarray.RasterSource` (a
+    # `GeoArray` or a lazy reader) and every raster patch, merge and wire
+    # form is a `geoarray.GeoArray`. The [georeader] extra brings the
+    # adapter (`source_to_georeader` / `from_georeader`) used at the engine
+    # boundary below.
+    "geotoolz-array[georeader]>=0.1",
+    # The internal engine only, never in the public API: georeader's
+    # `read_reproject` / `calculate_transform_window` / `window_from_polygon`
+    # behind `ReprojectingRasterField`, and `compare_crs` in the coordinate
+    # samplers; >=2.1 for the numpy-subclass GeoTensor the adapter targets.
     "georeader-spaceml>=2.1",
     "numpy>=1.26",
     # KDTree (PointDomain) + signal windows (Tukey/Gaussian).

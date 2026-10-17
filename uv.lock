@@ -1826,6 +1826,7 @@ version = "0.11.0"
 source = { editable = "packages/geotoolz-patcher" }
 dependencies = [
     { name = "georeader-spaceml" },
+    { name = "geotoolz-array", extra = ["georeader"] },
     { name = "numpy" },
     { name = "pyproj" },
     { name = "rasterio" },
@@ -1913,6 +1914,7 @@ requires-dist = [
     { name = "geopandas", marker = "extra == 'patch-full'", specifier = ">=0.14" },
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
+    { name = "geotoolz-array", extras = ["georeader"], editable = "packages/geotoolz-array" },
     { name = "geotoolz-cloud", extras = ["cog"], marker = "extra == 'cog'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-cloud", extras = ["cog"], marker = "extra == 'patch-full'", editable = "packages/geotoolz-cloud" },
     { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.23" },
