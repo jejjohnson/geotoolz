@@ -23,8 +23,14 @@ classifiers = [
 dependencies = [
     # The pooled S3 / GCS / Azure / HTTP clients (`geocloud.store`).
     "obstore>=0.9.5",
-    # GeoTensor, the GeoData surface and `georeader.read`, which the COG
-    # reader mirrors; >=2.1 for the numpy-subclass GeoTensor.
+    # The carrier: every public read returns a `geoarray.GeoArray`, and
+    # `write_cog` takes one (or any `geoarray.RasterSource`). The
+    # [georeader] extra brings the adapter (`from_georeader` /
+    # `to_georeader`) used at the engine boundary below.
+    "geotoolz-array[georeader]>=0.1",
+    # The internal engine only, never in the public API: `georeader.read`
+    # (window maths and reprojection, which the async COG reader mirrors);
+    # >=2.1 for the numpy-subclass GeoTensor.
     "georeader-spaceml>=2.1",
     "numpy>=1.26",
     # `georeader.geotensor` imports `Self` from typing_extensions without
@@ -87,6 +93,7 @@ ignore = ["E402", "E721", "E731", "E741"]
 # packages are used through their public API, and object-store clients
 # come from the one pool in geocloud.store.
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
+"geoarray._src".msg = "private to geoarray: import its public API (docs/capabilities.md), or make the helper public there first"
 "geoops._src".msg = "private to geoops: import its public API (docs/capabilities.md), or make the helper public there first"
 "geopatcher._src".msg = "private to geopatcher: import its public API (docs/capabilities.md), or make the helper public there first"
 "geocatalog._src".msg = "private to geocatalog: import its public API (docs/capabilities.md), or make the helper public there first"

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from geoarray import GeoArray
 from obstore.store import MemoryStore
 
 
@@ -69,10 +70,13 @@ def test_read_hdf_selects_bands_and_metadata(h5_file: Path, bucket: str):
         )
         with h5py.File(h5_file) as f:
             expected = f["radiance"][[0, 2]][::-1]
+        assert isinstance(out, GeoArray)
         np.testing.assert_array_equal(np.asarray(out), expected)  # (2, 20, 30)
-        assert out.fill_value_default == -9999.0
+        assert out.fill_value == -9999.0
         assert out.attrs["metadata"] == {"meta": {"sensor": "toy"}}
-        assert out.attrs["geolocation"]["latitude"].shape == (20, 30)
+        latitude = np.asarray(out.attrs["geolocation"]["latitude"])
+        np.testing.assert_array_equal(latitude, np.ones((20, 30)))  # (20, 30)
+        assert hash(out.attrs)  # frozen: a 2-D array is stored as row tuples
 
 
 def test_read_hdf_rejects_other_files(tmp_path: Path):
@@ -102,8 +106,8 @@ def test_read_netcdf_decodes_cf_and_georeferencing(tmp_path: Path, bucket: str):
     files.upload(path, f"{bucket}/l2.nc")
     for source in (path, f"{bucket}/l2.nc"):
         out = read_netcdf(source, "ch4", group="PRODUCT")
-        assert out.crs is not None and out.transform.a == 10
-        assert np.isnan(out.fill_value_default)
+        assert out.crs is not None and out.grid.affine.a == 10
+        assert np.isnan(out.fill_value)
         assert np.isnan(np.asarray(out)[0, 0])
         np.testing.assert_allclose(np.asarray(out)[1, 1], 1900.0)
 
@@ -194,7 +198,7 @@ def test_read_netcdf_transform_from_cf_coordinates(
 
     x = 500_000 + 10 * (np.arange(4) + 0.5)
     out = read_netcdf(_cf_netcdf(tmp_path / "cf.nc", x, y), "t2m")  # (3, 4) float32
-    assert out.transform == Affine(10.0, 0.0, 500_000.0, 0.0, expected_e, expected_f)
+    assert out.grid.affine == Affine(10.0, 0.0, 500_000.0, 0.0, expected_e, expected_f)
     assert out.crs.is_projected
 
 
@@ -205,7 +209,7 @@ def test_read_netcdf_transform_from_lon_lat(tmp_path: Path):
     lat = 40.0 - 0.25 * (np.arange(6) + 0.5)
     path = _cf_netcdf(tmp_path / "ll.nc", lon, lat, names=("lat", "lon"))
     out = read_netcdf(path, "t2m")  # (6, 8) float32
-    assert out.transform == Affine(0.25, 0.0, -3.0, 0.0, -0.25, 40.0)
+    assert out.grid.affine == Affine(0.25, 0.0, -3.0, 0.0, -0.25, 40.0)
 
 
 def test_read_netcdf_geotransform_wins_over_coordinates(tmp_path: Path):
@@ -213,7 +217,7 @@ def test_read_netcdf_geotransform_wins_over_coordinates(tmp_path: Path):
     y = 4_200_000 - 10 * (np.arange(3) + 0.5)
     path = _cf_netcdf(tmp_path / "gt.nc", x, y, geotransform="0 1 0 0 0 -1")
     out = read_netcdf(path, "t2m")
-    assert tuple(out.transform)[:6] == (1.0, 0.0, 0.0, 0.0, -1.0, 0.0)
+    assert tuple(out.grid.affine)[:6] == (1.0, 0.0, 0.0, 0.0, -1.0, 0.0)
 
 
 def test_read_netcdf_irregular_coordinates_warn(tmp_path: Path):
@@ -224,7 +228,7 @@ def test_read_netcdf_irregular_coordinates_warn(tmp_path: Path):
     path = _cf_netcdf(tmp_path / "irregular.nc", x, y)
     with pytest.warns(UserWarning, match="not evenly spaced"):
         out = read_netcdf(path, "t2m")
-    assert out.transform == Affine.identity()
+    assert out.grid.affine == Affine.identity()
 
 
 def test_read_netcdf_without_coordinates_warns(tmp_path: Path):
@@ -244,7 +248,7 @@ def test_read_netcdf_kilometre_coordinates_are_metres(tmp_path: Path):
     x = 500 + 0.01 * (np.arange(4) + 0.5)  # km
     y = 4200 - 0.01 * (np.arange(3) + 0.5)
     out = read_netcdf(_cf_netcdf(tmp_path / "km.nc", x, y, units="km"), "t2m")
-    assert out.transform.almost_equals(
+    assert out.grid.affine.almost_equals(
         Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_200_000.0)
     )
 
@@ -272,7 +276,7 @@ def test_read_netcdf_coordinates_from_a_parent_group(tmp_path: Path):
         product = ds.createGroup("PRODUCT")
         product.createVariable("v", "f4", ("lat", "lon"))[:] = np.ones((2, 3))
     out = read_netcdf(path, "v", group="PRODUCT")
-    assert out.transform == Affine(1.0, 0.0, 0.0, 0.0, -1.0, 11.0)
+    assert out.grid.affine == Affine(1.0, 0.0, 0.0, 0.0, -1.0, 11.0)
 
 
 def test_read_netcdf_declared_coordinates_beat_index_dimensions(tmp_path: Path):
@@ -292,7 +296,7 @@ def test_read_netcdf_declared_coordinates_beat_index_dimensions(tmp_path: Path):
         v = ds.createVariable("v", "f4", ("j", "i"))
         v[:], v.coordinates = np.ones((2, 3)), "lat lon"
     out = read_netcdf(path, "v")
-    assert out.transform == Affine(1.0, 0.0, 0.0, 0.0, -1.0, 11.0)
+    assert out.grid.affine == Affine(1.0, 0.0, 0.0, 0.0, -1.0, 11.0)
 
 
 def test_read_netcdf_curvilinear_coordinates_warn(tmp_path: Path):
@@ -326,7 +330,7 @@ def test_read_netcdf_regular_axes_win_over_2d_auxiliaries(tmp_path: Path):
         v = ds.createVariable("v", "f4", ("y", "x"))
         v[:], v.coordinates = np.ones((2, 3)), "lat lon"
     out = read_netcdf(path, "v")
-    assert out.transform == Affine(10.0, 0.0, 0.0, 0.0, -10.0, 20.0)
+    assert out.grid.affine == Affine(10.0, 0.0, 0.0, 0.0, -10.0, 20.0)
 
 
 def test_read_netcdf_float32_coordinates_near_the_antimeridian(tmp_path: Path):
@@ -344,8 +348,8 @@ def test_read_netcdf_float32_coordinates_near_the_antimeridian(tmp_path: Path):
         v_lat[:], v_lat.units = lat, "degrees_north"
         ds.createVariable("v", "f4", ("lat", "lon"))[:] = np.ones((5, 100))
     out = read_netcdf(path, "v")
-    assert out.transform.a == pytest.approx(0.1, rel=1e-5)
-    assert out.transform.c == pytest.approx(170.0, abs=1e-4)
+    assert out.grid.affine.a == pytest.approx(0.1, rel=1e-5)
+    assert out.grid.affine.c == pytest.approx(170.0, abs=1e-4)
 
 
 def test_read_netcdf_grid_mapping_in_a_parent_group(tmp_path: Path):
@@ -368,7 +372,7 @@ def test_read_netcdf_grid_mapping_in_a_parent_group(tmp_path: Path):
         v[:], v.grid_mapping = np.ones((2, 3)), "crs"
     out = read_netcdf(path, "v", group="PRODUCT")
     assert out.crs is not None
-    assert out.transform.almost_equals(
+    assert out.grid.affine.almost_equals(
         Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_200_020.0)
     )
 
@@ -390,7 +394,7 @@ def test_read_netcdf_ignores_non_horizontal_auxiliaries(tmp_path: Path):
         v = ds.createVariable("v", "f4", ("y", "x"))
         v[:], v.coordinates = np.ones((2, 3)), "height y x"
     out = read_netcdf(path, "v")
-    assert out.transform == Affine(10.0, 0.0, 0.0, 0.0, -10.0, 20.0)
+    assert out.grid.affine == Affine(10.0, 0.0, 0.0, 0.0, -10.0, 20.0)
 
 
 def test_read_netcdf_honours_cell_bounds(tmp_path: Path):
@@ -415,7 +419,7 @@ def test_read_netcdf_honours_cell_bounds(tmp_path: Path):
         ds.createVariable("y_bnds", "f8", ("y", "nv"))[:] = [[20, 10], [10, 0]]
         ds.createVariable("v", "f4", ("y", "x"))[:] = np.ones((2, 3))
     out = read_netcdf(path, "v")
-    assert out.transform == Affine(10.0, 0.0, 0.0, 0.0, -10.0, 20.0)
+    assert out.grid.affine == Affine(10.0, 0.0, 0.0, 0.0, -10.0, 20.0)
 
 
 def test_coordinates_convert_into_the_crs_axis_units():

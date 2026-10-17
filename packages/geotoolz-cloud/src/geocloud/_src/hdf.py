@@ -12,7 +12,7 @@ location the pool accepts:
 
 On top sit the CF decoders the product readers share (`PackedVariable`,
 `attr`, `scalar`, `unpacked`, `time_attr`, `grid_variables`) and two
-GeoTensor readers (`read_hdf`, `read_netcdf`).
+`geoarray.GeoArray` readers (`read_hdf`, `read_netcdf`).
 
 h5py, netCDF4 and pyhdf are imported at use time; a missing one raises an
 ``ImportError`` naming the geotoolz-cloud extra (``[hdf5]``, ``[netcdf]``,
@@ -33,7 +33,7 @@ from typing import IO, Any, cast
 
 import numpy as np
 from affine import Affine
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geocloud._src.extras import missing_extra
 from geocloud._src.store import Location, local_path
@@ -448,7 +448,7 @@ def fill_value_from_attrs(attrs: Mapping[str, Any]) -> Any:
     Looks up ``_FillValue``, ``missing_value``, ``fill_value`` and
     ``nodata`` in that order. Size-1 arrays / lists (how netCDF4 / xarray
     write HDF5 attributes) are unwrapped; multi-element values are skipped,
-    since a ``GeoTensor`` fill must be a scalar.
+    since a carrier's ``fill_value`` must be a scalar.
 
     Examples:
         >>> fill_value_from_attrs({"_FillValue": [-9999]})
@@ -493,24 +493,37 @@ def affine_from_geotransform(geotransform: Any) -> Affine:
     return Affine.from_gdal(*parts)
 
 
-def _geotensor(
+def _geoarray(
     values: Any,
     *,
     crs: Any = None,
     fill_value: Any = 0,
     attrs: dict[str, Any] | None = None,
     transform: Affine | None = None,
-) -> GeoTensor:
-    return GeoTensor(
+) -> GeoArray:
+    return GeoArray(
         np.asarray(values),
-        transform=Affine.identity() if transform is None else transform,
-        crs=crs,
-        fill_value_default=fill_value,
-        attrs=attrs,
+        Affine.identity() if transform is None else transform,
+        crs,
+        fill_value=fill_value,
+        attrs=attrs or {},
     )
 
 
-# --- GeoTensor readers -------------------------------------------------------------
+def _geolocation(latitude: Any, longitude: Any) -> dict[str, Any]:
+    """Latitude / longitude arrays as nested tuples, hashable in `FrozenAttrs`.
+
+    A carrier's attrs are frozen and hashable, so a 2-D array is stored as
+    a tuple of row tuples; ``np.asarray(attrs["geolocation"]["latitude"])``
+    gives the array back.
+    """
+    return {
+        "latitude": np.asarray(latitude).tolist(),
+        "longitude": np.asarray(longitude).tolist(),
+    }
+
+
+# --- GeoArray readers --------------------------------------------------------------
 
 
 def read_hdf(
@@ -521,8 +534,8 @@ def read_hdf(
     geolocation: tuple[str, str] | None = None,
     metadata_groups: list[str] | None = None,
     storage_options: Mapping[str, Any] | None = None,
-) -> GeoTensor:
-    """Read one dataset of an HDF5 or HDF4 / HDF-EOS file as a ``GeoTensor``.
+) -> GeoArray:
+    """Read one dataset of an HDF5 or HDF4 / HDF-EOS file as a `geoarray.GeoArray`.
 
     The format is told by the file signature. HDF5 is read through h5py
     with ranged reads (`open_hdf5`), only the requested bands off disk;
@@ -535,19 +548,20 @@ def read_hdf(
         dataset: Dataset path inside the file.
         indexes: 1-based band indexes along the leading dataset axis.
         geolocation: ``(latitude_dataset, longitude_dataset)`` to load into
-            ``attrs["geolocation"]``.
+            ``attrs["geolocation"]`` (``{"latitude", "longitude"}``, each a
+            tuple of row tuples — attrs are hashable; ``np.asarray`` it).
         metadata_groups: HDF5 group paths whose attributes are copied into
             ``attrs["metadata"]``.
         storage_options: Forwarded to `geocloud.store.get_obstore`.
 
     Returns:
-        The dataset, its attributes under ``attrs["attrs"]`` and its
-        declared fill as the tensor's fill value.
+        The dataset ``(..., H, W)``, its attributes under ``attrs["attrs"]``
+        and its declared fill (else ``0``) as the carrier's ``fill_value``.
 
     Raises:
         ImportError: h5py (``[hdf5]``) or pyhdf (``[hdf4]``) is missing.
-        ValueError: The file is neither HDF5 nor HDF4, or ``indexes`` do
-            not fit the dataset.
+        ValueError: The file is neither HDF5 nor HDF4, ``indexes`` do
+            not fit the dataset, or the dataset is not 2-D to 4-D.
         KeyError: No such dataset.
     """
     signature = _signature(source, storage_options)
@@ -567,7 +581,7 @@ def _read_hdf5(
     geolocation: tuple[str, str] | None,
     metadata_groups: list[str] | None,
     storage_options: Mapping[str, Any] | None,
-) -> GeoTensor:
+) -> GeoArray:
     _require("h5py", "hdf5", "geocloud.hdf.read_hdf (HDF5)")
     with open_hdf5(source, storage_options=storage_options) as f:
         var = f[dataset]
@@ -576,15 +590,12 @@ def _read_hdf5(
         out_attrs: dict[str, Any] = {"attrs": attrs}
         if geolocation is not None:
             lat, lon = geolocation
-            out_attrs["geolocation"] = {
-                "latitude": np.asarray(f[lat][...]),
-                "longitude": np.asarray(f[lon][...]),
-            }
+            out_attrs["geolocation"] = _geolocation(f[lat][...], f[lon][...])
         if metadata_groups is not None:
             out_attrs["metadata"] = {
                 group: _plain(dict(f[group].attrs)) for group in metadata_groups
             }
-    return _geotensor(values, fill_value=fill_value_from_attrs(attrs), attrs=out_attrs)
+    return _geoarray(values, fill_value=fill_value_from_attrs(attrs), attrs=out_attrs)
 
 
 def _read_hdf4(
@@ -593,7 +604,7 @@ def _read_hdf4(
     indexes: list[int] | None,
     geolocation: tuple[str, str] | None,
     storage_options: Mapping[str, Any] | None,
-) -> GeoTensor:
+) -> GeoArray:
     sd = _require("pyhdf.SD", "hdf4", "geocloud.hdf.read_hdf (HDF4)")
     hdf = sd.SD(_localize(source, storage_options), sd.SDC.READ)
     try:
@@ -603,13 +614,12 @@ def _read_hdf4(
         out_attrs: dict[str, Any] = {"attrs": attrs}
         if geolocation is not None:
             lat, lon = geolocation
-            out_attrs["geolocation"] = {
-                "latitude": np.asarray(hdf.select(lat).get()),
-                "longitude": np.asarray(hdf.select(lon).get()),
-            }
+            out_attrs["geolocation"] = _geolocation(
+                hdf.select(lat).get(), hdf.select(lon).get()
+            )
     finally:
         hdf.end()
-    return _geotensor(values, fill_value=fill_value_from_attrs(attrs), attrs=out_attrs)
+    return _geoarray(values, fill_value=fill_value_from_attrs(attrs), attrs=out_attrs)
 
 
 def _netcdf_group(root: Any, group: str | None) -> Any:
@@ -877,8 +887,8 @@ def read_netcdf(
     decode_cf: bool = True,
     use_cf_grid_mapping: bool = True,
     storage_options: Mapping[str, Any] | None = None,
-) -> GeoTensor:
-    """Read one variable of a NetCDF-3 / NetCDF-4 file as a ``GeoTensor``.
+) -> GeoArray:
+    """Read one variable of a NetCDF-3 / NetCDF-4 file as a `geoarray.GeoArray`.
 
     netCDF4 opens a local copy (`geocloud.cache.localize`; a local path is
     used in place). With ``decode_cf`` the CF mask / ``scale_factor`` /
@@ -900,12 +910,13 @@ def read_netcdf(
         storage_options: Forwarded to `geocloud.store.get_obstore`.
 
     Returns:
-        The variable, its attributes under ``attrs["attrs"]``.
+        The variable ``(..., H, W)``, its attributes under ``attrs["attrs"]``.
 
     Raises:
         ImportError: netCDF4 is missing (the ``[netcdf]`` extra).
         KeyError: No such group or variable.
-        ValueError: ``indexes`` do not fit the variable.
+        ValueError: ``indexes`` do not fit the variable, or it is not 2-D
+            to 4-D.
     """
     netcdf4 = _require("netCDF4", "netcdf", "geocloud.hdf.read_netcdf")
     with netcdf4.Dataset(_localize(source, storage_options), "r") as root:
@@ -922,7 +933,7 @@ def read_netcdf(
                 fill_value = np.nan
             values = values.filled(fill_value)
         crs, mapping = _netcdf_crs(holder, var, use_cf_grid_mapping)
-        return _geotensor(
+        return _geoarray(
             values,
             crs=crs,
             fill_value=fill_value,

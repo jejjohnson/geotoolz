@@ -15,7 +15,8 @@ import obstore
 import pytest
 import rasterio
 from affine import Affine
-from georeader.geotensor import GeoTensor
+from geoarray import FrozenAttrs, GeoArray, Grid, PixelWindow, RasterSource
+from geoarray.interop.georeader import source_from_georeader, to_georeader
 from obstore.store import MemoryStore
 from rasterio.io import MemoryFile
 from rasterio.windows import Window
@@ -30,14 +31,8 @@ TRANSFORM = Affine(10, 0, 500_000, 0, -10, 4_000_000)
 
 def scene(
     values: np.ndarray, *, fill: Any = 0, attrs: dict[str, Any] | None = None
-) -> GeoTensor:
-    return GeoTensor(
-        values,
-        transform=TRANSFORM,
-        crs="EPSG:32630",
-        fill_value_default=fill,
-        attrs=attrs,
-    )
+) -> GeoArray:
+    return GeoArray(values, TRANSFORM, "EPSG:32630", fill_value=fill, attrs=attrs)
 
 
 @pytest.fixture
@@ -129,19 +124,25 @@ def test_lazy_reader_is_staged_in_strips(tmp_path: Path, monkeypatch) -> None:
     gt = scene(values, fill=np.nan)
 
     class Lazy:
-        """A GeoData that only hands out windows, never its whole array."""
+        """A RasterSource that only hands out windows, never its whole array."""
 
-        transform, crs, fill_value_default = gt.transform, gt.crs, np.nan
-        shape, dtype, attrs = values.shape, values.dtype, {}
-        windows: ClassVar[list[Window]] = []
+        grid, fill_value, attrs = gt.grid, np.nan, FrozenAttrs()
+        shape, dtype = values.shape, values.dtype
+        windows: ClassVar[list[PixelWindow]] = []
 
-        def read_from_window(self, window: Window, boundless: bool = True) -> Any:
+        def read_window(
+            self, window: PixelWindow, *, boundless: bool = True
+        ) -> GeoArray:
+            assert not boundless
             self.windows.append(window)
-            rows = slice(window.row_off, window.row_off + window.height)
-            return values[:, rows, :]
+            return gt.read_window(window, boundless=boundless)
+
+        def load(self) -> GeoArray:
+            raise AssertionError("write_cog must not load a lazy source whole")
 
     monkeypatch.setattr(cog_write, "_STRIP_BLOCKS", 1)
     lazy = Lazy()
+    assert isinstance(lazy, RasterSource)
     out = write_cog(lazy, tmp_path / "lazy.tif", blocksize=256)
     assert [(w.row_off, w.height) for w in lazy.windows] == [
         (0, 256),
@@ -207,9 +208,32 @@ def test_bad_arguments(tmp_path: Path, kwargs: dict[str, Any], match: str) -> No
 def test_bad_data(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match=r"\(T, C, H, W\)"):
         write_cog(scene(np.ones((2, 1, 8, 8), "uint8")), tmp_path / "x.tif")
-    no_crs = GeoTensor(np.ones((8, 8), "uint8"), transform=TRANSFORM, crs=None)
+    no_crs = GeoArray(np.ones((8, 8), "uint8"), TRANSFORM, None)
     with pytest.raises(ValueError, match="no CRS"):
         write_cog(no_crs, tmp_path / "x.tif")
+    with pytest.raises(TypeError, match=r"GeoArray or a geoarray\.RasterSource"):
+        write_cog(np.ones((8, 8), "uint8"), tmp_path / "x.tif")
+
+
+def test_refuses_georeader_carriers(tmp_path: Path) -> None:
+    """A GeoTensor / georeader reader is refused, naming the adapter."""
+    gt = to_georeader(scene(np.ones((2, 16, 16), "uint8")))
+    with pytest.raises(TypeError, match="from_georeader"):
+        write_cog(gt, tmp_path / "x.tif")
+    path = write_cog(scene(np.ones((2, 16, 16), "uint8")), tmp_path / "a.tif")
+    from georeader.rasterio_reader import RasterioReader
+
+    reader = RasterioReader(str(path))
+    with pytest.raises(TypeError, match="source_from_georeader"):
+        write_cog(reader, tmp_path / "x.tif")
+    assert not (tmp_path / "x.tif").exists()
+    # Wrapped with the adapter, the same reader is a RasterSource.
+    out = write_cog(source_from_georeader(reader), tmp_path / "b.tif")
+    with rasterio.open(out) as src:
+        assert src.read().shape == (2, 16, 16)
+        assert Grid.from_affine(src.transform, src.crs, src.shape) == Grid(
+            TRANSFORM, "EPSG:32630", (16, 16)
+        )
 
 
 def test_auto_nodata_drops_a_fill_the_dtype_cannot_hold(tmp_path: Path) -> None:

@@ -1,9 +1,9 @@
 # Write COGs
 
-`geocloud.cog.write_cog` writes a `GeoTensor`, or a lazy georeader
-reader, as a validated COG to a local path or any bucket. It runs on the
-base install (GDAL's `COG` driver through rasterio). In a pipeline, use
-the operator `gz.WriteCOG`.
+`geocloud.cog.write_cog` writes a `geoarray.GeoArray`, or any lazy
+`geoarray.RasterSource`, as a validated COG to a local path or any bucket.
+It runs on the base install (GDAL's `COG` driver through rasterio). In a
+pipeline, use the operator `gz.WriteCOG`.
 
 ## Write a float, a class map and a mask
 
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 from affine import Affine
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from obstore.store import MemoryStore
 
 from geocloud import files
@@ -28,17 +28,17 @@ mount("s3://demo-bucket", MemoryStore())
 rng: np.random.Generator = np.random.default_rng(0)
 grid: Affine = Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_200_000.0)   # 10 m, UTM 10N
 
-ndvi: GeoTensor = GeoTensor(
+ndvi: GeoArray = GeoArray(
     rng.uniform(-1, 1, (1, 1024, 1024)).astype(np.float32),
-    transform=grid, crs="EPSG:32610", fill_value_default=np.nan,
+    grid, "EPSG:32610", fill_value=np.nan,
 )                                                    # (1, 1024, 1024) float32 · NaN = no data
-classes: GeoTensor = GeoTensor(
+classes: GeoArray = GeoArray(
     rng.integers(0, 5, (1024, 1024), dtype=np.uint8),
-    transform=grid, crs="EPSG:32610", fill_value_default=0,
+    grid, "EPSG:32610", fill_value=0,
 )                                                    # (1024, 1024) uint8 · 0 = no data
-mask: GeoTensor = GeoTensor(
-    np.asarray(ndvi)[0] < 0, transform=grid, crs="EPSG:32610", fill_value_default=False,
-)                                                    # (1024, 1024) bool
+mask: GeoArray = ndvi.with_data(
+    np.asarray(ndvi) < 0, fill_value=False,
+)                                                    # (1, 1024, 1024) bool
 
 out: Path = Path(tempfile.mkdtemp())
 write_cog(ndvi, "s3://demo-bucket/products/ndvi.tif")      # deflate + float predictor, average overviews
@@ -47,8 +47,12 @@ write_cog(mask, out / "water.tif")                          # bool → uint8 0 /
 size: int = files.info("s3://demo-bucket/products/ndvi.tif").size  # ≈ 4.7 MB
 ```
 
-A lazy reader (a georeader `RasterioReader`, a geoproducts reader) is
-staged strip by strip, so a scene larger than memory never loads whole.
+A lazy `geoarray.RasterSource` (a [`CogSource`](read-cogs.md), a
+geoproducts reader) is staged strip by strip through `read_window`, so a
+scene larger than memory never loads whole. A georeader `GeoTensor` is
+refused with a `TypeError`: convert it with
+`geoarray.interop.georeader.from_georeader`, or wrap a lazy georeader
+reader with `source_from_georeader`.
 
 ## How a write runs
 
@@ -74,7 +78,7 @@ staged strip by strip, so a scene larger than memory never loads whole.
 | `blocksize` | `512` | a power of two |
 | `overviews` | `True` | down to one tile |
 | `resampling` | auto | `nearest` for integer / bool data, `average` for floats |
-| `nodata` | `"auto"` | the data's `fill_value_default` if the dtype can hold it; never for a bool mask |
+| `nodata` | `"auto"` | the data's `fill_value` if the dtype can hold it; never for a bool mask |
 | `descriptions` | auto | from `attrs["band_names"]` (or `descriptions`) when it has one entry per band |
 | `tags`, `creation_options` | — | dataset tags; raw GDAL `COG` options that win over the keywords |
 | `overwrite`, `validate` | `True` | `overwrite=False` raises `FileExistsError` |

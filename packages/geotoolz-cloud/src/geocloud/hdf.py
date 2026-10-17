@@ -1,6 +1,6 @@
 """`geocloud.hdf` — HDF5 / NetCDF / HDF4 from any location, and CF decoding.
 
-- `read_hdf` / `read_netcdf` — one dataset / variable as a ``GeoTensor``,
+- `read_hdf` / `read_netcdf` — one dataset / variable as a `geoarray.GeoArray`,
   from a local path or any URI the pool accepts. HDF5 and NetCDF-4 are
   read with ranged requests; NetCDF-3 and HDF4 through a
   `geocloud.cache` copy.
@@ -14,11 +14,11 @@
 Extras: ``[hdf5]`` (h5py), ``[netcdf]`` (netCDF4), ``[hdf4]`` (pyhdf).
 
 ```python
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geocloud.hdf import open_hdf5, read_netcdf
 
-ch4: GeoTensor = read_netcdf("s3://bucket/L2.nc", "methane", group="PRODUCT")
+ch4: GeoArray = read_netcdf("s3://bucket/L2.nc", "methane", group="PRODUCT")  # (H, W)
 with open_hdf5("s3://noaa-goes19/ABI-L1b-RadC/.../OR_ABI-L1b-RadC-M6C02.nc") as f:
     radiance = f["Rad"][:500, :500]          # only these chunks are fetched
 ```
