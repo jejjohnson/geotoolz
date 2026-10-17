@@ -145,7 +145,7 @@ class DespeckleLee(Operator):
     Examples:
         >>> import geoops as gz
         >>> pipe = gz.restore.DespeckleLee(window=7) | gz.restore.MedianDenoise(window=3)
-        >>> clean = pipe(sar_geotensor)
+        >>> clean = pipe(sar_geoarray)
     """
 
     def __init__(self, *, window: int = 7, cu: float = 0.523) -> None:
@@ -173,7 +173,7 @@ class DespeckleFrost(Operator):
             contrast, ``0`` is the box mean.
 
     Examples:
-        >>> gz.restore.DespeckleFrost(window=7, damping=2.0)(sar_geotensor)
+        >>> gz.restore.DespeckleFrost(window=7, damping=2.0)(sar_geoarray)
     """
 
     def __init__(self, *, window: int = 7, damping: float = 2.0) -> None:
@@ -199,7 +199,7 @@ class DespeckleRefinedLee(Operator):
         window: Side length of the local window in pixels.
 
     Examples:
-        >>> gz.restore.DespeckleRefinedLee(window=7)(sar_geotensor)
+        >>> gz.restore.DespeckleRefinedLee(window=7)(sar_geoarray)
     """
 
     def __init__(self, *, window: int = 7) -> None:
@@ -433,9 +433,7 @@ class MNF(Operator):
             axis=self.axis,
         )
         # Scores are a new quantity: NaN marks nodata, never the input fill.
-        return wrap_filled(
-            gt, scores, fill_value=np.nan, valid=np.isfinite(scores)
-        )
+        return wrap_filled(gt, scores, fill_value=np.nan, valid=np.isfinite(scores))
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         fit_once(self, gt, lambda: self.state_ is not None)

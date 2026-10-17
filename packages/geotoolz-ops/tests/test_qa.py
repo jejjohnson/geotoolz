@@ -299,7 +299,9 @@ def test_mask_invalid_detects_nan_fill() -> None:
     expected = np.zeros((3, 3), dtype=bool)
     expected[1, 2] = True
     np.testing.assert_array_equal(np.asarray(out), expected)
-    assert not np.asarray(to_georeader(gt).invalidmask()).any()  # georeader's blind spot
+    assert not np.asarray(
+        to_georeader(gt).invalidmask()
+    ).any()  # georeader's blind spot
 
 
 def test_mask_invalid_explicit_value_and_plain_array() -> None:
@@ -671,7 +673,7 @@ def test_qa_operators_accept_plain_ndarray(op, arr) -> None:
     np.testing.assert_array_equal(out, np.asarray(gt_out))
 
 
-def test_string_qa_band_selector_requires_geotensor_metadata() -> None:
+def test_string_qa_band_selector_requires_geoarray_metadata() -> None:
     with pytest.raises(TypeError, match="band-name metadata"):
         qa.MaskClouds(qa_band="QA60", bits=[10])(np.zeros((2, 2, 2), dtype=np.uint16))
 

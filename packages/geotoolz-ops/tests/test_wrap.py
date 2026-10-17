@@ -145,21 +145,10 @@ def test_wrap_like_fill_value_inherit_vs_explicit() -> None:
     gt = _scene()
     assert gt.fill_value == -9999
     assert wrap_like(gt, np.asarray(gt)).fill_value == -9999
-    assert (
-        wrap_like(gt, np.asarray(gt), fill_value=INHERIT).fill_value
-        == -9999
-    )
-    assert (
-        wrap_like(gt, np.asarray(gt), fill_value=None).fill_value
-        is None
-    )
-    assert np.isnan(
-        wrap_like(gt, np.asarray(gt), fill_value=np.nan).fill_value
-    )
-    assert (
-        wrap_like(gt, np.asarray(gt), fill_value=False).fill_value
-        is False
-    )
+    assert wrap_like(gt, np.asarray(gt), fill_value=INHERIT).fill_value == -9999
+    assert wrap_like(gt, np.asarray(gt), fill_value=None).fill_value is None
+    assert np.isnan(wrap_like(gt, np.asarray(gt), fill_value=np.nan).fill_value)
+    assert wrap_like(gt, np.asarray(gt), fill_value=False).fill_value is False
     assert wrap_like(gt, np.asarray(gt), fill_value=0).fill_value == 0
 
 

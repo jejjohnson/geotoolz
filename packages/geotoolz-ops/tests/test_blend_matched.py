@@ -29,9 +29,7 @@ from geoops.compositing import BlendMatched, StackMatched
 
 
 def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoArray:
-    return toy_geoarray(
-        values, transform=transform, crs=crs, fill_value=np.nan
-    )
+    return toy_geoarray(values, transform=transform, crs=crs, fill_value=np.nan)
 
 
 # ---------------------------------------------------------------------------

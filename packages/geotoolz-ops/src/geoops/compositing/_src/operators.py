@@ -8,7 +8,7 @@ metadata-independent per-pixel reductions, so they accept plain
 ``np.ndarray`` frames as well as GeoArrays.
 The frame-sequence composites (:class:`MedianComposite`,
 :class:`MaxNDVIComposite`) also accept a single ``(T, C, H, W)`` time
-stack -- georeader's ``("time", "band", "y", "x")`` GeoArray -- which is
+stack -- a GeoArray with dims ``("time", "band", "y", "x")`` -- which is
 reduced over its time axis and rewrapped like ``stack.isel(time=0)``.
 Grid checks (transform / CRS equality) apply only to frames that carry
 georeferencing; plain arrays fall back to shape-equality checks. The
@@ -80,7 +80,6 @@ from geoops.compositing._src.array import (
     view_angle_score,
 )
 from geoops.indices._src.array import ndvi
-
 
 
 def _validate_nan_policy(nan_policy: str) -> NanPolicy:
@@ -332,8 +331,8 @@ class MaxNDVIComposite(Operator):
                 "MaxNDVIComposite requires multi-band GeoArrays (C, H, W); "
                 f"got shape {base.shape}."
             )
-        if (isinstance(self.red, str) or isinstance(self.nir, str)) and not hasattr(
-            base, "attrs"
+        if (isinstance(self.red, str) or isinstance(self.nir, str)) and not isinstance(
+            base, GeoArray
         ):
             raise TypeError(
                 "MaxNDVIComposite with named band references requires "
@@ -846,12 +845,11 @@ class StackMatched(Operator):
         output's fill (the first input's ``fill_value``) in that
         input's bands, when the output dtype can represent it.
 
-        Where :meth:`georeader.geotensor.GeoArray.concatenate` applies
-        (3-D inputs with equal band counts and equal, non-NaN fills) the
-        output matches it. The operator does not delegate to it because
-        ``concatenate`` refuses differing band counts, 2-D inputs, and
-        NaN fills (``NaN != NaN``), and it keeps only the first input's
-        attrs.
+        Where :func:`geoarray.concatenate` applies (3-D GeoArray inputs
+        with equal fills and no nodata pixels) the output matches it. The
+        operator does not delegate to it because ``concatenate`` refuses
+        2-D inputs and plain arrays, and leaves each input's nodata
+        pixels as they are.
     """
 
     def __init__(

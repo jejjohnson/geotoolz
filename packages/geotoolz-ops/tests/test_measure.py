@@ -15,7 +15,7 @@ def _gt(values: np.ndarray) -> GeoArray:
     return toy_geoarray(values, fill_value=0)
 
 
-def test_label_connected_components_returns_int_geotensor() -> None:
+def test_label_connected_components_returns_int_geoarray() -> None:
     mask = _gt(np.array([[1, 0, 1], [1, 0, 0]], dtype=bool))
 
     labels = gz.measure.LabelConnectedComponents(connectivity=4)(mask)
@@ -170,7 +170,7 @@ def test_skeleton_length_diagonal_steps_are_euclidean() -> None:
         pytest.param(gz.measure.SkeletonLength(), np.eye(5, dtype=bool), id="skeleton"),
     ],
 )
-def test_plain_ndarray_matches_geotensor_path(
+def test_plain_ndarray_matches_geoarray_path(
     op: gz.Operator, values: np.ndarray
 ) -> None:
     """Metadata-independent measure ops accept plain ndarrays and match

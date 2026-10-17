@@ -25,6 +25,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import numpy as np
+from geoarray import FrozenAttrs, GeoArray
 
 from geoops._src.bands import (
     BAND_NAME_KEYS,
@@ -32,10 +33,6 @@ from geoops._src.bands import (
     PER_BAND_KEYS,
     band_count,
 )
-
-
-from geoarray import FrozenAttrs, GeoArray
-
 from geoops._src.engine import from_engine
 from geoops._src.geo import reject_geotensor
 

@@ -48,9 +48,10 @@ References:
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 import numpy as np
+from geoarray import GeoArray
 from pipekit import Operator
 
 from geoops._src.bands import resolve_band, strip_band_attrs
@@ -65,10 +66,6 @@ from geoops.qa._src.array import (
     mask_from_scl,
 )
 from geoops.qa._src.scl import SCL_TARGETS
-
-
-if TYPE_CHECKING:
-    from geoarray import GeoArray
 
 
 BandSelector = int | str | None
@@ -338,13 +335,14 @@ class DecodeBitmask(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        reject_geotensor(gt, type(self).__name__)
         qa = _select_qa(gt, self.qa_band, self.axis)
         names = list(self.bits)
         layers = [
             _decode_bits_with_mode(qa, self.bits[name], self.mode) for name in names
         ]
         mask = np.stack(layers, axis=0)
-        if not hasattr(gt, "transform"):
+        if not isinstance(gt, GeoArray):
             return mask
         return wrap_like(
             gt,
@@ -376,9 +374,7 @@ def _invalid_mask(
     invalid when any band is.
     """
     fill = (
-        invalid_value
-        if invalid_value is not None
-        else getattr(gt, "fill_value", None)
+        invalid_value if invalid_value is not None else getattr(gt, "fill_value", None)
     )
     if fill is None:
         raise ValueError(
@@ -393,7 +389,7 @@ class MaskInvalid(Operator):
     """Mark invalid (nodata) pixels: True = invalid, drop it.
 
     The package-polarity counterpart of georeader's
-    ``GeoArray.invalidmask()`` reduced over bands: a pixel is invalid
+    ``GeoTensor.invalidmask()`` reduced over bands: a pixel is invalid
     when *any* band equals the fill value or is non-finite. Unlike
     georeader's comparison, a ``NaN`` fill (``fill_value=nan``)
     matches ``NaN`` pixels (see :mod:`geoops._src.valid`).
@@ -411,8 +407,8 @@ class MaskInvalid(Operator):
     Examples:
         >>> from geoops.mask import ApplyMask
         >>> from geoops.qa import MaskInvalid
-        >>> mask = MaskInvalid()(geotensor)  # True = invalid
-        >>> clean = ApplyMask(mask=MaskInvalid(), fill_value=np.nan)(geotensor)
+        >>> mask = MaskInvalid()(geoarray)  # True = invalid
+        >>> clean = ApplyMask(mask=MaskInvalid(), fill_value=np.nan)(geoarray)
     """
 
     def __init__(
@@ -505,7 +501,7 @@ class MaskClouds(_QAMask):
     Examples:
         >>> from geoops.qa import MaskClouds
         >>> # Sentinel-2 QA60: bit 10 is "opaque clouds".
-        >>> mask = MaskClouds(qa_band="QA60", bits=[10])(s2_geotensor)
+        >>> mask = MaskClouds(qa_band="QA60", bits=[10])(s2_geoarray)
         >>> # Sentinel-2 SCL: the cloud-like classes.
         >>> from geoops.qa import SCL_CLOUDS
         >>> mask = MaskClouds(qa_band="SCL", values=sorted(SCL_CLOUDS))(s2_l2a)
@@ -528,7 +524,7 @@ class MaskCirrus(_QAMask):
     Examples:
         >>> from geoops.qa import MaskCirrus
         >>> # Sentinel-2 QA60: bit 11 is "cirrus".
-        >>> mask = MaskCirrus(qa_band="QA60", bits=[11])(s2_geotensor)
+        >>> mask = MaskCirrus(qa_band="QA60", bits=[11])(s2_geoarray)
     """
 
 

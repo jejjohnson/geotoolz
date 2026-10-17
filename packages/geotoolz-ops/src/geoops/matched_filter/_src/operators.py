@@ -10,7 +10,7 @@ rewrap it to match the input carrier via
 non-carrier results (mean vectors, `NumpyLinearOperator`, background
 dataclasses) unchanged for either input kind.
 
-Band axis: the spectral axis defaults to ``-3`` (georeader's
+Band axis: the spectral axis defaults to ``-3`` (the carrier's
 ``(C, H, W)`` / ``(T, C, H, W)`` layout). A 2-D ``(H, W)`` map has no
 band axis and raises ``ValueError`` (its rows are never read as bands); a
 2-D ``(N, C)`` sample matrix needs an explicit ``axis``. On a

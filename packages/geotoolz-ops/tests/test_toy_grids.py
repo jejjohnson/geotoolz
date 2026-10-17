@@ -9,9 +9,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from geoops._src.geo import affine_of
 from _helpers import DEFAULT_CRS, DEFAULT_TRANSFORM, TOY_GRIDS, toy_geoarray
 from pyproj import CRS
+
+from geoops._src.geo import affine_of
 
 
 def _pixel_sizes(t: rasterio.Affine) -> tuple[float, float]:

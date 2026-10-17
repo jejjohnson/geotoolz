@@ -75,7 +75,6 @@ from geoops.spectral._src.array import (
 )
 
 
-
 def _attrs(gt: GeoArray | np.ndarray) -> dict[str, Any]:
     """Return a shallow copy of ``gt.attrs`` (or ``{}`` if missing)."""
     attrs = getattr(gt, "attrs", None)
@@ -113,7 +112,7 @@ class SelectBands(Operator):
         >>> from geoops import spectral
         >>> # Sentinel-2 RGB stacked as (B2, B3, B4, B8) -> keep (B4, B3, B2).
         >>> rgb = spectral.SelectBands(bands=["B4", "B3", "B2"])
-        >>> out = rgb(reflectance_geotensor)
+        >>> out = rgb(reflectance_geoarray)
     """
 
     def __init__(self, *, bands: list[BandRef], axis: int = -3) -> None:
@@ -158,7 +157,7 @@ class ReorderBands(SelectBands):
         >>> from geoops import spectral
         >>> # Reorder a BGRN stack to RGBN.
         >>> reorder = spectral.ReorderBands(order=[2, 1, 0, 3])
-        >>> rgbn = reorder(bgrn_geotensor)
+        >>> rgbn = reorder(bgrn_geoarray)
     """
 
     def __init__(self, *, order: list[BandRef], axis: int = -3) -> None:
@@ -271,7 +270,7 @@ class SplitBands(Operator):
 
     Examples:
         >>> from geoops import spectral
-        >>> bands = spectral.SplitBands()(rgb_geotensor)  # list of (1, H, W)
+        >>> bands = spectral.SplitBands()(rgb_geoarray)  # list of (1, H, W)
         >>> red, green, blue = bands
     """
 
@@ -331,7 +330,7 @@ class BandMath(Operator):
         >>> from geoops import spectral
         >>> # NDVI by name (assumes gt.attrs["band_names"] contains B4/B8).
         >>> ndvi = spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)")
-        >>> ndvi_map = ndvi(reflectance_geotensor)
+        >>> ndvi_map = ndvi(reflectance_geoarray)
     """
 
     def __init__(
@@ -365,9 +364,7 @@ class BandMath(Operator):
             fill = np.nan
         else:
             fill = carried_fill(gt, out.dtype)
-        return wrap_filled(
-            gt, out, fill_value=fill, attrs=strip_band_attrs(_attrs(gt))
-        )
+        return wrap_filled(gt, out, fill_value=fill, attrs=strip_band_attrs(_attrs(gt)))
 
 
 class BandRatio(Operator):
@@ -387,7 +384,7 @@ class BandRatio(Operator):
         >>> from geoops import spectral
         >>> # Simple Ratio Vegetation Index (NIR / Red).
         >>> srvi = spectral.BandRatio(numerator="B8", denominator="B4")
-        >>> ratio = srvi(reflectance_geotensor)
+        >>> ratio = srvi(reflectance_geoarray)
     """
 
     def __init__(
@@ -454,7 +451,7 @@ class ContinuumRemoval(Operator):
         >>> from geoops import spectral
         >>> # Continuum-remove a SWIR-2 mineral absorption window.
         >>> cr = spectral.ContinuumRemoval(method="convex_hull")
-        >>> band_depth = cr(swir2_geotensor)  # (B, H, W), values in (0, 1]
+        >>> band_depth = cr(swir2_geoarray)  # (B, H, W), values in (0, 1]
     """
 
     def __init__(
@@ -519,7 +516,7 @@ class SpectralBinning(Operator):
         ...     width=30.0,
         ...     method="weighted_mean",
         ... )
-        >>> coarse = binner(hyperspectral_geotensor)
+        >>> coarse = binner(hyperspectral_geoarray)
     """
 
     def __init__(
@@ -595,7 +592,7 @@ class SpectralSmoothing(Operator):
         >>> smooth = spectral.SpectralSmoothing(
         ...     method="savgol", window=9, polyorder=2
         ... )
-        >>> denoised = smooth(hyperspectral_geotensor)
+        >>> denoised = smooth(hyperspectral_geoarray)
     """
 
     def __init__(

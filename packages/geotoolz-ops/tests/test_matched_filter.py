@@ -780,7 +780,7 @@ def test_4d_time_stack() -> None:
     ("pattern", "pixel", "total"),
     [("impulse", None, 1.0), ("impulse", (1, 2), 3.0), ("uniform", None, 48.0)],
 )
-def test_target_pattern_on_geotensor_returns_plain_array(
+def test_target_pattern_on_geoarray_returns_plain_array(
     pattern: str, pixel: tuple[int, int] | None, total: float
 ) -> None:
     """``_target_pattern`` must not build its pattern as a GeoArray (#162)."""
