@@ -51,10 +51,11 @@ from geocatalog._src.utils.retry import retry_transient_io
 def _v0_to_v1(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """v0 → v1: reserve the state columns (`STATE_COLUMNS`).
 
-    A v0 catalog without any of the five names is unchanged. One whose
-    extras already use them (filled by hand before v1) gets all five,
-    typed: ``run_time`` as ``datetime64[us]``, ``member`` as text, the
-    missing ones as nulls.
+    A v0 catalog without a ``run_time`` column is unchanged, whatever
+    other extras it has (an ordinary ``kind`` stays as it is). One whose
+    extras were filled by hand before v1 gets all five, typed:
+    ``run_time`` as ``datetime64[us]``, ``member`` as text, the missing
+    ones as nulls.
     """
     return coerce_state_columns(gdf)
 

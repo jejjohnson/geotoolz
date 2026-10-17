@@ -12,7 +12,8 @@ one of them).
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable, Sequence
+import re
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -311,10 +312,45 @@ def _to_leads(piece: xr.Dataset, time_var: str, run_time: pd.Timestamp) -> xr.Da
     return piece.reset_coords(drop=True)
 
 
+_INTEGER = re.compile(r"[+-]?\d+")
+
+
+def _concat(pieces: list[xr.Dataset], dim: pd.Index) -> xr.Dataset:
+    """Stack ``pieces`` along a new ``dim``, outer-joining the other axes."""
+    return xr.concat(
+        pieces,
+        dim=dim,
+        join="outer",
+        data_vars="all",
+        coords="minimal",
+        compat="override",
+        combine_attrs="drop",
+    )
+
+
+def _member_order(labels: Iterable[str]) -> list[str]:
+    """Members in natural order: by number when every label is an integer.
+
+    CF realizations are numbers written as text, so text order would put
+    ``"10"`` before ``"2"``; CMIP variant labels (``r1i1p1f1``) and
+    mixed labels keep text order.
+    """
+    unique = sorted(set(labels))
+    if unique and all(_INTEGER.fullmatch(label) for label in unique):
+        return sorted(unique, key=int)
+    return unique
+
+
 def _stack(rows: list[CatalogRow], read: Callable[[CatalogRow], xr.Dataset]) -> Any:
-    """One cube from rows of the same grid: one (init_time, member) cell per file."""
+    """One cube from rows of the same grid: one (init_time, member) cell per file.
+
+    Members are concatenated within each run, then runs along
+    ``init_time``; outer joins put NaN where a run lacks a member or a
+    lead. Nothing is reindexed to the whole cube per file, and values are
+    never touched, so the cube equals the files exactly.
+    """
     seen: dict[tuple[pd.Timestamp, str], str] = {}
-    pieces: list[xr.Dataset] = []
+    by_run: dict[pd.Timestamp, dict[str, xr.Dataset]] = {}
     grid: tuple[str, str, np.ndarray, np.ndarray] | None = None
     for row in rows:
         state = row.state
@@ -335,6 +371,10 @@ def _stack(rows: list[CatalogRow], read: Callable[[CatalogRow], xr.Dataset]) -> 
         seen[key] = row.filepath
         time_var = str(row.extras.get("time_var") or "time")
         piece = _to_leads(read(row), time_var, state.run_time)
+        if piece.sizes[_LEAD] == 0:
+            # The row's interval overlaps the slice, but no time step of
+            # the file falls in it: this run has no state in the slice.
+            continue
         x_name, y_name = _xy_dims(piece)
         here = (x_name, y_name, piece[x_name].values, piece[y_name].values)
         if grid is None:
@@ -349,14 +389,28 @@ def _stack(rows: list[CatalogRow], read: Callable[[CatalogRow], xr.Dataset]) -> 
                 f"{rows[0].filepath}; pass group_by= (e.g. 'producer') to load "
                 "each grid as its own DataTree leaf."
             )
-        run = np.datetime64(state.run_time, "ns")
-        pieces.append(piece.expand_dims({_INIT: [run], _MEMBER: [member]}))
-    # Each piece fills its own (init_time, member) cell; outer alignment
-    # puts NaN where a run lacks a member or a lead. Values are not
-    # touched, so the cube equals the files exactly.
-    cube = xr.merge(pieces, join="outer", compat="no_conflicts", combine_attrs="drop")
-    cube = cube.sortby([_INIT, _MEMBER, _LEAD])
-    cube = cube.transpose(_INIT, _MEMBER, _LEAD, ...)
+        by_run.setdefault(state.run_time, {})[member] = piece
+    if not by_run:
+        raise ValueError(
+            f"load_states: the slice overlaps {len(rows)} file(s) but contains "
+            "none of their time steps; widen the slice's interval to include "
+            "a valid time."
+        )
+    members = _member_order(m for run in by_run.values() for m in run)
+    run_times = sorted(by_run)
+    runs: list[xr.Dataset] = []
+    for run_time in run_times:
+        cells = by_run.pop(run_time)
+        here = [m for m in members if m in cells]
+        run = _concat([cells.pop(m) for m in here], pd.Index(here, name=_MEMBER))
+        if here != members:
+            # Every run on the same member axis, in natural order, so the
+            # run-level join never re-sorts members as text.
+            run = run.reindex({_MEMBER: members})
+        runs.append(run)
+    inits = pd.Index(pd.DatetimeIndex(run_times).as_unit("ns"), name=_INIT)
+    cube = _concat(runs, inits)
+    cube = cube.sortby(_LEAD).transpose(_INIT, _MEMBER, _LEAD, ...)
     return cube.assign_coords(valid_time=cube[_INIT] + cube[_LEAD])
 
 
@@ -377,6 +431,10 @@ def load_states(
     two states, unlike `load_xarray`, which keeps one valid time. A
     member or lead missing from a run comes back as NaN, not as a shorter
     cube, and ``valid_time = init_time + lead_time`` is a 2-D coordinate.
+    Members are in natural order: by number when every label is an
+    integer (``"2"`` before ``"10"``), else as text (``r1i1p1f1``). A run
+    whose file overlaps the slice without a time step inside it has no
+    state there and is left out.
 
     Args:
         catalog: A state catalog (`build_state_catalog`), on either
@@ -401,8 +459,9 @@ def load_states(
         ImportError: If the ``[xarray-raster]`` extra is missing.
         TypeError: If the catalog is not of kind ``"xarray"``.
         ValueError: If the catalog has no state columns, no row matches,
-            a row has no run time, a run and member appears twice, or the
-            rows are on different grids without ``group_by``.
+            the slice holds none of the matching files' time steps, a row
+            has no run time, a run and member appears twice, or the rows
+            are on different grids without ``group_by``.
 
     Example:
         >>> from geocatalog.states import forecasts, load_states

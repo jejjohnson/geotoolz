@@ -53,7 +53,13 @@ if TYPE_CHECKING:
 from loguru import logger as log
 
 from geocatalog._src._deprecation import renamed_kwargs
-from geocatalog._src._schema import CatalogKind, state_arrow_types
+from geocatalog._src._schema import (
+    LEGACY_UNVERSIONED,
+    CatalogKind,
+    check_schema_versions,
+    is_state_frame,
+    state_arrow_types,
+)
 from geocatalog._src.base import INTERNAL_COLUMNS, RESERVED_COLUMNS
 from geocatalog._src.storage.parquet import (
     SCHEMA_VERSION_CURRENT as _SCHEMA_VERSION,
@@ -234,8 +240,8 @@ class StreamingParquetWriter:
             first batch, so a key first seen later — or a column that
             was all-null in the first batch and gains values — raises
             rather than being dropped; pass ``schema=`` for such streams.
-            The reserved state columns (`STATE_COLUMNS`) are never
-            inferred: they keep their v1 Arrow types.
+            In a state catalog (rows with ``run_time``) the state
+            columns are never inferred: they keep their v1 Arrow types.
 
     ``start_time`` / ``end_time`` are stored as ``timestamp("ns")`` in
     naive UTC — the catalog's time-axis contract (tz-aware inputs are
@@ -372,9 +378,10 @@ class StreamingParquetWriter:
             keys: dict[str, None] = {}
             for row in rows:
                 keys.update(dict.fromkeys(k for k in row if k not in _WRITER_OWNED))
-            # The reserved state columns have fixed types: an all-null
+            # A state catalog's columns have fixed types: an all-null
             # `member` in the first batch (analyses) must not seal as null.
-            state_types = state_arrow_types()
+            # Elsewhere (no `run_time`) the names are ordinary extras.
+            state_types = state_arrow_types() if is_state_frame(keys) else {}
             for key in keys:
                 if key in state_types:
                     fields.append(pa.field(key, state_types[key]))
@@ -861,6 +868,11 @@ def append_files(
     can't reconstruct cleanly. A fresh archive (no existing shards)
     accepts the caller's ``partition_by`` as the source of truth.
 
+    New shards are written at the archive's ``_schema_version``, so a
+    pre-upgrade (v0) archive stays at a single version after an append
+    and keeps opening: an archive is upgraded as a whole, never shard by
+    shard.
+
     Args:
         archive: Hive-partitioned GeoParquet directory.
         filepaths: New source files to index.
@@ -884,6 +896,9 @@ def append_files(
         ValueError: ``partition_by`` differs from the archive's existing
             layout, or no input files yielded a row (and none were
             skipped as already indexed).
+        CatalogSchemaError: The archive's shards are newer than the
+            reader, or already at mixed versions.
+
     """
     from geocatalog._src.backends.duckdb_backend import (
         DuckDBGeoCatalog,
@@ -909,6 +924,9 @@ def append_files(
             "pass partition_by matching the existing one."
         )
     indexed = _indexed_filepaths(archive)
+    # New shards take the archive's version, not the reader's: stamping
+    # them newer would leave a mixed-version archive that no reader opens.
+    schema_version = _archive_schema_version(archive)
     seen = set(indexed)
     skipped = 0
 
@@ -942,6 +960,7 @@ def append_files(
         crs=crs,
         kind=kind,
         partition_by=requested,
+        schema_version=schema_version,
         write_bbox=write_bbox,
         batch_size=batch_size,
         replace=False,
@@ -1211,6 +1230,35 @@ def _replace_partition_tree(staging: Path, out_path: Path) -> None:
         raise
     shutil.rmtree(holding, ignore_errors=True)
     shutil.rmtree(staging, ignore_errors=True)
+
+
+def _archive_schema_version(archive: Path) -> int:
+    """The ``_schema_version`` new shards of ``archive`` are written at.
+
+    The archive's own version when every shard agrees (shards without the
+    column count as `LEGACY_UNVERSIONED`); the reader's for a fresh
+    archive. An archive newer than the reader, or already mixed, raises
+    `CatalogSchemaError` before anything is written.
+    """
+    versions: set[int] = set()
+    if archive.is_dir():
+        for shard in archive.rglob("*.parquet"):
+            pf = pq.ParquetFile(shard)
+            if "_schema_version" not in pf.schema_arrow.names:
+                versions.add(LEGACY_UNVERSIONED)
+                continue
+            column = pf.read(columns=["_schema_version"]).column("_schema_version")
+            versions.update(int(v) for v in column.to_pylist() if v is not None)
+    if not versions:
+        return _SCHEMA_VERSION
+    check_schema_versions(
+        archive,
+        min(versions),
+        max(versions),
+        reader=_SCHEMA_VERSION,
+        can_migrate=True,
+    )
+    return min(versions)
 
 
 def _indexed_filepaths(archive: Path) -> set[str]:

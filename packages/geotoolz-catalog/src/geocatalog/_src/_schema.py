@@ -65,8 +65,10 @@ STATE_COLUMNS: tuple[str, ...] = ("kind", "run_time", "member", "producer", "par
 UTC: the run's initialisation time), ``member`` (string: a CF realization
 number written as text, or a CMIP variant label such as ``r1i1p1f1``),
 ``producer`` (string) and ``parents`` (``list<string>``: the URIs the
-state was computed from). A catalog carries all five or none of them;
-lead time is not stored, it is the row's valid time minus ``run_time``.
+state was computed from). A state catalog is one with a ``run_time``
+column (`is_state_frame`), and it carries all five; in any other catalog
+the names are ordinary extras. Lead time is not stored: it is the row's
+valid time minus ``run_time``.
 They stay ordinary row columns (and `CatalogRow.extras` keys), unlike
 `RESERVED_COLUMNS`, which every artifact carries.
 """
@@ -85,13 +87,30 @@ migrates those legacy files instead of silently skipping them.
 """
 
 
-MIGRATION_TOUCHES: dict[int, frozenset[str]] = {0: frozenset(STATE_COLUMNS)}
-"""The columns the ``v → v+1`` migration reads, by source version ``v``.
+STATE_MARKER: str = "run_time"
+"""The column that makes a frame a state catalog (`is_state_frame`).
+
+``kind``, ``member``, ``producer`` and ``parents`` are common words: a
+catalog with an ordinary ``kind`` extra (``"L2"``) is not a state
+catalog, and its columns pass through untouched. ``run_time`` is the
+one field only a model state has, and `build_state_catalog` always
+writes it (null for analyses).
+"""
+
+
+def is_state_frame(columns: Collection[str]) -> bool:
+    """True when ``columns`` (a frame's or an artifact's) make a state catalog."""
+    return STATE_MARKER in set(columns)
+
+
+MIGRATION_TOUCHES: dict[int, frozenset[str]] = {0: frozenset({STATE_MARKER})}
+"""The columns whose presence makes the ``v → v+1`` migration act, by ``v``.
 
 An artifact with none of them is already at ``v+1`` in all but its
 stamp, so a reader that cannot migrate (DuckDB) may open it as is.
-v0 → v1 only types the state columns: every v0 raster, vector or
-xarray catalog without them, and every external GeoParquet, opens.
+v0 → v1 only types state catalogs (`is_state_frame`): every v0 raster,
+vector or xarray catalog without ``run_time``, and every external
+GeoParquet, opens.
 """
 
 
@@ -260,23 +279,29 @@ def state_parents(value: Any) -> list[str] | None:
 def coerce_state_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """Give a frame's `STATE_COLUMNS` their v1 types; add the missing ones as nulls.
 
-    A frame with none of the five names is returned unchanged: it is not a
-    state catalog. One with any of them (a v0 catalog whose extras were
-    filled by hand, or rows read back from Parquet or DuckDB) gets all
-    five, typed: ``run_time`` as naive-UTC ``datetime64[us]``, ``member``
-    as text (``0`` becomes ``"0"``), ``parents`` as lists of strings.
+    A frame without ``run_time`` is returned unchanged: it is not a state
+    catalog (`is_state_frame`), whatever other columns it has, so an
+    ordinary ``kind`` or ``member`` extra is left alone. A state frame (a
+    v0 catalog whose extras were filled by hand, or rows read back from
+    Parquet or DuckDB) gets all five, typed: ``run_time`` as naive-UTC
+    ``datetime64[us]``, ``member`` as text (``0`` becomes ``"0"``),
+    ``parents`` as lists of strings.
 
     Args:
         gdf: A catalog frame.
 
     Returns:
-        A new frame (or ``gdf`` itself when it carries no state column).
+        A new frame (or ``gdf`` itself when it is not a state frame).
+
+    Raises:
+        ValueError: If a state frame's ``kind`` holds a value that is not
+            a `StateKind`.
     """
     import pandas as pd
 
     from geocatalog._src.utils.timeutil import naive_utc_datetimes
 
-    if not any(name in gdf.columns for name in STATE_COLUMNS):
+    if not is_state_frame(gdf.columns):
         return gdf
     gdf = gdf.copy()
     n = len(gdf)
@@ -284,6 +309,13 @@ def coerce_state_columns(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         values = gdf[name] if name in gdf.columns else [None] * n
         gdf[name] = pd.Series(
             [state_text(v) for v in values], index=gdf.index, dtype="str"
+        )
+    bad = sorted(set(gdf["kind"].dropna()) - set(STATE_KINDS))
+    if bad:
+        raise ValueError(
+            f"state catalog: kind {bad} is not one of {list(STATE_KINDS)}. A "
+            "catalog with a `run_time` column is a state catalog; rename an "
+            "unrelated `kind` column, or map its values to a state kind."
         )
     if "run_time" in gdf.columns:
         times = naive_utc_datetimes(
@@ -308,6 +340,7 @@ __all__ = [
     "SCHEMA_VERSION_CURRENT",
     "STATE_COLUMNS",
     "STATE_KINDS",
+    "STATE_MARKER",
     "CatalogKind",
     "StateKind",
     "StorageEngine",
@@ -316,6 +349,7 @@ __all__ = [
     "coerce_state_columns",
     "crs_config_string",
     "empty_frame",
+    "is_state_frame",
     "migration_is_noop",
     "state_arrow_types",
     "state_parents",

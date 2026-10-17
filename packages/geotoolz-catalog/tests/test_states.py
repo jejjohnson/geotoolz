@@ -554,3 +554,219 @@ def test_v1_types_round_trip(
     assert states["det.nc"] is not None
     assert states["det.nc"].member is None
     assert states["det.nc"].parents == ()
+
+
+# ---------------------------------------------------------------------------
+# Review fixes (#494)
+# ---------------------------------------------------------------------------
+
+
+def test_many_members_keep_numeric_order(
+    tmp_path: Path, as_backend: Callable[[InMemoryGeoCatalog], GeoCatalog]
+) -> None:
+    """Gate with N_e = 12: members 10 and 11 sort after 9, positionally."""
+    ne = 12
+    history = np.random.default_rng(2).standard_normal((2, ne, L, H, W))
+    paths = [
+        _write_forecast(tmp_path / f"fc_{r}_m{m}.nc", history[r, m], RUNS[r], m)
+        for r in range(2)
+        for m in range(ne)
+    ]
+    cat = as_backend(build_state_catalog(paths[::-1], crs="EPSG:4326"))
+    cube = gs.load_states(cat, AOI)
+    assert cube["member"].values.tolist() == [str(m) for m in range(ne)]
+    assert np.array_equal(cube["xch4"].values, history)
+
+
+def test_text_member_labels_keep_text_order(tmp_path: Path) -> None:
+    labels = ["r10i1p1f1", "r2i1p1f1", "r1i1p1f1"]
+    paths = [
+        _write_forecast(tmp_path / f"{label}.nc", np.full((1, H, W), i), RUNS[0], 0)
+        for i, label in enumerate(labels)
+    ]
+    names = {**gs.CF_NAMES, "member": lambda p: Path(p).stem}
+    cube = gs.load_states(build_state_catalog(paths, crs="EPSG:4326", names=names), AOI)
+    assert cube["member"].values.tolist() == sorted(labels)
+
+
+def test_slice_between_time_steps_raises(tmp_path: Path) -> None:
+    path = _write_forecast(tmp_path / "fc.nc", np.ones((2, H, W)), RUNS[0], 0)
+    between = GeoSlice(
+        bounds=AOI.bounds,
+        interval=pd.Interval(
+            RUNS[0] + pd.Timedelta("30h"), RUNS[0] + pd.Timedelta("42h"), closed="both"
+        ),
+        resolution=AOI.resolution,
+        crs=AOI.crs,
+    )
+    cat = build_state_catalog([path], crs="EPSG:4326")
+    with pytest.raises(ValueError, match="none of their time steps"):
+        gs.load_states(cat, between)
+
+
+def test_latest_analysis_breaks_ties_the_same_on_every_backend(
+    as_backend: Callable[[InMemoryGeoCatalog], GeoCatalog],
+) -> None:
+    from geocatalog._src._schema import coerce_state_columns
+
+    day = RUNS[1]
+    gdf = gpd.GeoDataFrame(
+        {
+            "filepath": ["b.nc", "c.nc", "a.nc", "z.nc"],
+            "start_time": [day] * 4,
+            "end_time": [day] * 4,
+            "kind": ["analysis"] * 4,
+            "run_time": [day, day, day, RUNS[0]],
+            "member": [None] * 4,
+            "producer": [None] * 4,
+            "parents": [None] * 4,
+        },
+        geometry=[shapely.geometry.box(0, 0, 1, 1)] * 4,
+        crs="EPSG:4326",
+    )
+    cat = as_backend(InMemoryGeoCatalog(coerce_state_columns(gdf), kind="xarray"))
+    latest = gs.latest_analysis(cat, before=day)
+    assert latest is not None
+    # Same valid time: the latest run (01-02) wins over z.nc, then the path.
+    assert latest.filepath == "c.nc"
+
+
+@needs_duckdb
+def test_lead_window_on_zoned_times_ignores_the_session_zone(tmp_path: Path) -> None:
+    from geocatalog.backends import DuckDBGeoCatalog
+
+    gdf = gpd.GeoDataFrame(
+        {
+            "filepath": ["fc.nc"],
+            "start_time": pd.DatetimeIndex([RUNS[1]]).tz_localize("UTC"),
+            "end_time": pd.DatetimeIndex([RUNS[2]]).tz_localize("UTC"),
+            "kind": ["forecast"],
+            "run_time": pd.DatetimeIndex([RUNS[0]]).as_unit("us"),
+            "member": ["0"],
+            "producer": [None],
+            "parents": [None],
+            "_backend": ["xarray"],
+            "_schema_version": [SCHEMA_VERSION_CURRENT],
+        },
+        geometry=[shapely.geometry.box(0, 0, 1, 1)],
+        crs="EPSG:4326",
+    )
+    path = tmp_path / "zoned.parquet"
+    gdf.to_parquet(path)
+    one_day = (pd.Timedelta("1D"), pd.Timedelta("1D"))
+    assert _names(gs.lead_window(from_geoparquet(path), *one_day)) == ["fc.nc"]
+    with DuckDBGeoCatalog.open(path) as cat:
+        assert cat._time_literal == "TIMESTAMPTZ"
+        for zone in ("Europe/Madrid", "Asia/Tokyo", "America/Los_Angeles"):
+            cat.con.execute(f"SET TimeZone = '{zone}'")
+            assert _names(gs.lead_window(cat, *one_day)) == ["fc.nc"], zone
+            early = gs.lead_window(cat, pd.Timedelta(0), pd.Timedelta("15h"))
+            assert len(early) == 0, zone
+
+
+def test_unrelated_kind_extra_is_not_a_state_catalog(tmp_path: Path) -> None:
+    gdf = gpd.GeoDataFrame(
+        {
+            "filepath": ["a.nc"],
+            "start_time": [RUNS[0]],
+            "end_time": [RUNS[0]],
+            "kind": ["L2"],
+            "member": [3],
+        },
+        geometry=[shapely.geometry.box(0, 0, 1, 1)],
+        crs="EPSG:4326",
+    )
+    out = tmp_path / "v0_kind.parquet"
+    to_geoparquet(InMemoryGeoCatalog(gdf, kind="xarray"), out, schema_version=0)
+    back = from_geoparquet(out).gdf
+    assert list(back.columns) == ["filepath", "kind", "member", "geometry"]
+    assert back["kind"].tolist() == ["L2"]
+    assert back["member"].tolist() == [3]  # untouched: still an int
+    assert next(from_geoparquet(out).iter_rows()).state is None
+
+
+@needs_duckdb
+def test_duckdb_opens_a_v0_catalog_with_an_unrelated_kind(tmp_path: Path) -> None:
+    from geocatalog.backends import DuckDBGeoCatalog
+
+    gdf = gpd.GeoDataFrame(
+        {"filepath": ["a.nc"], "start_time": [RUNS[0]], "end_time": [RUNS[0]]},
+        geometry=[shapely.geometry.box(0, 0, 1, 1)],
+        crs="EPSG:4326",
+    )
+    gdf["kind"] = ["L2"]
+    out = tmp_path / "v0_kind.parquet"
+    to_geoparquet(InMemoryGeoCatalog(gdf, kind="xarray"), out, schema_version=0)
+    with DuckDBGeoCatalog.open(out) as cat:
+        assert cat.gdf["kind"].tolist() == ["L2"]
+
+
+def test_state_catalog_with_a_bad_kind_raises(tmp_path: Path) -> None:
+    gdf = gpd.GeoDataFrame(
+        {
+            "filepath": ["a.nc"],
+            "start_time": [RUNS[0]],
+            "end_time": [RUNS[0]],
+            "run_time": [RUNS[0]],
+            "kind": ["L2"],
+        },
+        geometry=[shapely.geometry.box(0, 0, 1, 1)],
+        crs="EPSG:4326",
+    )
+    out = tmp_path / "v0_bad.parquet"
+    to_geoparquet(InMemoryGeoCatalog(gdf, kind="xarray"), out, schema_version=0)
+    with pytest.raises(ValueError, match=r"kind \['L2'\]"):
+        from_geoparquet(out)
+
+
+@needs_duckdb
+def test_append_keeps_a_v0_archive_at_one_version(tmp_path: Path) -> None:
+    from geocatalog._src.storage.streaming import (
+        _archive_schema_version,
+        write_partitioned_rows,
+    )
+    from geocatalog.backends import DuckDBGeoCatalog
+    from geocatalog.build import append_files
+
+    archive = tmp_path / "archive"
+    assert _archive_schema_version(archive) == SCHEMA_VERSION_CURRENT  # fresh
+
+    def extract(fp: str | Path) -> dict[str, object]:
+        start = RUNS[0] + pd.Timedelta(days=40 * int(Path(fp).stem))
+        return {
+            "filepath": str(fp),
+            "geometry": shapely.geometry.box(0, 0, 1, 1),
+            "start_time": start,
+            "end_time": start,
+        }
+
+    # An archive written before the upgrade: every shard at v0.
+    write_partitioned_rows(
+        iter([extract("0.tif")]),
+        out_path=archive,
+        crs="EPSG:4326",
+        kind="raster",
+        partition_by=["year", "month"],
+        schema_version=0,
+    )
+    cat = append_files(
+        archive,
+        ["1.tif", "2.tif"],
+        extract,
+        crs="EPSG:4326",
+        kind="raster",
+        partition_by=["year", "month"],
+    )
+    versions = {
+        v
+        for shard in archive.rglob("*.parquet")
+        for v in pq.read_table(shard, columns=["_schema_version"])
+        .column("_schema_version")
+        .to_pylist()
+    }
+    assert versions == {0}
+    assert len(cat) == 3
+    assert sorted(cat.materialize().gdf["filepath"]) == ["0.tif", "1.tif", "2.tif"]
+    cat.close()
+    with DuckDBGeoCatalog.open(archive) as reopened:
+        assert len(reopened) == 3

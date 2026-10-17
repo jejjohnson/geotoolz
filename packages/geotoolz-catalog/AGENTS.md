@@ -58,8 +58,9 @@ dependencies are actually imported).
   schema change needs a migration in `migrate_geoparquet` and a
   `docs/catalog/schema-versions.md` entry.
 - **State columns** (schema v1): `kind`, `run_time`, `member`, `producer`,
-  `parents` (`STATE_COLUMNS` in `_src/_schema.py`) have fixed types; a
-  catalog carries all five or none. Coerce them with
+  `parents` (`STATE_COLUMNS` in `_src/_schema.py`) have fixed types. A
+  frame is a state catalog only when it has `run_time` (`is_state_frame`);
+  elsewhere the names are ordinary extras. Coerce them with
   `coerce_state_columns` wherever rows are read back (Parquet, DuckDB),
   and never let the streaming writer infer their types.
 - **Object storage** (the `[cloud]` extra; credentials from

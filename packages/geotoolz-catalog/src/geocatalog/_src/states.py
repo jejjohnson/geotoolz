@@ -202,15 +202,20 @@ def _sql(predicates: list[_Predicate], *, time_literal: str) -> str:
     ``time_literal`` types timestamps compared with the catalog's own
     ``start_time`` / ``end_time`` (``TIMESTAMPTZ`` when they carry a zone,
     so DuckDB never reads a naive literal in the session's zone);
-    ``run_time`` is always a naive ``TIMESTAMP`` (`state_arrow_types`).
+    ``run_time`` is always a naive ``TIMESTAMP`` (`state_arrow_types`):
+    subtracted from a ``TIMESTAMPTZ`` it is read as UTC with
+    ``timezone('UTC', run_time)``, never cast through the session zone.
     """
+    run_time = (
+        "timezone('UTC', run_time)" if time_literal == "TIMESTAMPTZ" else "run_time"
+    )
     terms = []
     for name, op, value in predicates:
         if op not in _OPS:  # pragma: no cover - internal
             raise ValueError(op)
         column = {
-            "lead_start": "(start_time - run_time)",
-            "lead_end": "(end_time - run_time)",
+            "lead_start": f"(start_time - {run_time})",
+            "lead_end": f"(end_time - {run_time})",
         }.get(name, f'"{name}"')
         literal = time_literal if name in ("start_time", "end_time") else "TIMESTAMP"
         terms.append(f"{column} {op} {_sql_literal(value, time_literal=literal)}")
@@ -371,7 +376,9 @@ def latest_analysis(catalog: GeoCatalog, *, before: pd.Timestamp) -> CatalogRow 
     """The analysis with the latest valid time at or before ``before``.
 
     Filters on the reserved ``kind`` column, not on a zero lead: a lead-0
-    forecast row is valid at its run time too.
+    forecast row is valid at its run time too. Analyses valid at the same
+    time are ordered by run time, then by file path (the last wins), so
+    every backend returns the same row.
 
     Args:
         catalog: A state catalog.
@@ -393,9 +400,20 @@ def latest_analysis(catalog: GeoCatalog, *, before: pd.Timestamp) -> CatalogRow 
     )
     best: CatalogRow | None = None
     for row in rows.iter_rows():
-        if best is None or row.interval.right > best.interval.right:
+        if best is None or _recency(row) > _recency(best):
             best = row
     return best
+
+
+def _recency(row: CatalogRow) -> tuple[pd.Timestamp, pd.Timestamp, str]:
+    """Sort key of `latest_analysis`: valid time, then run time, then path.
+
+    The same on every backend, whatever order the rows arrive in (a SQL
+    relation has none); a missing run time sorts first.
+    """
+    state = row.state
+    run = state.run_time if state is not None else None
+    return (row.interval.right, pd.Timestamp.min if run is None else run, row.filepath)
 
 
 __all__ = [

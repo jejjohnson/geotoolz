@@ -71,7 +71,8 @@ assert np.array_equal(cube["xch4"].values, history)                         # ev
 `cube` has dimensions `init_time`, `member` and `lead_time` before the
 grid, and a 2-D `valid_time = init_time + lead_time` coordinate. Members
 are text (`"0"` … `"3"`): a CF realization is a number, but a CMIP member
-is a label such as `r1i1p1f1`. A member or lead missing from a run comes
+is a label such as `r1i1p1f1`. Numeric members sort as numbers (`"2"`
+before `"10"`), labels as text. A member or lead missing from a run comes
 back as NaN, so the cube keeps its shape.
 
 ## Ask questions with typed queries
@@ -137,6 +138,9 @@ leaf per producer, each a cube on its own grid.
 - **One run and member per file.** A file whose run-time or member source
   holds several values is rejected; so is a (run, member) pair indexed
   twice.
+- **A slice must hold a time step.** A slice that falls between a
+  file's steps gives that run no state; when no file has a step in it,
+  `load_states` raises.
 - **Rows need a run time.** Analyses written without
   `forecast_reference_time` have no run; load them with
   `geocatalog.load.load_xarray`.

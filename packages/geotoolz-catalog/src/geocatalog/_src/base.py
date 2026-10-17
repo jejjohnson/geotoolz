@@ -23,8 +23,8 @@ import pandas as pd
 from geocatalog._src._schema import (
     INTERNAL_COLUMNS as INTERNAL_COLUMNS,
     RESERVED_COLUMNS as RESERVED_COLUMNS,
-    STATE_COLUMNS,
     CatalogKind,
+    is_state_frame,
     state_parents,
     state_text,
 )
@@ -115,11 +115,12 @@ class CatalogRow:
     def state(self) -> StateFields | None:
         """The row's model-state fields, typed; ``None`` for a non-state row.
 
-        Reads the reserved state columns (`STATE_COLUMNS`) out of
+        A row is a state row when it has a ``run_time`` extra
+        (`is_state_frame`). Reads the reserved state columns out of
         ``extras``, with nulls as ``None`` whatever the backend returned
         (``NaN``, ``NaT``, a numpy array for ``parents``).
         """
-        if not any(name in self.extras for name in STATE_COLUMNS):
+        if not is_state_frame(self.extras):
             return None
         get = self.extras.get
         run_time = get("run_time")
