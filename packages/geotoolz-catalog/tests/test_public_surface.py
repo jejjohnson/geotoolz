@@ -28,6 +28,7 @@ NAMESPACES = (
     "patch",
     "sources",
     "staging",
+    "states",
     "storage",
     "utils",
 )

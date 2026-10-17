@@ -50,6 +50,7 @@ from geocatalog._src._schema import (
     CatalogKind,
     check_kind,
     check_schema_versions,
+    coerce_state_columns,
     crs_config_string,
 )
 from geocatalog._src.backends.memory import (
@@ -1298,10 +1299,13 @@ def _check_schema_version(
 
     1. ``max(version) > SCHEMA_VERSION_CURRENT`` — the artifact is
        newer than the reader. User should upgrade `geocatalog`.
-    2. ``min(version) < SCHEMA_VERSION_CURRENT`` — the artifact is
-       older than the reader. The DuckDB backend doesn't materialise
-       the relation through pandas just to migrate; the user should
-       run ``geocatalog migrate`` on the affected file(s).
+    2. ``min(version) < SCHEMA_VERSION_CURRENT`` and the migrations
+       would change it — the artifact is older than the reader. The
+       DuckDB backend doesn't materialise the relation through pandas
+       just to migrate; the user should run ``geocatalog migrate`` on
+       the affected file(s). An older artifact the migrations leave
+       unchanged (`migration_is_noop`: a v0 file without state columns)
+       opens as is.
     3. ``min(version) != max(version)`` — mixed-version shards. We
        can't pick which is canonical; the user has to migrate each
        shard separately or rewrite into one file.
@@ -1334,8 +1338,21 @@ def _check_schema_version(
         hi = int(df["hi"].iloc[0])
     from geocatalog._src.storage.parquet import SCHEMA_VERSION_CURRENT
 
+    columns = None
+    if hi < SCHEMA_VERSION_CURRENT:
+        # An older artifact the migrations would not change (no state
+        # columns, for v0 → v1) opens as is: no rewrite needed.
+        columns = con.sql(
+            "SELECT * FROM read_parquet($src, hive_partitioning = $hive) LIMIT 0",
+            params={"src": source, "hive": partitioned},
+        ).columns
     check_schema_versions(
-        source, lo, hi, reader=SCHEMA_VERSION_CURRENT, can_migrate=False
+        source,
+        lo,
+        hi,
+        reader=SCHEMA_VERSION_CURRENT,
+        can_migrate=False,
+        columns=columns,
     )
 
 
@@ -1482,7 +1499,9 @@ def _df_to_inmemory(
     housekeeping = [c for c in (*INTERNAL_COLUMNS, "bbox") if c in df.columns]
     out = df.drop(columns=["geometry", "start_time", "end_time", *housekeeping]).copy()
     out["geometry"] = geom
-    gdf = gpd.GeoDataFrame(out, geometry="geometry", crs=crs)
+    # Same state-column types as `from_geoparquet` (DuckDB hands lists
+    # back as numpy arrays).
+    gdf = coerce_state_columns(gpd.GeoDataFrame(out, geometry="geometry", crs=crs))
     idx = pd.IntervalIndex.from_arrays(starts, ends, closed="both", name="datetime")
     gdf = gdf.set_index(idx)
     return InMemoryGeoCatalog(gdf, kind=kind)

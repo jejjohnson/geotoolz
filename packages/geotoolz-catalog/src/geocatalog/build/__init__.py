@@ -7,6 +7,10 @@
   extra; loads lazily).
 - `build_vector_catalog` — vector files (``[vector]`` extra; loads
   lazily).
+- `build_state_catalog` — model states (analyses, forecasts, ensemble
+  members): NetCDF / Zarr files with the run time, member, kind,
+  producer and parents read into reserved columns (``[xarray-raster]``
+  extra; loads lazily). Query and load them with `geocatalog.states`.
 - `append_files` — add files to an existing GeoParquet catalog without
   rebuilding it.
 
@@ -33,6 +37,7 @@ from geocatalog._src.storage.streaming import append_files
 
 
 if TYPE_CHECKING:
+    from geocatalog._src.formats.states import build_state_catalog
     from geocatalog._src.formats.vector import build_vector_catalog
     from geocatalog._src.formats.xarray_backend import build_xarray_catalog
 
@@ -40,6 +45,7 @@ if TYPE_CHECKING:
 __all__ = [
     "append_files",
     "build_raster_catalog",
+    "build_state_catalog",
     "build_vector_catalog",
     "build_xarray_catalog",
 ]
@@ -49,6 +55,7 @@ __all__ = [
 __getattr__ = lazy_getattr(
     globals(),
     [
+        "build_state_catalog",
         "build_vector_catalog",
         "build_xarray_catalog",
     ],

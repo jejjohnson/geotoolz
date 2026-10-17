@@ -11,6 +11,10 @@ catalog, and append new files to a saved one.
 
 ::: geocatalog.build.build_xarray_catalog
 
+## Model states *(extras: `[xarray-raster]`)*
+
+::: geocatalog.build.build_state_catalog
+
 ## Vector
 
 ::: geocatalog.build.build_vector_catalog

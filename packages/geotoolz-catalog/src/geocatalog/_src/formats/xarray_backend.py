@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -112,16 +112,11 @@ def _axis_slice(coord: Any, lo: float, hi: float) -> slice:
     return slice(lo, hi)
 
 
-def _xarray_row(
-    filepath: str | Path,
-    *,
-    data_vars: Sequence[str] | None,
-    time_var: str,
-    target_crs: Any | None,
-    storage_options: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    if xr is None:
-        raise missing_extra("`build_xarray_catalog`", "xarray-raster")
+@contextlib.contextmanager
+def _open_for_row(
+    filepath: str | Path, storage_options: dict[str, Any] | None
+) -> Iterator[xr.Dataset]:
+    """Open ``filepath`` for indexing: lazily, grid mapping as a coordinate."""
     _register_rio_accessor()
     engine = _xarray_engine(filepath)
     resolved = _resolve_uri(filepath, storage_options=storage_options)
@@ -130,34 +125,47 @@ def _xarray_row(
         # (`spatial_ref`) into a coordinate; with the default, `.rio.crs`
         # can't see it and CRS recovery fails even with rioxarray loaded.
         with xr.open_dataset(resolved, engine=engine, decode_coords="all") as ds:
-            x_name, y_name = _xy_dims(ds)
-            # Coordinates are pixel centres; pad by half a pixel so the
-            # footprint covers the pixel edges (#218).
-            xmin, xmax = _edge_extent(ds[x_name].values)
-            ymin, ymax = _edge_extent(ds[y_name].values)
-            polygon = shapely.geometry.box(xmin, ymin, xmax, ymax)
-
-            if time_var in ds.coords:
-                times = pd.to_datetime(ds[time_var].values)
-                start = pd.Timestamp(times.min())
-                end = pd.Timestamp(times.max())
-                n_timesteps = int(ds[time_var].size)
-            else:
-                start = pd.Timestamp("1900-01-01")
-                end = pd.Timestamp("2100-01-01")
-                n_timesteps = 0
-
-            # Resolve CRS: rio accessor if rioxarray is loaded, otherwise the
-            # caller's target_crs as a fallback.
-            crs_value = None
-            try:
-                crs_value = ds.rio.crs  # type: ignore[attr-defined]
-            except (AttributeError, ValueError):
-                crs_value = None
-            if crs_value is None:
-                crs_value = target_crs
+            yield ds
     finally:
         _close_resolved_uri(resolved)
+
+
+def _dataset_row(
+    ds: xr.Dataset,
+    filepath: str | Path,
+    *,
+    data_vars: Sequence[str] | None,
+    time_var: str,
+    target_crs: Any | None,
+) -> dict[str, Any]:
+    """One catalog row from an open dataset: footprint, time span, CRS."""
+    x_name, y_name = _xy_dims(ds)
+    # Coordinates are pixel centres; pad by half a pixel so the
+    # footprint covers the pixel edges (#218).
+    xmin, xmax = _edge_extent(ds[x_name].values)
+    ymin, ymax = _edge_extent(ds[y_name].values)
+    polygon = shapely.geometry.box(xmin, ymin, xmax, ymax)
+
+    if time_var in ds.coords:
+        # `ravel`: a scalar time coordinate (one step) is a 0-d array.
+        times = pd.to_datetime(ds[time_var].values.ravel())
+        start = pd.Timestamp(times.min())
+        end = pd.Timestamp(times.max())
+        n_timesteps = int(ds[time_var].size)
+    else:
+        start = pd.Timestamp("1900-01-01")
+        end = pd.Timestamp("2100-01-01")
+        n_timesteps = 0
+
+    # Resolve CRS: rio accessor if rioxarray is loaded, otherwise the
+    # caller's target_crs as a fallback.
+    crs_value = None
+    try:
+        crs_value = ds.rio.crs  # type: ignore[attr-defined]
+    except (AttributeError, ValueError):
+        crs_value = None
+    if crs_value is None:
+        crs_value = target_crs
 
     return {
         "filepath": str(filepath),
@@ -169,6 +177,22 @@ def _xarray_row(
         "data_vars": list(data_vars) if data_vars is not None else None,
         "crs": str(crs_value) if crs_value is not None else None,
     }
+
+
+def _xarray_row(
+    filepath: str | Path,
+    *,
+    data_vars: Sequence[str] | None,
+    time_var: str,
+    target_crs: Any | None,
+    storage_options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if xr is None:
+        raise missing_extra("`build_xarray_catalog`", "xarray-raster")
+    with _open_for_row(filepath, storage_options) as ds:
+        return _dataset_row(
+            ds, filepath, data_vars=data_vars, time_var=time_var, target_crs=target_crs
+        )
 
 
 @renamed_kwargs(backend="engine", target_crs="crs")
@@ -354,6 +378,63 @@ def _build_xarray_catalog_duckdb(
     )
 
 
+def _read_clipped(
+    filepath: str | Path,
+    *,
+    bounds: tuple[float, float, float, float],
+    interval: tuple[Any, Any],
+    time_var: str,
+    data_vars: Sequence[str] | None,
+    storage_options: dict[str, Any] | None,
+) -> xr.Dataset:
+    """Read one file clipped to ``bounds`` (catalog CRS) and ``interval``, loaded.
+
+    Ascending and descending coordinate axes are both handled; a
+    non-monotonic axis (or a time coordinate that is not an index, such
+    as cfgrib's ``valid_time`` along ``step``) falls back to ``.where``.
+    """
+    xmin, ymin, xmax, ymax = bounds
+    t_start, t_end = interval
+    engine = _xarray_engine(filepath)
+    resolved = _resolve_uri(filepath, storage_options=storage_options)
+    try:
+        with xr.open_dataset(resolved, engine=engine) as ds:
+            x_name, y_name = _xy_dims(ds)
+            # `.sel(slice)` requires monotonic coords; fall back to `.where`.
+            try:
+                piece = ds.sel(
+                    {
+                        x_name: _axis_slice(ds[x_name], xmin, xmax),
+                        y_name: _axis_slice(ds[y_name], ymin, ymax),
+                    }
+                )
+            except KeyError:
+                mask = (
+                    (ds[x_name] >= xmin)
+                    & (ds[x_name] <= xmax)
+                    & (ds[y_name] >= ymin)
+                    & (ds[y_name] <= ymax)
+                )
+                piece = ds.where(mask, drop=True)
+            # Time-clip to the slice interval so multi-year files don't
+            # smuggle in out-of-range timesteps. Files without the time
+            # coord (n_timesteps == 0) pass through.
+            # A scalar time (one step) is inside the interval: the catalog
+            # query that selected the row already checked it.
+            if time_var in piece.coords and piece[time_var].ndim > 0:
+                try:
+                    piece = piece.sel({time_var: slice(t_start, t_end)})
+                except KeyError:
+                    t_mask = (piece[time_var] >= t_start) & (piece[time_var] <= t_end)
+                    piece = piece.where(t_mask, drop=True)
+            if data_vars is not None:
+                piece = piece[list(data_vars)]
+            # Materialise so the array survives the `with` block close.
+            return piece.load()
+    finally:
+        _close_resolved_uri(resolved)
+
+
 def load_xarray(
     catalog: InMemoryGeoCatalog,
     slice_: GeoSlice,
@@ -415,46 +496,17 @@ def load_xarray(
         if "time_var" in filtered.gdf.columns
         else pd.Series(["time"] * len(filtered.gdf))
     )
-    pieces: list[xr.Dataset] = []
-    for fp, row_time_var in zip(filtered.gdf["filepath"], time_vars, strict=True):
-        engine = _xarray_engine(fp)
-        resolved = _resolve_uri(fp, storage_options=storage_options)
-        try:
-            with xr.open_dataset(resolved, engine=engine) as ds:
-                x_name, y_name = _xy_dims(ds)
-                # `.sel(slice)` requires monotonic coords; fall back to `.where`.
-                try:
-                    piece = ds.sel(
-                        {
-                            x_name: _axis_slice(ds[x_name], xmin, xmax),
-                            y_name: _axis_slice(ds[y_name], ymin, ymax),
-                        }
-                    )
-                except KeyError:
-                    mask = (
-                        (ds[x_name] >= xmin)
-                        & (ds[x_name] <= xmax)
-                        & (ds[y_name] >= ymin)
-                        & (ds[y_name] <= ymax)
-                    )
-                    piece = ds.where(mask, drop=True)
-                # Time-clip to the slice interval so multi-year files don't
-                # smuggle in out-of-range timesteps. Files without the time
-                # coord (n_timesteps == 0) pass through.
-                if row_time_var in piece.coords:
-                    try:
-                        piece = piece.sel({row_time_var: slice(t_start, t_end)})
-                    except KeyError:
-                        t_mask = (piece[row_time_var] >= t_start) & (
-                            piece[row_time_var] <= t_end
-                        )
-                        piece = piece.where(t_mask, drop=True)
-                if data_vars is not None:
-                    piece = piece[list(data_vars)]
-                # Materialise so the array survives the `with` block close.
-                pieces.append(piece.load())
-        finally:
-            _close_resolved_uri(resolved)
+    pieces: list[xr.Dataset] = [
+        _read_clipped(
+            fp,
+            bounds=(xmin, ymin, xmax, ymax),
+            interval=(t_start, t_end),
+            time_var=row_time_var,
+            data_vars=data_vars,
+            storage_options=storage_options,
+        )
+        for fp, row_time_var in zip(filtered.gdf["filepath"], time_vars, strict=True)
+    ]
     if len(pieces) == 1:
         return pieces[0]
     time_var = time_vars.iloc[0]

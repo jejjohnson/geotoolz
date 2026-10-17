@@ -94,10 +94,11 @@ the step it serves:
 | Step | Namespace | Main names | Guide |
 |---|---|---|---|
 | discover | `geocatalog.sources` | `STACSource`, `CMRSource`, `EarthAccessSource`, `GEESource`, `from_stac_search` | [STAC ingestion](how-to/stac-ingestion.md) |
-| index | `geocatalog.build` | `build_raster_catalog`, `build_xarray_catalog`, `build_vector_catalog`, `append_files` | [Large archives](how-to/large-archives.md) |
+| index | `geocatalog.build` | `build_raster_catalog`, `build_xarray_catalog`, `build_vector_catalog`, `build_state_catalog`, `append_files` | [Large archives](how-to/large-archives.md) |
 | hold | `geocatalog.backends` | `InMemoryGeoCatalog`, `DuckDBGeoCatalog`, `CatalogRow`, the errors | [Backends](concepts.md#backends) |
 | join | `geocatalog.matchup` | `matchup`, `MatchupRow`, the spatial and temporal strategies | [Match sources](how-to/matchup.md) |
 | read | `geocatalog.load` | `load_raster`, `aload_raster`, `load_raster_timeseries`, `load_xarray`, `load_vector` | [Load API](api/load.md) |
+| model states | `geocatalog.states` | `load_states`, `forecasts`, `ensemble_at`, `forecast_chain`, `lead_window`, `at_time`, `latest_analysis`, `CF_NAMES` | [Model states](how-to/model-states.md) |
 | save / share | `geocatalog.storage` | `to_geoparquet`, `from_geoparquet`, `StreamingParquetWriter`, `to_stac_collection`, `CatalogBundle` | [Provenance bundles](how-to/stac-ingestion.md#record-provenance-with-a-bundle) |
 | stage | `geocatalog.staging` | `stage` (into a `geocloud.cache.LocalCache`) | [Staging](how-to/staging.md) |
 | patch | `geocatalog.patch` | `field_for`, `CatalogDomain` | [Catalog → patcher](how-to/catalog-to-patcher.md) |

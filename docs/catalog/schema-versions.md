@@ -39,20 +39,19 @@ versions newer than they understand.
   the relation through pandas, which defeats the lazy backend. Use
   `geocatalog migrate <path>` to bring the artifact up to date out of
   band; then reopen.
+  An older artifact the migrations would leave unchanged opens as is:
+  v0 → v1 only types the state columns, so a v0 raster, vector or xarray
+  catalog without them (and any external GeoParquet) needs no rewrite.
 
 ## CLI
 
 ```console
-$ geocatalog migrate legacy.parquet --to-version 0
-legacy.parquet already at v0
+$ geocatalog migrate v0_artifact.parquet
+wrote v0_artifact.parquet (v0 -> v1)
 
 $ geocatalog migrate v0_artifact.parquet
-v0_artifact.parquet already at v0
+v0_artifact.parquet already at v1
 ```
-
-(In the future, once ``SCHEMA_VERSION_CURRENT`` is bumped to 1, the
-second invocation will print ``wrote v0_artifact.parquet (v0 -> v1)``
-because the rewrite actually changes the version.)
 
 `--to-version` defaults to the reader's current version. The command
 exits with status 2 if the artifact is *newer* than the reader (you
@@ -63,5 +62,6 @@ need to upgrade `geocatalog`).
 | Version | Released | Change |
 | ------- | -------- | ------ |
 | 0       | initial  | First versioned schema. ``filepath`` / ``geometry`` / ``start_time`` / ``end_time`` columns; reserved ``_backend`` / ``_schema_version``. |
+| 1       | state catalog | Reserves the model-state columns ``kind`` (string: ``analysis`` / ``forecast`` / ``reanalysis``), ``run_time`` (``timestamp[us]``, naive UTC), ``member`` (string), ``producer`` (string) and ``parents`` (``list<string>``). A state catalog is one with a ``run_time`` column, and it carries all five; elsewhere the names are ordinary extras (a ``kind`` of ``"L2"`` is left alone). Migration v0 → v1: a catalog without ``run_time`` is unchanged (DuckDB opens it without ``migrate``); one whose extras were filled by hand is typed (``member`` ``0`` becomes ``"0"``), its ``kind`` checked, and the missing columns added as nulls. ``append_files`` writes new shards at the archive's own version, so a v0 archive stays at one version. See [Model states](how-to/model-states.md). |
 
 This table grows as the schema evolves.

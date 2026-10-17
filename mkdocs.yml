@@ -179,6 +179,7 @@ nav:
           - Match across sources: catalog/how-to/matchup.md
           - Catalog → patcher: catalog/how-to/catalog-to-patcher.md
           - Grid alignment: catalog/how-to/grid-alignment.md
+          - Model states: catalog/how-to/model-states.md
       - Tutorials:
           - End-to-end (Lake Tahoe): catalog/notebooks/end_to_end_lake_tahoe.ipynb
       - Reference:
@@ -189,6 +190,7 @@ nav:
           - Backends: catalog/api/backends.md
           - Matchup: catalog/api/matchup.md
           - Load: catalog/api/load.md
+          - States: catalog/api/states.md
           - Storage: catalog/api/storage.md
           - Staging: catalog/api/staging.md
           - Patch: catalog/api/patch.md

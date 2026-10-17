@@ -14,13 +14,16 @@ Everything else lives in one sub-namespace per step of the workflow:
 - discover — `geocatalog.sources`: `STACSource`, `CMRSource`,
   `EarthAccessSource`, `GEESource`.
 - index — `geocatalog.build`: `build_raster_catalog`,
-  `build_xarray_catalog`, `build_vector_catalog`.
+  `build_xarray_catalog`, `build_vector_catalog`, `build_state_catalog`.
 - hold — `geocatalog.backends`: `InMemoryGeoCatalog`, `DuckDBGeoCatalog`,
   the errors.
 - join — `geocatalog.matchup`: `matchup` and its spatial / temporal
   strategies.
 - read — `geocatalog.load`: `load_raster`, `load_raster_timeseries`,
   `load_xarray`.
+- model states — `geocatalog.states`: `load_states` (forecast cubes by
+  run, member and lead) and typed queries (`forecasts`, `ensemble_at`,
+  `latest_analysis`, …) over catalogs from `build_state_catalog`.
 - save / share — `geocatalog.storage`: GeoParquet, STAC export,
   `CatalogBundle`.
 - stage — `geocatalog.staging`: `stage` (into a `geocloud.cache.LocalCache`).
@@ -68,6 +71,7 @@ from geocatalog import (
     patch,
     sources,
     staging,
+    states,
     storage,
     utils,
 )
@@ -100,6 +104,7 @@ __all__ = [
     "query",
     "sources",
     "staging",
+    "states",
     "storage",
     "union",
     "utils",

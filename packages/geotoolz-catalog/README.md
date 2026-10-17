@@ -80,10 +80,11 @@ named for the step it serves:
 | Step | Namespace | Main names |
 |---|---|---|
 | discover | `geocatalog.sources` | `STACSource`, `CMRSource`, `EarthAccessSource`, `GEESource`, `from_stac_search` |
-| index | `geocatalog.build` | `build_raster_catalog`, `build_xarray_catalog`, `build_vector_catalog`, `append_files` |
+| index | `geocatalog.build` | `build_raster_catalog`, `build_xarray_catalog`, `build_vector_catalog`, `build_state_catalog`, `append_files` |
 | hold | `geocatalog.backends` | `InMemoryGeoCatalog`, `DuckDBGeoCatalog`, `CatalogRow`, the errors |
 | join | `geocatalog.matchup` | `matchup`, `MatchupRow`, the spatial / temporal strategies |
 | read | `geocatalog.load` | `load_raster`, `aload_raster`, `load_raster_timeseries`, `load_xarray`, `load_vector` |
+| model states | `geocatalog.states` | `load_states`, `forecasts`, `ensemble_at`, `forecast_chain`, `lead_window`, `at_time`, `latest_analysis`, `CF_NAMES` |
 | save / share | `geocatalog.storage` | `to_geoparquet` / `from_geoparquet`, `StreamingParquetWriter`, `to_stac_collection`, `CatalogBundle` |
 | stage | `geocatalog.staging` | `stage` (into a `geocloud.cache.LocalCache`) |
 | patch | `geocatalog.patch` | `field_for`, `CatalogDomain` |
