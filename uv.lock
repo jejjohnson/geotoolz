@@ -19,6 +19,7 @@ resolution-markers = [
 [manifest]
 members = [
     "geotoolz",
+    "geotoolz-array",
     "geotoolz-catalog",
     "geotoolz-cloud",
     "geotoolz-monorepo",
@@ -1328,6 +1329,50 @@ provides-extras = ["viz", "learn", "hydra", "vector-cube", "zarr", "hdf5", "hdf4
 dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
+name = "geotoolz-array"
+version = "0.0.0"
+source = { editable = "packages/geotoolz-array" }
+dependencies = [
+    { name = "affine" },
+    { name = "numpy" },
+    { name = "pyproj" },
+]
+
+[package.optional-dependencies]
+jax = [
+    { name = "jax" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+]
+lint = [
+    { name = "ruff" },
+]
+typecheck = [
+    { name = "ty" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "affine", specifier = ">=2.4" },
+    { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.30" },
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "pyproj", specifier = ">=3.6" },
+]
+provides-extras = ["jax"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
+]
+lint = [{ name = "ruff", specifier = ">=0.15.11" }]
+typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
+
+[[package]]
 name = "geotoolz-catalog"
 version = "0.5.1"
 source = { editable = "packages/geotoolz-catalog" }
@@ -1553,6 +1598,7 @@ source = { editable = "." }
 
 [package.dev-dependencies]
 dev = [
+    { name = "geotoolz-array", extra = ["jax"] },
     { name = "geotoolz-catalog" },
     { name = "geotoolz-cloud", extra = ["cog"] },
     { name = "geotoolz-ops", extra = ["hydra", "netcdf", "vector-cube", "zarr"] },
@@ -1568,6 +1614,7 @@ dev = [
     { name = "pytest-cov" },
 ]
 docs = [
+    { name = "geotoolz-array" },
     { name = "geotoolz-catalog" },
     { name = "geotoolz-cloud" },
     { name = "geotoolz-ops" },
@@ -1595,6 +1642,7 @@ typecheck = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "geotoolz-array", extras = ["jax"], editable = "packages/geotoolz-array" },
     { name = "geotoolz-catalog", editable = "packages/geotoolz-catalog" },
     { name = "geotoolz-cloud", extras = ["cog"], editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-ops", extras = ["hydra", "vector-cube", "netcdf", "zarr"], editable = "packages/geotoolz-ops" },
@@ -1610,6 +1658,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.1.0" },
 ]
 docs = [
+    { name = "geotoolz-array", editable = "packages/geotoolz-array" },
     { name = "geotoolz-catalog", editable = "packages/geotoolz-catalog" },
     { name = "geotoolz-cloud", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-ops", editable = "packages/geotoolz-ops" },

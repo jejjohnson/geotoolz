@@ -357,3 +357,49 @@ jobs:
       - name: Test geotoolz-cloud (base install)
         working-directory: packages/geotoolz-cloud
         run: uv run --no-sync pytest -q --no-cov
+
+  # `pip install geotoolz-array` without extras: NumPy carriers, Grid and
+  # Window work, JAX is never imported, and to_jax fails only when used,
+  # naming the `[jax]` extra; the test suite passes with the JAX tests
+  # skipping.
+  geotoolz-array-base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: Install geotoolz-array (base, no extras)
+        run: uv sync --locked --package geotoolz-array --no-default-groups --group dev
+      - name: Import and smoke test
+        run: |
+          uv run --no-sync python - <<'PY'
+          import importlib.util
+          import sys
+
+          import numpy as np
+
+          import geoarray
+          from geoarray import GeoArray, Grid
+
+          for module in ("jax", "georeader", "rasterio", "shapely", "geoops"):
+              assert importlib.util.find_spec(module) is None, f"{module} installed"
+          assert "jax" not in sys.modules
+
+          chip = GeoArray(
+              np.zeros((2, 4, 4), np.float32),
+              (20.0, 0.0, 600000.0, 0.0, -20.0, 3550000.0),
+              "EPSG:32613",
+          )
+          assert chip.grid == Grid(chip.transform, "EPSG:32613", (4, 4))
+          try:
+              chip.to_jax()
+          except ImportError as exc:
+              assert "geotoolz-array[jax]" in str(exc), exc
+          else:
+              raise AssertionError("to_jax ran without jax")
+          print("geotoolz-array base install OK", geoarray.__version__)
+          PY
+      - name: Test geotoolz-array (base install)
+        working-directory: packages/geotoolz-array
+        run: uv run --no-sync pytest -q --no-cov

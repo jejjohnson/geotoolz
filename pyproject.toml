@@ -21,6 +21,7 @@ geotoolz-patcher = { workspace = true }
 geotoolz-catalog = { workspace = true }
 geotoolz-products = { workspace = true }
 geotoolz-cloud = { workspace = true }
+geotoolz-array = { workspace = true }
 # The Operator / Sequential / Graph composition core lives in the pipekit
 # monorepo. Pull it from GitHub until the first PyPI release lands; the
 # published wheel metadata still carries the PyPI-flavoured `pipekit>=…`
@@ -60,6 +61,9 @@ dev = [
     "geotoolz-patcher",
     "geotoolz-catalog",
     "geotoolz-products[operators]",
+    # The carrier package with every extra, so its JAX tests run in the
+    # fast tier instead of skipping.
+    "geotoolz-array[jax]",
 ]
 lint = [
     "ruff>=0.15.11",
@@ -74,6 +78,7 @@ docs = [
     "geotoolz-catalog",
     "geotoolz-products",
     "geotoolz-cloud",
+    "geotoolz-array",
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.4",
@@ -112,7 +117,7 @@ combine-as-imports = true
 lines-after-imports = 2
 # The workspace sources live under packages/*/src, so root-level files
 # (docs notebooks) need the first-party classification made explicit.
-known-first-party = ["geotoolz", "geoops", "geopatcher", "geocatalog"]
+known-first-party = ["geotoolz", "geoops", "geopatcher", "geocatalog", "geoarray"]
 
 [tool.ty.environment]
 python-version = "3.12"

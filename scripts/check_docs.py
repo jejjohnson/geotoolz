@@ -39,7 +39,15 @@ from types import ModuleType
 
 
 ROOT = Path(__file__).resolve().parents[1]
-STACK = ("geoops", "geopatcher", "geocatalog", "geocloud", "geoproducts", "pipekit")
+STACK = (
+    "geoops",
+    "geopatcher",
+    "geocatalog",
+    "geocloud",
+    "geoproducts",
+    "geoarray",
+    "pipekit",
+)
 SKIP_MARK = "<!-- docs-check: skip -->"
 # The stack's conventional aliases: a fence that uses one must import it.
 ALIASES = {"gz": "geoops", "gp": "geopatcher", "gc": "geocatalog"}

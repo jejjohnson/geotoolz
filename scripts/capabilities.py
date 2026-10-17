@@ -42,6 +42,7 @@ PACKAGES = {
     "geocatalog": "geotoolz-catalog",
     "geocloud": "geotoolz-cloud",
     "geoproducts": "geotoolz-products",
+    "geoarray": "geotoolz-array",
 }
 
 # Upstream frameworks whose public API is listed (and whose names our

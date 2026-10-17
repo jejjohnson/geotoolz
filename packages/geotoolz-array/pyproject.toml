@@ -1,0 +1,101 @@
+[project]
+name = "geotoolz-array"
+version = "0.0.0"
+description = "One georeferenced array for the geotoolz stack — a GeoArray whose data is a NumPy or a JAX array, with its grid, window and slicing geometry."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+keywords = ["remote-sensing", "geospatial", "raster", "affine", "jax", "numpy", "pytree"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+dependencies = [
+    "numpy>=1.26",
+    # CRS parsing and the hashable CRS a Grid carries.
+    "pyproj>=3.6",
+    # `Grid.affine` / `Grid.from_affine`: the Affine type rasterio and
+    # georeader use, without importing either.
+    "affine>=2.4",
+]
+
+[project.optional-dependencies]
+# JAX data, `to_jax` and the pytree registration (registered on import
+# whenever JAX is installed). The transform is float64, so JAX carriers
+# need `jax_enable_x64`.
+jax = ["jax>=0.4.30"]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/geotoolz"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+]
+lint = [
+    "ruff>=0.15.11",
+]
+typecheck = [
+    "ty>=0.0.35",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/geoarray"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "TID251"]
+ignore = ["E402", "E721", "E731", "E741"]
+
+# Reuse guard rails (see AGENTS.md, "Reuse before you write"): geoarray is
+# the bottom of the workspace and imports no other workspace package.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"geoops".msg = "geoarray is the bottom of the workspace: it never imports geoops"
+"geopatcher".msg = "geoarray is the bottom of the workspace: it never imports geopatcher"
+"geocatalog".msg = "geoarray is the bottom of the workspace: it never imports geocatalog"
+"geocloud".msg = "geoarray is the bottom of the workspace: it never imports geocloud"
+"geoproducts".msg = "geoarray is the bottom of the workspace: it never imports geoproducts"
+"rasterio".msg = "geoarray never imports rasterio: use geoarray's Grid / Window maths"
+
+[tool.ruff.lint.per-file-ignores]
+# Docstrings write the affine maths in Unicode (T⁻¹, ×, ′, −) as the
+# coding standard asks; RUF001/002/003 would flag every symbol.
+"src/**/*.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/**/*.py" = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+lines-after-imports = 2
+
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src/geoarray --cov-report=term-missing --cov-report=xml:coverage.xml --strict-markers"
+
+[tool.coverage.run]
+source = ["src/geoarray"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 90

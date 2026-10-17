@@ -35,3 +35,6 @@ jobs:
       - name: Typecheck geotoolz-cloud
         run: uv run --group typecheck ty check src/geocloud
         working-directory: packages/geotoolz-cloud
+      - name: Typecheck geotoolz-array
+        run: uv run --group typecheck ty check src/geoarray
+        working-directory: packages/geotoolz-array

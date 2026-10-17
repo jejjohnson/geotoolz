@@ -22,6 +22,7 @@ person will find and reuse it.
 | `geotoolz-catalog` | `geocatalog` | Find, index, join, load and stage files (`GeoSlice` queries, GeoParquet) | geopandas / pyarrow; `[patch]` → geotoolz-patcher; `[cloud]` → geotoolz-cloud |
 | `geotoolz-cloud` | `geocloud` | Object storage: the one obstore client pool, file verbs, credentials, async COG reads | georeader, obstore |
 | `geotoolz-products` | `geoproducts` | Readers for EO products (GOES, Himawari, CarbonMapper, …) → `GeoData` / `GeoTensor` | georeader; `[goes]` / `[himawari]` → geotoolz-cloud; `[operators]` → geotoolz-ops |
+| `geotoolz-array` | `geoarray` | `GeoArray`, the NumPy/JAX carrier that will replace `GeoTensor` (not used by the other packages yet), with `Grid` / `PixelWindow` geometry | numpy, pyproj, affine; `[jax]`, `[georeader]`, `[vector]` |
 
 Dependencies point one way and every cross-package link is an optional extra:
 `geoops` never depends on `geoproducts`, the patcher never on `geoops`,
@@ -207,6 +208,7 @@ enforce them. Read it before changing that package:
 - [`packages/geotoolz-catalog/AGENTS.md`](packages/geotoolz-catalog/AGENTS.md) — namespaces, `GeoSlice` contract, lazy extras
 - [`packages/geotoolz-cloud/AGENTS.md`](packages/geotoolz-cloud/AGENTS.md) — the client pool and the COG engine
 - [`packages/geotoolz-products/AGENTS.md`](packages/geotoolz-products/AGENTS.md) — `ProductReader`, sensor subpackages, the reader toolkit
+- [`packages/geotoolz-array/AGENTS.md`](packages/geotoolz-array/AGENTS.md) — the carrier, the pytree split, the membership test
 
 Conventions shared by all five:
 
