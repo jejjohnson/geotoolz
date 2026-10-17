@@ -41,7 +41,7 @@ from pipekit import Operator
 from geoops._src.bands import resolve_wavelengths, strip_band_attrs
 from geoops._src.config import as_tuple, jsonable
 from geoops._src.engine import to_engine
-from geoops._src.geo import require_geoarray
+from geoops._src.geo import reject_geotensor, require_geoarray
 from geoops._src.shape import over_frames
 from geoops._src.valid import (
     carried_fill,
@@ -570,6 +570,7 @@ class EarthSunDistanceCorrection(Operator):
         self.acquisition_date = _parse_datetime(acquisition_date)
 
     def _apply(self, _input: Any | None = None) -> float:
+        reject_geotensor(_input, type(self).__name__)
         return earth_sun_distance_correction_factor(self.acquisition_date)
 
     def get_config(self) -> dict[str, Any]:
@@ -700,6 +701,7 @@ class IntegratedIrradiance(Operator):
         self.epsilon_srf = epsilon_srf
 
     def _apply(self, _input: Any | None = None) -> np.ndarray:
+        reject_geotensor(_input, type(self).__name__)
         solar_irradiance = (
             load_thuillier_irradiance()
             if self.solar_irradiance is None

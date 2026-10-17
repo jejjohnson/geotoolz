@@ -44,9 +44,9 @@ from typing import Any, ClassVar
 
 import numpy as np
 import shapely.wkt
-from georeader import read, save
 from geoarray import GeoArray, RasterSource
 from geoarray.interop.georeader import source_from_georeader
+from georeader import read, save
 from georeader.rasterio_reader import RasterioReader
 from pipekit import Operator
 from rasterio.errors import RasterioIOError
@@ -1130,8 +1130,9 @@ class WriteZarr(SinkOperator):
     before the GeoArray switch call it ``fill_value_default`` and hold the
     nine coefficients of an ``Affine``; a reader should accept both). The
     store is opened in append mode: other groups already in it are kept,
-    while an existing ``values`` array in the target group is overwritten. Requires the optional ``zarr`` extra
-    (``pip install geotoolz-ops[zarr]``, zarr-python >= 3).
+    while an existing ``values`` array in the target group is overwritten.
+    Requires the optional ``zarr`` extra (``pip install
+    geotoolz-ops[zarr]``, zarr-python >= 3).
 
     Args:
         store: Zarr store URI (``"/path/to/output.zarr"``,
@@ -1218,8 +1219,8 @@ class LoadFromSTAC(SourceOperator):
 
     Resolves ``item.assets[asset_key].href`` and reads it. When
     ``bounds`` is ``None`` the full asset is materialised (georeader's
-    ``RasterioReader``, as a `geoarray.RasterSource`); otherwise the read is delegated to
-    :class:`ReadToCRS` (assumed in ``EPSG:4326``) so the asset is
+    ``RasterioReader``, as a `geoarray.RasterSource`); otherwise the read
+    is delegated to :class:`ReadToCRS` (assumed in ``EPSG:4326``) so the asset is
     reprojected and cropped in one pass.
 
     Args:

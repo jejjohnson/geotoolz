@@ -55,6 +55,7 @@ from pipekit import Operator
 
 from geoops._src.bands import resolve_band, strip_band_attrs
 from geoops._src.config import mapping_from_pairs, mapping_to_pairs
+from geoops._src.geo import reject_geotensor
 from geoops._src.shape import over_frames
 from geoops._src.valid import invalid_values, valid_pixels, wrap_filled
 from geoops._src.wrap import wrap_like
@@ -422,6 +423,7 @@ class MaskInvalid(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        reject_geotensor(gt, type(self).__name__)
         mask = _invalid_mask(gt, self.invalid_value, self.axis, "MaskInvalid")
         return wrap_like(gt, mask, fill_value=False)
 
@@ -590,6 +592,7 @@ class MaskNoData(_QAMask):
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        reject_geotensor(gt, type(self).__name__)
         if self.bits is not None or self.values is not None:
             return super()._apply(gt)
         if self.qa_band is not None:

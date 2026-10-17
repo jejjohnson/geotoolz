@@ -16,8 +16,8 @@ pytest.importorskip(
 
 import numpy as np
 import rasterio
-from geopatcher import RasterField, SpatialPatcher, spatial
 from geoarray import GeoArray
+from geopatcher import RasterField, SpatialPatcher, spatial
 from pipekit import Lambda
 
 from geoops import Sequential

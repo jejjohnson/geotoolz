@@ -31,9 +31,7 @@ from geoops.geom.coregister import (
 
 
 def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoArray:
-    return toy_geoarray(
-        values, transform=transform, crs=crs, fill_value=np.nan
-    )
+    return toy_geoarray(values, transform=transform, crs=crs, fill_value=np.nan)
 
 
 PX_X = lambda j: 500_005.0 + 10.0 * j
