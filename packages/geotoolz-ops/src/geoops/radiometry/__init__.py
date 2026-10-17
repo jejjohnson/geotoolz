@@ -25,7 +25,7 @@ Examples:
             | gz.radiometry.Gamma(gamma=1.2)
         )
 
-        rgb = s2_display(s2_dn_geotensor)
+        rgb = s2_display(s2_dn_geoarray)
 
     Per-band gain and offset (Landsat-style)::
 
@@ -33,7 +33,7 @@ Examples:
         gains   = np.array([0.012, 0.013, 0.011, 0.009])
         offsets = np.array([-60.0, -61.0, -55.0, -45.0])
         op = gz.radiometry.DNToRadiance(gain=gains, offset=offsets)
-        radiance = op(dn_geotensor)
+        radiance = op(dn_geoarray)
 """
 
 from __future__ import annotations

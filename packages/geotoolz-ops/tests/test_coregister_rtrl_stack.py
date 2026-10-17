@@ -164,7 +164,7 @@ class TestStackMatchedSequence:
         out = StackMatched()([a, b])
         assert out.shape == (3, 8, 8)
 
-    def test_matches_geotensor_concatenate_where_it_applies(self) -> None:
+    def test_matches_georeader_concatenate_where_it_applies(self) -> None:
         """Same grid, band count and finite fill: identical to georeader.
 
         georeader's ``GeoTensor.concatenate`` (the oracle here) asserts equal

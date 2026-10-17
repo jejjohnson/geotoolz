@@ -140,9 +140,9 @@ class NormalizedDifference(Operator):
         >>> from geoops.indices import NormalizedDifference
         >>> # A custom water/snow index using SWIR vs Green.
         >>> swsi = NormalizedDifference(a=2, b=10)  # Green=2, SWIR1=10
-        >>> result = swsi(reflectance_geotensor)
+        >>> result = swsi(reflectance_geoarray)
         >>> # By band name (resolved against gt.attrs["band_names"]).
-        >>> ndvi = NormalizedDifference(a="B8", b="B4")(reflectance_geotensor)
+        >>> ndvi = NormalizedDifference(a="B8", b="B4")(reflectance_geoarray)
     """
 
     def __init__(
@@ -200,7 +200,7 @@ class NDVI(Operator):
     Examples:
         >>> from geoops.indices import NDVI
         >>> ndvi_op = NDVI(nir=7, red=3)         # Sentinel-2 band order
-        >>> ndvi_map = ndvi_op(reflectance_geotensor)    # GeoArray (H, W)
+        >>> ndvi_map = ndvi_op(reflectance_geoarray)    # GeoArray (H, W)
         >>>
         >>> # Chain with reflectance conversion:
         >>> import geoops as gz
@@ -208,7 +208,7 @@ class NDVI(Operator):
         ...     gz.radiometry.DNToReflectance(scale=1e-4)
         ...     | NDVI(nir=7, red=3)
         ... )
-        >>> ndvi_map = pipe(dn_geotensor)
+        >>> ndvi_map = pipe(dn_geoarray)
     """
 
     def __init__(
@@ -261,8 +261,8 @@ class NDWI(Operator):
     Examples:
         >>> from geoops.indices import NDWI
         >>> water_idx = NDWI(green=2, nir=7)  # Sentinel-2 B3, B8
-        >>> ndwi_map = water_idx(reflectance_geotensor)
-        >>> water_mask = (ndwi_map > 0).values  # rough surface-water mask
+        >>> ndwi_map = water_idx(reflectance_geoarray)
+        >>> water_mask = np.asarray(ndwi_map) > 0  # rough surface-water mask
     """
 
     def __init__(
@@ -314,13 +314,13 @@ class NDBI(Operator):
     Examples:
         >>> from geoops.indices import NDBI, NDVI
         >>> ndbi_op = NDBI(swir=10, nir=7)  # Sentinel-2 B11, B8
-        >>> built_up_raw = ndbi_op(reflectance_geotensor)
+        >>> built_up_raw = ndbi_op(reflectance_geoarray)
         >>>
         >>> # Zha's recipe: subtract NDVI to suppress soil confounders.
         >>> import numpy as np
         >>> ndvi_op = NDVI(nir=7, red=3)
-        >>> built_up = np.asarray(ndbi_op(reflectance_geotensor)) - np.asarray(
-        ...     ndvi_op(reflectance_geotensor)
+        >>> built_up = np.asarray(ndbi_op(reflectance_geoarray)) - np.asarray(
+        ...     ndvi_op(reflectance_geoarray)
         ... )
     """
 
@@ -377,8 +377,8 @@ class NBR(Operator):
         >>> nbr_op = NBR(nir=7, swir2=11)  # Sentinel-2 B8, B12
         >>>
         >>> # dNBR — burn severity from pre- vs post-fire scenes.
-        >>> dnbr = np.asarray(nbr_op(pre_fire_geotensor)) - np.asarray(
-        ...     nbr_op(post_fire_geotensor)
+        >>> dnbr = np.asarray(nbr_op(pre_fire_geoarray)) - np.asarray(
+        ...     nbr_op(post_fire_geoarray)
         ... )
         >>> # Key & Benson thresholds: > 0.66 high severity, 0.27-0.44 low.
     """
@@ -437,7 +437,7 @@ class SAVI(Operator):
         >>> from geoops.indices import SAVI
         >>> # Default L=0.5 for intermediate cover.
         >>> savi_op = SAVI(nir=7, red=3, L=0.5)
-        >>> v = savi_op(reflectance_geotensor)
+        >>> v = savi_op(reflectance_geoarray)
         >>>
         >>> # Sparse drylands -> larger L:
         >>> dryland_savi = SAVI(nir=7, red=3, L=1.0)
@@ -504,7 +504,7 @@ class EVI(Operator):
         >>> from geoops.indices import EVI
         >>> # Sentinel-2: B2=Blue, B4=Red, B8=NIR.
         >>> evi_op = EVI(nir=7, red=3, blue=1)
-        >>> v = evi_op(boa_reflectance_geotensor)
+        >>> v = evi_op(boa_reflectance_geoarray)
         >>>
         >>> # EVI assumes surface reflectance (BOA). Apply atmospheric
         >>> # correction first for cross-scene comparability.
@@ -579,7 +579,7 @@ class EVI2(Operator):
     Examples:
         >>> from geoops.indices import EVI2
         >>> evi2_op = EVI2(nir=7, red=3)  # S2 band order
-        >>> v = evi2_op(reflectance_geotensor)
+        >>> v = evi2_op(reflectance_geoarray)
 
     References:
         Jiang, Z., Huete, A. R., Didan, K., & Miura, T. (2008).
@@ -642,7 +642,7 @@ class ARVI(Operator):
         >>> from geoops.indices import ARVI
         >>> # Sentinel-2: B02=Blue (1), B04=Red (3), B08=NIR (7).
         >>> arvi_op = ARVI(blue=1, red=3, nir=7)
-        >>> v = arvi_op(toa_reflectance_geotensor)
+        >>> v = arvi_op(toa_reflectance_geoarray)
 
     References:
         Kaufman, Y. J., & Tanre, D. (1992). "Atmospherically resistant
@@ -707,7 +707,7 @@ class GCI(Operator):
     Examples:
         >>> from geoops.indices import GCI
         >>> gci_op = GCI(green=2, nir=7)  # S2 band order
-        >>> v = gci_op(reflectance_geotensor)
+        >>> v = gci_op(reflectance_geoarray)
 
     References:
         Gitelson, A. A., Vina, A., Arkebauer, T. J., Rundquist, D. C.,
@@ -765,7 +765,7 @@ class kNDVI(Operator):
     Examples:
         >>> from geoops.indices import kNDVI
         >>> kndvi_op = kNDVI(nir=7, red=3)
-        >>> v = kndvi_op(reflectance_geotensor)
+        >>> v = kndvi_op(reflectance_geoarray)
 
     References:
         Camps-Valls, G., Campos-Taberner, M., Moreno-Martinez, A.,
@@ -827,7 +827,7 @@ class MNDWI(Operator):
     Examples:
         >>> from geoops.indices import MNDWI
         >>> mndwi_op = MNDWI(green=2, swir=10)  # S2 B3, B11
-        >>> v = mndwi_op(reflectance_geotensor)
+        >>> v = mndwi_op(reflectance_geoarray)
 
     References:
         Xu, H. (2006). "Modification of normalised difference water
@@ -887,7 +887,7 @@ class NDMI(Operator):
     Examples:
         >>> from geoops.indices import NDMI
         >>> ndmi_op = NDMI(nir=7, swir1=10)  # S2 B8, B11
-        >>> v = ndmi_op(reflectance_geotensor)
+        >>> v = ndmi_op(reflectance_geoarray)
 
     References:
         Gao, B. C. (1996). "NDWI - A normalized difference water index
@@ -947,7 +947,7 @@ class NDSI(Operator):
     Examples:
         >>> from geoops.indices import NDSI
         >>> ndsi_op = NDSI(green=2, swir=10)  # S2 B3, B11
-        >>> snow_mask = (ndsi_op(reflectance_geotensor) > 0.4)
+        >>> snow_mask = (ndsi_op(reflectance_geoarray) > 0.4)
 
     References:
         Hall, D. K., Riggs, G. A., & Salomonson, V. V. (1995).
@@ -1006,7 +1006,7 @@ class NBR2(Operator):
     Examples:
         >>> from geoops.indices import NBR2
         >>> nbr2_op = NBR2(swir1=10, swir2=11)  # S2 B11, B12
-        >>> v = nbr2_op(reflectance_geotensor)
+        >>> v = nbr2_op(reflectance_geoarray)
     """
 
     def __init__(
@@ -1073,7 +1073,7 @@ class BAIS2(Operator):
     Examples:
         >>> from geoops.indices import BAIS2
         >>> bais2_op = BAIS2()  # S2-stack default ordering
-        >>> burn_score = bais2_op(reflectance_geotensor)
+        >>> burn_score = bais2_op(reflectance_geoarray)
 
     References:
         Filipponi, F. (2018). "BAIS2: Burned Area Index for
@@ -1150,8 +1150,8 @@ class dNBR(Operator):
     Examples:
         >>> from geoops.indices import NBR, dNBR
         >>> nbr_op = NBR(nir=7, swir2=11)
-        >>> pre_nbr = nbr_op(pre_fire_geotensor)
-        >>> post_nbr = nbr_op(post_fire_geotensor)
+        >>> pre_nbr = nbr_op(pre_fire_geoarray)
+        >>> post_nbr = nbr_op(post_fire_geoarray)
         >>> severity = dNBR()(pre_nbr, post_nbr)
 
     References:
@@ -1204,7 +1204,7 @@ class BSI(Operator):
         >>> from geoops.indices import BSI
         >>> # Sentinel-2: B2=Blue, B4=Red, B8=NIR, B11=SWIR1.
         >>> bsi_op = BSI(blue=1, red=3, nir=7, swir=10)
-        >>> v = bsi_op(reflectance_geotensor)
+        >>> v = bsi_op(reflectance_geoarray)
 
     References:
         Rikimaru, A., Roy, P. S., & Miyatake, S. (2002). "Tropical
@@ -1274,7 +1274,7 @@ class IronOxide(Operator):
         >>> from geoops.indices import IronOxide
         >>> # Sentinel-2: B2=Blue (1), B4=Red (3).
         >>> iron_op = IronOxide(red=3, blue=1)
-        >>> v = iron_op(reflectance_geotensor)
+        >>> v = iron_op(reflectance_geoarray)
 
     References:
         Sabins, F. F. (1999). "Remote sensing for mineral
@@ -1332,7 +1332,7 @@ class ClayMinerals(Operator):
     Examples:
         >>> from geoops.indices import ClayMinerals
         >>> clay_op = ClayMinerals(swir1=10, swir2=11)  # S2 B11/B12
-        >>> v = clay_op(reflectance_geotensor)
+        >>> v = clay_op(reflectance_geoarray)
 
     References:
         Crowley, J. K., Brickey, D. W., & Rowan, L. C. (1989).
@@ -1395,7 +1395,7 @@ class CIRI(Operator):
     Examples:
         >>> from geoops.indices import CIRI
         >>> ciri_op = CIRI()  # defaults to S2 B10
-        >>> cirrus_score = ciri_op(reflectance_geotensor)
+        >>> cirrus_score = ciri_op(reflectance_geoarray)
     """
 
     def __init__(
@@ -1436,7 +1436,7 @@ class AppendIndex(Operator):
     Examples:
         >>> from geoops.indices import AppendIndex, NDVI
         >>> bands_plus_ndvi = AppendIndex(index_op=NDVI(nir=3, red=2))
-        >>> stacked = bands_plus_ndvi(reflectance_geotensor)  # (C+1, H, W)
+        >>> stacked = bands_plus_ndvi(reflectance_geoarray)  # (C+1, H, W)
     """
 
     def __init__(self, *, index_op: Operator, axis: int = -3) -> None:

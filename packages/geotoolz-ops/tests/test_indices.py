@@ -338,7 +338,7 @@ def test_all_indices_run_without_crashing(reflectance_7band: GeoArray) -> None:
         assert out.grid == reflectance_7band.grid
 
 
-def test_band_name_resolution_uses_geotensor_descriptions() -> None:
+def test_band_name_resolution_uses_geoarray_descriptions() -> None:
     rng = np.random.default_rng(2)
     arr = rng.uniform(0.05, 0.6, size=(4, 5, 5)).astype(np.float32)
     gt = toy_geoarray(arr)

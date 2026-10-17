@@ -82,9 +82,7 @@ class _BuildsByHand(ZScore):
 class _Mutates(ZScore):
     def _apply(self, gt: Any) -> Any:
         np.asarray(gt)[...] = 0  # writes into the input
-        return wrap_like(
-            gt, np.asarray(gt, dtype=np.float32), fill_value=np.nan
-        )
+        return wrap_like(gt, np.asarray(gt, dtype=np.float32), fill_value=np.nan)
 
 
 class _IntegerFill(ZScore):
@@ -104,12 +102,23 @@ class _HoldsAModel(ZScore):
     [
         (_Positional(0.0, 1.0), np.float32, "positionally"),
         (_BareArray(mean=0.0, std=1.0), np.float32, "returned a plain array"),
-        (_BuildsByHand(mean=0.0, std=1.0), np.float32, "accepted a georeader GeoTensor"),
+        (
+            _BuildsByHand(mean=0.0, std=1.0),
+            np.float32,
+            "accepted a georeader GeoTensor",
+        ),
         (_Mutates(mean=0.0, std=1.0), np.float32, "mutated its input"),
         (_IntegerFill(mean=0.0, std=1.0), np.uint16, "expected NaN"),
         (_HoldsAModel(model=object()), np.float32, "forbid_in_yaml"),
     ],
-    ids=["positional", "bare-array", "accepts-geotensor", "mutates", "int-fill", "model"],
+    ids=[
+        "positional",
+        "bare-array",
+        "accepts-geotensor",
+        "mutates",
+        "int-fill",
+        "model",
+    ],
 )
 def test_broken_operators_fail_naming_the_rule(op: Any, dtype: Any, match: str) -> None:
     with pytest.raises((AssertionError, TypeError), match=match):

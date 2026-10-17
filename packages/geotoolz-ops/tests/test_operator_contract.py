@@ -27,9 +27,8 @@ xfail pass, so remove the entry in the same PR.
 
 from __future__ import annotations
 
-import copy
-
 import ast
+import copy
 import inspect
 import json
 import textwrap
@@ -44,8 +43,8 @@ from pipekit import Input, Operator
 from geoops._src.contract import (
     assert_clear_rank_error,
     assert_config_round_trips,
-    assert_fill_matches_dtype,
     assert_consistent_attrs,
+    assert_fill_matches_dtype,
     assert_graph_mode,
     assert_keyword_only,
     frames,
@@ -380,9 +379,7 @@ def _on_grid_of(x: Any, values: np.ndarray, fill: Any = None) -> Any:
 
     if getattr(x, "transform", None) is None:
         return values
-    return toy_geoarray(
-        values, transform=x.transform, crs=x.crs, fill_value=fill
-    )
+    return toy_geoarray(values, transform=x.transform, crs=x.crs, fill_value=fill)
 
 
 def _band_like(x: Any, seed: int = 3) -> Any:

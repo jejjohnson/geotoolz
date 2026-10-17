@@ -556,9 +556,7 @@ class SpatialPool(Operator):
         if not isinstance(gt, GeoArray):
             return out
         pooled_transform = affine_of(gt) * Affine.scale(fx, fy)
-        return wrap_like(
-            gt, out, transform=pooled_transform, fill_value=out_fill
-        )
+        return wrap_like(gt, out, transform=pooled_transform, fill_value=out_fill)
 
     def get_config(self) -> dict[str, Any]:
         return {"reduce": self.reduce, "factor": list(self.factor)}

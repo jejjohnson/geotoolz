@@ -75,9 +75,7 @@ def _rewrap_carried(gt: Any, out: Any, **kwargs: Any) -> Any:
     out = np.asarray(out)
     if out.ndim < 2:
         return wrap_like(gt, out, **kwargs)
-    return wrap_filled(
-        gt, out, fill_value=carried_fill(gt, out.dtype), **kwargs
-    )
+    return wrap_filled(gt, out, fill_value=carried_fill(gt, out.dtype), **kwargs)
 
 
 def _rewrap_stretch(gt: Any, out: Any) -> Any:
@@ -120,7 +118,7 @@ class ToFloat32(Operator):
         ...     gz.radiometry.ToFloat32()
         ...     | gz.radiometry.DNToReflectance(scale=1e-4)
         ... )
-        >>> reflectance = pipe(uint16_dn_geotensor)
+        >>> reflectance = pipe(uint16_dn_geoarray)
     """
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
@@ -161,7 +159,7 @@ class DNToRadiance(Operator):
         >>> gains   = np.array([0.012, 0.013, 0.011, 0.009])
         >>> offsets = np.array([-60.0, -61.0, -55.0, -45.0])
         >>> dn_to_rad = DNToRadiance(gain=gains, offset=offsets)
-        >>> radiance = dn_to_rad(dn_geotensor)  # shape preserved
+        >>> radiance = dn_to_rad(dn_geoarray)  # shape preserved
     """
 
     def __init__(
@@ -219,9 +217,9 @@ class RadianceToDN(Operator):
         >>> import numpy as np
         >>> from geoops.radiometry import DNToRadiance, RadianceToDN
         >>> # Round-trip a synthetic radiance back to DN.
-        >>> radiance = DNToRadiance(gain=0.012, offset=-60.0)(dn_geotensor)
+        >>> radiance = DNToRadiance(gain=0.012, offset=-60.0)(dn_geoarray)
         >>> dn = RadianceToDN(gain=0.012, offset=-60.0)(radiance)
-        >>> np.allclose(np.asarray(dn), np.asarray(dn_geotensor))
+        >>> np.allclose(np.asarray(dn), np.asarray(dn_geoarray))
         True
     """
 
@@ -284,16 +282,16 @@ class DNToReflectance(Operator):
         >>> from geoops.radiometry import DNToReflectance
         >>> # Sentinel-2 L1C pre-2022: a single global scale, no offset.
         >>> op = DNToReflectance(scale=1e-4)
-        >>> reflectance = op(s2_l1c_dn_geotensor)
+        >>> reflectance = op(s2_l1c_dn_geoarray)
         >>>
         >>> # Post-2022 S2 L1C: RADIO_ADD_OFFSET=-1000 in DN units
         >>> # collapses to -0.1 in reflectance units (-1000 * 1e-4).
         >>> op_v2 = DNToReflectance(scale=1e-4, offset=-0.1)
-        >>> reflectance = op_v2(s2_l1c_modern_dn_geotensor)
+        >>> reflectance = op_v2(s2_l1c_modern_dn_geoarray)
         >>>
         >>> # Landsat-8/9 Collection-2 surface reflectance.
         >>> op_l8 = DNToReflectance(scale=2.75e-5, offset=-0.2)
-        >>> reflectance = op_l8(landsat_c2_sr_geotensor)
+        >>> reflectance = op_l8(landsat_c2_sr_geoarray)
     """
 
     def __init__(
@@ -370,7 +368,7 @@ class RadianceToReflectance(Operator):
         ...     sza_deg=27.0,
         ...     units="W/m2/sr/nm",
         ... )
-        >>> reflectance = op(radiance_geotensor)
+        >>> reflectance = op(radiance_geoarray)
     """
 
     def __init__(
@@ -471,7 +469,7 @@ class ReflectanceToRadiance(Operator):
         ...     solar_irradiance=solar, acquisition_date=date, sza_deg=30.0
         ... )
         >>> # Round-trip preserves radiance up to float precision.
-        >>> radiance_out = inv(fwd(radiance_geotensor))
+        >>> radiance_out = inv(fwd(radiance_geoarray))
     """
 
     def __init__(
@@ -860,12 +858,12 @@ class ApplySRF(Operator):
         ...     source_wavelengths=[480.0, 490.0, 500.0, 510.0, 520.0],
         ...     band_names=["b500", "b520"],
         ... )
-        >>> multispectral = op(hyperspectral_geotensor)
+        >>> multispectral = op(hyperspectral_geoarray)
         >>> # Source wavelengths can come from gt.attrs["wavelengths"].
         >>> s2_like = ApplySRF(
         ...     target_center_wavelengths=[490.0, 665.0, 842.0],
         ...     target_fwhm=[65.0, 30.0, 115.0],
-        ... )(emit_geotensor)
+        ... )(emit_geoarray)
     """
 
     def __init__(
@@ -987,7 +985,7 @@ class BTFromRadiance(Operator):
         >>> from geoops.radiometry import BTFromRadiance
         >>> # Landsat-8 TIRS Band 10 published constants.
         >>> op = BTFromRadiance(K1=774.8853, K2=1321.0789)
-        >>> brightness_temp = op(radiance_geotensor)  # Kelvin
+        >>> brightness_temp = op(radiance_geoarray)  # Kelvin
 
     References:
         Planck, M. (1901). Ueber das Gesetz der Energieverteilung im
@@ -1061,7 +1059,7 @@ class DOS1(Operator):
         >>> # Subtract the 1st-percentile haze per band from TOA
         >>> # reflectance to approximate surface reflectance.
         >>> op = DOS1(dark_percentile=1.0)
-        >>> surface = op(toa_reflectance_geotensor)
+        >>> surface = op(toa_reflectance_geoarray)
 
     References:
         Chavez, P. S. (1988). An improved dark-object subtraction
@@ -1100,7 +1098,7 @@ class SimpleAtmosphericCorrection(Operator):
     Examples:
         >>> from geoops.radiometry import SimpleAtmosphericCorrection
         >>> op = SimpleAtmosphericCorrection(method="dos1", dark_percentile=1.0)
-        >>> surface = op(toa_reflectance_geotensor)
+        >>> surface = op(toa_reflectance_geoarray)
 
     References:
         See `DOS1` for the Chavez 1988/1996 references.
@@ -1146,7 +1144,7 @@ class MinMaxStretch(Operator):
         >>> from geoops.radiometry import MinMaxStretch
         >>> # Stretch reflectance in [0, 0.3] to display range.
         >>> op = MinMaxStretch(vmin=0.0, vmax=0.3)
-        >>> display_ready = op(reflectance_geotensor)
+        >>> display_ready = op(reflectance_geoarray)
     """
 
     def __init__(self, *, vmin: float, vmax: float, clip: bool = True) -> None:
@@ -1186,7 +1184,7 @@ class PercentileClip(Operator):
         >>> from geoops.radiometry import PercentileClip
         >>> # Standard "satellite RGB" stretch -- per-band 2-98 %.
         >>> op = PercentileClip(lower=2.0, upper=98.0)
-        >>> rgb = op(reflectance_geotensor)
+        >>> rgb = op(reflectance_geoarray)
     """
 
     def __init__(
@@ -1239,7 +1237,7 @@ class Gamma(Operator):
         ...     gz.radiometry.PercentileClip()
         ...     | gz.radiometry.Gamma(gamma=1.4)
         ... )
-        >>> rgb = pipe(reflectance_geotensor)
+        >>> rgb = pipe(reflectance_geoarray)
     """
 
     def __init__(self, *, gamma: float = 1.2) -> None:

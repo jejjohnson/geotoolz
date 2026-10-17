@@ -157,9 +157,7 @@ def test_carried_fill_follows_the_output_dtype():
     assert carried_fill(f64, np.int32) == -9999
     assert carried_fill(f64, np.uint8) is None
     assert (
-        carried_fill(
-            toy_geoarray(np.zeros((2, 2)), fill_value=np.nan), np.int32
-        )
+        carried_fill(toy_geoarray(np.zeros((2, 2)), fill_value=np.nan), np.int32)
         is None
     )
     # No fill stays no fill.

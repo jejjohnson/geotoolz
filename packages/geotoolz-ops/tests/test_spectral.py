@@ -8,8 +8,8 @@ import rasterio
 from _helpers import toy_geoarray, uint16_dn_cube
 from geoarray import GeoArray
 
-from geoops._src.geo import affine_of
 from geoops import indices, spectral
+from geoops._src.geo import affine_of
 
 
 _BAND_NAMES = ["B2", "B4", "B8", "B11"]
@@ -46,9 +46,7 @@ def test_reorder_bands_preserves_band_metadata() -> None:
 
 
 def test_band_math_matches_normalized_difference() -> None:
-    gt = _toy_geoarray(
-        np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32)
-    )
+    gt = _toy_geoarray(np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32))
 
     via_math = spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)")(gt)
     via_op = indices.NormalizedDifference(a="B8", b="B4", eps=1e-6)(gt)
@@ -64,9 +62,7 @@ def test_band_math_unknown_band_raises_clear_error() -> None:
 
 
 def test_band_math_allows_safe_numpy_functions() -> None:
-    gt = _toy_geoarray(
-        np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32)
-    )
+    gt = _toy_geoarray(np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32))
 
     out = spectral.BandMath(expression="sqrt(B8)")(gt)
 
@@ -92,9 +88,7 @@ def test_band_math_uint16_no_wrap() -> None:
 
 
 def test_band_ratio_by_name() -> None:
-    gt = _toy_geoarray(
-        np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32)
-    )
+    gt = _toy_geoarray(np.array([[[0.2]], [[0.4]], [[0.8]], [[0.6]]], dtype=np.float32))
 
     out = spectral.BandRatio(numerator="B8", denominator="B4", eps=0.0)(gt)
 
@@ -301,7 +295,7 @@ def test_spectral_hydra_zen_roundtrip(op: object) -> None:
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
 
 
-def test_geotensor_metadata_propagates_through_spectral_ops() -> None:
+def test_geoarray_metadata_propagates_through_spectral_ops() -> None:
     """Spatial transform/CRS must survive every spectral Operator (Tier-B)."""
     gt = _toy_geoarray(np.arange(4 * 3 * 3, dtype=np.float32).reshape(4, 3, 3))
 

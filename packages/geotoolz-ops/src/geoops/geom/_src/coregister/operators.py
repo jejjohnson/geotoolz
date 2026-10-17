@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from geoarray import GeoArray
 
 
-def _geotensor_to_dataarray(tensor: GeoArray, op_name: str) -> Any:
+def _geoarray_to_dataarray(tensor: GeoArray, op_name: str) -> Any:
     """Convert a `GeoArray` to an `xarray.DataArray` with proper coords.
 
     The result has ``x`` / ``y`` 1-D coords at pixel centers and a
@@ -217,7 +217,7 @@ class RasterToPoints(Operator):
                 "Install with `pip install 'geotoolz-ops[vector-cube]'`."
             ) from exc
 
-        da = _geotensor_to_dataarray(raster, "RasterToPoints")
+        da = _geoarray_to_dataarray(raster, "RasterToPoints")
         geoms = _resolve_geometries(points)
         crs = str(raster.crs)
 

@@ -443,9 +443,7 @@ def _fill_frames() -> list[GeoArray]:
     band0 = [[1.0, _FILL, _FILL], [3.0, 5.0, _FILL], [5.0, 7.0, _FILL]]
     band1 = [[2.0, _FILL, _FILL], [1.0, 1.0, _FILL], [2.0, 2.0, _FILL]]
     return [
-        toy_geoarray(
-            np.array([[b0], [b1]], dtype=np.float32), fill_value=_FILL
-        )
+        toy_geoarray(np.array([[b0], [b1]], dtype=np.float32), fill_value=_FILL)
         for b0, b1 in zip(band0, band1, strict=True)
     ]
 

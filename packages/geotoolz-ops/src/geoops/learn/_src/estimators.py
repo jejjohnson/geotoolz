@@ -137,7 +137,7 @@ class GeoArrayEstimator:
             (frozen) for later batches.
         is_fitted: Whether ``fit`` / ``partial_fit`` / ``fit_predict``
             (or ``load_state``) has run.
-        fit_geotensor_shape: Shape of the last cube seen at fit time.
+        fit_geoarray_shape: Shape of the last cube seen at fit time.
         fit_n_samples: Number of sample rows the estimator was fitted on.
 
     Examples:
@@ -174,7 +174,7 @@ class GeoArrayEstimator:
         self.label_fill_value = int(label_fill_value)
         self.imputer: Any | None = None
         self.is_fitted = False
-        self.fit_geotensor_shape: tuple[int, ...] | None = None
+        self.fit_geoarray_shape: tuple[int, ...] | None = None
         self.fit_n_samples: int | None = None
 
         _validate_nan_strategy(nan_fit)
@@ -203,7 +203,7 @@ class GeoArrayEstimator:
         x_fit, _ = self._prepare_fit(flat)
         self.estimator.fit(x_fit)
         self.is_fitted = True
-        self.fit_geotensor_shape = tuple(np.asarray(gt).shape)
+        self.fit_geoarray_shape = tuple(np.asarray(gt).shape)
         self.fit_n_samples = int(x_fit.shape[0])
         return self
 
@@ -234,7 +234,7 @@ class GeoArrayEstimator:
         x_fit, _ = self._prepare_fit(flat, reuse_imputer=True)
         self.estimator.partial_fit(x_fit)
         self.is_fitted = True
-        self.fit_geotensor_shape = tuple(np.asarray(gt).shape)
+        self.fit_geoarray_shape = tuple(np.asarray(gt).shape)
         self.fit_n_samples = int(x_fit.shape[0])
         return self
 
@@ -301,7 +301,7 @@ class GeoArrayEstimator:
         x_fit, valid = self._prepare_fit(flat)
         y_fit = self.estimator.fit_predict(x_fit)
         self.is_fitted = True
-        self.fit_geotensor_shape = tuple(np.asarray(gt).shape)
+        self.fit_geoarray_shape = tuple(np.asarray(gt).shape)
         self.fit_n_samples = int(x_fit.shape[0])
         return self._unflatten_apply_result(gt, flat, y_fit, valid)
 
@@ -326,7 +326,7 @@ class GeoArrayEstimator:
                 "estimator": self.estimator,
                 "imputer": self.imputer,
                 "is_fitted": self.is_fitted,
-                "fit_geotensor_shape": self.fit_geotensor_shape,
+                "fit_geoarray_shape": self.fit_geoarray_shape,
                 "fit_n_samples": self.fit_n_samples,
             },
             state_path,
@@ -334,7 +334,7 @@ class GeoArrayEstimator:
         if write_meta:
             _write_metadata(
                 state_path,
-                fit_geotensor_shape=self.fit_geotensor_shape,
+                fit_geoarray_shape=self.fit_geoarray_shape,
                 fit_n_samples=self.fit_n_samples,
             )
 
@@ -355,8 +355,8 @@ class GeoArrayEstimator:
         self.estimator = state["estimator"]
         self.imputer = state.get("imputer")
         self.is_fitted = bool(state.get("is_fitted", True))
-        shape = state.get("fit_geotensor_shape")
-        self.fit_geotensor_shape = None if shape is None else tuple(shape)
+        shape = state.get("fit_geoarray_shape")
+        self.fit_geoarray_shape = None if shape is None else tuple(shape)
         n_samples = state.get("fit_n_samples")
         self.fit_n_samples = None if n_samples is None else int(n_samples)
 
@@ -493,7 +493,7 @@ class GeoArrayEstimator:
             dense[valid] = y
         out = _restore_shape(dense, flat)
         # When the trailing axes do not match the input spatial (H, W),
-        # ``GeoArray.array_as_geotensor`` cannot attach CRS/transform
+        # ``wrap_like`` cannot attach CRS/transform
         # meaningfully (e.g. sample-only outputs from ``mode="custom"`` or
         # ``mode="spectral"``). Return a bare ndarray in that case; callers
         # / wrappers are responsible for re-attaching geo metadata.
@@ -568,14 +568,14 @@ def _make_imputer(
 def _write_metadata(
     state_path: Path,
     *,
-    fit_geotensor_shape: tuple[int, ...] | None,
+    fit_geoarray_shape: tuple[int, ...] | None,
     fit_n_samples: int | None,
 ) -> None:
     sklearn = import_optional("sklearn", "learn", feature="save_state(write_meta=True)")
 
     metadata = {
         "sklearn_version": sklearn.__version__,
-        "fit_geotensor_shape": fit_geotensor_shape,
+        "fit_geoarray_shape": fit_geoarray_shape,
         "fit_n_samples": fit_n_samples,
         "fit_timestamp": datetime.now(UTC).isoformat(),
     }

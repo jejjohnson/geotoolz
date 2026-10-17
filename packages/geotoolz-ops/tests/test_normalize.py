@@ -367,7 +367,7 @@ def test_normalize_hydra_zen_roundtrip(op: object) -> None:
     assert restored.get_config() == op.get_config()  # type: ignore[attr-defined]
 
 
-def test_normalize_geotensor_metadata_preserved(scene: GeoArray) -> None:
+def test_normalize_geoarray_metadata_preserved(scene: GeoArray) -> None:
     """Tier-B operators must preserve transform / CRS / shape."""
     ops = [
         StandardScaler(mean=[5.0, 105.0], std=[2.0, 3.0]),
@@ -525,9 +525,7 @@ def test_scaler_fit_then_transform_matches_fit_on_call(
 
 
 @pytest.mark.parametrize(("cls", "fitted"), _SCALERS)
-def test_scaler_fitted_state_excluded_from_config(
-    cls, fitted, scene: GeoArray
-) -> None:
+def test_scaler_fitted_state_excluded_from_config(cls, fitted, scene: GeoArray) -> None:
     """Statistics learned on call never reach ``get_config()`` / ``state``."""
     op = cls(fit_on_call=True)
     before = op.get_config()
