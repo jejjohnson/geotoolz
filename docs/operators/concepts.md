@@ -226,7 +226,7 @@ denoised: np.ndarray = mnf.inverse(mnf(scene))                # (4, 32, 32) → 
 
 ## Where geotoolz fits
 
-![The geostack: geocatalog finds, geoproducts reads, geopatcher cuts, geotoolz computes, geopatcher stitches](../assets/diagrams/stack-overview.png)
+![The geostack: geocatalog finds, geoproducts reads, geopatcher cuts, geoops computes, geopatcher stitches](../assets/diagrams/stack-overview.png)
 
 geotoolz is the compute stage. It sees only `GeoTensor`s, so it does not
 care which catalog or reader produced them. The seams are on

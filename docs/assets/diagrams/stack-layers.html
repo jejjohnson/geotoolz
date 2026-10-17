@@ -53,9 +53,9 @@
       <div class="imp">import geopatcher</div>
       <div class="one">Four-axis patchers, Field adapters, runners, PatchCache</div>
     </div>
-    <div class="pkg-card compute" id="p-geotoolz">
+    <div class="pkg-card compute" id="p-geoops">
       <div class="verb">compute</div>
-      <div class="dist">geotoolz</div>
+      <div class="dist">geotoolz-ops</div>
       <div class="imp">import geoops</div>
       <div class="one">Carrier-preserving Operator families; patch_ops bridges the patcher</div>
     </div>
@@ -75,7 +75,7 @@
 <script src="_connect.js"></script>
 <script>
   const X = "#64748b";
-  wire("p-products", "p-geotoolz", { from: "top", to: "top", bend: 140, dashed: true, color: X, fromShift: -40, toShift: 30,
+  wire("p-products", "p-geoops", { from: "top", to: "top", bend: 140, dashed: true, color: X, fromShift: -40, toShift: 30,
         label: "<span class='t'>[operators]</span><span class='s'>sensor presets</span>" });
   wire("p-catalog", "p-patcher", { from: "right", to: "left", dashed: true, color: X,
         label: "<span class='t'>[patch]</span>", dy: -18 });
@@ -83,15 +83,15 @@
         label: "<span class='t'>[goes] [himawari]</span>" });
   wire("p-catalog", "geocloud", { from: "bottom", to: "top", dashed: true, color: X,
         label: "<span class='t'>[cloud]</span>" });
-  wire("p-geotoolz", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, fromShift: -110, toShift: 470, dx: -95, dy: 14,
+  wire("p-geoops", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, fromShift: -110, toShift: 470, dx: -95, dy: 14,
         label: "<span class='t'>[cloud] [hdf5]</span>" });
   wire("p-patcher", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, fromShift: -40, toShift: 360,
         label: "<span class='t'>[cog]</span>" });
-  wire("p-geotoolz", "p-patcher", { from: "left", to: "right", dashed: true, color: X,
+  wire("p-geoops", "p-patcher", { from: "left", to: "right", dashed: true, color: X,
         label: "<span class='t'>[patch]</span>", dy: -18 });
   wire("p-patcher", "pipekit", { from: "bottom", to: "top", dashed: true, color: X, fromShift: 60, toShift: -80, bend: 18,
         label: "<span class='t'>[pipekit]</span>" });
-  wire("p-geotoolz", "pipekit", { from: "bottom", to: "top", color: "#475569", toShift: 40 });
+  wire("p-geoops", "pipekit", { from: "bottom", to: "top", color: "#475569", toShift: 40 });
   ready();
 </script>
 </body>

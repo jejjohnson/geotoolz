@@ -26,7 +26,7 @@
 [`geotoolz-patcher`](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher)
 (*cut*, `import geopatcher`). Docs: <https://jejjohnson.github.io/geotoolz/>.
 
-<p align="center"><img src="../../docs/assets/diagrams/geotoolz-composition.png" alt="Sequential and Graph composition of geotoolz operators with the output shape of every step" width="100%"></p>
+<p align="center"><img src="../../docs/assets/diagrams/geotoolz-composition.png" alt="Sequential and Graph composition of geoops operators with the output shape of every step" width="100%"></p>
 
 ## 30-second pitch
 

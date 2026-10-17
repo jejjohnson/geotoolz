@@ -67,7 +67,7 @@ distribution names carry the `geotoolz-` prefix. The dependency graph is
 a strict layering: solid arrows are hard dependencies, dotted arrows are
 opt-in extras, and nothing points back up.
 
-<p align="center"><img src="docs/assets/diagrams/stack-layers.png" alt="Dependency layers: the five packages stand on georeader; object storage in geotoolz-cloud; geotoolz on pipekit; cross-package links are opt-in extras" width="100%"></p>
+<p align="center"><img src="docs/assets/diagrams/stack-layers.png" alt="Dependency layers: the five packages stand on georeader; object storage in geotoolz-cloud; geotoolz-ops on pipekit; cross-package links are opt-in extras" width="100%"></p>
 
 ## Quickstart — catalog → patcher → operators
 
