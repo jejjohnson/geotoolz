@@ -23,6 +23,7 @@ from geocatalog._src.storage.streaming import StreamingParquetWriter
 from geocatalog.backends import InMemoryGeoCatalog
 from geocatalog.storage import from_geoparquet, to_geoparquet
 from tests.conftest import assert_catalogs_equal, needs_duckdb
+from tests.test_antimeridian_query import A_EAST, B_WEST, C_FAR
 
 
 Convert = Callable[[InMemoryGeoCatalog], GeoCatalog]
@@ -146,6 +147,88 @@ def test_union_matches_memory(as_backend: Convert) -> None:
 def test_iter_slices_match_memory(as_backend: Convert) -> None:
     got = sorted(as_backend(_scenes()).iter_slices(resolution=(10.0, 10.0)), key=repr)
     want = sorted(_scenes().iter_slices(resolution=(10.0, 10.0)), key=repr)
+    assert got == want
+
+
+def _antimeridian_scenes() -> InMemoryGeoCatalog:
+    """EPSG:4326 footprints either side of 180° (and far away), at two dates."""
+    jan = (pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02"))
+    feb = (pd.Timestamp("2024-02-01"), pd.Timestamp("2024-02-02"))
+    return _catalog(
+        [
+            {"geometry": g, "start_time": t0, "end_time": t1, "filepath": name}
+            for g, (t0, t1), name in [
+                (A_EAST, jan, "a.tif"),
+                (B_WEST, jan, "b.tif"),
+                (C_FAR, jan, "c.tif"),
+                (B_WEST, feb, "b-feb.tif"),
+            ]
+        ],
+        crs="EPSG:4326",
+    )
+
+
+@pytest.mark.parametrize(
+    ("make", "kwargs", "resolution", "expected"),
+    [
+        pytest.param(
+            _scenes,
+            {
+                "bounds": (90, 0, 350, 10),
+                "crs": "EPSG:32629",
+                "time": ("2024-01-02", "2024-03-01"),
+            },
+            (10.0, 10.0),
+            {"b.tif", "c.tif"},
+            id="bbox-time-overlap",
+        ),
+        pytest.param(
+            _antimeridian_scenes,
+            {
+                "bounds": (179.0, -20.0, -179.0, -15.0),
+                "crs": "EPSG:4326",
+                "time": ("2024-01-01", "2024-01-15"),
+            },
+            (0.1, 0.1),
+            {"a.tif", "b.tif"},
+            id="bbox-time-antimeridian",
+        ),
+        pytest.param(
+            _scenes,
+            {
+                "bounds": (0, 0, 50, 50),
+                "crs": "EPSG:32629",
+                "time": ("2025-01-01", "2025-12-31"),
+            },
+            (10.0, 10.0),
+            set(),
+            id="bbox-time-empty",
+        ),
+        pytest.param(
+            _scenes,
+            # Closed on both sides: touches a's end and b's start exactly.
+            {"time": ("2024-01-01T10:05", "2024-01-02T10:00")},
+            (10.0, 10.0),
+            {"a.tif", "b.tif"},
+            id="time-exact-boundary",
+        ),
+    ],
+)
+def test_bbox_time_slice_set_parity(
+    as_backend: Convert,
+    make: Callable[[], InMemoryGeoCatalog],
+    kwargs: dict,
+    resolution: tuple[float, float],
+    expected: set[str],
+) -> None:
+    """Gate B1: every backend yields the same slice set for a bbox + time query."""
+    want_cat = make().query(**kwargs)
+    assert {r.filepath for r in want_cat.iter_rows()} == expected
+
+    got = set(as_backend(make()).query(**kwargs).iter_slices(resolution=resolution))
+    want = set(want_cat.iter_slices(resolution=resolution))
+    # Guard against a vacuous pass: one slice per expected row.
+    assert len(want) == len(expected)
     assert got == want
 
 
