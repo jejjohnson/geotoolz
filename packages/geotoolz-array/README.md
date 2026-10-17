@@ -139,8 +139,9 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 | `GeoArray.valid_mask`, `pixel_coords`, `footprint` | Which pixels hold data; each pixel's map coordinates; the outline as a shapely polygon (`[vector]`) |
 | `combine`, `stack`, `concatenate` | Join carriers on one grid (`GridMismatchError` otherwise) |
 | `FrozenAttrs` | The immutable, hashable metadata mapping; `PER_BAND_KEYS` |
+| `RasterSource`, `AsyncRasterSource` | What a lazy reader provides: its grid, and reads that return a `GeoArray` (`read_window`, `load`); a `GeoArray` is one too |
 | `set_options`, `get_options`, `HostTransferWarning` | warn when NumPy code copies JAX data to the host |
-| `from_georeader`, `to_georeader` | bridge to georeader's `GeoTensor`, zero-copy (`[georeader]`) |
+| `from_georeader`, `to_georeader` | bridge to georeader's `GeoTensor`, zero-copy, and (`source_from_georeader` / `source_to_georeader`) its lazy readers (`[georeader]`) |
 | `as_transform`, `as_crs` | Coerce an `affine.Affine`, six numbers, an EPSG code or WKT |
 
 The design, its decisions and its roadmap are in

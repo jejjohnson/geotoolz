@@ -29,10 +29,15 @@ anywhere else).
 - **The backend dispatch** (`_src/backend.py`) — the one place that tells
   NumPy from JAX and imports JAX on demand; `_src/options.py` holds
   `set_options` (``warn_on_transfer``).
+- **`RasterSource`, `AsyncRasterSource`** (`_src/source.py`) — the
+  protocols every lazy reader of the stack implements (grid, shape, dtype,
+  fill, attrs; `read_window` / `load`, or `aread_window` / `aload`). A
+  `GeoArray` is a `RasterSource`. geoarray ships no reader.
 - **The georeader adapter** (`_src/georeader.py`, public as
-  `geoarray.interop.georeader`) — `from_georeader` / `to_georeader`, the
-  one module that imports georeader (lazily, `[georeader]` extra), mapping
-  public attributes only.
+  `geoarray.interop.georeader`) — `from_georeader` / `to_georeader` for
+  carriers, `source_from_georeader` / `source_to_georeader` for lazy
+  readers; the one module that imports georeader (lazily, `[georeader]`
+  extra), mapping public attributes only.
 
 The design is
 [geostack's `docs/design/01_geoarray.md`](https://github.com/jejjohnson/geostack/blob/main/docs/design/01_geoarray.md);

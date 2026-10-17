@@ -36,6 +36,7 @@ from geoarray._src.backend import (
 from geoarray._src.errors import GeoArrayTraceError, X64Error
 from geoarray._src.grid import (
     Grid,
+    PixelWindow,
     Transform,
     as_crs,
     as_transform,
@@ -612,6 +613,30 @@ class GeoArray[A: SupportsArray]:
         else:
             axes = tuple(range(n_batch, self.ndim - 2))
         return ~invalid.any(axis=axes) if axes else ~invalid
+
+    # -- RasterSource ----------------------------------------------------------
+
+    def read_window(self, window: PixelWindow, *, boundless: bool = True) -> GeoArray:
+        """The pixels of ``window``: `geoarray.read_window` as a method.
+
+        With `load`, this makes a carrier a `RasterSource`, so code written
+        for lazy readers takes a loaded carrier too.
+
+        Example:
+            >>> import numpy as np
+            >>> from geoarray import PixelWindow
+            >>> g = GeoArray(np.ones((4, 4)), (20, 0, 0, 0, -20, 0), 32613, 0.0)
+            >>> window = PixelWindow(col_off=2, row_off=2, width=4, height=4)
+            >>> g.read_window(window).shape
+            (4, 4)
+        """
+        from geoarray._src.geometry import read_window
+
+        return read_window(self, window, boundless=boundless)
+
+    def load(self) -> GeoArray:
+        """This carrier: its pixels are already loaded (`RasterSource`)."""
+        return self
 
     # -- backends -------------------------------------------------------------
 
