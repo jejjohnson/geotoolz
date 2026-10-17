@@ -120,6 +120,12 @@ class FrozenAttrs(Mapping[str, Any]):
     def __getitem__(self, key: str) -> Any:
         return self._items[key]
 
+    def __reduce__(self) -> tuple[Any, ...]:
+        # Rebuild through the constructor: the cached hash of string keys
+        # differs between processes (hash randomisation), and every NaN
+        # must become the one ``math.nan`` again.
+        return (FrozenAttrs, (self.to_dict(),))
+
     def __iter__(self) -> Iterator[str]:
         return iter(self._items)
 

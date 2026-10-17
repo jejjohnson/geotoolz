@@ -327,6 +327,14 @@ class GeoArray[A: SupportsArray]:
 
     # -- new carriers from this one ----------------------------------------
 
+    def __reduce__(self) -> tuple[Any, ...]:
+        # Rebuild through the constructor, so a NaN fill is the one
+        # ``math.nan`` again and attrs are re-frozen in the new process.
+        return (
+            GeoArray,
+            (self.data, self.transform, self.crs, self.fill_value, self.attrs),
+        )
+
     def replace(self, **changes: Any) -> GeoArray:
         """A copy with fields replaced (``data``, ``transform``, ``crs``, …).
 

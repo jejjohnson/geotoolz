@@ -222,3 +222,13 @@ class TestBatched:
 
 def test_inherit_sentinel_repr() -> None:
     assert repr(INHERIT) == "INHERIT"
+
+
+def test_pickle_round_trip_keeps_identity(chip: GeoArray) -> None:
+    import math
+    import pickle
+
+    back = pickle.loads(pickle.dumps(chip))
+    assert back.identical(chip)
+    assert back.fill_value is math.nan
+    assert back.attrs == chip.attrs
