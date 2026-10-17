@@ -1339,6 +1339,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+georeader = [
+    { name = "georeader-spaceml" },
+    { name = "typing-extensions" },
+]
 jax = [
     { name = "jax" },
 ]
@@ -1361,12 +1365,14 @@ typecheck = [
 [package.metadata]
 requires-dist = [
     { name = "affine", specifier = ">=2.4" },
+    { name = "georeader-spaceml", marker = "extra == 'georeader'", specifier = ">=2.1" },
     { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.30" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "shapely", marker = "extra == 'vector'", specifier = ">=2.0" },
+    { name = "typing-extensions", marker = "extra == 'georeader'", specifier = ">=4.0" },
 ]
-provides-extras = ["jax", "vector"]
+provides-extras = ["jax", "vector", "georeader"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1602,7 +1608,7 @@ source = { editable = "." }
 
 [package.dev-dependencies]
 dev = [
-    { name = "geotoolz-array", extra = ["jax", "vector"] },
+    { name = "geotoolz-array", extra = ["georeader", "jax", "vector"] },
     { name = "geotoolz-catalog" },
     { name = "geotoolz-cloud", extra = ["cog"] },
     { name = "geotoolz-ops", extra = ["hydra", "netcdf", "vector-cube", "zarr"] },
@@ -1646,7 +1652,7 @@ typecheck = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "geotoolz-array", extras = ["jax", "vector"], editable = "packages/geotoolz-array" },
+    { name = "geotoolz-array", extras = ["jax", "vector", "georeader"], editable = "packages/geotoolz-array" },
     { name = "geotoolz-catalog", editable = "packages/geotoolz-catalog" },
     { name = "geotoolz-cloud", extras = ["cog"], editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-ops", extras = ["hydra", "vector-cube", "netcdf", "zarr"], editable = "packages/geotoolz-ops" },

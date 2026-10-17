@@ -41,6 +41,7 @@ from geoarray._src.grid import (
     as_transform,
     shift_scale_transform,
 )
+from geoarray._src.options import warn_host_transfer
 
 
 __all__ = ["DIMS", "GeoArray"]
@@ -663,9 +664,33 @@ class GeoArray[A: SupportsArray]:
         )
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
-        """The data as a NumPy array, so ``np.asarray(g)`` works."""
-        if copy:
-            return np.array(self.data, dtype=dtype, copy=True)
+        """The data as a NumPy array, so ``np.asarray(g)`` works.
+
+        NumPy data is returned as it is (no copy unless ``copy=True`` or a
+        cast). JAX data is copied to the host, eagerly only: inside ``jit``,
+        ``grad`` or ``vmap`` the data are tracers, and NumPy code cannot run
+        on them. With ``set_options(warn_on_transfer=True)`` each host copy
+        warns (`HostTransferWarning`).
+
+        Raises:
+            GeoArrayTraceError: The data are traced.
+            ValueError: ``copy=False`` for JAX data, which needs a copy.
+        """
+        if self.backend == "numpy":
+            if copy:
+                return np.array(self.data, dtype=dtype, copy=True)
+            return np.asarray(self.data, dtype=dtype)
+        if is_tracer(self.data):
+            raise GeoArrayTraceError(
+                "NumPy code received a GeoArray's data inside jit / grad / vmap, "
+                "where the data are tracers; use a JAX function "
+                "(geoops.functional) or call the NumPy code outside the transform"
+            )
+        if copy is False:
+            raise ValueError(
+                "a JAX GeoArray cannot become a NumPy array without a copy"
+            )
+        warn_host_transfer("np.asarray(GeoArray)", stacklevel=2)
         return np.asarray(self.data, dtype=dtype)
 
     # -- comparison and display ----------------------------------------------

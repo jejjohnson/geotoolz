@@ -45,6 +45,17 @@ Carriers on one grid: the same CRS, spatial shape and transform.
 ::: geoarray.stack
 ::: geoarray.concatenate
 
+## Backends and interop
+
+NumPy and JAX carriers mix eagerly; `np.asarray(g)` copies JAX data to the
+host and raises `GeoArrayTraceError` under a trace.
+
+::: geoarray.set_options
+::: geoarray.get_options
+::: geoarray.HostTransferWarning
+::: geoarray.interop.georeader.from_georeader
+::: geoarray.interop.georeader.to_georeader
+
 ## Coercions
 
 Turn transforms and CRSs from other libraries into geoarray's.

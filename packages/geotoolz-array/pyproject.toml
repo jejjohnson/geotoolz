@@ -36,6 +36,9 @@ dependencies = [
 jax = ["jax>=0.4.30"]
 # `footprint`: a carrier's outline as a shapely Polygon.
 vector = ["shapely>=2.0"]
+# `geoarray.interop.georeader`: GeoTensor <-> GeoArray. georeader imports
+# `Self` from typing_extensions without declaring it (upstream bug >=2.1).
+georeader = ["georeader-spaceml>=2.1", "typing-extensions>=4.0"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
@@ -76,12 +79,15 @@ ignore = ["E402", "E721", "E731", "E741"]
 "geocloud".msg = "geoarray is the bottom of the workspace: it never imports geocloud"
 "geoproducts".msg = "geoarray is the bottom of the workspace: it never imports geoproducts"
 "rasterio".msg = "geoarray never imports rasterio: use geoarray's Grid / Window maths"
+"georeader".msg = "only geoarray._src.georeader (the [georeader] adapter) imports georeader"
 
 [tool.ruff.lint.per-file-ignores]
 # Docstrings write the affine maths in Unicode (T⁻¹, ×, ′, −) as the
 # coding standard asks; RUF001/002/003 would flag every symbol.
 "src/**/*.py" = ["RUF001", "RUF002", "RUF003"]
-"tests/**/*.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/**/*.py" = ["RUF001", "RUF002", "RUF003", "TID251"]
+# The adapter is the one module that imports georeader (lazily).
+"src/geoarray/_src/georeader.py" = ["RUF001", "RUF002", "RUF003", "TID251"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

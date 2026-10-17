@@ -359,9 +359,10 @@ jobs:
         run: uv run --no-sync pytest -q --no-cov
 
   # `pip install geotoolz-array` without extras: NumPy carriers, Grid,
-  # windows and crops work, JAX is never imported, and to_jax / footprint
-  # fail only when used, naming the `[jax]` / `[vector]` extra; the test
-  # suite passes with the JAX, shapely and oracle tests skipping.
+  # windows and crops work, JAX is never imported, and to_jax / footprint /
+  # from_georeader fail only when used, naming the `[jax]` / `[vector]` /
+  # `[georeader]` extra (gate GC3); the test suite passes with the JAX,
+  # shapely, georeader and oracle tests skipping.
   geotoolz-array-base:
     runs-on: ubuntu-latest
     steps:
@@ -382,7 +383,8 @@ jobs:
           import geoarray
           from geoarray import GeoArray, Grid
 
-          for module in ("jax", "georeader", "rasterio", "shapely", "geoops"):
+          # GC3: none of jax, rasterio, georeader or xarray is installed.
+          for module in ("jax", "georeader", "rasterio", "xarray", "shapely", "geoops"):
               assert importlib.util.find_spec(module) is None, f"{module} installed"
           assert "jax" not in sys.modules
 
@@ -407,6 +409,16 @@ jobs:
               assert "geotoolz-array[vector]" in str(exc), exc
           else:
               raise AssertionError("footprint ran without shapely")
+          from geoarray.interop.georeader import from_georeader
+
+          try:
+              from_georeader(chip)
+          except ImportError as exc:
+              assert "geotoolz-array[georeader]" in str(exc), exc
+          else:
+              raise AssertionError("from_georeader ran without georeader")
+          assert np.asarray(chip) is chip.data
+          assert "jax" not in sys.modules
           print("geotoolz-array base install OK", geoarray.__version__)
           PY
       - name: Test geotoolz-array (base install)
