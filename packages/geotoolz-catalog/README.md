@@ -21,7 +21,7 @@
 
 > **A spatiotemporal index over geospatial files.** Ask *"what overlaps this AOI between these dates?"* and get an answer in milliseconds — without opening a single file.
 
-<p align="center"><img src="../../docs/assets/diagrams/catalog-flow.png" alt="geocatalog: sources are built into an InMemory or DuckDB catalog, queried with a GeoSlice, and only the hits are loaded as a GeoTensor or a patcher RasterField" width="100%"></p>
+<p align="center"><img src="../../docs/assets/diagrams/catalog-flow.png" alt="geocatalog: sources are built into an InMemory or DuckDB catalog, queried with a GeoSlice, and only the hits are loaded as a GeoArray or a patcher RasterField" width="100%"></p>
 
 ## 30-second pitch
 
@@ -42,7 +42,7 @@ and queryable straight from `s3://` URIs).
 
 ```python
 import pandas as pd
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geocatalog import GeoSlice
 from geocatalog.backends import InMemoryGeoCatalog
@@ -63,12 +63,13 @@ aoi = GeoSlice(
 )
 
 hits: InMemoryGeoCatalog = catalog.query(aoi)                            # 2 rows — no file opened
-tensor: GeoTensor = load_raster(hits, aoi, band_indexes=[1, 2, 3])       # (3, 500, 500) uint16, mosaicked
+scene: GeoArray = load_raster(hits, aoi, band_indexes=[1, 2, 3])        # (3, 500, 500) uint16 on aoi.grid
 ```
 
 `hits` is itself a catalog, so queries chain and set-combine; only
 `load_raster` (or `load_vector`) opens files, and only the ones that
-overlap. From STAC, the same flow starts with
+overlap. Loaders return a [`geoarray.GeoArray`](../geotoolz-array/README.md)
+on the slice grid (`scene.grid == aoi.grid`), its nodata in `fill_value`. From STAC, the same flow starts with
 `geocatalog.sources.from_stac_search(client, collections=["sentinel-2-l2a"], bounds=..., datetime="2024-06", asset_key="B04")`.
 
 ## Where things live
@@ -94,9 +95,10 @@ named for the step it serves:
 ## Bridging to a patcher
 
 `geocatalog.patch.field_for` (the `[patch]` extra) mosaics the rows a
-`GeoSlice` selects into one `geopatcher.RasterField`, which
-`geopatcher.SpatialPatcher` chips with `split` and reassembles with
-`merge`:
+`GeoSlice` selects into one `GeoArray` and wraps it as a
+`geopatcher.RasterField`, which `geopatcher.SpatialPatcher` chips with
+`split` and reassembles with `merge` (`materialize=False` gives one lazy
+field per file instead):
 
 ```python
 import geocatalog as gc
@@ -132,7 +134,7 @@ uv add geotoolz-catalog
 | `[earthaccess]` / `[gee]` | `EarthAccessSource` / `GEESource` | NASA Earthdata / Earth Engine ingestion |
 | `[sources-all]` | `[earthaccess]` + `[stac]` + `[gee]` | Every source adapter |
 | `[cloud]` | `s3://`, `gs://`, `az://`, `https://`, `hf://` reads in the builders and loaders (`geocloud.fs`) and `stage()` of remote URIs (`geocloud.files`): one client pool and the credentials in `geocloud.credentials` (geotoolz-cloud) | Cloud object storage, local caches of cloud assets |
-| `[patch]` | `geocatalog.patch.field_for` — bridge to `geopatcher` | Patcher / tiling workflows |
+| `[patch]` | `geocatalog.patch.field_for` — bridge to `geopatcher` (plus georeader, the engine of its lazy `materialize=False` fields) | Patcher / tiling workflows |
 | `[full]` | All of the above | One-shot install |
 
 ## Next steps

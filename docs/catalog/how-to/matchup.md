@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geocatalog as gc
@@ -62,8 +62,8 @@ grid: gc.GeoSlice = gc.GeoSlice(
     resolution=(30.0, 30.0),                                         # the coarser sensor's grid
     crs="EPSG:32611",
 )
-s2_chip: GeoTensor = gc.load.load_raster(s2.where(f"filepath == '{s2_path}'"), grid)        # (1, 200, 100) uint16
-ls_chip: GeoTensor = gc.load.load_raster(landsat.where(f"filepath == '{ls_path}'"), grid)   # (1, 200, 100) uint16
+s2_chip: GeoArray = gc.load.load_raster(s2.where(f"filepath == '{s2_path}'"), grid)        # (1, 200, 100) uint16
+ls_chip: GeoArray = gc.load.load_raster(landsat.where(f"filepath == '{ls_path}'"), grid)   # (1, 200, 100) uint16
 ```
 
 The 06-15 scene has no Landsat partner within three days, so it drops out.

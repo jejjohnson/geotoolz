@@ -19,8 +19,8 @@ import tempfile
 import pandas as pd
 import planetary_computer
 import pystac_client
+from geoarray import GeoArray
 from geocloud.cache import LocalCache
-from georeader.geotensor import GeoTensor
 
 import geocatalog as gc
 from geocatalog.backends import InMemoryGeoCatalog
@@ -48,7 +48,7 @@ aoi: gc.GeoSlice = gc.GeoSlice(
     resolution=(0.0002, 0.0002),                                     # ~20 m
     crs="EPSG:4326",
 )
-scl: GeoTensor = gc.load.load_raster(local, aoi)                     # (1, 250, 250) uint8, read from disk
+scl: GeoArray = gc.load.load_raster(local, aoi)                     # (1, 250, 250) uint8, read from disk
 ```
 
 What `stage` does:

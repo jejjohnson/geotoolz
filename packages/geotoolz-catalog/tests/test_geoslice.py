@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pyproj
 import pytest
+from geoarray import Grid
 
 from geocatalog import GeoSlice
 from geocatalog.grid import slice_to_window, window_to_slice
@@ -238,3 +239,21 @@ class TestBoundsResolutionCoercion:
     def test_non_numeric_rejected(self) -> None:
         with pytest.raises(ValueError, match="4 numbers"):
             GeoSlice(("a", 0, 1, 1), _iv(), (1.0, 1.0), "EPSG:4326")  # type: ignore[arg-type]
+
+
+def test_grid_is_the_output_pixel_grid() -> None:
+    sl = GeoSlice(
+        bounds=(500_000.0, 4_000_000.0, 500_640.0, 4_000_320.0),
+        interval=pd.Interval(
+            pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-31"), closed="both"
+        ),
+        resolution=(10.0, 20.0),
+        crs="EPSG:32629",
+    )
+    grid = sl.grid
+    assert isinstance(grid, Grid)
+    assert grid.shape == sl.shape == (16, 64)
+    assert grid.affine == sl.transform
+    assert grid.crs == sl.crs
+    assert grid.bounds == sl.bounds
+    assert grid.res == sl.resolution

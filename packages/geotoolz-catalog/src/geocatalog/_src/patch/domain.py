@@ -3,7 +3,8 @@
 A downstream `SpatialPatcher` (e.g. `geopatcher.SpatialPatcher`)
 operates on a `Domain` — an object with ``bounds``, an iterable tiling,
 and (downstream) a `Field` that knows how to read bytes for a given
-sub-region. The single-file case is `RasterDomain` + `RasterField`. The
+sub-region. The single-file case is a `geopatcher.RasterField` over one
+`geoarray.RasterSource` (its own domain, by its ``grid``). The
 *multi-file* case is this shim: wrap a catalog, get one sub-domain per
 row, and the same operator pipeline that handled a single raster now
 handles an archive.
@@ -53,12 +54,13 @@ class CatalogDomain:
         Tiled per-row inference across a multi-file S2 archive::
 
             import geocatalog as gc
+            import numpy as np
 
             catalog = gc.build.build_raster_catalog(paths)
             domain = gc.patch.CatalogDomain(catalog, resolution=(10.0, 10.0))
             for slice_ in domain.slices():
-                chip = gc.load.load_raster(catalog, slice_)
-                predictions.append(model(chip.values))
+                chip = gc.load.load_raster(catalog, slice_)  # (C, H, W) GeoArray
+                predictions.append(model(np.asarray(chip)))
     """
 
     catalog: GeoCatalog

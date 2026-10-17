@@ -3,7 +3,7 @@
 A staged catalog (the output of `stage()`) has its ``filepath`` /
 ``assets`` columns rewritten to local paths. ``field_for`` mosaics the
 rows a `GeoSlice` selects onto the slice grid with `load_raster` and
-wraps the resulting `GeoTensor` in a `geopatcher.RasterField`, so a
+wraps the resulting `geoarray.GeoArray` in a `geopatcher.RasterField`, so a
 `SpatialPatcher` can chip it and reassemble its output:
 
     staged = stage(bundle.catalog)
@@ -12,7 +12,10 @@ wraps the resulting `GeoTensor` in a `geopatcher.RasterField`, so a
 
 The field is in the slice CRS (the catalog CRS when no slice is given),
 whatever CRS the individual files are in. ``materialize=False`` skips
-the mosaic and returns one lazy field per row, in each file's own CRS.
+the mosaic and returns one lazy field per row, in each file's own CRS:
+georeader's ``RasterioReader`` is the engine, wrapped as a
+`geoarray.RasterSource` with
+``geoarray.interop.georeader.source_from_georeader``.
 
 `geopatcher` is a soft dependency — imports happen inside
 `field_for` so a base install is unaffected. Opt in with
@@ -31,16 +34,11 @@ from geocatalog._src.utils.uri import parse_uri
 
 
 if TYPE_CHECKING:
+    from geoarray import RasterSource
     from geopatcher import RasterField
 
     from geocatalog._src.backends.memory import InMemoryGeoCatalog
     from geocatalog._src.geoslice import GeoSlice
-
-
-_GEOREADER_HINT = (
-    "field_for() requires georeader, a base dependency of geotoolz-catalog. "
-    "Reinstall it with `pip install georeader-spaceml`."
-)
 
 
 def _is_local_path(path: str) -> bool:
@@ -116,12 +114,13 @@ def field_for(
         merge_method: How overlapping rows combine (see `load_raster`).
         nodata: Nodata override for the mosaic (see `load_raster`).
         materialize: ``True`` (default) reads and mosaics the selected
-            rows into one `GeoTensor` on the slice grid and wraps it —
-            a field `SpatialPatcher.split` / ``merge`` can round-trip.
-            ``False`` reads nothing and returns one lazy field per
-            selected row (catalog order), each over a
-            `georeader.RasterioReader` in its file's own CRS and grid;
-            each ``select`` reads its window on demand, restricted to
+            rows into one `geoarray.GeoArray` on the slice grid and wraps
+            it — a field `SpatialPatcher.split` / ``merge`` can
+            round-trip, whose ``domain`` is that GeoArray. ``False``
+            reads nothing and returns one lazy field per selected row
+            (catalog order), each over a lazy `geoarray.RasterSource`
+            in its file's own CRS and grid (its ``domain.grid``); each
+            ``select`` reads its window on demand, restricted to
             ``band_indexes``. There is no mosaic and no reprojection on
             this path (``resampling``, ``merge_method`` and ``nodata``
             do not apply).
@@ -131,8 +130,8 @@ def field_for(
         One `RasterField` (``materialize=True``) or a list of lazy ones.
 
     Raises:
-        ImportError: If geopatcher (``[patch]`` extra) or georeader is
-            missing — each with its own install hint.
+        ImportError: If geopatcher, or (for ``materialize=False``)
+            georeader, is missing — both come with the ``[patch]`` extra.
         TypeError: If ``slice_`` is a string (``asset`` is keyword-only).
         ValueError: If ``mode`` is unsupported, the backend is not
             raster, the catalog (or the slice's selection) is empty, or
@@ -149,10 +148,6 @@ def field_for(
         raise missing_extra(
             "`field_for()`", "patch", packages="geotoolz-patcher"
         ) from exc
-    try:
-        from georeader.rasterio_reader import RasterioReader
-    except ImportError as exc:
-        raise ImportError(_GEOREADER_HINT) from exc
 
     if isinstance(slice_, str):
         raise TypeError(
@@ -188,13 +183,12 @@ def field_for(
     _reject_unstaged_uris(paths, asset=asset)
 
     if not materialize:
-        indexes = list(band_indexes) if band_indexes is not None else None
-        return [RasterField(RasterioReader(p, indexes=indexes)) for p in paths]
+        return [RasterField(source) for source in _lazy_sources(paths, band_indexes)]
     assert slice_ is not None
 
     from geocatalog._src.formats.raster import load_raster
 
-    tensor = load_raster(
+    mosaic = load_raster(  # (bands, H, W) on slice_.grid
         selected,
         slice_,
         band_indexes=band_indexes,
@@ -202,7 +196,28 @@ def field_for(
         merge_method=merge_method,  # type: ignore[arg-type]
         nodata=nodata,
     )
-    return RasterField(tensor)
+    return RasterField(mosaic)
+
+
+def _lazy_sources(
+    paths: list[str], band_indexes: Sequence[int] | None
+) -> list[RasterSource]:
+    """One lazy `geoarray.RasterSource` per file, read window by window.
+
+    georeader's ``RasterioReader`` is the engine; the adapter presents it
+    as a `RasterSource` whose reads return `geoarray.GeoArray`.
+    """
+    try:
+        from geoarray.interop.georeader import source_from_georeader
+        from georeader.rasterio_reader import RasterioReader
+    except ImportError as exc:
+        raise missing_extra(
+            "`field_for(materialize=False)`",
+            "patch",
+            packages="'geotoolz-array[georeader]' georeader-spaceml",
+        ) from exc
+    indexes = list(band_indexes) if band_indexes is not None else None
+    return [source_from_georeader(RasterioReader(p, indexes=indexes)) for p in paths]
 
 
 def _whole_catalog_slice(catalog: InMemoryGeoCatalog) -> GeoSlice:

@@ -27,6 +27,7 @@ from typing import Any, get_args
 import numpy as np
 import pandas as pd
 import pyproj
+from geoarray import Grid
 from rasterio import Affine
 from rasterio.windows import (
     Window,
@@ -242,6 +243,29 @@ class GeoSlice:
         x_res, y_res = self.resolution
         xmin, _ymin, _xmax, ymax = self.bounds
         return Affine(x_res, 0.0, xmin, 0.0, -y_res, ymax)
+
+    @property
+    def grid(self) -> Grid:
+        """The output pixel grid: `transform`, ``crs`` and `shape`.
+
+        The grid every loader returns its `geoarray.GeoArray` on, so
+        ``load_raster(catalog, s).grid == s.grid``.
+
+        Example:
+            >>> import pandas as pd
+            >>> s = GeoSlice(
+            ...     bounds=(500000.0, 4000000.0, 500640.0, 4000320.0),
+            ...     interval=pd.Interval(
+            ...         pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-31"),
+            ...         closed="both",
+            ...     ),
+            ...     resolution=(10.0, 10.0),
+            ...     crs="EPSG:32629",
+            ... )
+            >>> s.grid.shape, s.grid.bounds == s.bounds
+            ((32, 64), True)
+        """
+        return Grid(self.transform, self.crs, self.shape)
 
     def to_crs(self, target_crs: Any) -> GeoSlice:
         """Reproject this slice's bounds into ``target_crs``.
