@@ -11,7 +11,7 @@ geotransform instead of preserving or dropping it).
 Design notes:
 
 - Arrays are unwrapped with ``np.asarray`` *before* reaching einx, so
-  `GeoArray.__array_ufunc__` never interacts with einx internals.
+  einx only ever sees plain arrays.
 - Pattern validation is permissive at construction (einx itself
   validates at dispatch); the op name, bracket balance and the names of
   extra einx keyword arguments are checked eagerly.
