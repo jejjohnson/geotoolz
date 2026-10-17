@@ -39,6 +39,7 @@ plugins:
             - packages/geotoolz-catalog/src
             - packages/geotoolz-cloud/src
             - packages/geotoolz-products/src
+            - packages/geotoolz-array/src
           options:
             docstring_style: google
             # Parse `Returns:  X: desc` as *type: description* (not as a
@@ -231,6 +232,9 @@ nav:
           - GOES-19 mesoscale: products/notebooks/goes_mesoscale.ipynb
           - Himawari over Japan: products/notebooks/himawari_japan.ipynb
       - Reference: products/api.md
+  - Array — geoarray:
+      - Overview: array/index.md
+      - Reference: array/api.md
   - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack
   - Contributing: contributing.md
 

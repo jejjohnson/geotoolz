@@ -126,6 +126,7 @@ typecheck: ## 🔬 Type-check with ty (all packages)
 	cd packages/geotoolz-catalog && uv run --group typecheck ty check src/geocatalog
 	cd packages/geotoolz-products && uv run --group typecheck ty check src/geoproducts
 	cd packages/geotoolz-cloud && uv run --group typecheck ty check src/geocloud
+	cd packages/geotoolz-array && uv run --group typecheck ty check src/geoarray
 	@printf "$(GREEN)>>> ✅ Type check passed!$(RESET)\n"
 
 # ===========================================================================
@@ -140,6 +141,7 @@ test: ## 🧪 Run fast tests across all packages (no coverage)
 	cd packages/geotoolz-catalog && uv run pytest -v -o addopts="--strict-markers --ignore=tests/bench -m 'not live'"
 	cd packages/geotoolz-products && uv run pytest -v -o addopts=--strict-markers -m "not slow and not live and not integration"
 	cd packages/geotoolz-cloud && uv run pytest -v -o addopts=--strict-markers
+	cd packages/geotoolz-array && uv run pytest -v -o addopts=--strict-markers
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
 test-all: ## 🧪 Run ALL tests including slow/integration (no coverage)
@@ -149,6 +151,7 @@ test-all: ## 🧪 Run ALL tests including slow/integration (no coverage)
 	cd packages/geotoolz-catalog && uv run pytest -v -o addopts="--strict-markers --ignore=tests/bench -m 'not live'"
 	cd packages/geotoolz-products && uv run pytest -v -o addopts=--strict-markers -m "not live"
 	cd packages/geotoolz-cloud && uv run pytest -v -o addopts=--strict-markers
+	cd packages/geotoolz-array && uv run pytest -v -o addopts=--strict-markers
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
 test-slow: ## 🐢 Run only the slow/integration tiers (geotoolz, geotoolz-products; no coverage)
@@ -164,6 +167,7 @@ test-cov: ## 📊 Run fast tests with coverage reports (same tier as CI)
 	cd packages/geotoolz-catalog && uv run pytest -v
 	cd packages/geotoolz-products && uv run pytest -v -m "not slow and not live and not integration"
 	cd packages/geotoolz-cloud && uv run pytest -v
+	cd packages/geotoolz-array && uv run pytest -v
 	@printf "$(GREEN)>>> ✅ Coverage reports generated!$(RESET)\n"
 
 # ===========================================================================

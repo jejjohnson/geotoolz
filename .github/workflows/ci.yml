@@ -106,6 +106,16 @@ jobs:
             exit 1
           fi
         working-directory: packages/geotoolz-cloud
+      # The all-extras run of the array suite: the JAX tests need [jax], so
+      # a skip fails the job.
+      - name: Test geotoolz-array (all extras, no skips)
+        run: |
+          uv run pytest -v -rs | tee pytest.log
+          if grep -q "^SKIPPED" pytest.log; then
+            echo "::error::geotoolz-array tests skipped in the all-extras run"
+            exit 1
+          fi
+        working-directory: packages/geotoolz-array
       - name: Upload coverage report
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v7
@@ -116,5 +126,5 @@ jobs:
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v7
         with:
-          files: packages/geotoolz-ops/coverage.xml,packages/geotoolz-patcher/coverage.xml,packages/geotoolz-catalog/coverage.xml,packages/geotoolz-products/coverage.xml,packages/geotoolz-cloud/coverage.xml
+          files: packages/geotoolz-ops/coverage.xml,packages/geotoolz-patcher/coverage.xml,packages/geotoolz-catalog/coverage.xml,packages/geotoolz-products/coverage.xml,packages/geotoolz-cloud/coverage.xml,packages/geotoolz-array/coverage.xml
           fail_ci_if_error: false

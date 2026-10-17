@@ -4,5 +4,6 @@
   "packages/geotoolz-patcher": "0.10.2",
   "packages/geotoolz-catalog": "0.5.1",
   "packages/geotoolz-products": "0.4.2",
-  "packages/geotoolz-cloud": "0.4.1"
+  "packages/geotoolz-cloud": "0.4.1",
+  "packages/geotoolz-array": "0.0.0"
 }
