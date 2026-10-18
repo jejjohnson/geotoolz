@@ -43,6 +43,7 @@ from pipekit import Operator
 
 from geoops._src.config import jsonable
 from geoops._src.fitted import fit_once
+from geoops._src.geo import reject_geotensor
 from geoops._src.stretch import percentile_stretch
 from geoops._src.valid import (
     invalid_values,
@@ -620,6 +621,7 @@ class HistogramMatch(Operator):
         self.reference = reference
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        reject_geotensor(self.reference, "HistogramMatch (reference)")
         arr, valid = _masked(gt)
         reference, _ = _masked(self.reference)
         # The primitive matches along a leading band axis: put the band

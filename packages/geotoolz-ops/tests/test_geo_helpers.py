@@ -271,3 +271,36 @@ def test_require_projected_crs_messages() -> None:
     require_projected_crs(feet, "Op", metres=False)
     require_projected_crs(toy_geoarray(np.zeros((2, 2))), "Op")
     require_projected_crs(np.zeros((2, 2)), "Op")
+
+
+# --- the engine boundary refuses georeader objects --------------------------
+
+
+def test_to_engine_refuses_a_geotensor() -> None:
+    """GD1 at the engine boundary: only geotoolz carriers cross into georeader."""
+    from geoarray.interop.georeader import to_georeader
+
+    from geoops._src.engine import to_engine
+
+    gt = to_georeader(toy_geoarray(np.zeros((2, 2))))
+    with pytest.raises(TypeError, match=r"ReprojectLike .*from_georeader"):
+        to_engine(gt, "ReprojectLike")
+
+
+def test_to_engine_refuses_a_georeader_reader(tmp_path) -> None:
+    from georeader.rasterio_reader import RasterioReader
+
+    from geoops._src.engine import to_engine
+
+    path = tmp_path / "scene.tif"
+    gz.io.WriteGeoTIFF(path=str(path))(toy_geoarray(np.ones((1, 4, 4))))
+    with pytest.raises(TypeError, match="source_from_georeader"):
+        to_engine(RasterioReader(str(path)))
+
+
+def test_to_engine_converts_geotoolz_carriers() -> None:
+    from geoops._src.engine import to_engine
+    from geoops._src.geo import is_geotensor
+
+    assert is_geotensor(to_engine(toy_geoarray(np.zeros((2, 2)))))
+    assert to_engine(None) is None

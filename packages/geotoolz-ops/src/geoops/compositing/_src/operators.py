@@ -3,7 +3,7 @@
 All composites are N-ary reducers: they take their inputs as positional
 arguments, ``op(f1, f2, ...)``, so they wire into a ``pipekit.Graph`` as
 ``op(Input("a"), Input("b"))``, or as one sequence, ``op([f1, f2])``
-(the multi-input convention, see ``docs/concepts.md``). They are
+(the multi-input convention, see ``docs/operators/concepts.md``). They are
 metadata-independent per-pixel reductions, so they accept plain
 ``np.ndarray`` frames as well as GeoArrays.
 The frame-sequence composites (:class:`MedianComposite`,

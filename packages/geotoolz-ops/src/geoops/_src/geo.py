@@ -39,8 +39,10 @@ __all__ = [
     "as_pixel_window",
     "grid_matches",
     "ground_pixel_size",
+    "is_georeader_object",
     "is_geotensor",
     "pixel_xy",
+    "reject_georeader",
     "reject_geotensor",
     "require_geoarray",
     "require_grid_match",
@@ -80,6 +82,36 @@ def reject_geotensor(x: Any, op_name: str = "geotoolz") -> None:
         raise TypeError(
             f"{op_name} takes a geoarray.GeoArray, not a georeader GeoTensor; "
             f"{_FROM_GEOREADER}"
+        )
+
+
+def is_georeader_object(x: Any) -> bool:
+    """Whether ``x`` is an instance of any georeader class (checked by module)."""
+    return any(
+        cls.__module__.split(".", 1)[0] == "georeader" for cls in type(x).__mro__
+    )
+
+
+def reject_georeader(x: Any, op_name: str = "geotoolz") -> None:
+    """Raise ``TypeError`` for any georeader object; pass anything else.
+
+    A ``GeoTensor`` gets `reject_geotensor`'s message (convert it with
+    ``from_georeader``); any other georeader object (a reader, a
+    ``GeoData``) is told to wrap it with ``source_from_georeader``.
+
+    Args:
+        x: The value to check.
+        op_name: Who refuses it, for the message.
+
+    Raises:
+        TypeError: ``x`` is a georeader object.
+    """
+    reject_geotensor(x, op_name)
+    if is_georeader_object(x):
+        raise TypeError(
+            f"{op_name} takes a geoarray.GeoArray or geoarray.RasterSource, not a "
+            f"georeader {type(x).__name__}; wrap the reader at the boundary with "
+            "geoarray.interop.georeader.source_from_georeader(reader)"
         )
 
 

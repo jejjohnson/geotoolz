@@ -61,7 +61,7 @@ from geoops._src.config import (
     mapping_to_pairs,
 )
 from geoops._src.engine import from_engine, to_engine
-from geoops._src.geo import is_geotensor, reject_geotensor, require_geoarray
+from geoops._src.geo import reject_georeader, require_geoarray
 from geoops.io._src.errors import GeoToolzIOError
 
 
@@ -136,29 +136,6 @@ def _coerce_window(window: Window | tuple[float, float, float, float]) -> Window
     return Window(col_off=col_off, row_off=row_off, width=width, height=height)
 
 
-def _is_georeader_object(x: Any) -> bool:
-    """Whether ``x`` is an instance of a georeader class (checked by module)."""
-    return any(
-        cls.__module__.split(".", 1)[0] == "georeader" for cls in type(x).__mro__
-    )
-
-
-def _reject_georeader(x: Any, op_name: str) -> None:
-    """Refuse a georeader ``GeoTensor`` / ``GeoData`` handed in by a user.
-
-    Raises:
-        TypeError: ``x`` is a georeader object; the message names the
-            ``geoarray.interop.georeader`` bridge to convert it with.
-    """
-    reject_geotensor(x, op_name)
-    if _is_georeader_object(x) and not is_geotensor(x):
-        raise TypeError(
-            f"{op_name} takes a path, a geoarray.RasterSource or a GeoArray, not a "
-            f"georeader {type(x).__name__}; wrap the reader at the boundary with "
-            "geoarray.interop.georeader.source_from_georeader(reader)"
-        )
-
-
 def _coerce_source(
     src: Source, indexes: list[int] | None = None, op_name: str = "geoops.io"
 ) -> RasterSource:
@@ -179,7 +156,7 @@ def _coerce_source(
         GeoToolzIOError: ``indexes`` is given for a source that cannot
             select bands.
     """
-    _reject_georeader(src, op_name)
+    reject_georeader(src, op_name)
     if isinstance(src, str | PathLike):
         return source_from_georeader(RasterioReader(str(src), indexes=indexes))
 

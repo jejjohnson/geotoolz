@@ -14,18 +14,25 @@ from typing import Any
 
 from geoarray import GeoArray, RasterSource
 
-from geoops._src.geo import is_geotensor
+from geoops._src.geo import is_geotensor, reject_georeader
 
 
 __all__ = ["from_engine", "to_engine"]
 
 
-def to_engine(x: Any) -> Any:
+def to_engine(x: Any, op_name: str = "geotoolz") -> Any:
     """``x`` as georeader expects it: a ``GeoTensor`` or ``GeoData``.
 
     A `GeoArray` becomes a ``GeoTensor`` sharing its memory (JAX data is
     copied to the host first); a `RasterSource` becomes a ``GeoData``
-    view read window by window. Anything else is returned unchanged.
+    view read window by window. A georeader object handed in by a user
+    (a ``GeoTensor``, a reader) is refused: only geotoolz carriers cross
+    into the engine, so a constructor-held ``GeoTensor`` cannot slip
+    through. Anything else is returned unchanged.
+
+    Raises:
+        TypeError: ``x`` is already a georeader object; the message names
+            the ``geoarray.interop.georeader`` bridge to convert it with.
     """
     from geoarray.interop.georeader import source_to_georeader, to_georeader
 
@@ -33,6 +40,7 @@ def to_engine(x: Any) -> Any:
         return to_georeader(x.to_numpy())
     if isinstance(x, RasterSource):
         return source_to_georeader(x)
+    reject_georeader(x, op_name)
     return x
 
 

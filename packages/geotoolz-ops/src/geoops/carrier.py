@@ -8,7 +8,7 @@ naming ``geoarray.interop.georeader.from_georeader``. These are the
 helpers the built-in operators use to keep them; an operator you write on
 top of the stack uses the same ones, so it composes with everything else.
 The rules themselves are in the repository's ``AGENTS.md`` ("The two
-contracts") and ``docs/concepts.md``.
+contracts") and ``docs/operators/concepts.md``.
 
 Rewrap:
     `wrap_like` puts a result back on the input's carrier (``transform=``
@@ -38,7 +38,9 @@ Samples:
     `sample_layout` / `SampleLayout` describe the round trip.
 
 Grids:
-    `require_geoarray`, `reject_geotensor`, `require_projected_crs`,
+    `require_geoarray`, `reject_geotensor` (a georeader ``GeoTensor``
+    carrier), `reject_georeader` (any georeader object, e.g. a raster an
+    operator holds in its constructor), `require_projected_crs`,
     `require_grid_match`, `grid_matches`, `affine_of` (the transform as an
     ``affine.Affine``) and `pixel_xy` (map coordinates of pixel centres).
 
@@ -105,6 +107,7 @@ from geoops._src.geo import (
     affine_of,
     grid_matches,
     pixel_xy,
+    reject_georeader,
     reject_geotensor,
     require_geoarray,
     require_grid_match,
@@ -163,6 +166,7 @@ __all__ = [
     "over_frames",
     "pixel_xy",
     "reject_config_summary",
+    "reject_georeader",
     "reject_geotensor",
     "require_geoarray",
     "require_grid_match",

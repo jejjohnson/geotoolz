@@ -1179,6 +1179,121 @@ def test_multi_input_operator_refuses_a_geotensor_second_input(cls: type) -> Non
         _build_seeded(cls)(*values)
 
 
+#: Constructor arguments that hold a raster but are not annotated with a
+#: geoarray type (``Any`` / ``np.ndarray``), and the toy raster for each.
+#: Arguments annotated ``GeoArray`` / ``RasterSource`` / ``Source`` are
+#: found from the signature.
+HELD_RASTERS: dict[str, dict[str, Callable[[], Any]]] = {
+    "geom._src.operators.Georeference": {
+        "valid_glt": lambda: __import__("_helpers").toy_geoarray(
+            np.ones((16, 16), dtype=bool), fill_value=False
+        ),
+    },
+    "geom._src.operators.GeostationaryParallaxCorrect": {
+        "target_height_m": lambda: __import__("_helpers").toy_geoarray(
+            np.full((16, 16), 1000.0)
+        ),
+    },
+    "io._src.operators.ReadReprojectLike": {"like": _grid},
+    "normalize._src.operators.HistogramMatch": {"reference": _grid},
+    "patch_ops.BalancedSampler": {
+        "labels": lambda: __import__("_helpers").toy_geoarray(
+            np.zeros((16, 16), dtype=np.int32), fill_value=0
+        ),
+    },
+    "patch_ops.StratifiedSample": {
+        "labels": lambda: __import__("_helpers").toy_geoarray(
+            np.zeros((16, 16), dtype=np.int32), fill_value=0
+        ),
+    },
+}
+
+_RASTER_ANNOTATION = ("GeoArray", "RasterSource", "Source")
+
+
+def _held_raster_params() -> list[Any]:
+    """One case per (operator, constructor argument holding a raster)."""
+    cases = []
+    for cls in _CLASSES:
+        key = _key(cls)
+        params = inspect.signature(cls.__init__).parameters
+        names = {
+            name
+            for name, param in params.items()
+            if any(t in str(param.annotation) for t in _RASTER_ANNOTATION)
+        }
+        names |= set(HELD_RASTERS.get(key, {}))
+        cases += [pytest.param(cls, name, id=f"{key}.{name}") for name in sorted(names)]
+    return cases
+
+
+def _held_raster_kwargs(cls: type, name: str) -> dict[str, Any]:
+    """Constructor kwargs for ``cls`` with a toy GeoArray as ``name``."""
+    from geoarray import GeoArray
+
+    key = _key(cls)
+    if key in RUNTIME_CTOR_KWARGS:
+        kwargs = RUNTIME_CTOR_KWARGS[key]()
+    else:
+        spec = CTOR_KWARGS.get(key, {})
+        kwargs = dict(spec) if isinstance(spec, dict) else spec()
+    if not isinstance(kwargs.get(name), GeoArray):
+        kwargs[name] = HELD_RASTERS.get(key, {}).get(name, _grid)()
+    return kwargs
+
+
+def test_held_raster_cases_cover_the_known_operators() -> None:
+    """The signature scan finds the ``like`` / ``glt`` / ``src`` holders."""
+    ids = {param.id for param in _held_raster_params()}
+    for case in (
+        "geom._src.operators.ReprojectLike.like",
+        "geom._src.operators.ResampleLike.like",
+        "geom._src.operators.RasterizeLike.like",
+        "geom._src.operators.Georeference.glt",
+        "io._src.operators.ReadWindow.src",
+    ):
+        assert case in ids
+
+
+@pytest.mark.parametrize(("cls", "name"), _held_raster_params())
+def test_constructor_held_geotensor_is_refused(
+    cls: type, name: str, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GD1 for a raster an operator holds: a GeoTensor there is refused too.
+
+    The call-time checks never see a constructor argument, and georeader
+    takes a GeoTensor as its own, so without a check the operator would
+    run on it and return a GeoArray. The operator is built with a toy
+    GeoArray in ``name`` and run on the first input it accepts (or none);
+    the same operator holding that raster as a GeoTensor must raise a
+    ``TypeError`` naming the ``geoarray.interop.georeader`` bridge.
+    """
+    monkeypatch.chdir(tmp_path)  # sinks write their relative paths here
+    kwargs = _held_raster_kwargs(cls, name)
+    good = cls(**kwargs)
+    bad = cls(**{**kwargs, name: _as_geotensor(kwargs[name])})
+    calls: list[tuple[Any, ...]] = [(), *((x,) for x in _toy_inputs())]
+    for args in calls:
+        try:
+            good(*args) if not args else _call(copy.deepcopy(good), args[0])
+        except Exception:
+            continue
+        with pytest.raises(TypeError, match="from_georeader"):
+            bad(*args) if not args else _call(copy.deepcopy(bad), args[0])
+        return
+    # No toy input runs (a reader of a missing file): the refusal comes
+    # before anything else can fail, for some input.
+    refused = []
+    for args in calls:
+        try:
+            bad(*args) if not args else _call(copy.deepcopy(bad), args[0])
+        except TypeError as exc:
+            refused.append("from_georeader" in str(exc))
+        except Exception:
+            refused.append(False)
+    assert any(refused), f"{_key(cls)}({name}=GeoTensor) was not refused"
+
+
 def test_phase_align_is_terminal_only_without_apply() -> None:
     """``PhaseAlign(apply=False)`` returns a shift tuple (#142 review)."""
     from pipekit import Identity, Sequential

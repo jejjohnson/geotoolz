@@ -60,6 +60,7 @@ from geoops._src.geo import (
     as_pixel_window,
     grid_matches,
     pixel_xy,
+    reject_georeader,
     reject_geotensor,
     require_geoarray,
     require_grid_match,
@@ -369,7 +370,9 @@ class ReprojectLike(Operator):
         self.resampling = resampling
 
     def _apply(self, gt: GeoArray) -> GeoArray:
-        require_geoarray(gt, type(self).__name__)
+        name = type(self).__name__
+        require_geoarray(gt, name)
+        reject_georeader(self.like, f"{name} (like)")
         return adopt_attrs(
             gt,
             read.read_reproject_like(
@@ -1680,6 +1683,9 @@ class GeostationaryParallaxCorrect(Operator):
         require_geoarray(gt, "GeostationaryParallaxCorrect")
         if self.method not in {"nearest", "bilinear"}:
             raise ValueError("method must be 'nearest' or 'bilinear'.")
+        reject_geotensor(
+            self.target_height_m, "GeostationaryParallaxCorrect (target_height_m)"
+        )
         heights = _height_array(self.target_height_m, gt.shape[-2:])
         if np.all(heights == 0):
             return gt
@@ -1950,7 +1956,8 @@ class Georeference(Operator):
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray:
         reject_geotensor(gt, "Georeference")
-        reject_geotensor(self.glt, "Georeference (glt)")
+        reject_georeader(self.glt, "Georeference (glt)")
+        reject_geotensor(self.valid_glt, "Georeference (valid_glt)")
         fill = gt.fill_value if isinstance(gt, GeoArray) else None
         return from_engine(
             griddata.georreference(
@@ -2094,6 +2101,9 @@ class RasterizeLike(Operator):
         self.fill_value = fill_value
 
     def _apply(self, gt: GeoArray | None = None) -> GeoArray:
+        reject_georeader(self.like, "RasterizeLike (like)")
+        if gt is not None:
+            reject_geotensor(gt, "RasterizeLike")
         if gt is not None and not grid_matches(gt, self.like):
             raise ValueError(
                 "RasterizeLike: the input is not on `like`'s grid (spatial "
