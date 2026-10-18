@@ -81,6 +81,20 @@ def test_read_hdf_reads_geolocation_onto_the_data_grid(h5_file: Path):
     np.testing.assert_array_equal(np.asarray(latlon)[1], np.zeros((20, 30)))
 
 
+def test_read_hdf_drops_a_fill_the_dtype_cannot_hold(tmp_path: Path):
+    path = tmp_path / "dn.h5"
+    with h5py.File(path, "w") as f:
+        dn = f.create_dataset("dn", data=np.ones((4, 5), dtype="u2"))
+        dn.attrs["_FillValue"] = -9999.0  # a uint16 pixel can never equal it
+        f.create_dataset("qa", data=np.ones((4, 5), dtype="u1")).attrs["_FillValue"] = (
+            255.0
+        )
+    out = read_hdf(path, "dn")  # (4, 5) uint16
+    assert out.fill_value is None
+    assert out.attrs["attrs"]["_FillValue"] == -9999.0  # still on record
+    assert read_hdf(path, "qa").fill_value == 255  # a fill that fits stays
+
+
 def test_read_hdf_rejects_other_files(tmp_path: Path):
     path = tmp_path / "x.bin"
     path.write_bytes(b"not an hdf file")

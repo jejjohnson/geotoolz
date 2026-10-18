@@ -237,7 +237,24 @@ def test_refuses_georeader_carriers(tmp_path: Path) -> None:
 
 
 def test_auto_nodata_drops_a_fill_the_dtype_cannot_hold(tmp_path: Path) -> None:
-    out = write_cog(scene(np.ones((32, 32), "int16"), fill=np.nan), tmp_path / "x.tif")
+    # A GeoArray refuses such a fill, but a lazy RasterSource may declare one.
+    with pytest.raises(ValueError, match="cannot be held by int16"):
+        scene(np.ones((32, 32), "int16"), fill=np.nan)
+    gt = scene(np.ones((32, 32), "int16"), fill=None)
+
+    class Lazy:
+        grid, fill_value, attrs = gt.grid, np.nan, FrozenAttrs()
+        shape, dtype = gt.shape, gt.dtype
+
+        def read_window(
+            self, window: PixelWindow, *, boundless: bool = True
+        ) -> GeoArray:
+            return gt.read_window(window, boundless=boundless)
+
+        def load(self) -> GeoArray:
+            return gt
+
+    out = write_cog(Lazy(), tmp_path / "x.tif")
     with rasterio.open(out) as src:
         assert src.nodata is None
 

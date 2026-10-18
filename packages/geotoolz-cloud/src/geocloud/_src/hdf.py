@@ -501,13 +501,36 @@ def _geoarray(
     attrs: dict[str, Any] | None = None,
     transform: Affine | None = None,
 ) -> GeoArray:
+    values = np.asarray(values)
     return GeoArray(
-        np.asarray(values),
+        values,
         Affine.identity() if transform is None else transform,
         crs,
-        fill_value=fill_value,
+        fill_value=_representable_fill(fill_value, values.dtype),
         attrs=attrs or {},
     )
+
+
+def _representable_fill(fill: Any, dtype: np.dtype) -> Any:
+    """``fill`` when ``dtype`` data can hold it, else ``None``.
+
+    Files declare fills their dtype cannot hold (``-9999.0`` on ``uint16``,
+    a float fill on integers); no pixel can equal such a fill, so the read
+    has no nodata and its carrier none (a `GeoArray` refuses the fill).
+    """
+    if fill is None or dtype.kind not in "biu":
+        return fill
+    if isinstance(fill, bool | np.bool_):
+        fill = int(fill)
+    if not isinstance(fill, int | float | np.integer | np.floating):
+        return None
+    value = float(fill)
+    if not (np.isfinite(value) and value.is_integer()):
+        return None
+    low, high = (
+        (0, 1) if dtype.kind == "b" else (np.iinfo(dtype).min, np.iinfo(dtype).max)
+    )
+    return fill if low <= value <= high else None
 
 
 # --- GeoArray readers --------------------------------------------------------------
@@ -541,7 +564,8 @@ def read_hdf(
 
     Returns:
         The dataset ``(..., H, W)``, its attributes under ``attrs["attrs"]``
-        and its declared fill (else ``0``) as the carrier's ``fill_value``.
+        and its declared fill (else ``0``) as the carrier's ``fill_value``
+        (``None`` when the dataset's dtype cannot hold the declared fill).
 
     Raises:
         ImportError: h5py (``[hdf5]``) or pyhdf (``[hdf4]``) is missing.
@@ -882,7 +906,8 @@ def read_netcdf(
         storage_options: Forwarded to `geocloud.store.get_obstore`.
 
     Returns:
-        The variable ``(..., H, W)``, its attributes under ``attrs["attrs"]``.
+        The variable ``(..., H, W)``, its attributes under ``attrs["attrs"]``;
+        a declared fill its dtype cannot hold becomes ``fill_value=None``.
 
     Raises:
         ImportError: netCDF4 is missing (the ``[netcdf]`` extra).

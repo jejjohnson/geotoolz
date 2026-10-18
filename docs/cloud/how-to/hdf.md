@@ -118,4 +118,6 @@ read attributes and coordinates as plain Python values.
   fills. When the two datasets declare different ones, stack the arrays
   yourself: `lat.with_data(np.stack([np.asarray(lat), np.asarray(lon)]))`.
 - **No declared fill** means `fill_value` is `0` (`fill_value_from_attrs`'s default); check
-  `out.attrs["attrs"]` for what the file declares.
+  `out.attrs["attrs"]` for what the file declares. A declared fill the
+  dtype cannot hold (`-9999.0` on `uint16`) gives `fill_value=None`: no
+  pixel can equal it.
