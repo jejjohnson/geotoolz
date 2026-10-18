@@ -235,6 +235,7 @@ class TestMergeRefusesGeoreader:
             asyncio.run(patcher.amerge(stream(), field.domain))
 
     def test_merge_patches_refuses_a_geotensor_domain_and_chips(self) -> None:
+        pytest.importorskip("pipekit")
         from geopatcher.integrations.pipekit import MergePatches
 
         field = RasterField(_scene())
@@ -281,7 +282,9 @@ class TestMergeRefusesGeoreader:
                 carrier.with_data({"primary": _geotensor(8)})
 
     def test_every_field_with_data_refuses_a_geotensor(self) -> None:
-        import xarray as xr
+        xr = pytest.importorskip("xarray")
+        pytest.importorskip("rioxarray")
+        pytest.importorskip("geocloud")
 
         from geopatcher.fields import CogField, RioXarrayField, XarrayField
 
@@ -387,6 +390,7 @@ class TestRewrapFill:
         assert np.isnan(float(out.fill_value))
 
     def test_merge_patches_on_a_band_collapsing_uint8_output(self) -> None:
+        pytest.importorskip("pipekit")
         from geopatcher.integrations.pipekit import MergePatches
 
         scene = GeoArray(
