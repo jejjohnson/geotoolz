@@ -95,3 +95,26 @@ def test_frozen_attrs_are_immutable() -> None:
     attrs = FrozenAttrs(a=1)
     with pytest.raises(TypeError):
         attrs["a"] = 2  # type: ignore[index]
+
+
+def test_pickle_round_trip_in_another_process() -> None:
+    """A FrozenAttrs pickled in one process is equal (and hashes equal) in another."""
+    import pickle
+    import subprocess
+    import sys
+
+    attrs = FrozenAttrs(band_names=["B11", "B12"], scale=float("nan"), tags={"a": 1})
+    payload = pickle.dumps(attrs).hex()
+    code = (
+        "import math, pickle, sys\n"
+        "from geoarray import FrozenAttrs\n"
+        f"a = pickle.loads(bytes.fromhex({payload!r}))\n"
+        "b = FrozenAttrs(\n"
+        "    band_names=['B11', 'B12'], scale=float('nan'), tags={'a': 1}\n"
+        ")\n"
+        "assert a == b and hash(a) == hash(b) and a['scale'] is math.nan, a\n"
+    )
+    env = {"PYTHONHASHSEED": "12345"}
+    import os
+
+    subprocess.run([sys.executable, "-c", code], check=True, env={**os.environ, **env})

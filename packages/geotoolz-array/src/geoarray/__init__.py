@@ -19,6 +19,9 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   `crop` (traced offsets), `pad`, `read_window` / `write_window`,
   `pixel_coords`, `GeoArray.valid_mask`, `GeoArray.map`, `combine`,
   `stack` / `concatenate`, `footprint` (``[vector]``).
+- `RasterSource` / `AsyncRasterSource` — what a lazy reader provides:
+  its `Grid`, shape, dtype, fill and attrs, and reads that return a
+  `GeoArray` (``read_window``, ``load``). A `GeoArray` is one too.
 - `as_transform` / `as_crs` — coerce an ``affine.Affine``, six numbers, an
   EPSG code or WKT.
 - Backends (C1): NumPy and JAX carriers mix eagerly. ``np.asarray(g)``
@@ -26,7 +29,9 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   trace); joins and writes promote NumPy inputs to JAX. `set_options`
   (``warn_on_transfer``) / `get_options`, `HostTransferWarning`.
 - `geoarray.interop.georeader` — ``from_georeader`` / ``to_georeader``,
-  zero-copy bridges to georeader's ``GeoTensor`` (``[georeader]``).
+  zero-copy bridges to georeader's ``GeoTensor``, and
+  ``source_from_georeader`` / ``source_to_georeader`` for its lazy readers
+  (``[georeader]``).
 - Errors: `GeoArrayError` and its subclasses `X64Error`,
   `GeoArrayTraceError` and `GridMismatchError`.
 
@@ -57,6 +62,7 @@ from geoarray._src.geometry import (
 )
 from geoarray._src.grid import Grid, PixelWindow, as_crs, as_transform
 from geoarray._src.options import HostTransferWarning, get_options, set_options
+from geoarray._src.source import AsyncRasterSource, RasterSource
 
 
 __version__ = "0.1.0"  # x-release-please-version
@@ -64,6 +70,7 @@ __version__ = "0.1.0"  # x-release-please-version
 __all__ = [
     "DIMS",
     "PER_BAND_KEYS",
+    "AsyncRasterSource",
     "FrozenAttrs",
     "GeoArray",
     "GeoArrayError",
@@ -72,6 +79,7 @@ __all__ = [
     "GridMismatchError",
     "HostTransferWarning",
     "PixelWindow",
+    "RasterSource",
     "X64Error",
     "__version__",
     "as_crs",
