@@ -81,7 +81,10 @@ class Rectangular(Geometry):
               a patch larger than the domain yields no anchors at all.
             - ``"pad"``: the sampler places the edge anchor (the first
               whose patch reaches the edge); out-of-bounds cells are
-              filled with the reader's nodata, or ``pad_value``.
+              filled with the reader's nodata, or ``pad_value``. A
+              `GeoArray` source with ``fill_value=None`` pads float data
+              with NaN (the chip declares NaN) and raises for integer or
+              bool data.
             - ``"reflect"``: as ``"pad"``, but the overflow is
               mirror-padded from the interior (numpy ``mode="reflect"``,
               repeated when the overflow exceeds the domain).

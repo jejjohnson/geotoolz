@@ -10,6 +10,10 @@ This module holds the few helpers every raster path shares:
 
 - `reject_georeader` — the refusal (reads the class hierarchy only, so it
   never imports georeader).
+- `reject_georeader_data` — the same refusal on a patch payload (a dict's
+  members too).
+- `holds_fill` / `output_fill` — whether a dtype can hold a fill, and the
+  fill an output of that dtype declares (ADR-012).
 - `raster_grid` — the `geoarray.Grid` of a raster domain, or ``None`` for
   any other domain. A raster domain is a `geoarray.Grid` or anything with a
   ``grid`` (every `RasterSource`, `geocloud.cog.CogDomain`).
@@ -33,9 +37,12 @@ from rasterio import Affine
 __all__ = [
     "as_pixel_window",
     "from_wire",
+    "holds_fill",
+    "output_fill",
     "pad_carrier",
     "raster_grid",
     "reject_georeader",
+    "reject_georeader_data",
     "to_wire",
 ]
 
@@ -73,6 +80,69 @@ def reject_georeader(x: Any, where: str) -> None:
         f"{type(x).__name__}; wrap it with "
         "geoarray.interop.georeader.source_from_georeader(reader)"
     )
+
+
+def reject_georeader_data(data: Any, where: str) -> None:
+    """`reject_georeader` on a patch payload: the value, or each of a dict's.
+
+    A matched patch carries ``{source name: carrier}``; every member is
+    checked.
+    """
+    reject_georeader(data, where)
+    if isinstance(data, dict):
+        for value in data.values():
+            reject_georeader(value, where)
+
+
+def holds_fill(dtype: Any, fill: Any) -> bool:
+    """Whether data of ``dtype`` holds ``fill`` exactly (geoarray's own check).
+
+    ``None`` always fits. Float and complex data hold any fill, NaN
+    included; integer data a finite integral value in range; bool data
+    ``0`` / ``1``. Anything else (a string fill, an object dtype) does not.
+
+    Example:
+        >>> holds_fill(np.uint8, 255), holds_fill(np.uint8, -9999.0)
+        (True, False)
+    """
+    if fill is None:
+        return True
+    dtype = np.dtype(dtype)
+    if dtype.kind in "fc":
+        return True
+    try:
+        value = float(fill)
+    except (TypeError, ValueError):
+        return False
+    if dtype.kind == "b":
+        return value in (0.0, 1.0)
+    if dtype.kind in "iu":
+        info = np.iinfo(dtype.type)
+        return (
+            bool(np.isfinite(value))
+            and value.is_integer()
+            and (info.min <= value <= info.max)
+        )
+    return False
+
+
+def output_fill(fill: Any, dtype: Any) -> Any:
+    """The fill an output of ``dtype`` declares when ``fill`` is the wanted one.
+
+    The rule every raster ``with_data``, `merge_to_field` and
+    ``MergePatches`` follow (ADR-012): keep ``fill`` when ``dtype`` holds
+    it; else NaN for a float / complex output; else ``None`` (no nodata) —
+    never a fill the data cannot hold, which `geoarray.GeoArray` refuses.
+
+    Example:
+        >>> output_fill(-9999.0, np.uint8) is None
+        True
+        >>> output_fill(-9999.0, np.float32)
+        -9999.0
+    """
+    if holds_fill(dtype, fill):
+        return fill
+    return np.nan if np.dtype(dtype).kind in "fc" else None
 
 
 def raster_grid(domain: Any) -> Grid | None:

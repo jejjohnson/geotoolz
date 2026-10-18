@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 
 from geopatcher._src._extras import missing_extra
+from geopatcher._src.carrier import reject_georeader
 
 
 try:
@@ -118,6 +119,7 @@ class RioXarrayField:
         return _georeference(chip, window_transform(window, self.da.rio.transform()))
 
     def with_data(self, array: Any) -> RioXarrayField:
+        reject_georeader(array, "RioXarrayField.with_data")
         return RioXarrayField(self.da.copy(data=np.asarray(array)))
 
 

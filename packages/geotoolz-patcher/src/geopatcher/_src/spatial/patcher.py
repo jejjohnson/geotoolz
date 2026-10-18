@@ -34,7 +34,15 @@ import numpy as np
 from geoarray import GeoArray
 
 from geopatcher._src._serialize import patcher_config
-from geopatcher._src.carrier import as_pixel_window, pad_carrier, raster_grid
+from geopatcher._src.carrier import (
+    as_pixel_window,
+    holds_fill,
+    output_fill,
+    pad_carrier,
+    raster_grid,
+    reject_georeader,
+    reject_georeader_data,
+)
 from geopatcher._src.domains import GridDomain
 from geopatcher._src.hooks import (
     PatcherHook,
@@ -1037,9 +1045,12 @@ def _merge_with_hooks(
     already ran it on the user's frame.
     """
     hook_list = _as_hooks(hooks)
+    if domain is not _NO_DOMAIN:
+        reject_georeader(domain, "merge")
     _dispatch(hook_list, "on_merge_start", _len_or_unknown(patches))
     if stacklevel is not None:
         _check_streaming(aggregation, stacklevel=stacklevel + 1)
+    patches = refusing_georeader(patches, "merge")
     try:
         if domain is _NO_DOMAIN:
             output = aggregation.merge(patches)
@@ -1128,6 +1139,41 @@ async def _aclosing(patches: AsyncIterable[Patch]) -> AsyncIterator[Patch]:
             yield patch
 
 
+def _reject_patch(patch: Any, where: str) -> None:
+    """Refuse a georeader carrier in a patch (its data, or a matched patch's)."""
+    members = getattr(patch, "members", None)
+    if isinstance(members, dict):
+        for member in members.values():
+            _reject_patch(member, where)
+        return
+    reject_georeader_data(getattr(patch, "data", patch), where)
+
+
+def refusing_georeader(patches: Iterable[Any], where: str) -> Iterable[Any]:
+    """``patches`` with every patch checked for a georeader carrier.
+
+    A list or tuple is checked up front and returned as it is (an
+    aggregation may index or re-read it); any other iterable is checked
+    lazily, patch by patch, so a stream stays a stream.
+
+    Raises:
+        TypeError: A patch's data (or a matched patch's member's) is a
+            georeader ``GeoTensor``; the message names
+            ``geoarray.interop.georeader.from_georeader``.
+    """
+    if isinstance(patches, list | tuple):
+        for patch in patches:
+            _reject_patch(patch, where)
+        return patches
+    return _refusing_stream(patches, where)
+
+
+def _refusing_stream(patches: Iterable[Any], where: str) -> Iterator[Any]:
+    for patch in patches:
+        _reject_patch(patch, where)
+        yield patch
+
+
 def _require_with_data(field: Any, caller: str) -> Callable[[Any], Any]:
     """``field.with_data``, or a `TypeError` naming ``caller``."""
     with_data = getattr(field, "with_data", None)
@@ -1170,6 +1216,8 @@ def on_domain_grid(merged: Any, aggregation: SpatialAggregation, domain: Any) ->
     """
     from geopatcher._src.fields.raster import _rewrap
 
+    reject_georeader(domain, "MergePatches")
+    reject_georeader(merged, "MergePatches")
     grid = raster_grid(domain)
     if not isinstance(merged, np.ndarray) or grid is None:
         return merged
@@ -1237,7 +1285,7 @@ def _merge_nodata(
 def _with_nodata(out: Any, fill: Any) -> Any:
     """``out`` declaring ``fill`` as its nodata, if a `GeoArray` (others unchanged)."""
     if isinstance(out, GeoArray):
-        return out.replace(fill_value=fill)
+        return out.replace(fill_value=output_fill(fill, out.dtype))
     return out
 
 
@@ -1322,9 +1370,19 @@ def _field_values(
         or out_shape != shape
         or values.dtype == dtype
         or not _fits_dtype(values, dtype)
+        # The aggregation's own nodata (the votes' -1) must survive the cast.
+        or not holds_fill(dtype, _finite_fill(aggregation))
     ):
         return values
     return values.astype(dtype)
+
+
+def _finite_fill(aggregation: Any) -> Any:
+    """The aggregation's finite ``fill_value``, or ``None`` (none, or NaN)."""
+    fill = getattr(aggregation, "fill_value", None)
+    if fill is None or (isinstance(fill, float) and np.isnan(fill)):
+        return None
+    return fill
 
 
 def _fits_dtype(values: np.ndarray, dtype: np.dtype) -> bool:
@@ -1930,9 +1988,30 @@ def _pad_request(indices: Any, domain: Any) -> _PadRequest | None:
 
 
 def _carrier_nodata(data: Any) -> Any:
-    """Best-effort nodata / fill value for a selected patch carrier."""
-    if isinstance(data, GeoArray) and data.fill_value is not None:
-        return data.fill_value
+    """The value ``boundary="pad"`` pads a selected patch carrier with.
+
+    A `GeoArray` pads with its ``fill_value``. One without a fill has no
+    value a padded pixel could hold that reads as nodata: float data pads
+    with NaN (and the chip declares NaN, see `_finish_padded`); integer
+    and bool data raise, as ``geoarray.read_window`` does past the edge.
+    A rioxarray chip pads with ``rio.nodata``; anything else with ``0``.
+
+    Raises:
+        ValueError: ``data`` is an integer or bool `GeoArray` with
+            ``fill_value=None``.
+    """
+    if isinstance(data, GeoArray):
+        if data.fill_value is not None:
+            return data.fill_value
+        if np.dtype(data.dtype).kind in "fc":
+            return np.nan
+        raise ValueError(
+            f"boundary='pad' needs a nodata to pad with, but the source's "
+            f"{np.dtype(data.dtype)} data has fill_value=None, so padded pixels "
+            "would read as valid data. Give the source a fill_value its dtype "
+            "holds (e.g. GeoArray(..., fill_value=0)), or use a boundary that "
+            "does not pad ('drop', 'shrink', 'reflect')."
+        )
     rio = getattr(data, "rio", None) if _is_rio_dataarray(data) else None
     if rio is not None and getattr(rio, "nodata", None) is not None:
         return rio.nodata
@@ -2148,12 +2227,26 @@ def _finish_padded(
             for name, value in data.items()
         }
     mode = "reflect" if boundary == "reflect" else "constant"
-    if mode == "constant" and pad_value is not None:
+    if mode == "reflect":
+        fill = None
+    elif pad_value is not None:
         _check_pad_value(pad_value, data)
-    fill = pad_value if pad_value is not None else _carrier_nodata(data)
-    if request.raster:
-        return _finish_raster(data, request, sources, mode, fill)
-    return _finish_grid(data, request, sources, domain, mode, fill)
+        fill = pad_value
+    else:
+        fill = _carrier_nodata(data)
+    if not request.raster:
+        return _finish_grid(data, request, sources, domain, mode, fill)
+    out = _finish_raster(data, request, sources, mode, fill)
+    if (
+        mode == "constant"
+        and pad_value is None
+        and isinstance(out, GeoArray)
+        and out.fill_value is None
+    ):
+        # A float source without a fill was padded with NaN: declare it, so
+        # the padded pixels read as nodata.
+        out = out.replace(fill_value=np.nan)
+    return out
 
 
 def _select_padded(

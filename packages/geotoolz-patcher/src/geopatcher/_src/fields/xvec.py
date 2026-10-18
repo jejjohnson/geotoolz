@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 
 from geopatcher._src._extras import missing_extra
+from geopatcher._src.carrier import reject_georeader
 from geopatcher._src.domains import PointDomain
 
 
@@ -65,6 +66,7 @@ class XvecField:
         )
 
     def with_data(self, array: Any) -> XvecField:
+        reject_georeader(array, "XvecField.with_data")
         new = self.ds.copy()
         new["_value"] = ((self.geometry_dim,), np.asarray(array))
         return XvecField(new, geometry_dim=self.geometry_dim)

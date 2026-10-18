@@ -57,12 +57,14 @@ def _patcher(
 
 def _geoarray_field(dtype: Any = np.uint16) -> RasterField:
     values = np.arange(2 * 8 * 8, dtype=dtype).reshape(2, 8, 8)
+    # A nodata outside the data's range that the dtype holds (uint8 tops at 255).
+    fill = 255 if np.dtype(dtype) == np.uint8 else 999
     return RasterField(
         GeoArray(
             data=values,
             transform=_T,
             crs="EPSG:32630",
-            fill_value=999,
+            fill_value=fill,
             attrs={"band_names": ["b1", "b2"]},
         )
     )

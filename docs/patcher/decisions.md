@@ -796,8 +796,30 @@ or JAX data, fill `None` by default), with lazy readers implementing
 `patch.data.values` / `.transform.c` (use `np.asarray` / `.grid.affine`),
 mutated `attrs`, or wrote a custom raster domain with `transform` /
 `shape` / `crs` (add a `grid`). A source without a fill can no longer be
-read past its edge (there is no value to pad with); `boundary="pad"`
-still pads such a source with 0, and keeps the chip's own fill.
+read past its edge (there is no value to pad with).
+
+**Amendment — fills an output can hold.** `geoarray.GeoArray` refuses a
+`fill_value` its dtype cannot hold (NaN or `-9999.0` in `uint8`), and a
+fill of `None` means "no nodata", so the patcher never pads or rewraps
+with a value the chip would read as data:
+
+- *Padding* (`boundary="pad"` with no `pad_value`): a chip pads with its
+  source's `fill_value`. A source without one pads float data with NaN
+  and the padded chip declares NaN; integer and bool data raise
+  `ValueError` naming the missing `fill_value` (give the source one, or
+  use `"reflect"` / `"shrink"`), as `geoarray`'s boundless `read_window`
+  does. An explicit `pad_value` is the caller's choice and the chip keeps
+  its own fill.
+- *Rewrapping* (every raster `with_data`, `CogField` included,
+  `merge_to_field` and `MergePatches`): the fill ADR-009 picks is kept
+  when the output's dtype holds it; otherwise a float output declares
+  NaN and any other output declares `None` (`_src/carrier.py`'s
+  `output_fill`). The source dtype is restored only when it also holds an
+  aggregation's own fill (the votes' `-1` stays on a signed dtype).
+- Every merge path (`merge`, `amerge`, `merge_to_field`, the matched
+  merges, `MergePatches`, `on_domain_grid`), `Patch.with_data` and every
+  field's `with_data` refuse a georeader carrier, as the fields'
+  constructors do.
 
 ---
 

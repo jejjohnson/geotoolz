@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from rasterio.windows import Window
 
-from geopatcher._src.carrier import as_pixel_window, raster_grid
+from geopatcher._src.carrier import as_pixel_window, raster_grid, reject_georeader
 from geopatcher._src.matched.patch import PRIMARY_KEY
 
 
@@ -215,6 +215,7 @@ class MatchedField:
         through this (the primary's) ``with_data``, since the
         coregistration already mapped each secondary onto that grid.
         """
+        reject_georeader(array, "MatchedField.with_data")
         return self.primary.with_data(array)
 
 

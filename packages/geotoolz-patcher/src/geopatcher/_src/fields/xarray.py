@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 
 from geopatcher._src._extras import missing_extra
+from geopatcher._src.carrier import reject_georeader
 from geopatcher._src.domains import GridDomain
 
 
@@ -82,6 +83,7 @@ class XarrayField:
         )
 
     def with_data(self, array: Any) -> XarrayField:
+        reject_georeader(array, "XarrayField.with_data")
         new = self.da.copy(data=np.asarray(array))
         return XarrayField(new)
 

@@ -495,7 +495,12 @@ def test_split_merge_matrix(field_name: str, step: int, boundary: BoundaryMode) 
             np.testing.assert_array_equal(
                 chip, reflected[r : r + window.height, c : c + window.width]
             )
-        if boundary == "pad":
+        padded = (in_h, in_w) != (window.height, window.width)
+        if boundary == "pad" and isinstance(patch.data, GeoArray):
+            # A float source without a fill pads with NaN and declares it.
+            assert (patch.data.fill_value is not None) == padded
+            assert np.isnan(chip[in_h:, :]).all() and np.isnan(chip[:, in_w:]).all()
+        elif boundary == "pad":
             assert np.all(chip[in_h:, :] == 0) and np.all(chip[:, in_w:] == 0)
         covered[r : r + in_h, c : c + in_w] = True
 

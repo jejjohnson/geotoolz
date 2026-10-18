@@ -47,7 +47,7 @@ patch would overflow the domain.
 | `boundary` | Behaviour |
 |---|---|
 | `"drop"` (default) | Samplers place only anchors whose patch lies wholly in the domain; the trailing residual is not covered. A patch larger than the domain places no anchor, with a `RuntimeWarning`. |
-| `"pad"` | Samplers also place the edge anchor — the first whose patch reaches the edge, never one past it. The patch is full size, padded with the reader's nodata or `pad_value` (which must fit the field's dtype). |
+| `"pad"` | Samplers also place the edge anchor — the first whose patch reaches the edge, never one past it. The patch is full size, padded with the reader's nodata or `pad_value` (which must fit the field's dtype). A `GeoArray` source without a `fill_value` pads float data with NaN, declared as the chip's fill, and raises for integer or bool data (give it a `fill_value`, or use `"reflect"` / `"shrink"`). |
 | `"reflect"` | As `"pad"`, but the overflow is mirrored from the interior (numpy `mode="reflect"`). Needs at least two cells on a padded axis. |
 | `"shrink"` | As `"pad"` for placement, but the window is clipped to the domain on every side, so edge patches are smaller. Weights crop to match. |
 | `"raise"` | As `"pad"` for placement; `split` raises `ValueError` on the first overflowing window. Useful with `spatial.sampler.Explicit`. |

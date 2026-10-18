@@ -34,6 +34,7 @@ from geoarray import (
 from geopatcher._src.carrier import (
     as_pixel_window,
     from_wire,
+    output_fill,
     reject_georeader,
     to_wire,
 )
@@ -170,7 +171,14 @@ def _rewrap(source: Any, array: Any, grid: Grid) -> GeoArray:
       the source's values. A float output on an integer source, or on a
       different band count, is a new quantity whose missing cells are NaN,
       so its fill is NaN.
+    * The fill is always one the output's dtype holds (`output_fill`): a
+      ``uint8`` output of a source whose fill is ``-9999.0`` declares no
+      nodata (``None``) rather than a value it cannot store.
+
+    Raises:
+        TypeError: ``array`` is a georeader ``GeoTensor``.
     """
+    reject_georeader(array, "with_data")
     values = np.asarray(array)
     source_shape = tuple(getattr(source, "shape", None) or values.shape)
     same_bands = _band_count(source_shape) == _band_count(values.shape)
@@ -184,6 +192,7 @@ def _rewrap(source: Any, array: Any, grid: Grid) -> GeoArray:
     )
     if np.issubdtype(values.dtype, np.floating) and not (source_float and same_bands):
         fill = np.nan
+    fill = output_fill(fill, values.dtype)
     return GeoArray(values, grid.transform, grid.crs, fill_value=fill, attrs=attrs)
 
 

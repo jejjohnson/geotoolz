@@ -87,13 +87,17 @@ class CogField(CogSource):
     def with_data(self, array: np.ndarray) -> GeoArray:
         """Wrap an operator output on the full grid as a `geoarray.GeoArray`.
 
-        Carries the COG's grid (transform, CRS) and its nodata as
-        ``fill_value``.
-        """
-        from geoarray import GeoArray
+        Carries the COG's grid (transform, CRS), attrs and nodata, by the
+        rule every raster ``with_data`` follows (`RasterField.with_data`):
+        the COG's nodata while the output carries its values and its dtype
+        holds it, NaN for a new float quantity, else no fill.
 
-        grid = self.grid
-        return GeoArray(array, grid.transform, grid.crs, fill_value=self.fill_value)
+        Raises:
+            TypeError: ``array`` is a georeader ``GeoTensor``.
+        """
+        from geopatcher._src.fields.raster import _rewrap
+
+        return _rewrap(self, array, self.grid)
 
     def cache_id(self) -> str:
         """`PatchCache` identity: the object read, its version and the IFD.

@@ -820,8 +820,12 @@ class MatchedSpatialPatcher(_MatchedConfigMixin):
         stacklevel: int,
     ) -> dict[str, Any]:
         """`merge` body; ``stacklevel`` (from the caller) places the warning."""
-        from geopatcher._src.spatial.patcher import _check_streaming
+        from geopatcher._src.spatial.patcher import (
+            _check_streaming,
+            refusing_georeader,
+        )
 
+        patches = refusing_georeader(patches, "merge")
         _validate_aggregator_names(
             self.secondary_aggregators, mfield, type(self).__name__
         )
