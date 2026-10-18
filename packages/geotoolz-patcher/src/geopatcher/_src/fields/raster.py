@@ -1,72 +1,113 @@
-"""Raster `Field` adapter — bridges `georeader.GeoData` to the Patcher.
+"""Raster `Field` adapter — bridges a `geoarray.RasterSource` to the Patcher.
 
-`RasterioReader`, `AsyncGeoTIFFReader`, and `GeoTensor` all satisfy the
-`GeoData` / `AsyncGeoData` Protocols already. The only thing missing is
-the method-name rename (`select` vs `read_from_window`). This adapter is
-a one-attribute dataclass that does exactly that, with no behavior of
-its own.
+A `RasterSource` (a `geoarray.GeoArray`, a lazy file or product reader, a
+COG) already knows its grid and reads windows as `GeoArray`. This adapter
+renames ``read_window`` to ``select`` and rebuilds merged outputs on the
+source grid (``with_data``), with no behaviour of its own.
 
 Users wrap once at the boundary::
 
-    reader = RasterioReader("scene.tif")
-    field  = RasterField(reader)
+    field = RasterField(scene)                  # a GeoArray, or a lazy reader
     for patch in patcher.split(field):
-        ...
+        ...                                     # patch.data: GeoArray
+
+A georeader reader crosses with `geoarray.interop.georeader`::
+
+    field = RasterField(source_from_georeader(RasterioReader("scene.tif")))
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, NamedTuple
+from typing import Any
 
 import numpy as np
-from georeader.abstract_reader import GeoData
-from georeader.geotensor import GeoTensor
+from geoarray import (
+    PER_BAND_KEYS,
+    AsyncRasterSource,
+    FrozenAttrs,
+    GeoArray,
+    Grid,
+    RasterSource,
+)
+
+from geopatcher._src.carrier import (
+    as_pixel_window,
+    from_wire,
+    output_fill,
+    reject_georeader,
+    to_wire,
+)
 
 
-try:
-    from georeader.abstract_reader import AsyncGeoData
-except ImportError:  # pragma: no cover
-    # Older georeader-spaceml releases (<= 2.2) don't ship the async
-    # mirror yet. Define a minimal Protocol-shaped stub so the rest of
-    # this module imports cleanly. `AsyncRasterField` will still raise at
-    # construction time when used against the unreleased async surface.
-    AsyncGeoData = Any  # type: ignore[assignment, misc]
+def _require_source(reader: Any, where: str, protocol: type) -> None:
+    """Refuse georeader objects and anything that is not a ``protocol``."""
+    reject_georeader(reader, where)
+    if not isinstance(reader, protocol):
+        raise TypeError(
+            f"{where} takes a geoarray.{protocol.__name__} (a GeoArray or a lazy "
+            f"reader with grid / shape / read_window), got {type(reader).__name__}"
+        )
 
 
 @dataclass(eq=False)
 class RasterField:
-    """Wrap a sync `GeoData` (a `RasterioReader`, a `GeoTensor`, …) as a `Field`.
+    """A `geoarray.RasterSource` (a `GeoArray`, a lazy reader, …) as a `Field`.
 
-    The reader itself doubles as the `RasterDomain` — the `GeoDataBase`
-    Protocol already carries ``crs`` / ``transform`` / ``shape`` /
-    ``bounds`` / ``res``.
+    The source doubles as the `RasterDomain`: its ``grid`` and ``shape`` are
+    metadata, known before any pixel is read. Each ``select`` reads one
+    window through ``source.read_window`` — a lazy source reads window by
+    window, a `GeoArray` slices its memory.
 
     Args:
-        reader: Any object satisfying `georeader.abstract_reader.GeoData`.
+        reader: Any `geoarray.RasterSource`. A georeader ``GeoTensor`` or
+            reader is refused; convert it with
+            ``geoarray.interop.georeader.from_georeader`` /
+            ``source_from_georeader``.
+
+    Raises:
+        TypeError: ``reader`` is a georeader object or not a `RasterSource`.
+
+    Example:
+        >>> import numpy as np
+        >>> from geoarray import GeoArray
+        >>> scene = GeoArray(
+        ...     np.zeros((4, 512, 512), np.float32),        # (C, H, W) float32
+        ...     (10.0, 0.0, 500000.0, 0.0, -10.0, 4600000.0),
+        ...     "EPSG:32630",
+        ...     fill_value=np.nan,
+        ... )
+        >>> field = RasterField(scene)
+        >>> field.domain.grid.shape
+        (512, 512)
     """
 
-    reader: GeoData
+    reader: RasterSource
+
+    def __post_init__(self) -> None:
+        _require_source(self.reader, "RasterField", RasterSource)
 
     @property
-    def domain(self) -> GeoData:
+    def domain(self) -> RasterSource:
         return self.reader
 
-    def select(self, window: Any) -> GeoTensor:
-        """Read ``window`` (boundless) as a materialised `GeoTensor`.
+    def select(self, window: Any) -> GeoArray:
+        """Read ``window`` (boundless) as a `GeoArray` on the window's grid.
 
-        Lazy readers such as `RasterioReader` answer ``read_from_window``
-        with another lazy reader; it is loaded here so every patch carries
-        real pixels (dense aggregation, padding and `stack_patches` all
-        need an ndarray, not a reader).
+        Args:
+            window: A ``rasterio.windows.Window`` (what the geometries
+                produce) or a `geoarray.PixelWindow`.
+
+        Returns:
+            ``(..., window.height, window.width)``; pixels past the grid
+            hold the source's ``fill_value`` (a source without one raises
+            when the window leaves the grid).
         """
-        out = self.reader.read_from_window(window, boundless=True)
-        if isinstance(out, GeoTensor):
-            return out
-        return out.load(boundless=True)
+        return self.reader.read_window(as_pixel_window(window), boundless=True)
 
-    def with_data(self, array: Any) -> GeoTensor:
-        return _rewrap(self.reader, array, self.reader.transform, self.reader.crs)
+    def with_data(self, array: Any) -> GeoArray:
+        """``array`` (``(..., H, W)`` on the source grid) as a `GeoArray`."""
+        return _rewrap(self.reader, array, self.reader.grid)
 
     def __getstate__(self) -> dict[str, Any]:
         return _pack_reader_state(self.__dict__)
@@ -77,38 +118,37 @@ class RasterField:
 
 @dataclass(eq=False)
 class AsyncRasterField:
-    """Async mirror of `RasterField` over an `AsyncGeoData`.
+    """Async mirror of `RasterField` over a `geoarray.AsyncRasterSource`.
 
-    `select` is a coroutine; otherwise the surface is identical.
+    `select` is a coroutine (``reader.aread_window``); otherwise the
+    surface is identical.
+
+    Args:
+        reader: Any `geoarray.AsyncRasterSource` (``geocloud.cog.CogSource``,
+            ``geocloud.cog.AsyncCogReader``, …).
+
+    Raises:
+        TypeError: ``reader`` is a georeader object or not an
+            `AsyncRasterSource`.
     """
 
-    reader: AsyncGeoData
+    reader: AsyncRasterSource
+
+    def __post_init__(self) -> None:
+        _require_source(self.reader, "AsyncRasterField", AsyncRasterSource)
 
     @property
-    def domain(self) -> AsyncGeoData:
+    def domain(self) -> AsyncRasterSource:
         return self.reader
 
-    async def select(self, window: Any) -> GeoTensor:
-        return await self.reader.read_from_window(window, boundless=True)
+    async def select(self, window: Any) -> GeoArray:
+        return await self.reader.aread_window(as_pixel_window(window), boundless=True)
 
-    async def aselect(self, window: Any) -> GeoTensor:
+    async def aselect(self, window: Any) -> GeoArray:
         return await self.select(window)
 
-    def with_data(self, array: Any) -> GeoTensor:
-        return _rewrap(self.reader, array, self.reader.transform, self.reader.crs)
-
-
-#: ``attrs`` keys that hold one entry per band (band-name aliases and
-#: per-band spectral metadata, as geotoolz reads and writes them). They go
-#: stale when the band axis changes size, so `_rewrap` drops them then.
-PER_BAND_KEYS: tuple[str, ...] = (
-    "band_names",
-    "descriptions",
-    "bands",
-    "band_descriptions",
-    "wavelengths",
-    "wavelengths_nm",
-)
+    def with_data(self, array: Any) -> GeoArray:
+        return _rewrap(self.reader, array, self.reader.grid)
 
 
 def _band_count(shape: tuple[int, ...]) -> int:
@@ -116,80 +156,62 @@ def _band_count(shape: tuple[int, ...]) -> int:
     return int(shape[-3]) if len(shape) >= 3 else 1
 
 
-def _rewrap(reader: Any, array: Any, transform: Any, crs: Any) -> GeoTensor:
-    """Wrap ``array`` as a `GeoTensor` on ``reader``'s grid.
+def _rewrap(source: Any, array: Any, grid: Grid) -> GeoArray:
+    """Wrap ``array`` as a `GeoArray` on ``grid``, described by ``source``.
 
-    Used by every raster ``with_data`` and by the pipekit ``Stitch``
-    operator, so a merged output keeps the source's georeferencing and
-    follows the carrier contract:
+    Used by every raster ``with_data`` and by `on_domain_grid` (the pipekit
+    ``MergePatches`` operator), so a merged output keeps the source's
+    georeferencing and follows the carrier contract:
 
-    * ``attrs`` is a fresh copy of the source's; when the band axis
-      changed size (four bands merged into one index), the per-band keys
-      (`PER_BAND_KEYS`) are dropped instead of describing bands that are
-      gone.
-    * ``fill_value_default`` is the source's nodata while the output
-      still carries the source's values. A float output on an integer
-      source, or on a different band count, is a new quantity whose
-      missing cells are NaN, so its fill is NaN.
+    * ``attrs`` are the source's; when the band axis changed size (four
+      bands merged into one index), the per-band keys
+      (`geoarray.PER_BAND_KEYS`) are dropped instead of describing bands
+      that are gone.
+    * ``fill_value`` is the source's nodata while the output still carries
+      the source's values. A float output on an integer source, or on a
+      different band count, is a new quantity whose missing cells are NaN,
+      so its fill is NaN.
+    * The fill is always one the output's dtype holds (`output_fill`): a
+      ``uint8`` output of a source whose fill is ``-9999.0`` declares no
+      nodata (``None``) rather than a value it cannot store.
+
+    Raises:
+        TypeError: ``array`` is a georeader ``GeoTensor``.
     """
+    reject_georeader(array, "with_data")
     values = np.asarray(array)
-    source_shape = tuple(getattr(reader, "shape", None) or values.shape)
+    source_shape = tuple(getattr(source, "shape", None) or values.shape)
     same_bands = _band_count(source_shape) == _band_count(values.shape)
-    attrs = dict(getattr(reader, "attrs", None) or {})
+    attrs = FrozenAttrs(getattr(source, "attrs", None) or {})
     if not same_bands:
-        for key in PER_BAND_KEYS:
-            attrs.pop(key, None)
-    fill = getattr(reader, "fill_value_default", 0)
-    source_dtype = getattr(reader, "dtype", None)
+        attrs = attrs.drop(*PER_BAND_KEYS)
+    fill = getattr(source, "fill_value", None)
+    source_dtype = getattr(source, "dtype", None)
     source_float = source_dtype is not None and np.issubdtype(
         np.dtype(source_dtype), np.floating
     )
     if np.issubdtype(values.dtype, np.floating) and not (source_float and same_bands):
         fill = np.nan
-    return GeoTensor(
-        values=array,
-        transform=transform,
-        crs=crs,
-        fill_value_default=fill,
-        attrs=attrs,
-    )
-
-
-class _PickledGeoTensor(NamedTuple):
-    """A `GeoTensor`'s pixels plus the metadata its own pickle drops."""
-
-    values: np.ndarray
-    transform: Any
-    crs: Any
-    fill_value_default: Any
-    attrs: dict[str, Any]
+    fill = output_fill(fill, values.dtype)
+    return GeoArray(values, grid.transform, grid.crs, fill_value=fill, attrs=attrs)
 
 
 def _pack_reader_state(state: dict[str, Any]) -> dict[str, Any]:
-    """Copy of a field's ``__dict__`` whose `GeoTensor` reader pickles intact.
+    """Copy of a field's ``__dict__`` whose `GeoArray` reader pickles compactly.
 
-    `GeoTensor` subclasses `numpy.ndarray` without extending its pickle
-    hook, so a pickled `GeoTensor` comes back with no ``transform`` /
-    ``crs`` / ``fill_value_default`` / ``attrs`` — a field wrapping one
-    would be unusable in a spawn / forkserver worker. Lazy readers
-    (`RasterioReader`) pickle by path and pass through unchanged.
+    A `GeoArray` reader travels in the wire form of `geopatcher._src.carrier`
+    (pixels plus the grid config, fill and attrs), rebuilt through the
+    constructor in the worker, so the carrier compares equal to one built
+    there. Lazy readers pickle as they define (by path or URL).
     """
     state = dict(state)
-    reader = state.get("reader")
-    if isinstance(reader, GeoTensor):
-        state["reader"] = _PickledGeoTensor(
-            values=np.asarray(reader),
-            transform=reader.transform,
-            crs=reader.crs,
-            fill_value_default=reader.fill_value_default,
-            attrs=reader.attrs,
-        )
+    if "reader" in state:
+        state["reader"] = to_wire(state["reader"])
     return state
 
 
 def _unpack_reader_state(state: dict[str, Any]) -> dict[str, Any]:
     """Inverse of `_pack_reader_state`."""
-    reader = state.get("reader")
-    if isinstance(reader, _PickledGeoTensor):
-        state = {**state, "reader": GeoTensor(**reader._asdict())}
+    if "reader" in state:
+        state = {**state, "reader": from_wire(state["reader"])}
     return state

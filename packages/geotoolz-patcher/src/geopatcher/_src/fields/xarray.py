@@ -18,6 +18,7 @@ from typing import Any
 import numpy as np
 
 from geopatcher._src._extras import missing_extra
+from geopatcher._src.carrier import reject_georeader
 from geopatcher._src.domains import GridDomain
 
 
@@ -58,7 +59,7 @@ class XarrayField:
 
         Returns the bare `DataArray` (not another `XarrayField`) so the
         result is `np.asarray`-able and feeds straight into the spatial
-        aggregations. Mirrors `RasterField.select → GeoTensor`: select
+        aggregations. Mirrors `RasterField.select → GeoArray`: select
         returns the natural data payload, not another field wrapper. Use
         `XarrayField(da_sliced)` if you need to keep treating the slice
         as a sub-Field.
@@ -82,6 +83,7 @@ class XarrayField:
         )
 
     def with_data(self, array: Any) -> XarrayField:
+        reject_georeader(array, "XarrayField.with_data")
         new = self.da.copy(data=np.asarray(array))
         return XarrayField(new)
 

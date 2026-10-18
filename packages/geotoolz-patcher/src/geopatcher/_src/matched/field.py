@@ -47,11 +47,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from georeader import window_utils
 from rasterio.windows import Window
 
+from geopatcher._src.carrier import as_pixel_window, raster_grid, reject_georeader
 from geopatcher._src.matched.patch import PRIMARY_KEY
-from geopatcher._src.spatial.geometry import _is_raster_domain
 
 
 if TYPE_CHECKING:
@@ -94,7 +93,7 @@ class MatchedField:
             `MatchedSpatioTemporalPatcher`) compute a per-source
             ``valid_mask`` (True = data present) and pack it on each
             matched patch: False where a member equals its carrier's
-            declared nodata (``fill_value_default`` / ``rio.nodata``)
+            declared nodata (``fill_value`` / ``rio.nodata``)
             and, for float data, where it is NaN / ±inf. Useful when
             secondaries have partial coverage (LEO swath ↔ GEO grid).
             `MatchedField.select` itself returns data only, so a plain
@@ -171,7 +170,8 @@ class MatchedField:
         under ``PRIMARY_KEY`` (``"primary"``), each secondary under
         the name supplied to `MatchedField.secondaries`. The values
         are whatever the underlying Fields' `select` returns: a
-        `GeoTensor` for raster, a sub-`xarray.DataArray` for grid, etc.
+        `geoarray.GeoArray` for raster, a sub-`xarray.DataArray` for grid,
+        etc.
 
         Each secondary is read over the primary chip's geographic
         footprint (see the module docstring), so the coreg callable
@@ -215,17 +215,18 @@ class MatchedField:
         through this (the primary's) ``with_data``, since the
         coregistration already mapped each secondary onto that grid.
         """
+        reject_georeader(array, "MatchedField.with_data")
         return self.primary.with_data(array)
 
 
 def _footprint_indexer(indexer: Any, primary_domain: Any, secondary_domain: Any) -> Any:
     """Map a primary indexer onto the secondary's grid by geographic footprint.
 
-    For a raster ``Window`` over two raster-shaped domains, the window's
-    bounds in the primary's CRS are converted to a window on the
-    secondary's own transform (`georeader.read.window_from_bounds`
-    reprojects the bounds when the CRSs differ, densifying the edges),
-    then rounded outward so the read covers the whole footprint. A
+    For a raster ``Window`` over two raster domains, the window's bounds
+    in the primary's CRS are converted to a window on the secondary's own
+    grid (``rasterio.warp.transform_bounds`` reprojects the bounds when the
+    CRSs differ, densifying the edges), rounded outward
+    (`geoarray.Grid.window`) so the read covers the whole footprint. A
     secondary on the primary's exact grid gets the indexer unchanged —
     no float round-trip. Anything else (grid / vector / point indexers)
     passes through: those domains carry no affine transform to map
@@ -241,16 +242,26 @@ def _footprint_indexer(indexer: Any, primary_domain: Any, secondary_domain: Any)
     """
     if not isinstance(indexer, Window):
         return indexer
-    if not (_is_raster_domain(primary_domain) and _is_raster_domain(secondary_domain)):
+    primary = raster_grid(primary_domain)
+    secondary = raster_grid(secondary_domain)
+    if primary is None or secondary is None:
         return indexer
-    if secondary_domain.transform == primary_domain.transform and (
-        window_utils.compare_crs(secondary_domain.crs, primary_domain.crs)
+    if secondary.transform == primary.transform and secondary.crs == primary.crs:
+        return indexer
+    bounds = primary.bounds_of(as_pixel_window(indexer))
+    if (
+        primary.crs is not None
+        and secondary.crs is not None
+        and (primary.crs != secondary.crs)
     ):
-        return indexer
-    # Deferred: `georeader.read` pulls in rasterio.warp, which plain
-    # same-grid matching never needs.
-    from georeader.read import window_from_bounds
+        # Deferred: rasterio.warp is only needed across CRSs.
+        from rasterio.warp import transform_bounds
 
-    bounds = window_utils.window_bounds(indexer, primary_domain.transform)
-    window = window_from_bounds(secondary_domain, bounds, crs_bounds=primary_domain.crs)
-    return window_utils.round_outer_window(window)
+        bounds = transform_bounds(primary.crs, secondary.crs, *bounds)
+    window = secondary.window(bounds)
+    return Window(
+        col_off=window.col_off,
+        row_off=window.row_off,
+        width=window.width,
+        height=window.height,
+    )

@@ -486,6 +486,9 @@ Three options were on the table:
 > Partly superseded by ADR-009: the output's band axes come from the
 > patches, and `merge_to_field` accepts a changed band count on raster
 > fields.
+>
+> Carrier amended by ADR-012: a raster `with_data` returns a
+> `geoarray.GeoArray`, not a `GeoTensor`.
 
 **Decision.** `SpatialPatcher.merge(patches, domain)` keeps returning
 whatever the aggregation's `merge` produces — a bare `np.ndarray` on the
@@ -590,6 +593,9 @@ each name is findable from its task, and the root is short enough to read.
 ## ADR-009 — The domain fixes the grid, the patches fix the bands
 
 > Supersedes the shape rule of ADR-007.
+>
+> Carrier amended by ADR-012: the raster carrier it names is now
+> `geoarray.GeoArray` (`fill_value`, not `fill_value_default`).
 
 **Status.** Accepted.
 
@@ -692,6 +698,10 @@ unchanged.
 
 ## ADR-011 — A masked read keeps the carrier of a successful one
 
+> Carrier amended by ADR-012: the raster placeholder is a NaN
+> `geoarray.GeoArray` (`fill_value` NaN), built on a raster domain whose
+> grid has a CRS.
+
 **Status.** Accepted.
 
 **Context.** Under `on_error="mask"` a failed read became a bare
@@ -728,6 +738,88 @@ into plain arrays could not distinguish.
 **Consequences.** Operators run on placeholders unchanged and
 `merge_to_field` stitches them like any patch. Code that detected a
 placeholder by `isinstance(data, np.ndarray)` must read `patch.masked`.
+
+---
+
+## ADR-012 — Raster fields take a `geoarray.RasterSource`; patches are `GeoArray`
+
+> Amends the raster carrier named in ADR-007, ADR-009 and ADR-011.
+
+**Status.** Accepted (the workspace-wide switch to `geoarray.GeoArray`).
+
+**Context.** The raster path was georeader's: `RasterField` wrapped any
+`GeoData`, its domain was the reader (`GeoDataBase`, re-exported as
+`RasterDomain`), patches and merged outputs were `GeoTensor`s. The stack
+now has one carrier, `geoarray.GeoArray` (immutable, hashable attrs, NumPy
+or JAX data, fill `None` by default), with lazy readers implementing
+`geoarray.RasterSource`.
+
+**Decision.**
+
+- `RasterField(reader)` takes any `geoarray.RasterSource` (a `GeoArray`, a
+  lazy reader, a COG); `AsyncRasterField` any `AsyncRasterSource`;
+  `ReprojectingRasterField` any `RasterSource`. `select` reads through
+  `read_window` (rasterio windows from the geometries are converted to
+  `geoarray.PixelWindow`), so a lazy source is read window by window.
+  Patches, placeholders, `with_data`, `merge_to_field` and `MergePatches`
+  are `GeoArray`s.
+- `RasterDomain` is a protocol: a `grid` (`geoarray.Grid`) plus the full
+  `shape`. Every `RasterSource` satisfies it, so the field's domain is the
+  source and costs no read. A bare `Grid` is a raster domain too. The
+  samplers and geometries read the grid (`grid.affine`, `grid.crs`,
+  `grid.window` / `grid.crop`), never a `transform` attribute.
+- georeader is an internal engine only (`ReprojectingRasterField`'s warp,
+  `compare_crs`), reached through `geoarray.interop.georeader`. A
+  georeader `GeoTensor` or reader passed in raises `TypeError` naming
+  `from_georeader` / `source_from_georeader`.
+- Process pools and pickled fields carry a `GeoArray` as its pixels plus
+  the grid config, fill and attrs, rebuilt through the constructor on
+  the other side (a carrier rebuilt there compares equal to one built
+  there). `PatchCache` writes entries of kind `"geoarray"` and still reads
+  the `"geotensor"` entries of earlier releases, as `GeoArray`; the format
+  id is unchanged.
+
+**Alternatives considered.**
+
+- *A concrete `RasterDomain` dataclass snapshotting grid, shape, dtype,
+  fill and attrs* — one more object to keep in sync with the source,
+  when the source already answers each member without I/O.
+- *Keep duck-typing `transform` / `shape` / `crs`* — a `GeoArray`'s
+  `transform` is a `(6,)` array, not an `Affine`, so every consumer
+  would branch on the type; one rule (`grid`) is simpler.
+- *Accept georeader objects and convert them silently* — two carriers in
+  the public API again, and a lazy reader converted with `from_georeader`
+  would be loaded whole.
+
+**Consequences.** Breaking for code that built `RasterField(GeoTensor)` /
+`RasterField(RasterioReader(...))` (wrap with the adapter), read
+`patch.data.values` / `.transform.c` (use `np.asarray` / `.grid.affine`),
+mutated `attrs`, or wrote a custom raster domain with `transform` /
+`shape` / `crs` (add a `grid`). A source without a fill can no longer be
+read past its edge (there is no value to pad with).
+
+**Amendment — fills an output can hold.** `geoarray.GeoArray` refuses a
+`fill_value` its dtype cannot hold (NaN or `-9999.0` in `uint8`), and a
+fill of `None` means "no nodata", so the patcher never pads or rewraps
+with a value the chip would read as data:
+
+- *Padding* (`boundary="pad"` with no `pad_value`): a chip pads with its
+  source's `fill_value`. A source without one pads float data with NaN
+  and the padded chip declares NaN; integer and bool data raise
+  `ValueError` naming the missing `fill_value` (give the source one, or
+  use `"reflect"` / `"shrink"`), as `geoarray`'s boundless `read_window`
+  does. An explicit `pad_value` is the caller's choice and the chip keeps
+  its own fill.
+- *Rewrapping* (every raster `with_data`, `CogField` included,
+  `merge_to_field` and `MergePatches`): the fill ADR-009 picks is kept
+  when the output's dtype holds it; otherwise a float output declares
+  NaN and any other output declares `None` (`_src/carrier.py`'s
+  `output_fill`). The source dtype is restored only when it also holds an
+  aggregation's own fill (the votes' `-1` stays on a signed dtype).
+- Every merge path (`merge`, `amerge`, `merge_to_field`, the matched
+  merges, `MergePatches`, `on_domain_grid`), `Patch.with_data` and every
+  field's `with_data` refuse a georeader carrier, as the fields'
+  constructors do.
 
 ---
 

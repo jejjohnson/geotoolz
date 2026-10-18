@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from geopatcher._src._extras import missing_extra
+from geopatcher._src.carrier import reject_georeader
 from geopatcher._src.domains import GridDomain
 
 
@@ -92,6 +93,7 @@ class DaskField:
         return sub.compute()
 
     def with_data(self, array: Any) -> DaskField:
+        reject_georeader(array, "DaskField.with_data")
         return DaskField(self.array.copy(data=array))
 
 

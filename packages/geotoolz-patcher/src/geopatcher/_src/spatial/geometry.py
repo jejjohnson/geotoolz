@@ -3,9 +3,10 @@
 Each `spatial.geometry.Geometry` subclass knows how to translate an anchor into
 backend-specific indices on each `Domain` it supports. The dispatch is
 explicit ``isinstance`` rather than `functools.singledispatchmethod`
-because the raster path matches a Protocol-like surface (``transform`` +
-``shape`` + ``crs``) rather than a single concrete class — Protocol
-nominal-typing is unreliable in `singledispatch` registries.
+because the raster path matches a protocol (`RasterDomain`: a
+`geoarray.Grid`, or anything with a ``grid`` — every `geoarray.RasterSource`)
+rather than a single concrete class — Protocol nominal-typing is
+unreliable in `singledispatch` registries.
 
 Five geometries:
 
@@ -25,6 +26,7 @@ from typing import Any, ClassVar, Literal
 import numpy as np
 
 from geopatcher._src._serialize import config_from_fields
+from geopatcher._src.carrier import raster_grid
 from geopatcher._src.domains import GridDomain, PointDomain, VectorDomain
 
 
@@ -39,12 +41,11 @@ _VALID_BOUNDARY_MODES: tuple[str, ...] = (
 
 
 def _is_raster_domain(domain: Any) -> bool:
-    """A domain is "raster-shaped" if it carries `transform`, `shape`, `crs`."""
-    return (
-        hasattr(domain, "transform")
-        and hasattr(domain, "shape")
-        and hasattr(domain, "crs")
-    )
+    """A domain is a raster one if it is a `geoarray.Grid` or has a ``grid``.
+
+    Every `geoarray.RasterSource` does (see `RasterDomain`).
+    """
+    return raster_grid(domain) is not None
 
 
 class Geometry:
@@ -80,7 +81,10 @@ class Rectangular(Geometry):
               a patch larger than the domain yields no anchors at all.
             - ``"pad"``: the sampler places the edge anchor (the first
               whose patch reaches the edge); out-of-bounds cells are
-              filled with the reader's nodata, or ``pad_value``.
+              filled with the reader's nodata, or ``pad_value``. A
+              `GeoArray` source with ``fill_value=None`` pads float data
+              with NaN (the chip declares NaN) and raises for integer or
+              bool data.
             - ``"reflect"``: as ``"pad"``, but the overflow is
               mirror-padded from the interior (numpy ``mode="reflect"``,
               repeated when the overflow exceeds the domain).
@@ -434,20 +438,19 @@ def _polygon_masked_window(domain: Any, poly: Any, anchor: int) -> _MaskedWindow
     ``mask[i, j]`` is True iff the centre of raster pixel
     ``(row_off + i, col_off + j)`` lies inside ``poly``.
     """
-    from georeader.window_utils import round_outer_window
+    from geoarray import PixelWindow
     from rasterio import features
-    from rasterio.errors import WindowError
-    from rasterio.windows import Window, from_bounds, transform as window_transform
+    from rasterio.windows import Window
 
-    height, width = (int(s) for s in domain.shape[-2:])
-    rounded = round_outer_window(from_bounds(*poly.bounds, transform=domain.transform))
-    try:
-        clipped = rounded.intersection(
-            Window(col_off=0, row_off=0, width=width, height=height)
-        )
-    except WindowError:
-        clipped = None
-    if clipped is None or clipped.width <= 0 or clipped.height <= 0:
+    grid = raster_grid(domain)
+    assert grid is not None  # dispatched on a raster domain
+    height, width = grid.shape
+    # Grid.window rounds the polygon's bounds outward to whole pixels.
+    rounded = grid.window(poly.bounds)
+    clipped = rounded.intersection(
+        PixelWindow(col_off=0, row_off=0, width=width, height=height)
+    )
+    if clipped is None:
         raise ValueError(
             f"spatial.geometry.PolygonIntersection: polygon {anchor} (bounds "
             f"{poly.bounds}) "
@@ -462,7 +465,7 @@ def _polygon_masked_window(domain: Any, poly: Any, anchor: int) -> _MaskedWindow
     mask = features.geometry_mask(
         [poly],
         out_shape=(window.height, window.width),
-        transform=window_transform(window, domain.transform),
+        transform=grid.crop(clipped).affine,
         invert=True,
     )
     return _MaskedWindow(window=window, mask=mask)

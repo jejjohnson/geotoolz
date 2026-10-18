@@ -5,11 +5,12 @@ read from"; `Domain` is its I/O-free metadata twin — bounds, CRS, shape
 — consulted by `spatial.sampler.Sampler.anchors` and
 `spatial.geometry.Geometry.neighborhood` without triggering any reads.
 
-For rasters, the raster-side surface already exists in
-`georeader.abstract_reader` as `GeoData` / `AsyncGeoData` / `GeoDataBase`.
-A thin `RasterField` adapter in `_src/fields/raster.py` bridges the
-naming difference (`select` vs `read_from_window`). The non-raster
-fields (`XarrayField`, `GeoPandasField`, `XvecField`) are new substrate.
+For rasters, the raster-side surface already exists in geoarray as
+`RasterSource` / `AsyncRasterSource` (a `GeoArray` is one). A thin
+`RasterField` adapter in `_src/fields/raster.py` bridges the naming
+difference (`select` vs `read_window`), and the source itself is the
+`RasterDomain`. The non-raster fields (`XarrayField`, `GeoPandasField`,
+`XvecField`) are new substrate.
 """
 
 from __future__ import annotations
@@ -55,9 +56,9 @@ class Field(Protocol):
     Optional: ``placeholder(indexer, data)`` returns ``data`` (an all-NaN
     array) in the carrier ``select(indexer)`` would return, without
     reading; the patchers use it for the ``on_error="mask"`` placeholder
-    (ADR-011). Without it, a raster window on a domain with ``transform``
-    and ``crs`` becomes a NaN `GeoTensor` on the window's grid, and
-    anything else stays a bare array.
+    (ADR-011). Without it, a raster window on a `RasterDomain` becomes a
+    NaN `geoarray.GeoArray` on the window's grid, and anything else stays
+    a bare array.
     """
 
     @property

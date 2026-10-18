@@ -43,7 +43,7 @@ else:
 
 if TYPE_CHECKING:
     import numpy as np
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray, PixelWindow
     from rasterio.windows import Window
 
 
@@ -55,9 +55,10 @@ class CogField(CogSource):
 
     Open with :meth:`open` (``await`` :meth:`aopen` inside an event loop);
     every argument is `geocloud.cog.CogSource.open`'s. Patches are
-    `georeader.GeoTensor` chips with the window's transform, the CRS and
-    the COG's nodata as ``fill_value_default``. The field pickles by URL,
-    so it ships to process-pool workers.
+    `geoarray.GeoArray` chips ``(bands, h, w)`` with the window's transform,
+    the CRS and the COG's nodata as ``fill_value``. The field's domain is
+    `geocloud.cog.CogDomain` (a `RasterDomain`: ``grid`` and ``shape``). The
+    field pickles by URL, so it ships to process-pool workers.
 
     Examples:
         Patch a remote scene; `parallel_map` reads each chunk of patches
@@ -67,35 +68,36 @@ class CogField(CogSource):
             patches = list(patcher.split(field))
     """
 
-    def select(self, window: Window) -> GeoTensor:
+    def select(self, window: Window | PixelWindow) -> GeoArray:
         """Read one window (`read_window`)."""
         return self.read_window(window)
 
-    async def aselect(self, window: Window) -> GeoTensor:
+    async def aselect(self, window: Window | PixelWindow) -> GeoArray:
         """Async twin of :meth:`select` (the `AsyncField` spelling)."""
         return await self.aread_window(window)
 
-    def select_many(self, windows: list[Window]) -> list[GeoTensor]:
+    def select_many(self, windows: list[Window | PixelWindow]) -> list[GeoArray]:
         """Read every window, fetching each overlapping tile once (`read_windows`)."""
         return self.read_windows(windows)
 
-    async def aselect_many(self, windows: list[Window]) -> list[GeoTensor]:
+    async def aselect_many(self, windows: list[Window | PixelWindow]) -> list[GeoArray]:
         """Async twin of :meth:`select_many`."""
         return await self.aread_windows(windows)
 
-    def with_data(self, array: np.ndarray) -> GeoTensor:
-        """Wrap an operator output on the full grid as a `georeader.GeoTensor`.
+    def with_data(self, array: np.ndarray) -> GeoArray:
+        """Wrap an operator output on the full grid as a `geoarray.GeoArray`.
 
-        Carries the domain transform, CRS and nodata fill value.
+        Carries the COG's grid (transform, CRS), attrs and nodata, by the
+        rule every raster ``with_data`` follows (`RasterField.with_data`):
+        the COG's nodata while the output carries its values and its dtype
+        holds it, NaN for a new float quantity, else no fill.
+
+        Raises:
+            TypeError: ``array`` is a georeader ``GeoTensor``.
         """
-        from georeader.geotensor import GeoTensor
+        from geopatcher._src.fields.raster import _rewrap
 
-        return GeoTensor(
-            values=array,
-            transform=self.domain.transform,
-            crs=self.domain.crs,
-            fill_value_default=self.fill_value_default,
-        )
+        return _rewrap(self, array, self.grid)
 
     def cache_id(self) -> str:
         """`PatchCache` identity: the object read, its version and the IFD.

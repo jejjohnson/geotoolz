@@ -20,14 +20,14 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 from geopatcher.observe import PatchJournal
 
 Path("out/chips").mkdir(parents=True, exist_ok=True)
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.ones((1, 256, 256), dtype=np.float32),       # (1, 256, 256) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",

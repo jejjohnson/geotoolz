@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geopatcher import (
     RasterField,
@@ -23,8 +23,8 @@ from geopatcher.temporal.stencils import TimeStencil
 def time_field() -> RasterField:
     # (time=8, H=16, W=16); the spatial select returns the full time series.
     arr = np.arange(8 * 16 * 16, dtype=np.float32).reshape(8, 16, 16)
-    gt = GeoTensor(
-        values=arr,
+    gt = GeoArray(
+        data=arr,
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
     )
@@ -88,8 +88,8 @@ class TestCoupledCoupling:
 
         arr = np.arange(8 * 16 * 16, dtype=np.float32).reshape(8, 16, 16)
         field = RasterField(
-            GeoTensor(
-                values=arr,
+            GeoArray(
+                data=arr,
                 transform=rasterio.Affine.identity(),
                 crs="EPSG:32630",
             )
@@ -278,8 +278,8 @@ def test_coupled_polygon_and_reflect(
 
     # North-up grid: polygon footprints need a negative y pixel size.
     north_up = RasterField(
-        GeoTensor(
-            values=np.asarray(time_field.reader.values),
+        GeoArray(
+            data=np.asarray(time_field.reader),
             transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 16.0),
             crs="EPSG:32630",
         )

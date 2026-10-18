@@ -22,6 +22,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from geopatcher._src.carrier import from_wire, to_wire
 from geopatcher._src.hooks import PatcherHook
 from geopatcher._src.patch import Patch
 from geopatcher._src.prefetch import prefetch_iterable
@@ -74,9 +75,9 @@ def parallel_map(
     default, which is unsafe in a process running GDAL / obstore / dask
     threads. The operator, every patch and every output are pickled to
     and from the workers, so ``operator`` must be a picklable,
-    module-level callable. The field itself is never sent. `GeoTensor`
-    chips and outputs travel in a wire form that keeps their transform /
-    CRS / nodata / attrs (a bare GeoTensor pickle drops them).
+    module-level callable. The field itself is never sent. `GeoArray`
+    chips and outputs travel in a compact wire form (pixels, grid config,
+    fill, attrs) rebuilt through the constructor in the receiving process.
 
     Args:
         patcher: Spatial patcher that defines the anchor schedule, the
@@ -229,7 +230,7 @@ def _run(
             try:
                 _, output, runtime_s = future.result()
                 if to_process:
-                    output = output.with_data(_from_wire(output.data))
+                    output = output.with_data(from_wire(output.data))
             except Exception as exc:
                 if journal is not None:
                     journal.commit(
@@ -265,8 +266,8 @@ def _run(
             if to_process:
                 # `with_data` drops the (unpicklable) release closure — the
                 # parent keeps it on `patch` and runs it in `collect` — and
-                # the wire form keeps a GeoTensor's georeferencing.
-                payload = patch.with_data(_to_wire(patch.data))
+                # the wire form rebuilds a GeoArray in the worker.
+                payload = patch.with_data(to_wire(patch.data))
                 future = executor.submit(_apply_operator_wire, index, payload, operator)
             else:
                 future = executor.submit(_apply_operator, index, patch, operator)
@@ -301,60 +302,11 @@ def _apply_operator(
 def _apply_operator_wire(
     index: int, patch: Patch, operator: Callable[[Any], Any]
 ) -> tuple[int, Patch, float]:
-    """Process-pool twin of `_apply_operator`: unwraps / rewraps `_WireGeoTensor`."""
+    """Process-pool twin of `_apply_operator`: unwraps / rewraps the wire form."""
     index, output, runtime_s = _apply_operator(
-        index, patch.with_data(_from_wire(patch.data)), operator
+        index, patch.with_data(from_wire(patch.data)), operator
     )
-    return index, output.with_data(_to_wire(output.data)), runtime_s
-
-
-class _WireGeoTensor:
-    """Picklable stand-in for a `GeoTensor`.
-
-    georeader's `GeoTensor` is an ndarray subclass whose pickle drops the
-    transform / CRS / nodata / attrs, so a chip (or output) sent through a
-    process pool would come back ungeoreferenced. This carries the plain
-    values plus the metadata, and `_from_wire` rebuilds the `GeoTensor`.
-    """
-
-    __slots__ = ("attrs", "crs", "fill_value_default", "transform", "values")
-
-    def __init__(self, data: Any) -> None:
-        self.values = np.asarray(data)
-        self.transform = data.transform
-        self.crs = data.crs
-        self.fill_value_default = data.fill_value_default
-        self.attrs = dict(getattr(data, "attrs", None) or {})
-
-    def __getstate__(self) -> tuple[Any, ...]:
-        return tuple(getattr(self, name) for name in self.__slots__)
-
-    def __setstate__(self, state: tuple[Any, ...]) -> None:
-        for name, value in zip(self.__slots__, state, strict=True):
-            setattr(self, name, value)
-
-    def rebuild(self) -> Any:
-        from georeader.geotensor import GeoTensor
-
-        return GeoTensor(
-            values=self.values,
-            transform=self.transform,
-            crs=self.crs,
-            fill_value_default=self.fill_value_default,
-            attrs=self.attrs,
-        )
-
-
-def _to_wire(data: Any) -> Any:
-    try:
-        from georeader.geotensor import GeoTensor
-    except ImportError:  # pragma: no cover - georeader is a core dependency
-        return data
-    return _WireGeoTensor(data) if isinstance(data, GeoTensor) else data
-
-
-def _from_wire(data: Any) -> Any:
-    return data.rebuild() if isinstance(data, _WireGeoTensor) else data
+    return index, output.with_data(to_wire(output.data)), runtime_s
 
 
 def _ensure_picklable_operator(operator: Callable[[Any], Any]) -> None:

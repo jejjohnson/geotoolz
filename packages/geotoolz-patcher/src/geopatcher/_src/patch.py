@@ -18,6 +18,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any, Self
 
+from geopatcher._src.carrier import reject_georeader_data
+
 
 class _ReleaseLifecycleMixin:
     """Shared release-slot lifecycle for the patch carriers.
@@ -76,8 +78,9 @@ class Patch[AnchorT, IndicesT, DataT](_ReleaseLifecycleMixin):
     """A single patch produced by a `SpatialPatcher`.
 
     Args:
-        data: The substrate slice the operator consumes (a `GeoTensor`,
-            a sub-`DataArray`, a `GeoDataFrame` slice, …).
+        data: The substrate slice the operator consumes (a
+            `geoarray.GeoArray`, a sub-`DataArray`, a `GeoDataFrame`
+            slice, …).
         anchor: Where this patch lives in the global field. Shape varies
             with the `Sampler` (pixel coords, lat/lon, polygon id, …).
         indices: Backend-specific indexer used to extract `data` from
@@ -101,7 +104,13 @@ class Patch[AnchorT, IndicesT, DataT](_ReleaseLifecycleMixin):
     _release: Callable[[], None] | None = field(default=None, repr=False, compare=False)
 
     def with_data[NewDataT](self, data: NewDataT) -> Patch[AnchorT, IndicesT, NewDataT]:
-        """Return a data-replaced copy that does not own this patch's release slot."""
+        """Return a data-replaced copy that does not own this patch's release slot.
+
+        Raises:
+            TypeError: ``data`` is a georeader ``GeoTensor`` (convert it with
+                ``geoarray.interop.georeader.from_georeader``).
+        """
+        reject_georeader_data(data, "Patch.with_data")
         return replace(self, data=data, _release=None)
 
 
@@ -130,6 +139,7 @@ class TemporalPatch[AnchorT, IndicesT, DataT](_ReleaseLifecycleMixin):
         self, data: NewDataT
     ) -> TemporalPatch[AnchorT, IndicesT, NewDataT]:
         """Return a data-replaced copy that does not own this patch's release slot."""
+        reject_georeader_data(data, "TemporalPatch.with_data")
         return replace(self, data=data, _release=None)
 
 
@@ -153,4 +163,5 @@ class SpatioTemporalPatch(_ReleaseLifecycleMixin):
 
     def with_data(self, data: Any) -> SpatioTemporalPatch:
         """Return a data-replaced copy that does not own this patch's release slot."""
+        reject_georeader_data(data, "SpatioTemporalPatch.with_data")
         return replace(self, data=data, _release=None)

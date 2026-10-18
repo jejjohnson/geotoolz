@@ -17,6 +17,7 @@ from typing import Any
 import numpy as np
 
 from geopatcher._src._extras import missing_extra
+from geopatcher._src.carrier import reject_georeader
 from geopatcher._src.domains import PointDomain, VectorDomain
 
 
@@ -91,6 +92,7 @@ class GeoPandasField:
             ValueError: If ``array`` is not 1-D or its length differs
                 from the number of rows.
         """
+        reject_georeader(array, "GeoPandasField.with_data")
         values = np.asarray(array)
         if values.ndim != 1 or values.shape[0] != len(self.gdf):
             raise ValueError(

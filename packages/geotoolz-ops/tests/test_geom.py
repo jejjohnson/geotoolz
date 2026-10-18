@@ -382,7 +382,6 @@ def test_stitch_feather_matches_spatial_overlap_add() -> None:
         "geopatcher",
         reason="geoops.patch_ops bridge requires the [patch] extra (geopatcher)",
     )
-    from geoarray.interop.georeader import to_georeader
     from geopatcher import RasterField, SpatialPatcher
 
     from geoops.patch_ops import TriangularWindow
@@ -391,8 +390,7 @@ def test_stitch_feather_matches_spatial_overlap_add() -> None:
     tiles = gz.geom.Tile(size=(3, 4), stride=(2, 3))(gt)
 
     stitched = gz.geom.Stitch(blend="feather", feather_width=2)(tiles)
-    # geopatcher (the oracle) still reads georeader carriers.
-    field = RasterField(to_georeader(gt))
+    field = RasterField(gt)
     patcher = SpatialPatcher(
         geometry=spatial.geometry.Rectangular(size=(3, 4)),
         sampler=spatial.sampler.RegularStride(step=(2, 3)),

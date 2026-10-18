@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 import rasterio
 import shapely.geometry
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray, Grid
 
 from geopatcher import (
     RasterField,
@@ -35,7 +35,7 @@ def _ones_field(h: int = 32, w: int = 32) -> RasterField:
     transform = rasterio.transform.from_origin(
         west=0.0, north=float(h), xsize=1.0, ysize=1.0
     )
-    gt = GeoTensor(values=arr, transform=transform, crs="EPSG:32630")
+    gt = GeoArray(data=arr, transform=transform, crs="EPSG:32630")
     return RasterField(gt)
 
 
@@ -75,10 +75,13 @@ class TestPolygonIntersectionUnwrap:
         seen: list[Any] = []
 
         class _StubDomain:
-            # `_is_raster_domain` checks for transform/shape/crs attrs.
-            transform = rasterio.transform.from_origin(0.0, 20.0, 1.0, 1.0)
+            # `_is_raster_domain` checks for a `grid` (the RasterDomain).
+            grid = Grid.from_affine(
+                rasterio.transform.from_origin(0.0, 20.0, 1.0, 1.0),
+                "EPSG:32630",
+                (20, 20),
+            )
             shape = (20, 20)
-            crs = "EPSG:32630"
 
         class _StubField:
             domain = _StubDomain()

@@ -425,17 +425,17 @@ class TestConstructionAndCoupling:
 
 def _time_raster(n_time: int, scale: float = 1.0) -> Any:
     import rasterio
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
     from geopatcher._src.fields.raster import RasterField
 
     arr = np.arange(n_time * 16 * 16, dtype=np.float32).reshape(n_time, 16, 16)
     return RasterField(
-        GeoTensor(
-            values=arr * scale,
+        GeoArray(
+            data=arr * scale,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
-            fill_value_default=np.nan,
+            fill_value=np.nan,
         )
     )
 

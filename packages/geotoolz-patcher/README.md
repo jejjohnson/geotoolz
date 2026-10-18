@@ -63,14 +63,14 @@ pip install 'geotoolz-patcher[pipekit]'            # pipekit operator-graph brid
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 
-# 1. Wrap any GeoTensor (or GeoData reader) as a Field.
+# 1. Wrap a GeoArray (or any lazy geoarray.RasterSource) as a Field.
 arr: np.ndarray = np.outer(np.linspace(0, 1, 512), np.linspace(0, 1, 512)).astype(np.float32)[None]  # (1, 512, 512)
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(arr, transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000), crs="EPSG:32611")
+    GeoArray(arr, rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000), "EPSG:32611")
 )
 
 # 2. Compose the four axes.
@@ -82,7 +82,7 @@ patcher: gp.SpatialPatcher = gp.SpatialPatcher(
 )
 
 # 3. Split → operate per patch → merge.
-patches: list[gp.Patch] = list(patcher.split(field))         # 25 patches, data (1, 128, 128) each
+patches: list[gp.Patch] = list(patcher.split(field))         # 25 patches, GeoArray (1, 128, 128) each
 out: list[gp.Patch] = [
     p.with_data(np.asarray(p.data) * 2.0)                   # your operator here
     for p in patches
@@ -91,7 +91,11 @@ stitched: np.ndarray = patcher.merge(out, field.domain)     # (1, 512, 512) floa
 ```
 
 `patch.anchor` is the patch origin in pixel coordinates (`(0, 0)`,
-`(0, 96)`, …) and `field.domain` carries the grid the merge writes onto.
+`(0, 96)`, …), `patch.data` is a `geoarray.GeoArray` on the window's grid,
+and `field.domain` (the source itself: its `grid` and `shape`) carries the
+grid the merge writes onto. A lazy reader is read window by window; a
+georeader reader crosses with
+`RasterField(geoarray.interop.georeader.source_from_georeader(reader))`.
 For independent local jobs, swap the loop for
 `geopatcher.run.parallel_map`; for global-context operators, use the codified
 `reduce` / `two_pass` helpers. See the
@@ -127,18 +131,18 @@ pipeline:
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 import geoops as gz
 from geoops.patch_ops import ApplyToChips, GridSampler, MergePatches
 
 rng: np.random.Generator = np.random.default_rng(0)
-scene: GeoTensor = GeoTensor(
+scene: GeoArray = GeoArray(
     rng.integers(1, 10_000, size=(4, 512, 512), dtype=np.uint16),  # (4, 512, 512) uint16
-    transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
-    crs="EPSG:32611",
-    fill_value_default=0,
+    rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
+    "EPSG:32611",
+    fill_value=0,
     attrs={"band_names": ["blue", "green", "red", "nir"]},
 )
 field: gp.RasterField = gp.RasterField(scene)
@@ -155,7 +159,7 @@ tiled: gz.Sequential = gz.Sequential([
     ApplyToChips(operator=ndvi),           # (4, 128, 128) uint16 → (128, 128) float64
     MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-ndvi_map: GeoTensor = tiled(field)         # (512, 512) float64 · NaN = no data
+ndvi_map: GeoArray = tiled(field)          # (512, 512) float64 · NaN = no data
 ```
 
 The domain fixes the grid and the patches fix the bands, so NDVI's

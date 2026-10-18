@@ -10,12 +10,12 @@ applies your function to every patch.
 ```python
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 
 field: gp.RasterField = gp.RasterField(
-    GeoTensor(
+    GeoArray(
         np.outer(np.linspace(0, 1, 512), np.linspace(0, 1, 512)).astype(np.float32)[None],  # (1, 512, 512) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",
@@ -32,7 +32,7 @@ stats: dict[str, float] = patcher.reduce(field, gp.spatial.aggregation.MeanStd()
 bounds: dict[str, float] = patcher.reduce(field, gp.spatial.aggregation.MinMax())  # {'min': 0.0, 'max': 1.0}
 
 
-def standardise(chip: GeoTensor, s: dict[str, float]) -> np.ndarray:
+def standardise(chip: GeoArray, s: dict[str, float]) -> np.ndarray:
     """Scale one patch by the scene's statistics."""
     return (np.asarray(chip) - s["mean"]) / s["std"]  # (1, 128, 128) float32 → (1, 128, 128) float32
 
@@ -70,7 +70,7 @@ from typing import Any
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.windows import Window
 
 import geopatcher as gp
@@ -79,13 +79,13 @@ import geopatcher as gp
 class AsyncRaster(gp.RasterField):
     """A RasterField with an awaitable read, standing in for a remote COG."""
 
-    async def aselect(self, window: Window) -> GeoTensor:
+    async def aselect(self, window: Window) -> GeoArray:
         await asyncio.sleep(0)                        # the network round trip
         return self.select(window)                    # (1, 128, 128) float32
 
 
 field: AsyncRaster = AsyncRaster(
-    GeoTensor(
+    GeoArray(
         np.outer(np.linspace(0, 1, 512), np.linspace(0, 1, 512)).astype(np.float32)[None],  # (1, 512, 512) float32
         transform=rasterio.Affine(10, 0, 500_000, 0, -10, 4_300_000),
         crs="EPSG:32611",

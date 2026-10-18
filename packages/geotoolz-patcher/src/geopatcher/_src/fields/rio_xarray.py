@@ -1,9 +1,9 @@
 """`RioXarrayField` — raster `Field` adapter on an `xarray.DataArray`.
 
 For users who want the xarray surface end-to-end (chunked Dask reads,
-unified xarray pipelines) instead of `GeoTensor`. The domain is still
-the raster one — affine + CRS + shape — so all `Rectangular` patching
-works the same.
+unified xarray pipelines) instead of `geoarray.GeoArray`. The domain is
+still the raster one — a `geoarray.Grid` plus the array shape — so all
+`Rectangular` patching works the same.
 
 Optional extra: ``pip install 'geotoolz-patcher[xarray-raster]'``.
 """
@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 
 from geopatcher._src._extras import missing_extra
+from geopatcher._src.carrier import reject_georeader
 
 
 try:
@@ -28,10 +29,9 @@ except ImportError:  # pragma: no cover
 class RioXarrayField:
     """Wrap a rioxarray-flavoured `xarray.DataArray` as a raster `Field`.
 
-    The `domain` view exposes the rasterio affine, the array shape, and
-    the CRS — i.e. it satisfies the same metadata surface as
-    `GeoDataBase` from georeader, so it interoperates with the existing
-    raster patching path.
+    The `domain` view exposes the pixel grid (a `geoarray.Grid` from the
+    rasterio affine and the CRS) and the array shape — the `RasterDomain`
+    protocol — so it takes the same raster patching path as `RasterField`.
 
     Args:
         da: An `xarray.DataArray` with a working ``da.rio`` accessor.
@@ -119,14 +119,22 @@ class RioXarrayField:
         return _georeference(chip, window_transform(window, self.da.rio.transform()))
 
     def with_data(self, array: Any) -> RioXarrayField:
+        reject_georeader(array, "RioXarrayField.with_data")
         return RioXarrayField(self.da.copy(data=np.asarray(array)))
 
 
 @dataclass(eq=False)
 class _RioDomain:
-    """`GeoDataBase`-shaped view over a rioxarray DataArray."""
+    """`RasterDomain` view over a rioxarray DataArray: ``grid`` + ``shape``."""
 
     da: Any
+
+    @property
+    def grid(self) -> Any:
+        from geoarray import Grid
+
+        rio = self.da.rio
+        return Grid.from_affine(rio.transform(), rio.crs, (rio.height, rio.width))
 
     @property
     def transform(self) -> Any:
@@ -146,7 +154,7 @@ class _RioDomain:
 
 
 def _nodata(da: Any) -> Any:
-    """``rio.nodata`` of ``da``, or ``0`` (the `GeoTensor` default) when unset."""
+    """``rio.nodata`` of ``da``, or ``0`` when unset (what rasterio pads with)."""
     nodata = da.rio.nodata
     return 0 if nodata is None else nodata
 

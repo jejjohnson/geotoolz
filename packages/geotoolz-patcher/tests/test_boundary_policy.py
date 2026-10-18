@@ -29,7 +29,7 @@ from typing import Any, Literal
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray, PixelWindow
 from rasterio.windows import (
     Window,
     bounds as window_bounds,
@@ -59,8 +59,8 @@ def _patcher(boundary: BoundaryMode, step: int = 16) -> SpatialPatcher:
 def misaligned_field() -> RasterField:
     # 70x70 with patch=16, stride=16 → residual of 6 px on each axis.
     arr = np.ones((70, 70), dtype=np.float32)
-    gt = GeoTensor(
-        values=arr,
+    gt = GeoArray(
+        data=arr,
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
     )
@@ -89,7 +89,7 @@ class TestRectangularBoundary:
         # Every patch is still 16x16 — georeader pads the out-of-bounds
         # region via boundless=True (with reader nodata).
         for patch in patches:
-            assert patch.data.values.shape == (16, 16)
+            assert np.asarray(patch.data).shape == (16, 16)
 
     def test_shrink_clips_edge_patches(self, misaligned_field: RasterField) -> None:
         p = _patcher("shrink")
@@ -97,13 +97,13 @@ class TestRectangularBoundary:
         assert len(patches) == 25
         # Interior patch at (0, 0) keeps full 16x16; corner patch at
         # (64, 64) shrinks to 6x6.
-        shapes = {patch.anchor: patch.data.values.shape for patch in patches}
+        shapes = {patch.anchor: np.asarray(patch.data).shape for patch in patches}
         assert shapes[(0, 0)] == (16, 16)
         assert shapes[(64, 64)] == (6, 6)
         assert shapes[(64, 0)] == (6, 16)
         # Weights track the actual patch size.
         for patch in patches:
-            assert patch.weights.shape == patch.data.values.shape
+            assert patch.weights.shape == np.asarray(patch.data).shape
 
     def test_raise_errors_on_first_overflow(
         self, misaligned_field: RasterField
@@ -136,8 +136,8 @@ class TestAlignedDomainIsUnchanged:
     @pytest.fixture
     def aligned_field(self) -> RasterField:
         arr = np.arange(64 * 64, dtype=np.float32).reshape(64, 64)
-        gt = GeoTensor(
-            values=arr,
+        gt = GeoArray(
+            data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
         )
@@ -162,7 +162,7 @@ class TestAlignedDomainIsUnchanged:
         assert sorted({a[0] for a in anchors}) == starts
         assert len(anchors) == len(starts) ** 2
         merged = p.merge(p.split(aligned_field), aligned_field.domain)
-        np.testing.assert_array_equal(merged, aligned_field.reader.values)
+        np.testing.assert_array_equal(merged, np.asarray(aligned_field.reader))
 
 
 class TestBoundaryHonoredByAllRasterSamplers:
@@ -176,8 +176,8 @@ class TestBoundaryHonoredByAllRasterSamplers:
     @pytest.fixture
     def misaligned_field(self) -> RasterField:
         arr = np.ones((70, 70), dtype=np.float32)
-        gt = GeoTensor(
-            values=arr,
+        gt = GeoArray(
+            data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
         )
@@ -200,8 +200,8 @@ class TestBoundaryHonoredByAllRasterSamplers:
         # non-drop raster sampler (anchored at the origin), so
         # boundary="raise" fires.
         small = RasterField(
-            GeoTensor(
-                values=np.ones((10, 10), dtype=np.float32),
+            GeoArray(
+                data=np.ones((10, 10), dtype=np.float32),
                 transform=rasterio.Affine.identity(),
                 crs="EPSG:32630",
             )
@@ -272,7 +272,7 @@ class TestBoundaryHonoredByAllRasterSamplers:
 def _arange_field(n: int = 10) -> RasterField:
     """``n x n`` field of ``arange`` values on an identity transform."""
     arr = np.arange(n * n, dtype=np.float32).reshape(n, n)
-    gt = GeoTensor(values=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630")
+    gt = GeoArray(data=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630")
     return RasterField(gt)
 
 
@@ -301,33 +301,35 @@ class TestReflectAndPadValue:
         # covers rows/cols 8..11; row/col 11 is out of domain, so the
         # clipped read is raw[8:11, 8:11] (3x3) and the overflow is 1.
         field = _arange_field(11)
-        raw = np.asarray(field.reader.values)
+        raw = np.asarray(field.reader)
         patcher = _corner_patcher("reflect", size=4)
         patches = {p.anchor: p for p in patcher.split(field)}
         corner = patches[(8, 8)]
         expected = np.pad(raw[8:11, 8:11], ((0, 1), (0, 1)), mode="reflect")
-        np.testing.assert_array_equal(corner.data.values, expected)
-        assert corner.data.values.shape == (4, 4)
+        np.testing.assert_array_equal(np.asarray(corner.data), expected)
+        assert np.asarray(corner.data).shape == (4, 4)
 
     def test_reflect_interior_anchor_is_untouched(self) -> None:
         # An in-domain window takes the plain read path — no padding.
         field = _arange_field(11)
-        raw = np.asarray(field.reader.values)
+        raw = np.asarray(field.reader)
         patcher = _corner_patcher("reflect", size=4)
         interior = {p.anchor: p for p in patcher.split(field)}[(0, 0)]
-        np.testing.assert_array_equal(interior.data.values, raw[0:4, 0:4])
+        np.testing.assert_array_equal(np.asarray(interior.data), raw[0:4, 0:4])
 
     def test_pad_value_fills_overflow_region(self) -> None:
         field = _arange_field(10)
-        raw = np.asarray(field.reader.values)
+        raw = np.asarray(field.reader)
         patcher = _corner_patcher("pad", size=4, pad_value=-999.0)
         corner = {p.anchor: p for p in patcher.split(field)}[(8, 8)]
-        assert corner.data.values.shape == (4, 4)
+        assert np.asarray(corner.data).shape == (4, 4)
         # In-domain quadrant preserved …
-        np.testing.assert_array_equal(corner.data.values[0:2, 0:2], raw[8:10, 8:10])
+        np.testing.assert_array_equal(
+            np.asarray(corner.data)[0:2, 0:2], raw[8:10, 8:10]
+        )
         # … overflow filled with the requested constant.
-        assert np.all(corner.data.values[2:, :] == -999.0)
-        assert np.all(corner.data.values[:, 2:] == -999.0)
+        assert np.all(np.asarray(corner.data)[2:, :] == -999.0)
+        assert np.all(np.asarray(corner.data)[:, 2:] == -999.0)
 
     @pytest.mark.parametrize("boundary", ["pad", "reflect"])
     @pytest.mark.parametrize(
@@ -345,7 +347,7 @@ class TestReflectAndPadValue:
         # overflow on every side.
         utm = rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0)
         arr = np.arange(100, dtype=np.float32).reshape(10, 10)
-        field = RasterField(GeoTensor(values=arr, transform=utm, crs="EPSG:32630"))
+        field = RasterField(GeoArray(data=arr, transform=utm, crs="EPSG:32630"))
         patcher = SpatialPatcher(
             geometry=spatial.geometry.Rectangular(size=(4, 4), boundary=boundary),
             sampler=spatial.sampler.Explicit([anchor]),
@@ -355,9 +357,9 @@ class TestReflectAndPadValue:
         (chip,) = list(patcher.split(field))
         row, col = anchor
         assert chip.data.shape == (4, 4)
-        assert chip.data.transform == window_transform(Window(col, row, 4, 4), utm)
-        assert chip.data.transform.c == 500_000.0 + 10.0 * col
-        assert chip.data.transform.f == 4_600_000.0 - 10.0 * row
+        assert chip.data.grid.affine == window_transform(Window(col, row, 4, 4), utm)
+        assert chip.data.grid.affine.c == 500_000.0 + 10.0 * col
+        assert chip.data.grid.affine.f == 4_600_000.0 - 10.0 * row
 
     @pytest.mark.parametrize(("n", "size"), [(10, 4), (70, 16), (5, 16)])
     def test_reflect_overflow_beyond_in_domain_extent(self, n: int, size: int) -> None:
@@ -366,16 +368,16 @@ class TestReflectAndPadValue:
         # 10 out; a 5x5 domain under a 16-px patch). The chip equals the
         # reflect-extended domain, i.e. np.pad(raw, mode="reflect").
         field = _arange_field(n)
-        raw = np.asarray(field.reader.values)
+        raw = np.asarray(field.reader)
         patcher = _corner_patcher("reflect", size=size)
         reference = np.pad(raw, ((0, size), (0, size)), mode="reflect")
         patches = list(patcher.split(field))
         for patch in patches:
             r, c = patch.anchor
             np.testing.assert_array_equal(
-                patch.data.values, reference[r : r + size, c : c + size]
+                np.asarray(patch.data), reference[r : r + size, c : c + size]
             )
-            assert (patch.data.transform.c, patch.data.transform.f) == (c, r)
+            assert (patch.data.grid.affine.c, patch.data.grid.affine.f) == (c, r)
         merged = patcher.merge(patches, field.domain)
         np.testing.assert_array_equal(merged, raw)
 
@@ -386,13 +388,15 @@ class TestReflectAndPadValue:
             list(patcher.split(field))
 
     def test_pad_none_matches_boundless_read(self) -> None:
-        # With pad_value=None the clip-and-pad path must reproduce the old
-        # boundless read (fill_value_default) bit-for-bit.
-        field = _arange_field(10)
+        # With pad_value=None the clip-and-pad path must reproduce the
+        # boundless read (fill_value) bit-for-bit. A boundless read needs
+        # a declared fill (a GeoArray's default is none).
+        field = RasterField(_arange_field(10).reader.replace(fill_value=-1.0))
         patcher = _corner_patcher("pad", size=4)
         corner = {p.anchor: p for p in patcher.split(field)}[(8, 8)]
-        boundless = field.reader.read_from_window(corner.indices, boundless=True)
-        np.testing.assert_array_equal(corner.data.values, np.asarray(boundless.values))
+        window = PixelWindow(col_off=8, row_off=8, width=4, height=4)
+        boundless = field.reader.read_window(window, boundless=True)
+        np.testing.assert_array_equal(np.asarray(corner.data), np.asarray(boundless))
 
     def test_config_round_trips_pad_value(self) -> None:
         geom = spatial.geometry.Rectangular(
@@ -423,7 +427,7 @@ def _ramp(h: int = _H, w: int = _W) -> np.ndarray:
 
 
 def _raster_case() -> RasterField:
-    return RasterField(GeoTensor(values=_ramp(), transform=_T, crs="EPSG:32630"))
+    return RasterField(GeoArray(data=_ramp(), transform=_T, crs="EPSG:32630"))
 
 
 def _rioxarray_case() -> Any:
@@ -446,8 +450,8 @@ _MATRIX_FIELDS = {"RasterField": _raster_case, "RioXarrayField": _rioxarray_case
 
 
 def _chip_georef(data: Any) -> tuple[rasterio.Affine, tuple[float, ...]]:
-    if isinstance(data, GeoTensor):
-        return data.transform, tuple(data.bounds)
+    if isinstance(data, GeoArray):
+        return data.grid.affine, tuple(data.bounds)
     return data.rio.transform(), tuple(data.rio.bounds())
 
 
@@ -491,7 +495,12 @@ def test_split_merge_matrix(field_name: str, step: int, boundary: BoundaryMode) 
             np.testing.assert_array_equal(
                 chip, reflected[r : r + window.height, c : c + window.width]
             )
-        if boundary == "pad":
+        padded = (in_h, in_w) != (window.height, window.width)
+        if boundary == "pad" and isinstance(patch.data, GeoArray):
+            # A float source without a fill pads with NaN and declares it.
+            assert (patch.data.fill_value is not None) == padded
+            assert np.isnan(chip[in_h:, :]).all() and np.isnan(chip[:, in_w:]).all()
+        elif boundary == "pad":
             assert np.all(chip[in_h:, :] == 0) and np.all(chip[:, in_w:] == 0)
         covered[r : r + in_h, c : c + in_w] = True
 
@@ -615,7 +624,7 @@ def test_negative_pad_window_does_not_wrap() -> None:
     # A window starting at -2 used to become acc[-2:2] — a slice numpy
     # reads from the end — instead of the in-domain rows 0..1.
     field = _arange_field(10)
-    raw = np.asarray(field.reader.values)
+    raw = np.asarray(field.reader)
     patcher = SpatialPatcher(
         geometry=spatial.geometry.Rectangular(
             size=(4, 4), boundary="pad", pad_value=-1.0
@@ -636,7 +645,7 @@ class TestShrinkClipsNegativeAnchors:
 
     def test_explicit_negative_anchor(self) -> None:
         field = _arange_field(10)
-        raw = np.asarray(field.reader.values)
+        raw = np.asarray(field.reader)
         window = spatial.window.Hann()
         patcher = SpatialPatcher(
             geometry=spatial.geometry.Rectangular(size=(4, 4), boundary="shrink"),
@@ -646,8 +655,8 @@ class TestShrinkClipsNegativeAnchors:
         )
         (patch,) = list(patcher.split(field))
         assert patch.indices == Window(0, 0, 3, 2)
-        np.testing.assert_array_equal(patch.data.values, raw[0:2, 0:3])
-        assert (patch.data.transform.c, patch.data.transform.f) == (0.0, 0.0)
+        np.testing.assert_array_equal(np.asarray(patch.data), raw[0:2, 0:3])
+        assert (patch.data.grid.affine.c, patch.data.grid.affine.f) == (0.0, 0.0)
         # The weights are the in-domain part of the full taper, not its
         # top-left corner.
         full = window.weights(patcher.geometry)
@@ -655,7 +664,7 @@ class TestShrinkClipsNegativeAnchors:
 
     def test_centred_coords_near_corner(self) -> None:
         field = _arange_field(20)
-        raw = np.asarray(field.reader.values)
+        raw = np.asarray(field.reader)
         patcher = SpatialPatcher(
             geometry=spatial.geometry.Rectangular(size=(4, 4), boundary="shrink"),
             sampler=spatial.sampler.ExplicitCoords([(0.5, 0.5)]),
@@ -666,7 +675,7 @@ class TestShrinkClipsNegativeAnchors:
         # Centred on pixel (0, 0): anchor (-2, -2) clips to rows/cols 0..1.
         assert patch.anchor == (-2, -2)
         assert patch.indices == Window(0, 0, 2, 2)
-        np.testing.assert_array_equal(patch.data.values, raw[:2, :2])
+        np.testing.assert_array_equal(np.asarray(patch.data), raw[:2, :2])
         assert patch.weights.shape == (2, 2)
 
 
@@ -723,7 +732,7 @@ class TestDropPatchLargerThanDomain:
         patches = list(patcher.split(field))
         assert [p.anchor for p in patches] == [(0, 0)]
         merged = patcher.merge(patches, field.domain)
-        np.testing.assert_array_equal(merged, field.reader.values)
+        np.testing.assert_array_equal(merged, np.asarray(field.reader))
 
 
 class TestCheckFullScanOnlyUnderDrop:
@@ -758,9 +767,7 @@ class TestPadValueValidation:
     def _field(dtype: Any) -> RasterField:
         arr = np.arange(100).reshape(10, 10).astype(dtype)
         return RasterField(
-            GeoTensor(
-                values=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630"
-            )
+            GeoArray(data=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630")
         )
 
     @pytest.mark.parametrize(
@@ -790,9 +797,9 @@ class TestPadValueValidation:
     def test_representable_value_fills(self, dtype: Any, pad_value: float) -> None:
         patcher = _corner_patcher("pad", size=4, pad_value=pad_value)
         corner = {p.anchor: p for p in patcher.split(self._field(dtype))}[(8, 8)]
-        assert corner.data.values.dtype == dtype
+        assert np.asarray(corner.data).dtype == dtype
         np.testing.assert_array_equal(
-            corner.data.values[2:, :], np.full((2, 4), pad_value, dtype=dtype)
+            np.asarray(corner.data)[2:, :], np.full((2, 4), pad_value, dtype=dtype)
         )
 
     def test_non_numeric_rejected_at_construction(self) -> None:
@@ -842,14 +849,14 @@ class TestGridDomainBoundary:
             assert patch.data.shape == (h, w)
             # Coordinates continue the source grid past the edge.
             np.testing.assert_allclose(
-                patch.data["y"].values, 100.0 - 2.0 * np.arange(r, r + h)
+                np.asarray(patch.data["y"]), 100.0 - 2.0 * np.arange(r, r + h)
             )
             np.testing.assert_allclose(
-                patch.data["x"].values, 10.0 + 0.5 * np.arange(c, c + w)
+                np.asarray(patch.data["x"]), 10.0 + 0.5 * np.arange(c, c + w)
             )
             if boundary == "reflect":
                 np.testing.assert_array_equal(
-                    patch.data.values, reflected[r : r + h, c : c + w]
+                    np.asarray(patch.data), reflected[r : r + h, c : c + w]
                 )
             covered[r : r + h, c : c + w] = True
         if boundary != "drop":

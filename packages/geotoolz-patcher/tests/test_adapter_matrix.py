@@ -5,7 +5,7 @@ coordinate-bearing) fixture per adapter, so a regression in any
 adapter's ``select`` / ``domain`` / ``with_data`` contract shows up in
 the same place:
 
-- chips are the natural, materialised payload (``GeoTensor`` or
+- chips are the natural, materialised payload (``GeoArray`` or
   ``xarray.DataArray``), never a Field wrapper or a lazy reader;
 - raster chips carry the exact window transform;
 - ``merge(split(field), field.domain)`` reproduces the source;
@@ -28,7 +28,7 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio import Affine
 from rasterio.windows import Window, transform as window_transform
 
@@ -91,16 +91,18 @@ class Case:
     transform: Affine | None  # source grid for chip georeferencing checks
 
 
-def _raster_geotensor(tmp_path: Path) -> Case:
-    gt = GeoTensor(values=_values(), transform=_T, crs=_CRS, fill_value_default=-1.0)
+def _raster_geoarray(tmp_path: Path) -> Case:
+    gt = GeoArray(data=_values(), transform=_T, crs=_CRS, fill_value=-1.0)
     return Case(RasterField(gt), _values(), _T)
 
 
 def _raster_rasterio_reader(tmp_path: Path) -> Case:
+    from geoarray.interop.georeader import source_from_georeader
     from georeader.rasterio_reader import RasterioReader
 
     path = _write_tif(tmp_path / "src.tif")
-    return Case(RasterField(RasterioReader(str(path))), _values(), _T)
+    reader = source_from_georeader(RasterioReader(str(path)))
+    return Case(RasterField(reader), _values(), _T)
 
 
 def _xarray(tmp_path: Path) -> Case:
@@ -143,16 +145,16 @@ def _reprojecting_3d(tmp_path: Path) -> Case:
     # Same-CRS, same-resolution, nearest: the warp is the identity, so the
     # merge must reproduce the source exactly while every chip still goes
     # through the per-chip crop + warp path.
-    gt = GeoTensor(values=_values(), transform=_T, crs=_CRS, fill_value_default=-1.0)
+    gt = GeoArray(data=_values(), transform=_T, crs=_CRS, fill_value=-1.0)
     field = ReprojectingRasterField(
         gt, dst_crs=_CRS, resolution=10.0, resampling="nearest"
     )
     assert field.domain.shape == (_BANDS, _H, _W)
-    return Case(field, _values(), field.domain.transform)
+    return Case(field, _values(), field.domain.grid.affine)
 
 
 ADAPTERS: dict[str, Callable[[Path], Case]] = {
-    "RasterField-GeoTensor": _raster_geotensor,
+    "RasterField-GeoArray": _raster_geoarray,
     "RasterField-RasterioReader": _raster_rasterio_reader,
     "XarrayField": _xarray,
     "RioXarrayField-coords": _rioxarray,
@@ -172,8 +174,8 @@ def _patcher(boundary: str) -> SpatialPatcher:
 
 
 def _chip_transform(data: Any) -> Affine:
-    if isinstance(data, GeoTensor):
-        return data.transform
+    if isinstance(data, GeoArray):
+        return data.grid.affine
     return data.rio.transform()
 
 

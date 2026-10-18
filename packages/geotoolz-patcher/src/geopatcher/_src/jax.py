@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from geoarray import GeoArray
 
 from geopatcher._src.patch import Patch
 
@@ -45,7 +46,7 @@ class BatchedPatch:
             ``batch``; ``None`` for padding entries.
         weights: Per-patch window weights (as on `Patch.weights`), length
             ``batch``; ``None`` for padding entries.
-        carriers: Per-patch carrier templates (`GeoTensor` / `DataArray`
+        carriers: Per-patch carrier templates (`GeoArray` / `DataArray`
             metadata with no pixel data), used by `unbatch` to rebuild the
             original carrier type; ``None`` for plain arrays and padding.
 
@@ -141,11 +142,12 @@ def unbatch(batch: BatchedPatch, data: Any | None = None) -> list[Patch]:
 
     Returns:
         One `Patch` per valid entry, in batch order. A patch that came from
-        a `GeoTensor` or `DataArray` chip comes back as the same carrier
+        a `GeoArray` or `DataArray` chip comes back as the same carrier
         (transform / CRS / nodata / coords restored, values as a numpy
         array) whenever its row keeps the chip's spatial shape — e.g. a
-        per-pixel model output with a different band count; otherwise
-        the row is returned as a bare array.
+        per-pixel model output with a different band count, whose stale
+        per-band attrs are dropped; otherwise the row is returned as a
+        bare array.
 
     Examples:
         Round-trip a batch through a model and merge::
@@ -211,15 +213,14 @@ def _template(data: Any) -> Any:
     The template holds a zero-stride broadcast view instead of the chip's
     pixels, so a batch does not keep a second copy of every chip alive.
     """
-    from georeader.geotensor import GeoTensor
-
-    if isinstance(data, GeoTensor):
-        return GeoTensor(
-            values=np.broadcast_to(np.zeros((), dtype=data.dtype), data.shape),
-            transform=data.transform,
-            crs=data.crs,
-            fill_value_default=data.fill_value_default,
-            attrs=dict(data.attrs or {}),
+    if isinstance(data, GeoArray):
+        # A NumPy template (no device memory, no x64 needed for its transform).
+        return GeoArray(
+            np.broadcast_to(np.zeros((), dtype=data.dtype), data.shape),
+            np.asarray(data.transform, dtype=np.float64),
+            data.crs,
+            fill_value=data.fill_value,
+            attrs=data.attrs,
         )
     if _is_dataarray(data):
         placeholder = np.broadcast_to(np.zeros((), dtype=data.dtype), data.shape)
@@ -244,17 +245,9 @@ def _rebuild(template: Any, row: Any) -> Any:
         if values.shape != template.shape:
             return row
         return template.copy(deep=False, data=values)
-    if values.shape[-2:] != template.shape[-2:]:
+    if values.shape[-2:] != template.shape[-2:] or not 2 <= values.ndim <= 4:
         return row
-    from georeader.geotensor import GeoTensor
-
-    return GeoTensor(
-        values=values,
-        transform=template.transform,
-        crs=template.crs,
-        fill_value_default=template.fill_value_default,
-        attrs=dict(template.attrs or {}),
-    )
+    return template.with_data(values)
 
 
 def _flatten(batch: BatchedPatch) -> tuple[tuple[Any, Any], _StaticMeta]:

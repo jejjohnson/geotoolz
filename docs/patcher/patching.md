@@ -13,15 +13,24 @@ is an explicit `isinstance` check; an unsupported pairing raises
 
 | Field | Domain | Backend | Extra |
 |---|---|---|---|
-| `geopatcher.RasterField` | `RasterDomain` (a georeader `GeoData`) | `GeoTensor`, `RasterioReader` | — |
-| `geopatcher.fields.AsyncRasterField` | `RasterDomain` | `georeader` `AsyncGeoData` | — |
+| `geopatcher.RasterField` | `RasterDomain` (the source itself) | any `geoarray.RasterSource`: a `GeoArray`, a lazy reader | — |
+| `geopatcher.fields.AsyncRasterField` | `RasterDomain` | any `geoarray.AsyncRasterSource` | — |
 | `geopatcher.fields.CogField` | `RasterDomain` | a COG over `geocloud.cog.CogSource` | `[cog]` |
-| `geopatcher.fields.ReprojectingRasterField` | the destination grid | any `GeoData`, warped per chip | — |
+| `geopatcher.fields.ReprojectingRasterField` | the destination grid | any `geoarray.RasterSource`, warped per chip | — |
 | `geopatcher.fields.RioXarrayField` | `RasterDomain` | rioxarray `DataArray` | `[xarray-raster]` |
 | `geopatcher.fields.XarrayField` | `GridDomain` | `xarray.DataArray` (non-raster) | `[grid]` |
 | `geopatcher.fields.DaskField` | `GridDomain` | dask-backed `DataArray` | `[dask]` |
 | `geopatcher.fields.GeoPandasField` | `VectorDomain` / `PointDomain` | `geopandas.GeoDataFrame` | `[vector]` |
 | `geopatcher.fields.XvecField` | `PointDomain` | `xvec` `Dataset` | `[point]` |
+
+A `RasterDomain` is a protocol: a `geoarray.Grid` (`grid`: transform, CRS,
+`(H, W)`) plus the full array `shape`. Every `RasterSource` satisfies it, so
+a raster field's domain is its source and costs no read; a bare
+`geoarray.Grid` works too, to plan anchors before any data exists.
+Raster patches are `geoarray.GeoArray` chips on the window's grid, and a
+raster `with_data` / `merge_to_field` returns a `GeoArray` on the source
+grid. georeader objects are refused with a `TypeError` naming
+`geoarray.interop.georeader.from_georeader` / `source_from_georeader`.
 
 `DaskField.from_zarr(store, var="sst")` wraps one variable of a zarr store.
 `SpatialPatcher.to_delayed` / `to_dask_bag` build one Dask task per patch.
@@ -38,7 +47,7 @@ patch would overflow the domain.
 | `boundary` | Behaviour |
 |---|---|
 | `"drop"` (default) | Samplers place only anchors whose patch lies wholly in the domain; the trailing residual is not covered. A patch larger than the domain places no anchor, with a `RuntimeWarning`. |
-| `"pad"` | Samplers also place the edge anchor — the first whose patch reaches the edge, never one past it. The patch is full size, padded with the reader's nodata or `pad_value` (which must fit the field's dtype). |
+| `"pad"` | Samplers also place the edge anchor — the first whose patch reaches the edge, never one past it. The patch is full size, padded with the reader's nodata or `pad_value` (which must fit the field's dtype). A `GeoArray` source without a `fill_value` pads float data with NaN, declared as the chip's fill, and raises for integer or bool data (give it a `fill_value`, or use `"reflect"` / `"shrink"`). |
 | `"reflect"` | As `"pad"`, but the overflow is mirrored from the interior (numpy `mode="reflect"`). Needs at least two cells on a padded axis. |
 | `"shrink"` | As `"pad"` for placement, but the window is clipped to the domain on every side, so edge patches are smaller. Weights crop to match. |
 | `"raise"` | As `"pad"` for placement; `split` raises `ValueError` on the first overflowing window. Useful with `spatial.sampler.Explicit`. |
