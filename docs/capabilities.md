@@ -1045,7 +1045,7 @@ current).
 | `PackedVariable` | class | How to decode one CF-packed variable. |
 | `affine_from_geotransform` | function | Parse a GDAL ``GeoTransform`` attribute into an ``Affine``. |
 | `attr` | function | An HDF5 attribute as a plain Python scalar / ``str`` (arrays kept). |
-| `fill_value_from_attrs` | function | The scalar fill value declared in ``attrs`` (default ``0``). |
+| `fill_value_from_attrs` | function | The scalar fill value declared in ``attrs``, or ``None`` when none is. |
 | `grid_variables` | function | Names of the file's top-level variables of shape ``shape``. |
 | `open_hdf5` | function | An open ``h5py.File`` on ``source``, read-only. |
 | `read_hdf` | function | Read one dataset of an HDF5 or HDF4 / HDF-EOS file as a `geoarray.GeoArray`. |

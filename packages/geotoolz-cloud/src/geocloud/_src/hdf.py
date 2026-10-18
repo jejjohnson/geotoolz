@@ -443,7 +443,7 @@ def read_indexes(source: Any, indexes: list[int] | None) -> np.ndarray:
 
 
 def fill_value_from_attrs(attrs: Mapping[str, Any]) -> Any:
-    """The scalar fill value declared in ``attrs`` (default ``0``).
+    """The scalar fill value declared in ``attrs``, or ``None`` when none is.
 
     Looks up ``_FillValue``, ``missing_value``, ``fill_value`` and
     ``nodata`` in that order. Size-1 arrays / lists (how netCDF4 / xarray
@@ -453,8 +453,8 @@ def fill_value_from_attrs(attrs: Mapping[str, Any]) -> Any:
     Examples:
         >>> fill_value_from_attrs({"_FillValue": [-9999]})
         -9999
-        >>> fill_value_from_attrs({})
-        0
+        >>> fill_value_from_attrs({}) is None
+        True
     """
     for name in ("_FillValue", "missing_value", "fill_value", "nodata"):
         if name not in attrs:
@@ -466,7 +466,7 @@ def fill_value_from_attrs(attrs: Mapping[str, Any]) -> Any:
                 continue
             value = flat[0].item()
         return value
-    return 0
+    return None
 
 
 def affine_from_geotransform(geotransform: Any) -> Affine:
@@ -564,7 +564,7 @@ def read_hdf(
 
     Returns:
         The dataset ``(..., H, W)``, its attributes under ``attrs["attrs"]``
-        and its declared fill (else ``0``) as the carrier's ``fill_value``
+        and its declared fill (else ``None``) as the carrier's ``fill_value``
         (``None`` when the dataset's dtype cannot hold the declared fill).
 
     Raises:
@@ -928,6 +928,9 @@ def read_netcdf(
             # sentinel the returned tensor actually carries.
             if values.dtype.kind == "f":
                 fill_value = np.nan
+            elif fill_value is None:
+                # Masked against netCDF's default fill: that value marks them.
+                fill_value = np.asarray(values.fill_value).item()
             values = values.filled(fill_value)
         crs, mapping = _netcdf_crs(holder, var, use_cf_grid_mapping)
         return _geoarray(
