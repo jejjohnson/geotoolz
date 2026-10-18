@@ -86,7 +86,7 @@ read many small windows of the full disk.
 from datetime import datetime
 from pathlib import Path
 
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geoproducts import himawari
 from geoproducts.himawari import aws
@@ -99,7 +99,7 @@ reader: himawari.Reader = himawari.Reader(paths, calibration="brightness_tempera
 segs: tuple[int, ...] = reader.segments              # (5, 6) · grid (1, 5500, 5500), 2000 m
 
 aoi: tuple[float, float, float, float] = (110.0, -5.0, 120.0, 5.0)    # lon/lat box over Borneo
-bt: GeoTensor = reader.read_from_bounds(aoi, crs_bounds="EPSG:4326")   # (1, 546, 477) float32 · K
+bt: GeoArray = reader.read_from_bounds(aoi, crs_bounds="EPSG:4326")    # (1, 546, 477) float32 · K
 
 jp: aws.Segment = aws.list_segments(
     start=datetime(2026, 10, 7, 3, 0), sector="Japan", band=3, area="JP01"
@@ -157,7 +157,7 @@ This is the figure above:
 ```python
 from datetime import datetime
 
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geoproducts
 from geoproducts import himawari
@@ -173,7 +173,7 @@ def jp01(band: int, calibration: str) -> himawari.Reader:
 
 
 cmsk: aws.L2File = aws.list_l2(start=SLOT)[0]       # ~370 MB
-scene: GeoTensor = geoproducts.stack([
+scene: GeoArray = geoproducts.stack([
     jp01(13, "brightness_temperature"),                         # reference: the 2 km grid
     *(jp01(b, "reflectance") for b in (1, 2, 3, 4, 5)),         # 1 km / 0.5 km → averaged
     himawari.L2Reader(aws.download(cmsk, "data/ahi"), variables="CloudMask"),  # full disk → cut, mode
@@ -190,7 +190,7 @@ stretches on the matching AHI bands. With `[operators]` each preset is a
 ```python
 from datetime import datetime
 
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geoproducts
 import geoops as gz
@@ -206,18 +206,18 @@ def jp01(band: int, calibration: str) -> himawari.Reader:
     return himawari.Reader(aws.download(seg, "data/ahi"), calibration=calibration)
 
 
-scene: GeoTensor = geoproducts.stack(
+scene: GeoArray = geoproducts.stack(
     [jp01(13, "brightness_temperature"), *(jp01(b, "reflectance") for b in (1, 2, 3, 4, 5))]
 )                                                    # (6, 1200, 1500) float32 · B13, B01 … B05
-true_color: GeoTensor = himawari.TrueColor()(scene)          # (6, 1200, 1500) → (3, 1200, 1500) float32 in [0, 1]
-cloud_phase: GeoTensor = himawari.DayCloudPhase()(scene)     # (6, 1200, 1500) → (3, 1200, 1500) float32
-ndvi: GeoTensor = himawari.NDVI()(scene)                     # (6, 1200, 1500) → (1200, 1500) float32 · B03, B04
+true_color: GeoArray = himawari.TrueColor()(scene)           # (6, 1200, 1500) → (3, 1200, 1500) float32 in [0, 1]
+cloud_phase: GeoArray = himawari.DayCloudPhase()(scene)      # (6, 1200, 1500) → (3, 1200, 1500) float32
+ndvi: GeoArray = himawari.NDVI()(scene)                      # (6, 1200, 1500) → (1200, 1500) float32 · B03, B04
 
 # Parallax for clouds at an assumed 10 km top, on a lon/lat grid.
-lonlat: GeoTensor = gz.geom.Reproject(dst_crs="EPSG:4326", resolution=(0.02, 0.02))(
+lonlat: GeoArray = gz.geom.Reproject(dst_crs="EPSG:4326", resolution=(0.02, 0.02))(
     gz.spectral.SelectBands(bands=["B13"])(scene)
 )                                                            # (1, 1200, 1500) → (1, h, w) float32
-moved: GeoTensor = himawari.ParallaxCorrect(target_height_m=10_000.0)(lonlat)  # (1, h, w) float32 · 140.7°E view
+moved: GeoArray = himawari.ParallaxCorrect(target_height_m=10_000.0)(lonlat)   # (1, h, w) float32 · 140.7°E view
 ```
 
 | Preset | Bands | Recipe |

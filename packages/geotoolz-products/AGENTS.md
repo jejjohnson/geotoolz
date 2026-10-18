@@ -1,21 +1,41 @@
 # geotoolz-products (`geoproducts`) — agent rules
 
 Readers for Earth-observation products, each turning a mission's or
-provider's files into a georeader `GeoData` / `GeoTensor`. The root
-[`AGENTS.md`](../../AGENTS.md) applies too; this file adds what is specific
-to the readers. The package depends on georeader only: geotoolz is an
-optional extra (`[operators]`, for presets) and never a hard dependency.
+provider's files into a lazy `geoarray.RasterSource` whose reads return a
+`geoarray.GeoArray`. The root [`AGENTS.md`](../../AGENTS.md) applies too;
+this file adds what is specific to the readers. geotoolz is an optional
+extra (`[operators]`, for presets) and never a hard dependency. georeader
+is a base dependency used only internally, as an engine (map-coordinate
+windows, reprojection, rasterize, `RasterioReader`): every public API takes
+and returns `GeoArray` / `RasterSource`, never `GeoTensor` / `GeoData`.
 Satpy is never a dependency — it may be read for reference, not imported.
 
 ## The reader contract
 
 Every reader subclasses `ProductReader` (`_src/base.py`), which is a
-georeader `GeoData`. Implement `_read_window(window)` and the metadata
-properties `_crs`, `_transform`, `_shape`, `_dtype`, `_bands`,
-`_fill_value`, `_track` (Track A: a clean affine grid; Track B: irregular
-geolocation). The base class supplies `load()`, `read_from_window()`,
-boundless reads. File formats (`geocloud.hdf`) and object storage come from
-geotoolz-cloud, through each sensor's extra.
+`geoarray.RasterSource` (no georeader base class). Implement
+`_read_window(window: PixelWindow) -> np.ndarray` (usually through
+`_read_boundless`) and the metadata properties `_crs`, `_transform`,
+`_shape`, `_dtype`, `_bands`, `_fill_value` (set explicitly), `_track`
+(Track A: a clean affine grid; Track B: irregular geolocation). The base
+class supplies the `RasterSource` surface — `grid`, `shape`, `dtype`,
+`fill_value`, `attrs` (`band_names` + `_band_attrs()`),
+`read_window(window, *, boundless=True)`, `load()` — plus `crs`,
+`transform` (an `Affine`), `res`, `bounds`, `bands`, `dims`, `track` and
+`read_from_bounds` / `read_from_center_coords` (georeader's window maths,
+through `geoarray.interop.georeader.source_to_georeader`), all returning
+`GeoArray`.
+
+- Call georeader only at the engine boundary:
+  `from_georeader(read.read_from_bounds(source_to_georeader(src), ...))`.
+- A georeader `GeoTensor` / `GeoData` passed in raises `TypeError` naming
+  `from_georeader` / `source_from_georeader`: `_src/carrier.py`
+  (`reject_georeader`, `require_source`).
+- Lazy georeader readers a module opens (Carbon Mapper's `RasterioReader`)
+  are handed out wrapped with `source_from_georeader`.
+
+File formats (`geocloud.hdf`) and object storage come from geotoolz-cloud,
+through each sensor's extra.
 
 ## A sensor subpackage
 
@@ -56,6 +76,7 @@ if something is missing, add it there so the next reader gets it:
 | `constants.py` | lazy loaders for packaged CSV / JSON tables |
 | `extras.py` | `require` / `missing_extra` / `install_hint` for optional dependencies |
 | `base.py` | `ProductReader`, `resolve_fill_value` |
+| `carrier.py` | `reject_georeader`, `require_source` (refuse georeader carriers at a public boundary) |
 
 Object-store reads go through geotoolz-cloud (`geocloud.hdf.open_hdf5`,
 `geocloud.files`, `geocloud.cog`), never a client of your own.
@@ -65,7 +86,10 @@ Object-store reads go through geotoolz-cloud (`geocloud.hdf.open_hdf5`,
 - Run from this directory: `uv run pytest tests/goes -v`.
 - Readers are tested on small synthetic files built in the tests, checked
   against an independent reference where one exists (rasterio / GDAL, or
-  published values).
+  published values). georeader may be an oracle in tests (through
+  `to_georeader` / `from_georeader`).
+- Every reader is asserted to be a `geoarray.RasterSource`; inputs that
+  accept a raster are tested to refuse a `GeoTensor`.
 - `live` marks tests against real APIs needing credentials (always
   deselected); `integration` marks tests that download real public data
   (run manually via the "Extended Tests" workflow); `slow` for long builds.

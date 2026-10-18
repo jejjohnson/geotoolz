@@ -3,7 +3,7 @@
 `geoproducts.carbonmapper` reads the [Carbon Mapper](https://carbonmapper.org)
 methane and CO₂ plume catalogue and its STAC API. Plume and source
 records come back as typed objects; per-plume (L3A) and per-scene (L2B)
-rasters come back as lazy georeader readers or `GeoTensor`s.
+rasters come back as lazy `geoarray.RasterSource`s or `GeoArray`s.
 
 ```bash
 pip install 'geotoolz-products[carbonmapper]'   # requests, pydantic, shapely, geopandas, pandas
@@ -65,7 +65,7 @@ scenes; `get_plume_context` fetches all three at once.
 ## Read the rasters
 
 ```python
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geoproducts import carbonmapper as cm
 
@@ -73,7 +73,7 @@ token: str = cm.CarbonMapperConfig.load().get_token() or ""
 plume: cm.CMRawPlume = cm.list_plumes(token, bbox=(-104.5, 31.5, -103.5, 32.5), limit=1)[0]
 
 image: cm.CMPlumeImage = cm.CMPlumeImage.from_plume_id(plume.plume_id, token=token)
-cmf: GeoTensor = image.tile_cmf(pad_px=64)            # (1, h, w) float32 · L2B retrieval, full resolution
+cmf: GeoArray = image.tile_cmf(pad_px=64)             # (1, h, w) float32 · L2B retrieval, full resolution
 ```
 
 `tile_cmf` crops the analysis-grade L2B retrieval to the plume outline
@@ -82,21 +82,21 @@ are only tens of pixels across.
 
 ## Label sources on a grid
 
-`rasterize_sources_like` burns sources onto any `GeoData` grid — here the
+`rasterize_sources_like` burns sources onto the grid of any `RasterSource` — here the
 plume's retrieval — to build training labels or screening masks:
 
 ```python
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geoproducts import carbonmapper as cm
 
 token: str = cm.CarbonMapperConfig.load().get_token() or ""
 permian: tuple[float, float, float, float] = (-104.5, 31.5, -103.5, 32.5)
 plume: cm.CMRawPlume = cm.list_plumes(token, bbox=permian, limit=1)[0]
-cmf: GeoTensor = cm.CMPlumeImage.from_plume_id(plume.plume_id, token=token).tile_cmf(pad_px=64)  # (1, h, w) float32
+cmf: GeoArray = cm.CMPlumeImage.from_plume_id(plume.plume_id, token=token).tile_cmf(pad_px=64)   # (1, h, w) float32
 
 sources: list[cm.CMSource] = cm.list_sources(token, bbox=permian, sectors=["1B2"])
-labels: GeoTensor = cm.rasterize_sources_like(sources, cmf, buffer_m=150.0)  # (h, w) uint8 · 1 = within 150 m
+labels: GeoArray = cm.rasterize_sources_like(sources, cmf, buffer_m=150.0)   # (h, w) uint8 · 1 = within 150 m
 ```
 
 `CMSourceRaster` is the lazy version, and `rasterize_sources` takes an

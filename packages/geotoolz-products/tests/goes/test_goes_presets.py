@@ -7,21 +7,21 @@ import sys
 import numpy as np
 import pytest
 from affine import Affine
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geoproducts import goes
 from geoproducts.goes import constants, recipes
 
 
-def _stack(values: dict[str, float], *, crs: str = "EPSG:4326") -> GeoTensor:
+def _stack(values: dict[str, float], *, crs: str = "EPSG:4326") -> GeoArray:
     data = np.stack(
         [np.full((4, 4), v, dtype=np.asarray(v).dtype) for v in values.values()]
     ).astype(np.float32)
-    return GeoTensor(
+    return GeoArray(
         data,
-        transform=Affine(0.01, 0.0, -100.0, 0.0, -0.01, 40.0),
-        crs=crs,
-        fill_value_default=np.nan,
+        Affine(0.01, 0.0, -100.0, 0.0, -0.01, 40.0),
+        crs,
+        fill_value=np.nan,
         attrs={"band_names": tuple(values)},
     )
 
@@ -84,7 +84,7 @@ def test_mask_clouds_reads_the_clear_sky_mask() -> None:
     data = np.asarray(stack).copy()
     data[0, 0, 0] = constants.BCM_CLEAR
     data[1, 0, 0] = constants.ACM_PROBABLY_CLEAR
-    stack = GeoTensor(data, transform=stack.transform, crs=stack.crs, attrs=stack.attrs)
+    stack = stack.with_data(data)
     default = np.asarray(goes.MaskClouds()(stack))
     assert default.dtype == bool
     assert not default[0, 0]

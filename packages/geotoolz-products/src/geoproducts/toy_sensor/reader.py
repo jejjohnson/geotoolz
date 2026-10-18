@@ -7,9 +7,10 @@ from typing import Any
 
 import numpy as np
 from affine import Affine
-from rasterio.windows import Window
+from geoarray import PixelWindow
 
 from geoproducts._src.base import ProductReader, Track, resolve_fill_value
+from geoproducts._src.carrier import reject_georeader
 from geoproducts.toy_sensor import constants
 
 
@@ -26,12 +27,15 @@ class Reader(ProductReader):
         data: Optional in-memory array in ``(band, y, x)`` order.
         transform: Affine transform for the synthetic grid.
         crs: Coordinate reference system.
-        fill_value_default: Fill value used for boundless reads. ``None``
+        fill_value: Fill value used for boundless reads. ``None``
             (default) picks ``NaN`` for floating-point data and ``0`` for
             integer / boolean data.
 
     Raises:
-        ValueError: If ``fill_value_default`` is not exactly representable
+        TypeError: ``data`` is a georeader ``GeoTensor`` (pass
+            ``np.asarray(gt)``, or keep its georeferencing with
+            ``transform=`` / ``crs=``).
+        ValueError: If ``fill_value`` is not exactly representable
             in the data dtype (e.g. ``NaN`` or ``1.5`` with integer data,
             or a value outside the integer range).
 
@@ -39,7 +43,7 @@ class Reader(ProductReader):
         >>> import numpy as np
         >>> from geoproducts.toy_sensor import Reader
         >>> reader = Reader("scene", data=np.zeros((4, 8, 8), dtype="float32"))
-        >>> reader.load().shape
+        >>> reader.load().shape  # (C, H, W)
         (4, 8, 8)
     """
 
@@ -50,8 +54,9 @@ class Reader(ProductReader):
         data: np.ndarray | None = None,
         transform: Affine | None = None,
         crs: Any = "EPSG:4326",
-        fill_value_default: float | None = None,
+        fill_value: float | None = None,
     ) -> None:
+        reject_georeader(data, "toy_sensor.Reader(data=...)")
         self.path = Path(path)
         self._data = (
             np.zeros((_DEFAULT_NUM_BANDS, 1, 1), dtype=np.float32)
@@ -71,8 +76,8 @@ class Reader(ProductReader):
             )
         self._reader_transform = Affine.identity() if transform is None else transform
         self._reader_crs = crs
-        self._fill_value_default = resolve_fill_value(
-            fill_value_default, self._data.dtype, owner="toy_sensor.Reader"
+        self._reader_fill = resolve_fill_value(
+            fill_value, self._data.dtype, owner="toy_sensor.Reader"
         )
 
     @property
@@ -102,13 +107,13 @@ class Reader(ProductReader):
 
     @property
     def _fill_value(self) -> float | int | bool:
-        return self._fill_value_default
+        return self._reader_fill
 
     @property
     def _track(self) -> Track:
         return "A"
 
-    def _read_window(self, window: Window) -> np.ndarray:
+    def _read_window(self, window: PixelWindow) -> np.ndarray:
         return self._read_boundless(
             window, lambda rows, cols: self._data[..., rows, cols]
         )

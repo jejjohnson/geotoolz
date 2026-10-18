@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import rasterio
 import requests
-from georeader.rasterio_reader import RasterioReader
+from geoarray import GeoArray, RasterSource
 from rasterio.transform import from_bounds as t_from_bounds
 
 from geoproducts.carbonmapper.image import (
@@ -525,9 +525,19 @@ class TestLazyProperties:
         p = tmp_path / "plume.tif"
         _write_rgba_geotiff(p)
         img = CMPlumeImage(plume_id=PID_V3A, urls={"plume.tif": str(p)})
-        assert isinstance(img.mask, RasterioReader)
+        assert isinstance(img.mask, RasterSource)
         # Repeat access is cached (same instance)
         assert img.mask is img.mask
+
+    def test_load_alpha_mask_is_a_boolean_geoarray(self, tmp_path):
+        p = tmp_path / "plume.tif"
+        _write_rgba_geotiff(p)
+        img = CMPlumeImage(plume_id=PID_V3A, urls={"plume.tif": str(p)})
+        alpha = img.load_alpha_mask()
+        assert isinstance(alpha, GeoArray)
+        assert alpha.dtype == bool and alpha.fill_value is False
+        assert alpha.grid == img.mask.grid
+        assert int(np.asarray(alpha).sum()) == 16
 
     def test_concentrations_returns_rasterio_reader(self, tmp_path):
         p = tmp_path / "plume-concentrations.tif"
@@ -537,10 +547,12 @@ class TestLazyProperties:
             urls={"plume-concentrations.tif": str(p)},
         )
         reader = img.concentrations
-        assert isinstance(reader, RasterioReader)
+        assert isinstance(reader, RasterSource)
         # Verify we can load it
-        gt = reader.load()
-        assert gt.values.shape == (1, 8, 8)
+        scene = reader.load()
+        assert isinstance(scene, GeoArray)
+        assert scene.shape == (1, 8, 8)
+        assert scene.grid == reader.grid
 
     def test_ime_concentrations_returns_none_if_absent(self):
         img = CMPlumeImage(plume_id=PID_V3A, urls={})
@@ -557,7 +569,7 @@ class TestLazyProperties:
             plume_id=PID_V3A,
             urls={"ime-cmf-mask.tif": str(p)},
         )
-        assert isinstance(img.ime_mask, RasterioReader)
+        assert isinstance(img.ime_mask, RasterSource)
 
     def test_ime_mask_returns_none_if_absent(self):
         img = CMPlumeImage(plume_id=PID_V3A, urls={})
@@ -857,19 +869,26 @@ class TestTileCrop:
         """Build a CMPlumeImage with mocked outline + mocked tile + mocked
         ``read.read_from_polygon``, returning the image and the recorded
         call-args dict."""
+        from georeader import read
         from georeader.geotensor import GeoTensor
-
-        from geoproducts.carbonmapper import image as _image
 
         # Fake outline polygon — `tile_*` only checks it's not None.
         outline_geom = MagicMock(name="outline_polygon")
 
-        # Fake tile with the three bands we want to crop. RasterioReader
-        # objects are duck-typed by `read.read_from_polygon`.
+        # Fake tile with the three bands we want to crop, each a carrier
+        # filled with its own value so the crop's input is identifiable.
+        def band(value: float) -> GeoArray:
+            return GeoArray(
+                np.full((1, 4, 4), value, np.float32),
+                t_from_bounds(0, 0, 100, 100, 4, 4),
+                "EPSG:32613",
+                fill_value=np.nan,
+            )
+
         fake_tile = MagicMock(name="CMImageRaster")
-        fake_tile.cmf = MagicMock(name="cmf_reader")
-        fake_tile.rgb = MagicMock(name="rgb_reader") if with_rgb else None
-        fake_tile.uncertainty = MagicMock(name="uncertainty_reader")
+        fake_tile.cmf = band(1.0)
+        fake_tile.rgb = band(2.0) if with_rgb else None
+        fake_tile.uncertainty = band(3.0)
         fake_tile.asset_paths = {
             "cmf": "https://x/cmf.tif",
             "uncertainty": "https://x/unc.tif",
@@ -877,8 +896,8 @@ class TestTileCrop:
         }
         fake_tile.scene_id = "tan-foo"
 
-        # Recorded crop. `trigger_load=True` so the wrapper sees a
-        # ready-to-return GeoTensor and skips the `.load()` fallback.
+        # Recorded crop: the engine (georeader) returns a GeoTensor, which
+        # the wrapper hands back as a GeoArray.
         sentinel_geo = GeoTensor(
             values=np.zeros((1, 16, 16), dtype="float32"),
             transform=t_from_bounds(0, 0, 100, 100, 16, 16),
@@ -891,7 +910,7 @@ class TestTileCrop:
             captured.update(kw)
             return sentinel_geo
 
-        monkeypatch.setattr(_image.read, "read_from_polygon", fake_read_from_polygon)
+        monkeypatch.setattr(read, "read_from_polygon", fake_read_from_polygon)
 
         img = CMPlumeImage(
             plume_id="tan-foo-A",
@@ -906,32 +925,29 @@ class TestTileCrop:
         return img, captured, sentinel_geo, fake_tile
 
     def test_tile_cmf_crops_with_default_pad(self, monkeypatch):
-        img, captured, sentinel_geo, fake_tile = self._make_image_with_tile_and_outline(
+        img, captured, sentinel_geo, _ = self._make_image_with_tile_and_outline(
             monkeypatch
         )
         result = img.tile_cmf()
-        assert result is sentinel_geo
-        # Sourced from the tile's cmf reader.
-        assert captured["data_in"] is fake_tile.cmf
+        assert isinstance(result, GeoArray)
+        assert np.shares_memory(result.data, sentinel_geo.values)
+        # Sourced from the tile's cmf band.
+        assert (np.asarray(captured["data_in"]) == 1.0).all()
         # Default pad = 64 on both axes.
         assert captured["pad_add"] == (64, 64)
         assert captured["crs_polygon"] == "EPSG:4326"
         assert captured["boundless"] is False
 
     def test_tile_rgb_crops_rgb_band(self, monkeypatch):
-        img, captured, _, fake_tile = self._make_image_with_tile_and_outline(
-            monkeypatch
-        )
+        img, captured, _, _ = self._make_image_with_tile_and_outline(monkeypatch)
         img.tile_rgb(pad_px=8)
-        assert captured["data_in"] is fake_tile.rgb
+        assert (np.asarray(captured["data_in"]) == 2.0).all()
         assert captured["pad_add"] == (8, 8)
 
     def test_tile_uncertainty_crops_uncertainty_band(self, monkeypatch):
-        img, captured, _, fake_tile = self._make_image_with_tile_and_outline(
-            monkeypatch
-        )
+        img, captured, _, _ = self._make_image_with_tile_and_outline(monkeypatch)
         img.tile_uncertainty(pad_px=0)
-        assert captured["data_in"] is fake_tile.uncertainty
+        assert (np.asarray(captured["data_in"]) == 3.0).all()
         assert captured["pad_add"] == (0, 0)
 
     def test_tile_rgb_raises_when_sibling_missing(self, monkeypatch):
@@ -950,12 +966,12 @@ class TestTileCrop:
             img.tile_cmf()
 
     def test_raises_on_zero_overlap(self, monkeypatch):
-        from geoproducts.carbonmapper import image as _image
+        from georeader import read
 
         img, _, _, _ = self._make_image_with_tile_and_outline(monkeypatch)
         # Make read_from_polygon return None (zero-overlap path).
         monkeypatch.setattr(
-            _image.read,
+            read,
             "read_from_polygon",
             lambda *a, **kw: None,
         )

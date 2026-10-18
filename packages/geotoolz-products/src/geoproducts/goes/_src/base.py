@@ -30,7 +30,7 @@ GRID_MAPPING = "goes_imager_projection"
 
 
 class ABIFile(PackedGridReader):
-    """One ABI product file read as a ``(bands, H, W)`` ``GeoTensor``.
+    """One ABI product file read as a ``(bands, H, W)`` ``GeoArray``.
 
     Each band is one 2-D variable of the file, all on the file's fixed
     grid. Subclasses choose the variables and, where needed, how raw

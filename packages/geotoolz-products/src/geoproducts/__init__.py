@@ -1,14 +1,17 @@
 """`geoproducts` — readers for Earth-observation data products.
 
-Each reader turns a mission's or provider's product into a georeader
-`GeoData` / `GeoTensor`, so the geotoolz operators, the geopatcher
-patchers and the geocatalog loaders consume it unchanged. The package
-depends on georeader only: it installs without the operator library.
+Each reader turns a mission's or provider's product into a lazy
+`geoarray.RasterSource` whose reads return a `geoarray.GeoArray`, so the
+geotoolz operators and the geopatcher patchers consume it unchanged. The
+package installs without the operator library; georeader is only its
+internal engine (map-coordinate windows, reprojection), never in its API.
 
 Public surface:
 
-- `ProductReader` — the ABC for product readers (lazy ``_read_window``,
-  band names, track). File formats and object storage come from
+- `ProductReader` — the ABC for product readers: a `geoarray.RasterSource`
+  (``grid``, ``read_window``, ``load``) plus ``read_from_bounds`` /
+  ``read_from_center_coords``, band names and track; subclasses implement
+  ``_read_window(PixelWindow)``. File formats and object storage come from
   geotoolz-cloud, through each reader's extra.
 - `stack` — several readers' bands on one reference grid.
 - Per-sensor / per-provider subpackages, each exposing ``Reader``,

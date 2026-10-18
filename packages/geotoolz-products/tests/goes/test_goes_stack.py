@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from _goes_abi import STEP_RAD, X0_RAD, Y0_RAD
 from affine import Affine
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray, RasterSource
 
 from geoproducts import goes, stack
 
@@ -31,7 +31,8 @@ def test_same_grid_readers_stack_band_by_band(abi_file) -> None:
     assert out.shape == (2, 6, 8)
     assert out.attrs["band_names"] == ("C13", "C07")
     assert out.attrs["units"] == ("K", "K")
-    assert out.transform == c13.transform
+    assert isinstance(out, GeoArray)
+    assert out.grid == c13.grid
     np.testing.assert_allclose(np.asarray(out)[1], np.asarray(c07.load())[0])
 
 
@@ -58,7 +59,7 @@ def test_integer_masks_mix_into_a_float_stack(abi_file, l2_file) -> None:
     assert out.dtype == np.float32
     assert np.isnan(np.asarray(out)[1, 0, 0])
     assert np.asarray(out)[1, 1, 1] == 1.0
-    assert np.isnan(out.fill_value_default)
+    assert np.isnan(out.fill_value)
 
 
 def test_all_integer_readers_stay_integer(abi_file) -> None:
@@ -66,7 +67,7 @@ def test_all_integer_readers_stay_integer(abi_file) -> None:
     quality = goes.Reader(path).quality
     out = stack([quality, goes.QualityReader(path)])
     assert out.dtype == np.uint8
-    assert out.fill_value_default == 255
+    assert out.fill_value == 255
 
 
 def test_bounds_select_the_reference_area(abi_file) -> None:
@@ -87,18 +88,25 @@ def test_like_picks_the_reference_grid(abi_file, l2_file) -> None:
     np.testing.assert_allclose(np.nanmean(np.asarray(out)[0]), 1000.0)
 
 
-def test_generic_geodata_without_per_band_units(abi_file) -> None:
+def test_generic_source_without_per_band_units(abi_file) -> None:
     reader = goes.Reader(abi_file())
-    other = reader.load()
-    plain = GeoTensor(
-        np.asarray(other),
-        transform=other.transform,
-        crs=other.crs,
-        fill_value_default=np.nan,
-    )
+    plain = reader.load().replace(attrs={})
+    assert isinstance(plain, RasterSource)
     out = stack([reader, plain])
     assert "band_names" not in out.attrs
     assert out.shape == (2, 6, 8)
+
+
+def test_stack_refuses_georeader_carriers(abi_file) -> None:
+    from geoarray.interop.georeader import source_to_georeader, to_georeader
+
+    reader = goes.Reader(abi_file())
+    with pytest.raises(TypeError, match="from_georeader"):
+        stack([reader, to_georeader(reader.load())])
+    with pytest.raises(TypeError, match="source_from_georeader"):
+        stack([reader, source_to_georeader(reader)])
+    with pytest.raises(TypeError, match="RasterSource"):
+        stack([reader, np.zeros((1, 6, 8))])
 
 
 def test_explicit_resampling_and_errors(abi_file) -> None:

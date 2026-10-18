@@ -1076,7 +1076,7 @@ current).
 
 | Name | Kind | What it does |
 |---|---|---|
-| `ProductReader` | class | ABC for georeader-compatible product readers. |
+| `ProductReader` | class | ABC for product readers: each one a lazy `geoarray.RasterSource`. |
 | `stack` | function | Stack readers' bands on the grid of ``readers[like]``. |
 
 ### `geoproducts.carbonmapper`
@@ -1089,14 +1089,14 @@ current).
 | `CARBONMAPPER_PLUME_PARAMS` | constant | `['ch4_fluxrate', 'ch4_fluxrate_std', 'geometry', 'lon', '...` |
 | `CMAPIError` | class | Base for everything raised by :mod:`api_queries`. |
 | `CMCollectionSpec` | class | The ``(gas, cmf_type, version)`` triple naming a processing run. |
-| `CMImageRaster` | class | L2B scene exposed as four georeader-backed rasters. |
+| `CMImageRaster` | class | L2B scene exposed as lazy `geoarray.RasterSource` rasters. |
 | `CMPlumeImage` | class | Per-plume L3A bundle — **outline polygon + L2B tile bridge**. |
 | `CMPlumeNotFound` | class | Raised by :func:`get_plume` when the plume is unknown to CM. |
 | `CMProduct` | class | One Carbon Mapper product: an asset key within a family. |
 | `CMProductFamily` | class | Which collection family a product's assets live in. |
 | `CMProductNotSelected` | class | A product was requested from a bundle that didn't select it. |
 | `CMQuicklookProduct` | class | A non-georeferenced PNG quicklook → raw ``bytes``. |
-| `CMRasterProduct` | class | A georeferenced raster product (GeoTIFF) → ``RasterioReader``. |
+| `CMRasterProduct` | class | A georeferenced raster product (GeoTIFF) → a lazy `geoarray.RasterSource`. |
 | `CMRawPlume` | class | Unified Carbon Mapper plume model. |
 | `CMSceneNotPublished` | class | Raised when STAC has no L2B item for a given ``scene_id``. |
 | `CMSource` | class | Typed view of a Carbon Mapper source (cluster of plumes). |
@@ -1141,7 +1141,7 @@ current).
 | `paginate_plumes` | function | Auto-paginate through the annotated plumes endpoint. |
 | `product_for_key` | function | Look up a registry product by asset key (and family for the |
 | `rasterize_sources` | function | Rasterize source points onto a target grid as a binary mask. |
-| `rasterize_sources_like` | function | Rasterize sources onto an existing :class:`GeoData` grid. |
+| `rasterize_sources_like` | function | Rasterize sources onto the grid of an existing raster. |
 | `refresh_token` | function | Refresh an expired access token using a refresh token. |
 | `stac_get_catalog` | function | Get the STAC root catalog with links to all collections. |
 | `stac_get_collection` | function | Get metadata for a single collection. |
@@ -1482,6 +1482,7 @@ helper is added here, not inline in one caller.
 | Module | Purpose | Helpers |
 |---|---|---|
 | `geoproducts._src.base` | Shared reader primitives for sensor-specific modules. | `ProductReader`, `resolve_fill_value` |
+| `geoproducts._src.carrier` | Refuse georeader carriers at geoproducts' public boundary. | `reject_georeader`, `require_source` |
 | `geoproducts._src.constants` | Shared lazy loaders for packaged sensor calibration data. | `load_csv`, `load_json` |
 | `geoproducts._src.credentials` | Credential storage shared by provider clients. | `auth_path`, `read_json_config`, `jwt_expiry` |
 | `geoproducts._src.extras` | Install hints for optional extras. | `install_hint`, `missing_extra`, `require` |

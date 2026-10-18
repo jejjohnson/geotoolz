@@ -11,8 +11,7 @@ import h5py
 import numpy as np
 import pytest
 from _goes_abi import KAPPA0, PERSPECTIVE_HEIGHT_M, PLANCK, STEP_RAD, X0_RAD, Y0_RAD
-from georeader.geotensor import GeoTensor
-from rasterio.windows import Window
+from geoarray import GeoArray, PixelWindow, RasterSource
 
 from geoproducts import ProductReader, goes
 from geoproducts.goes import constants
@@ -62,7 +61,7 @@ class TestCalibration:
         out = np.asarray(reader.load())[0]
         assert reader.dtype == np.float32
         assert np.isnan(out[1, 2])
-        assert np.isnan(reader.fill_value_default)
+        assert np.isnan(reader.fill_value)
         expected = _radiance(counts)
         expected[1, 2] = np.nan
         np.testing.assert_array_equal(out, expected)
@@ -73,7 +72,7 @@ class TestCalibration:
         out = reader.load()
         assert out.dtype == np.uint16
         np.testing.assert_array_equal(np.asarray(out)[0], counts)
-        assert reader.fill_value_default == 65_535
+        assert reader.fill_value == 65_535
 
     def test_reflectance_is_kappa0_times_radiance(self, abi_file) -> None:
         counts = np.arange(12, dtype=np.uint16).reshape(3, 4) + 300
@@ -131,15 +130,26 @@ class TestWindows:
     def test_window_matches_the_full_load(self, abi_file) -> None:
         reader = goes.Reader(abi_file())
         full = np.asarray(reader.load())
-        chip = reader.read_from_window(Window(2, 1, 4, 3))
-        assert isinstance(chip, GeoTensor)
+        chip = reader.read_window(PixelWindow(col_off=2, row_off=1, width=4, height=3))
+        assert isinstance(chip, GeoArray)
         assert chip.shape == (1, 3, 4)
         np.testing.assert_array_equal(np.asarray(chip), full[:, 1:4, 2:6])
-        assert chip.transform.c == pytest.approx(reader.transform.c + 2 * reader.res[0])
+        assert chip.grid.affine.c == pytest.approx(
+            reader.transform.c + 2 * reader.res[0]
+        )
+
+    def test_readers_are_raster_sources(self, abi_file) -> None:
+        reader = goes.Reader(abi_file())
+        assert isinstance(reader, RasterSource)
+        assert isinstance(reader.quality, RasterSource)
+        assert reader.grid.shape == reader.shape[-2:]
+        assert reader.load().grid == reader.grid
 
     def test_boundless_window_pads_with_the_fill(self, abi_file) -> None:
         reader = goes.Reader(abi_file())
-        chip = np.asarray(reader.read_from_window(Window(-2, -1, 4, 3)))
+        chip = np.asarray(
+            reader.read_window(PixelWindow(col_off=-2, row_off=-1, width=4, height=3))
+        )
         assert np.isnan(chip[0, 0, :]).all()
         assert np.isnan(chip[0, :, :2]).all()
         np.testing.assert_array_equal(
@@ -147,14 +157,14 @@ class TestWindows:
         )
 
     def test_window_outside_the_file_is_all_fill(self, abi_file) -> None:
-        chip = goes.Reader(abi_file(), calibration="counts").read_from_window(
-            Window(100, 100, 2, 2)
+        chip = goes.Reader(abi_file(), calibration="counts").read_window(
+            PixelWindow(col_off=100, row_off=100, width=2, height=2)
         )
         assert (np.asarray(chip) == 16383).all()
 
     def test_bounded_read_clips_to_the_file(self, abi_file) -> None:
-        chip = goes.Reader(abi_file()).read_from_window(
-            Window(6, 4, 10, 10), boundless=False
+        chip = goes.Reader(abi_file()).read_window(
+            PixelWindow(col_off=6, row_off=4, width=10, height=10), boundless=False
         )
         assert chip.shape == (1, 2, 2)
 
@@ -189,7 +199,9 @@ class TestQuality:
         assert out.dtype == np.uint8
         assert out.attrs["band_names"] == ("DQF",)
         np.testing.assert_array_equal(np.asarray(out)[0], dqf)
-        padded = np.asarray(quality.read_from_window(Window(-1, 0, 2, 1)))
+        padded = np.asarray(
+            quality.read_window(PixelWindow(col_off=-1, row_off=0, width=2, height=1))
+        )
         assert padded.tolist() == [[[constants.DQF_FILL, constants.DQF_NO_VALUE]]]
 
     def test_quality_reader_shares_the_grid(self, abi_file) -> None:

@@ -12,8 +12,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 from affine import Affine
+from geoarray import PixelWindow
 from rasterio.crs import CRS
-from rasterio.windows import Window
 
 
 h5py = pytest.importorskip("h5py")
@@ -81,7 +81,9 @@ def test_a_non_abi_reader_gets_the_full_contract(latlon_file: Path) -> None:
     values = np.asarray(out)[0]
     assert np.isnan(values[0, 0])  # stored 0 is the fill
     assert values[0, 1] == pytest.approx(270.5)
-    pad = np.asarray(reader.read_from_window(Window(3, 2, 2, 2)))
+    pad = np.asarray(
+        reader.read_window(PixelWindow(col_off=3, row_off=2, width=2, height=2))
+    )
     assert np.isnan(pad[0, :, 1]).all() and np.isnan(pad[0, 1, :]).all()
 
 

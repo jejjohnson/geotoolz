@@ -7,6 +7,7 @@ URL expectations are copied verbatim from live-API probes in the
 """
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -373,7 +374,7 @@ class TestRasterAuthScoping:
 
         def fake_reader(path, **kw):
             seen.update(kw)
-            return object()
+            return MagicMock()
 
         monkeypatch.setattr(rr, "RasterioReader", fake_reader)
         P.PLUME_TIF.open(

@@ -115,7 +115,7 @@ def ParallaxCorrect(
     Args:
         satellite_lon_deg: Sub-satellite longitude. Default 140.7°E.
         target_height_m: Height of the observed feature (metres): a scalar,
-            a same-grid array or a same-grid GeoTensor.
+            a same-grid array or a same-grid GeoArray.
         method: ``"nearest"`` or ``"bilinear"``.
 
     Raises:

@@ -173,7 +173,7 @@ def test_clear_sky_mask_matches_the_files_own_counts(
             constants.ACM_PROBABLY_CLOUDY: f["percent_probably_cloudy_pixels"][()],
             constants.ACM_CLOUDY: f["percent_cloudy_pixels"][()],
         }
-    valid = acm != reader.fill_value_default
+    valid = acm != reader.fill_value
     for code, fraction in expected.items():
         assert (acm[valid] == code).mean() == pytest.approx(float(fraction), abs=1e-5)
 
