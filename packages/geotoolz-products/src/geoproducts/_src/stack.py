@@ -56,8 +56,9 @@ def stack(
     Returns:
         A ``(sum of bands, H, W)`` ``GeoArray`` on the reference grid. It
         keeps an integer dtype when every reader shares one integer dtype
-        and fill; otherwise it is ``float32`` with ``NaN`` fill (integer
-        fills become ``NaN``).
+        and fill; otherwise it is ``float32`` with ``NaN`` fill, and every
+        reader's nodata pixels (its own fill, integer or float such as
+        ``-9999.0``, and non-finite values) become ``NaN``.
 
     Raises:
         TypeError: A reader is a georeader ``GeoTensor`` / ``GeoData``
@@ -124,14 +125,7 @@ def _concatenate(
     (georeader's warp drops ``attrs``)."""
     keys = {(np.dtype(p.dtype), _fill_key(p.fill_value)) for p in parts}
     integer = len(keys) == 1 and np.issubdtype(next(iter(keys))[0], np.integer)
-    arrays = []
-    for part in parts:
-        values = np.asarray(part)
-        if not integer and not np.issubdtype(values.dtype, np.floating):
-            filled = values == part.fill_value
-            values = values.astype(np.float32)
-            values[filled] = np.nan
-        arrays.append(values.astype(values.dtype if integer else np.float32))
+    arrays = [np.asarray(p) if integer else _nan_filled(p) for p in parts]
     attrs: dict[str, Any] = {}
     for key in ("band_names", "units", "wavelengths"):
         values: list[Any] = []
@@ -149,6 +143,16 @@ def _concatenate(
         fill_value=parts[0].fill_value if integer else np.nan,
         attrs=attrs,
     )
+
+
+def _nan_filled(part: GeoArray) -> np.ndarray:
+    """``part`` as ``float32`` with ``NaN`` wherever geoarray reads a band as
+    nodata (non-finite or equal to the part's own fill), band by band, so a
+    ``-9999.0`` or integer fill is not read as data under the ``NaN`` fill."""
+    values = np.asarray(part).astype(np.float32)
+    for k in range(values.shape[0]):
+        values[k][~np.asarray(part[k : k + 1].valid_mask())] = np.nan
+    return values
 
 
 def _fill_key(fill: Any) -> Any:
