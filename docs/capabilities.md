@@ -877,9 +877,9 @@ current).
 | Name | Kind | What it does |
 |---|---|---|
 | `aload_raster` | function | Async mirror of `load_raster` for event-loop consumers. |
-| `load_raster` | function | Read + mosaic the catalog rows matching ``slice_`` into one `GeoTensor`. |
+| `load_raster` | function | Read + mosaic the catalog rows matching ``slice_`` into one `GeoArray`. |
 | `load_raster_timeseries` | function | Stack daily mosaics across the slice's interval into ``(time, b, h, w)``. |
-| `load_vector` | function | Rasterise the catalog's vector rows matching ``slice_`` into a `GeoTensor`. |
+| `load_vector` | function | Rasterise the catalog's vector rows matching ``slice_`` into a `GeoArray`. |
 | `load_xarray` | function | Load + concat the catalog rows matching ``slice_`` into an ``xr.Dataset``. |
 
 ### `geocatalog.matchup`

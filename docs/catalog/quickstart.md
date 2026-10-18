@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geocatalog as gc
@@ -47,7 +47,7 @@ june_hits: InMemoryGeoCatalog = catalog.query(june)                  # 2 rows: b
 east: InMemoryGeoCatalog = gc.query(catalog, bounds=(504_000, 4_300_000, 506_000, 4_303_000))
 both: InMemoryGeoCatalog = gc.union(june_hits, east)                 # 4 rows (no de-duplication)
 
-mosaic: GeoTensor = gc.load.load_raster(june_hits, june)             # (4, 300, 400) uint16
+mosaic: GeoArray = gc.load.load_raster(june_hits, june)             # (4, 300, 400) uint16
 
 gc.storage.to_geoparquet(catalog, root / "catalog.parquet")
 reopened: gc.GeoCatalog = gc.open_catalog(root / "catalog.parquet")  # DuckDB if installed, else InMemory
@@ -72,7 +72,7 @@ The same flow on real data needs the `[stac]` extra and network access.
 import pandas as pd
 import planetary_computer
 import pystac_client
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geocatalog as gc
 from geocatalog.backends import InMemoryGeoCatalog
@@ -98,7 +98,7 @@ aoi: gc.GeoSlice = gc.GeoSlice(
     resolution=(0.0001, 0.0001),                                     # ~10 m at this latitude
     crs="EPSG:4326",
 )
-red: GeoTensor = gc.load.load_raster(clearest, aoi)                  # (1, 500, 500) uint16, warped to lon/lat
+red: GeoArray = gc.load.load_raster(clearest, aoi)                  # (1, 500, 500) uint16, warped to lon/lat
 ```
 
 `load_raster` reads only the windows it needs over HTTP and warps each

@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import shapely.geometry
+from geoarray import GeoArray
 
 from geocatalog import GeoSlice
 from geocatalog.build import build_vector_catalog
@@ -110,9 +111,9 @@ class TestLoadVector:
         tensor = load_vector(
             catalog, sl, task="semantic_segmentation", label_field="class_id"
         )
-        assert tensor.values.shape == (1, 32, 32)
+        assert np.asarray(tensor).shape == (1, 32, 32)
         # We rasterised two classes; their IDs should appear in the output.
-        unique = set(np.unique(tensor.values).tolist())
+        unique = set(np.unique(np.asarray(tensor)).tolist())
         # Background is 0; classes 1 and 2 land in the raster.
         assert {1, 2}.issubset(unique)
 
@@ -153,4 +154,23 @@ class TestLoadVector:
         tensor = load_vector(
             catalog, sl, task="semantic_segmentation", label_field="class_id"
         )
-        assert tensor.values.shape == (1, 32, 32)
+        assert np.asarray(tensor).shape == (1, 32, 32)
+
+
+def test_load_vector_returns_a_geoarray_on_the_slice_grid(vector_file: Path) -> None:
+    catalog = build_vector_catalog([vector_file], filename_regex=REGEX)
+    sl = GeoSlice(
+        bounds=(500_000, 4_000_000, 500_320, 4_000_320),
+        interval=pd.Interval(
+            pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-31"), closed="both"
+        ),
+        resolution=(10.0, 10.0),
+        crs="EPSG:32629",
+    )
+    labels = load_vector(catalog, sl, label_field="class_id", fill=-1)
+    assert isinstance(labels, GeoArray)
+    assert labels.shape == (1, 32, 32)
+    assert labels.dtype == np.int64
+    assert labels.grid == sl.grid
+    assert labels.fill_value == -1  # the background is the declared nodata
+    assert (np.asarray(labels) == -1).any()

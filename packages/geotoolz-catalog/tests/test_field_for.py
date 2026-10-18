@@ -26,7 +26,7 @@ from tests.conftest import catalog_from_rows
 
 geopatcher = pytest.importorskip("geopatcher")
 
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray, RasterSource
 
 from geocatalog._src.backends.memory import InMemoryGeoCatalog
 from geocatalog._src.geoslice import GeoSlice
@@ -149,17 +149,17 @@ class TestFieldOnTheSliceGrid:
         field = field_for(asset_catalog, _slice(), asset="red")
         assert isinstance(field, geopatcher.RasterField)
         tensor = field.domain
-        assert isinstance(tensor, GeoTensor)
-        assert str(tensor.crs).endswith("32629")
+        assert isinstance(tensor, GeoArray)
+        assert tensor.grid == _slice().grid
         assert tensor.shape == (3, 32, 64)
-        assert int(tensor.values[0, 0, 0]) == 10  # red0
-        assert int(tensor.values[0, 0, -1]) == 30  # red1
+        assert int(np.asarray(tensor)[0, 0, 0]) == 10  # red0
+        assert int(np.asarray(tensor)[0, 0, -1]) == 30  # red1
 
     def test_asset_selects_the_band_file(
         self, asset_catalog: InMemoryGeoCatalog
     ) -> None:
-        tensor = field_for(asset_catalog, _slice(), asset="nir").domain
-        assert (int(tensor.values[0, 0, 0]), int(tensor.values[0, 0, -1])) == (20, 40)
+        nir = np.asarray(field_for(asset_catalog, _slice(), asset="nir").domain)
+        assert (int(nir[0, 0, 0]), int(nir[0, 0, -1])) == (20, 40)
 
     def test_band_indexes_are_forwarded(
         self, asset_catalog: InMemoryGeoCatalog
@@ -172,8 +172,8 @@ class TestFieldOnTheSliceGrid:
     ) -> None:
         tensor = field_for(legacy_catalog).domain
         assert tensor.shape == (3, 32, 32)
-        assert tuple(tensor.bounds) == LEFT
-        assert int(tensor.values[0, 5, 5]) == 7
+        assert tensor.grid.bounds == LEFT
+        assert int(np.asarray(tensor)[0, 5, 5]) == 7
 
     def test_rows_outside_the_slice_need_not_carry_the_asset(
         self, asset_catalog: InMemoryGeoCatalog
@@ -183,7 +183,7 @@ class TestFieldOnTheSliceGrid:
         cat = InMemoryGeoCatalog(gdf, kind="raster")
         # Clear of the shared edge, which `query` counts as intersecting.
         field = field_for(cat, _slice((*LEFT[:2], 500_300, LEFT[3])), asset="red")
-        assert int(field.domain.values[0, 0, 0]) == 10
+        assert int(np.asarray(field.domain)[0, 0, 0]) == 10
 
 
 class TestCrossCrsRoundTrip:
@@ -191,10 +191,10 @@ class TestCrossCrsRoundTrip:
         self, cross_crs_catalog: InMemoryGeoCatalog
     ) -> None:
         tensor = field_for(cross_crs_catalog, _slice()).domain
-        assert str(tensor.crs).endswith("32629")
+        assert tensor.grid == _slice().grid  # the slice CRS, not the files'
         assert tensor.shape == (1, 32, 64)
-        assert int(tensor.values[0, 16, 8]) == 10
-        assert int(tensor.values[0, 16, 56]) == 30  # warped from UTM 30N
+        assert int(np.asarray(tensor)[0, 16, 8]) == 10
+        assert int(np.asarray(tensor)[0, 16, 56]) == 30  # warped from UTM 30N
 
     def test_split_then_merge_reassembles_the_field(
         self, cross_crs_catalog: InMemoryGeoCatalog
@@ -204,7 +204,7 @@ class TestCrossCrsRoundTrip:
         patches = list(patcher.split(field))
         assert len(patches) == (32 // 8) * (64 // 8)
         merged = np.asarray(patcher.merge(patches, field.domain))
-        np.testing.assert_array_equal(merged, np.asarray(field.domain.values))
+        np.testing.assert_array_equal(merged, np.asarray(field.domain))
 
 
 class TestLazyFields:
@@ -214,10 +214,13 @@ class TestLazyFields:
         fields = field_for(cross_crs_catalog, _slice(), materialize=False)
         assert len(fields) == 2
         # Each lazy field stays in its file's CRS; nothing is warped.
-        crs = [str(f.domain.crs) for f in fields]
-        assert crs[0].endswith("32629") and crs[1].endswith("32630")
+        assert all(isinstance(f.domain, RasterSource) for f in fields)
+        crs = [f.domain.grid.crs.to_epsg() for f in fields]
+        assert crs == [32629, 32630]
         window = rasterio.windows.Window(0, 0, 4, 4)
-        assert int(fields[1].select(window).values[0, 0, 0]) == 30
+        chip = fields[1].select(window)
+        assert isinstance(chip, GeoArray)
+        assert int(np.asarray(chip)[0, 0, 0]) == 30
 
 
 # ---------------------------------------------------------------------------
@@ -320,13 +323,20 @@ class TestImportGuards:
         with pytest.raises(ImportError, match=r"geotoolz-catalog\[patch\]"):
             field_for(asset_catalog, asset="red")
 
-    def test_missing_georeader_names_georeader(
+    def test_lazy_fields_without_georeader_name_the_patch_extra(
         self, asset_catalog: InMemoryGeoCatalog, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setitem(sys.modules, "georeader.rasterio_reader", None)
-        with pytest.raises(ImportError, match="georeader-spaceml") as info:
-            field_for(asset_catalog, asset="red")
-        assert "patch" not in str(info.value)
+        with pytest.raises(ImportError, match=r"geotoolz-catalog\[patch\]") as info:
+            field_for(asset_catalog, asset="red", materialize=False)
+        assert "georeader-spaceml" in str(info.value)
+
+    def test_the_mosaic_needs_no_georeader(
+        self, asset_catalog: InMemoryGeoCatalog, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(sys.modules, "georeader.rasterio_reader", None)
+        field = field_for(asset_catalog, _slice(), asset="red")
+        assert isinstance(field.domain, GeoArray)
 
 
 def test_dict_asset_maps_from_stage_are_readable(
@@ -340,7 +350,7 @@ def test_dict_asset_maps_from_stage_are_readable(
     cat.gdf["assets"] = [{"red": str(red)}]
     staged = stage(cat, dest=tmp_path / "cache")
     field = field_for(staged, _slice(LEFT), asset="red")
-    assert int(field.domain.values[0, 0, 0]) == 10
+    assert int(np.asarray(field.domain)[0, 0, 0]) == 10
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +389,7 @@ def test_inferred_grid_covers_a_partial_last_pixel(utm29_tile_factory) -> None:
         crs="EPSG:32629",
     )
     tensor = field_for(cat).domain
-    xmin, _, xmax, _ = tensor.bounds
+    xmin, _, xmax, _ = tensor.grid.bounds
     assert (xmin, xmax) == (500_000, 500_330)  # whole pixels on the first grid
     assert tensor.shape[-1] == 33
-    assert int(tensor.values[0, 0, -2]) == 9  # the later row wins the overlap
+    assert int(np.asarray(tensor)[0, 0, -2]) == 9  # the later row wins the overlap

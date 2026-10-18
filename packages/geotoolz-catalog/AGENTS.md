@@ -40,8 +40,20 @@ dependencies are actually imported).
 - **`GeoSlice`** (`_src/geoslice.py`) is the wire format between catalog,
   loaders and patchers: `bounds` (xmin < xmax, ymin < ymax), `interval`
   (a `pd.Interval` with `closed="both"`; tz-aware endpoints become naive
-  UTC), `resolution`, `crs`, optional `align`. It is frozen — change a slice
-  with `dataclasses.replace`.
+  UTC), `resolution`, `crs`, optional `align`; `grid` (a `geoarray.Grid`
+  of `transform`, `crs` and `shape`) is the output pixel grid. It is
+  frozen — change a slice with `dataclasses.replace`.
+- **The carrier** is `geoarray.GeoArray`. Every raster loader
+  (`load_raster`, `aload_raster`, `load_raster_timeseries`, `load_vector`)
+  returns one on `slice_.grid`, built from rasterio's NumPy output with an
+  explicit `fill_value` (the nodata the mosaic used, 0 when no source
+  declares one; `fill` for `load_vector`). `field_for` wraps that GeoArray,
+  or, with `materialize=False`, a lazy `geoarray.RasterSource` per file. No
+  public name takes or returns a georeader `GeoTensor` / `GeoData`.
+  georeader is not a base dependency: it is only the engine behind the lazy
+  `field_for` path (`RasterioReader` wrapped with
+  `geoarray.interop.georeader.source_from_georeader`), from the `[patch]`
+  extra, imported inside the function.
 - **Time** is naive UTC everywhere in a catalog; use the helpers in
   `geocatalog.utils` (`to_utc_ts`, `to_naive_utc`, `to_rfc3339`) rather than
   converting by hand.
