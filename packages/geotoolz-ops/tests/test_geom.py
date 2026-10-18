@@ -5,7 +5,7 @@ Three tiers:
 - **Tier-A**: pure-numpy primitives in
   :mod:`geoops.geom._src.array` (feather kernel, slicing math,
   validity mask, resampling resolution).
-- **Tier-B**: ``GeoTensor`` round-trip checks for every Operator,
+- **Tier-B**: ``GeoArray`` round-trip checks for every Operator,
   with transform + CRS propagation asserted explicitly.
 - **Tier-C**: hydra-zen ``builds()`` round-trip for the YAML-safe
   Operators.
@@ -16,26 +16,28 @@ from __future__ import annotations
 import geopandas as gpd
 import numpy as np
 import pytest
+from _helpers import toy_fill
 from affine import Affine
+from geoarray import FrozenAttrs, GeoArray
 from geopatcher import spatial
-from georeader.geotensor import GeoTensor
 from rasterio.enums import Resampling
 from rasterio.windows import WindowError
 from shapely.geometry import box
 
 import geoops as gz
 from geoops._src.blending import triangular_weights
+from geoops._src.geo import affine_of
 from geoops.geom._src import array as geom_array
 
 
-def _gt(values: np.ndarray | None = None) -> GeoTensor:
+def _gt(values: np.ndarray | None = None) -> GeoArray:
     if values is None:
         values = np.arange(1 * 5 * 7, dtype=np.float32).reshape(1, 5, 7)
-    return GeoTensor(
+    return GeoArray(
         values,
         transform=Affine(1, 0, 10, 0, -1, 20),
         crs="EPSG:4326",
-        fill_value_default=-9999,
+        fill_value=toy_fill(values),
     )
 
 
@@ -168,7 +170,7 @@ def test_pad_to_then_crop_to_recovers_original_values() -> None:
 
     assert cropped.shape == gt.shape
     np.testing.assert_array_equal(np.asarray(cropped), np.asarray(gt))
-    assert cropped.same_extent(gt)
+    assert cropped.grid == gt.grid
 
 
 def test_tile_then_stitch_reconstructs_original_with_crs_preserved() -> None:
@@ -179,11 +181,11 @@ def test_tile_then_stitch_reconstructs_original_with_crs_preserved() -> None:
 
     assert stitched.shape == gt.shape
     np.testing.assert_allclose(np.asarray(stitched), np.asarray(gt))
-    assert stitched.same_extent(gt)
+    assert stitched.grid == gt.grid
     # CRS propagation through the round-trip.
     assert str(stitched.crs) == str(gt.crs)
     # Affine origin matches.
-    assert stitched.transform == gt.transform
+    assert affine_of(stitched) == affine_of(gt)
 
 
 def test_stitch_masks_fill_sentinels_from_padded_tiles() -> None:
@@ -196,21 +198,21 @@ def test_stitch_masks_fill_sentinels_from_padded_tiles() -> None:
     crs = "EPSG:4326"
     fill = -9999.0
     real = np.ones((1, 3, 3), dtype=np.float32)
-    left = GeoTensor(
+    left = GeoArray(
         real,
         transform=Affine(1, 0, 0, 0, -1, 3),
         crs=crs,
-        fill_value_default=fill,
+        fill_value=fill,
     )
     padded = np.array(
         [[[1.0, 1.0, fill], [1.0, 1.0, fill], [1.0, 1.0, fill]]],
         dtype=np.float32,
     )
-    right = GeoTensor(
+    right = GeoArray(
         padded,
         transform=Affine(1, 0, 3, 0, -1, 3),
         crs=crs,
-        fill_value_default=fill,
+        fill_value=fill,
     )
     stitched = gz.geom.Stitch(blend="average")([left, right])
     out = np.asarray(stitched)
@@ -229,18 +231,18 @@ def test_stitch_masks_fill_sentinels_from_padded_tiles() -> None:
 
 def test_reproject_like_matches_reference_grid_and_propagates_crs() -> None:
     gt = _gt()
-    like = GeoTensor(
+    like = GeoArray(
         np.zeros((1, 3, 4), dtype=np.float32),
         transform=Affine(2, 0, 10, 0, -2, 20),
         crs="EPSG:4326",
-        fill_value_default=-9999,
+        fill_value=-9999,
     )
 
     out = gz.geom.ReprojectLike(like=like, resampling="nearest")(gt)
 
-    assert out.same_extent(like)
+    assert out.grid == like.grid
     assert str(out.crs) == str(like.crs)
-    assert out.transform == like.transform
+    assert affine_of(out) == affine_of(like)
 
 
 def test_resize_resample_and_crop_to_bounds() -> None:
@@ -262,11 +264,11 @@ def test_resize_resample_and_crop_to_bounds() -> None:
 
 @pytest.mark.parametrize("crs", [None, "EPSG:4326", "EPSG:3857"])
 def test_crop_to_bounds_matches_read_from_bounds(crs: str | None) -> None:
+    from geoarray.interop.georeader import from_georeader, to_georeader
     from georeader import read
     from rasterio.warp import transform_bounds
 
-    gt = _gt()
-    gt.attrs = {"band_names": ["b1"]}
+    gt = _gt().with_attrs(band_names=["b1"])
     # Partial-pixel bounds: every pixel they touch is kept (outer
     # rounding), so the crop is 4 x 4 rather than the 3 x 3 that nearest
     # rounding of the window used to give.
@@ -275,21 +277,24 @@ def test_crop_to_bounds_matches_read_from_bounds(crs: str | None) -> None:
         bounds = transform_bounds("EPSG:4326", crs, *bounds)
 
     cropped = gz.geom.CropToBounds(bounds=bounds, crs=crs)(gt)
-    expected = read.read_from_bounds(gt, bounds, crs_bounds=crs, boundless=False)
+    # georeader is the oracle here.
+    expected = from_georeader(
+        read.read_from_bounds(to_georeader(gt), bounds, crs_bounds=crs, boundless=False)
+    )
 
     assert cropped.shape == expected.shape == (1, 4, 4)
-    assert cropped.transform == expected.transform
+    assert affine_of(cropped) == affine_of(expected)
     np.testing.assert_array_equal(np.asarray(cropped), np.asarray(expected))
     np.testing.assert_array_equal(np.asarray(cropped), np.asarray(gt)[:, 0:4, 2:6])
-    assert cropped.fill_value_default == gt.fill_value_default
-    assert cropped.attrs["band_names"] == ["b1"]
+    assert cropped.fill_value == gt.fill_value
+    assert cropped.attrs["band_names"] == ("b1",)
 
 
 def test_crop_to_bounds_clips_to_the_carrier_and_rejects_disjoint_bounds() -> None:
     gt = _gt()
     clipped = gz.geom.CropToBounds(bounds=(8.5, 13.0, 12.5, 30.0))(gt)
     assert clipped.shape == (1, 5, 3)
-    assert clipped.transform == gt.transform
+    assert affine_of(clipped) == affine_of(gt)
     with pytest.raises(WindowError):
         gz.geom.CropToBounds(bounds=(100.0, 50.0, 101.0, 51.0))(gt)
 
@@ -363,7 +368,7 @@ def test_stitch_blend_modes_and_errors() -> None:
         gz.geom.Stitch()([])
     with pytest.raises(ValueError, match="blend"):
         gz.geom.Stitch(blend="unknown")(tiles)
-    rotated = GeoTensor(
+    rotated = GeoArray(
         np.ones((1, 2, 2), dtype=np.float32),
         transform=Affine(1, 0.1, 0, 0, -1, 2),
         crs="EPSG:4326",
@@ -377,6 +382,7 @@ def test_stitch_feather_matches_spatial_overlap_add() -> None:
         "geopatcher",
         reason="geoops.patch_ops bridge requires the [patch] extra (geopatcher)",
     )
+    from geoarray.interop.georeader import to_georeader
     from geopatcher import RasterField, SpatialPatcher
 
     from geoops.patch_ops import TriangularWindow
@@ -385,7 +391,8 @@ def test_stitch_feather_matches_spatial_overlap_add() -> None:
     tiles = gz.geom.Tile(size=(3, 4), stride=(2, 3))(gt)
 
     stitched = gz.geom.Stitch(blend="feather", feather_width=2)(tiles)
-    field = RasterField(gt)
+    # geopatcher (the oracle) still reads georeader carriers.
+    field = RasterField(to_georeader(gt))
     patcher = SpatialPatcher(
         geometry=spatial.geometry.Rectangular(size=(3, 4)),
         sampler=spatial.sampler.RegularStride(step=(2, 3)),
@@ -403,11 +410,11 @@ def test_stitch_feather_matches_spatial_overlap_add() -> None:
 
 def test_stitch_feather_clips_valid_mask_for_custom_target_grid() -> None:
     fill = -9999.0
-    tile = GeoTensor(
+    tile = GeoArray(
         np.array([[[1.0, fill], [fill, 4.0]]], dtype=np.float32),
         transform=Affine(1, 0, 0, 0, -1, 2),
         crs="EPSG:4326",
-        fill_value_default=fill,
+        fill_value=fill,
     )
 
     stitched = gz.geom.Stitch(
@@ -430,12 +437,12 @@ def test_stitch_validates_north_up_on_every_tile() -> None:
     ``tiles[0]``. A rotated later tile would silently misalign because
     ``target_slices`` assumes axis-aligned transforms for every tile.
     """
-    north_up = GeoTensor(
+    north_up = GeoArray(
         np.ones((1, 2, 2), dtype=np.float32),
         transform=Affine(1, 0, 0, 0, -1, 2),
         crs="EPSG:4326",
     )
-    rotated = GeoTensor(
+    rotated = GeoArray(
         np.ones((1, 2, 2), dtype=np.float32),
         transform=Affine(1, 0.1, 2, 0, -1, 2),
         crs="EPSG:4326",
@@ -457,29 +464,29 @@ def test_stitch_handles_target_shape_smaller_than_tile_union() -> None:
     transform = Affine(1, 0, 0, 0, -1, 4)
     # Four 2x2 tiles tiling a 4x4 grid; we then ask for a 2x2 target.
     tiles = [
-        GeoTensor(
+        GeoArray(
             np.full((1, 2, 2), 1.0, dtype=np.float32),
             transform=Affine(1, 0, 0, 0, -1, 4),
             crs=crs,
-            fill_value_default=fill,
+            fill_value=fill,
         ),
-        GeoTensor(
+        GeoArray(
             np.full((1, 2, 2), 2.0, dtype=np.float32),
             transform=Affine(1, 0, 2, 0, -1, 4),
             crs=crs,
-            fill_value_default=fill,
+            fill_value=fill,
         ),
-        GeoTensor(
+        GeoArray(
             np.full((1, 2, 2), 3.0, dtype=np.float32),
             transform=Affine(1, 0, 0, 0, -1, 2),
             crs=crs,
-            fill_value_default=fill,
+            fill_value=fill,
         ),
-        GeoTensor(
+        GeoArray(
             np.full((1, 2, 2), 4.0, dtype=np.float32),
             transform=Affine(1, 0, 2, 0, -1, 2),
             crs=crs,
-            fill_value_default=fill,
+            fill_value=fill,
         ),
     ]
     stitched = gz.geom.Stitch(
@@ -652,7 +659,7 @@ def test_bowtie_correction_is_identity_for_zero_scan_angle() -> None:
         )(gt)
         np.testing.assert_array_equal(np.asarray(out), np.asarray(gt))
         assert out.dtype == gt.dtype
-        assert out.transform == gt.transform
+        assert affine_of(out) == affine_of(gt)
         assert str(out.crs) == str(gt.crs)
 
 
@@ -724,11 +731,11 @@ def test_bowtie_viirs_refills_onboard_deleted_rows() -> None:
     zone3 = deg > 44.86
     swath[np.ix_(np.isin(detector, [0, 15]), zone2)] = -999.0
     swath[np.ix_(np.isin(detector, [0, 1, 14, 15]), zone3)] = -999.0
-    gt = GeoTensor(
+    gt = GeoArray(
         swath[None],
         transform=Affine(1, 0, 0, 0, -1, 0),
         crs=None,
-        fill_value_default=-999.0,
+        fill_value=-999.0,
     )
     out = np.asarray(op(gt))[0]
     truth = _smooth_scene(np.arange(48.0)[:, None], np.arange(3200)[None, :])
@@ -761,18 +768,18 @@ def test_bowtie_uses_overlapping_scan_where_primary_is_nodata() -> None:
 def test_bowtie_correction_nodata_and_dtype() -> None:
     values = np.full((1, 20, 9), 7, dtype=np.uint16)
     values[0, 4, 4] = 0  # nadir fill pixel: no overlapping scan covers it
-    gt = GeoTensor(
+    gt = GeoArray(
         values,
         transform=Affine(1, 0, 0, 0, -1, 0),
         crs="EPSG:4326",
-        fill_value_default=0,
+        fill_value=0,
     )
     op = gz.geom.BowtieCorrection(
         detectors_per_scan=10, max_scan_angle_deg=55.0, altitude_km=705.0
     )
     out = op(gt)
     assert out.dtype == np.uint16
-    assert out.fill_value_default == 0
+    assert out.fill_value == 0
     assert np.asarray(out)[0, 4, 4] == 0
     assert (np.asarray(out)[0][np.arange(20) != 4] == 7).all()
     linear = gz.geom.BowtieCorrection(
@@ -782,7 +789,7 @@ def test_bowtie_correction_nodata_and_dtype() -> None:
         method="linear",
     )(gt)
     assert np.issubdtype(linear.dtype, np.floating)
-    assert np.isnan(linear.fill_value_default)
+    assert np.isnan(linear.fill_value)
     assert np.isnan(np.asarray(linear)[0, 4, 4])
     np.testing.assert_allclose(np.asarray(linear)[0, 10:], 7.0)
 
@@ -815,21 +822,25 @@ def test_bowtie_correction_validates_inputs() -> None:
 def test_antimeridian_split_uses_lon_attrs_and_returns_west_east() -> None:
     values = np.arange(1 * 2 * 4, dtype=np.float32).reshape(1, 2, 4)
     lons = np.array([[170.0, 175.0, -179.0, -170.0]] * 2)
-    gt = GeoTensor(
+    gt = GeoArray(
         values,
         transform=Affine(1, 0, 170, 0, -1, 10),
         crs="EPSG:4326",
-        fill_value_default=-9999,
-        attrs={"lons": lons},
+        fill_value=-9999,
+        # attrs hold no 2-D arrays: per-pixel longitudes are nested tuples.
+        attrs={"lons": lons.tolist()},
     )
 
     west, east = gz.geom.AntimeridianSplit()(gt)
 
     np.testing.assert_array_equal(np.asarray(west), values[..., 2:])
     np.testing.assert_array_equal(np.asarray(east), values[..., :2])
+    # Per-pixel longitudes in, per-pixel (H, w) longitudes out, sliced.
+    np.testing.assert_array_equal(np.asarray(west.attrs["lons"]), lons[:, 2:])
+    np.testing.assert_array_equal(np.asarray(east.attrs["lons"]), lons[:, :2])
     assert np.nanmax(west.attrs["lons"]) < 0
     assert np.nanmin(east.attrs["lons"]) > 0
-    assert west.transform == gt.isel({"x": slice(2, 4)}).transform
+    assert west.grid == gt.isel(x=slice(2, 4)).grid
     assert str(west.crs) == str(gt.crs)
 
 
@@ -838,19 +849,20 @@ def test_antimeridian_split_identity_when_no_crossing() -> None:
 
     out = gz.geom.AntimeridianSplit()(gt)
 
-    assert out == [gt]
+    assert len(out) == 1
+    assert out[0] is gt
 
 
 def test_antimeridian_split_rejects_multiple_jumps() -> None:
     # Polar-pass-like swath that wraps the antimeridian twice in a row.
     values = np.arange(1 * 2 * 6, dtype=np.float32).reshape(1, 2, 6)
     lons = np.array([[170.0, -170.0, 170.0, -170.0, 170.0, -170.0]] * 2)
-    gt = GeoTensor(
+    gt = GeoArray(
         values,
         transform=Affine(1, 0, 170, 0, -1, 10),
         crs="EPSG:4326",
-        fill_value_default=-9999,
-        attrs={"lons": lons},
+        fill_value=-9999,
+        attrs={"lons": lons.tolist()},
     )
 
     with pytest.raises(ValueError, match="longitude jumps"):
@@ -861,13 +873,13 @@ def test_geostationary_parallax_zero_height_is_identity() -> None:
     gt = _gt()
 
     out = gz.geom.GeostationaryParallaxCorrect(
-        satellite_lon_deg=gt.transform.c,
+        satellite_lon_deg=affine_of(gt).c,
         target_height_m=0.0,
     )(gt)
 
     assert out is gt
     np.testing.assert_array_equal(np.asarray(out), np.asarray(gt))
-    assert out.transform == gt.transform
+    assert affine_of(out) == affine_of(gt)
 
 
 @pytest.mark.parametrize("method", ["nearest", "bilinear"])
@@ -875,11 +887,11 @@ def test_parallax_near_identity_small_height(method: str) -> None:
     # A 1 mm target height displaces the apparent position by far less than
     # a pixel, so sampling at pixel centres must reproduce the input (#119).
     values = np.arange(6 * 8, dtype=np.float64).reshape(1, 6, 8)
-    gt = GeoTensor(
+    gt = GeoArray(
         values,
         transform=Affine(0.1, 0, -75.4, 0, -0.1, 0.3),
         crs="EPSG:4326",
-        fill_value_default=np.nan,
+        fill_value=np.nan,
     )
 
     out = gz.geom.GeostationaryParallaxCorrect(
@@ -899,11 +911,11 @@ def test_geostationary_parallax_moves_elevated_point_toward_nadir() -> None:
     # the apparent view, so correction moves it 2 rows south, toward nadir.
     values = np.zeros((1, 9, 9), dtype=np.float32)
     values[0, 2, 4] = 1.0
-    gt = GeoTensor(
+    gt = GeoArray(
         values,
         transform=Affine(0.125, 0, -75.5625, 0, -0.125, 30.5625),
         crs="EPSG:4326",
-        fill_value_default=0.0,
+        fill_value=0.0,
     )
 
     out = gz.geom.GeostationaryParallaxCorrect(
@@ -914,7 +926,7 @@ def test_geostationary_parallax_moves_elevated_point_toward_nadir() -> None:
 
     assert np.asarray(out)[0, 4, 4] == 1.0
     assert np.asarray(out)[0, 2, 4] == 0.0
-    assert out.transform == gt.transform
+    assert affine_of(out) == affine_of(gt)
     assert str(out.crs) == str(gt.crs)
 
 
@@ -923,11 +935,11 @@ def test_geostationary_parallax_fills_off_limb_pixels() -> None:
     # the limb; at a high target height some rays will miss the Earth.
     fill = -1.0
     values = np.ones((1, 5, 5), dtype=np.float32)
-    gt = GeoTensor(
+    gt = GeoArray(
         values,
         transform=Affine(20.0, 0, -150.0, 0, -20.0, 50.0),
         crs="EPSG:4326",
-        fill_value_default=fill,
+        fill_value=fill,
     )
 
     out = gz.geom.GeostationaryParallaxCorrect(
@@ -939,23 +951,23 @@ def test_geostationary_parallax_fills_off_limb_pixels() -> None:
     arr = np.asarray(out)
     # The corner pixels are far off-limb relative to the sub-satellite point.
     assert (arr == fill).any()
-    assert out.transform == gt.transform
+    assert affine_of(out) == affine_of(gt)
 
 
 def test_segment_stitch_orders_segments_and_fills_missing_scan() -> None:
     fill = -1.0
-    seg0 = GeoTensor(
+    seg0 = GeoArray(
         np.full((1, 2, 3), 1.0, dtype=np.float32),
         transform=Affine(1, 0, 0, 0, -1, 6),
         crs="EPSG:4326",
-        fill_value_default=fill,
+        fill_value=fill,
         attrs={"__geotoolz_segment_meta__": {"segment_index": 0, "n_segments": 3}},
     )
-    seg2 = GeoTensor(
+    seg2 = GeoArray(
         np.full((1, 2, 3), 3.0, dtype=np.float32),
         transform=Affine(1, 0, 0, 0, -1, 2),
         crs="EPSG:4326",
-        fill_value_default=fill,
+        fill_value=fill,
         attrs={"__geotoolz_segment_meta__": {"segment_index": 2, "n_segments": 3}},
     )
 
@@ -970,19 +982,19 @@ def test_segment_stitch_orders_segments_and_fills_missing_scan() -> None:
         axis=-2,
     )
     np.testing.assert_array_equal(np.asarray(out), expected)
-    assert out.transform == seg0.transform
+    assert affine_of(out) == affine_of(seg0)
     assert str(out.crs) == str(seg0.crs)
 
 
 def test_segment_stitch_roundtrips_sample_segments() -> None:
     values = np.arange(1 * 3 * 6, dtype=np.float32).reshape(1, 3, 6)
-    left = GeoTensor(
+    left = GeoArray(
         values[..., :3],
         transform=Affine(1, 0, 0, 0, -1, 3),
         crs="EPSG:4326",
         attrs={"__geotoolz_segment_meta__": {"segment_index": 0, "n_segments": 2}},
     )
-    right = GeoTensor(
+    right = GeoArray(
         values[..., 3:],
         transform=Affine(1, 0, 3, 0, -1, 3),
         crs="EPSG:4326",
@@ -992,25 +1004,25 @@ def test_segment_stitch_roundtrips_sample_segments() -> None:
     out = gz.geom.SegmentStitch(direction="sample")([right, left])
 
     np.testing.assert_array_equal(np.asarray(out), values)
-    assert out.transform == left.transform
+    assert affine_of(out) == affine_of(left)
 
 
 def test_segment_stitch_integer_dtype_uses_existing_fill() -> None:
     # Integer sensor counts cannot hold NaN; stitching with the default
     # fill_value=np.nan must fall back to the segment's existing fill (or 0)
     # rather than raising.
-    seg0 = GeoTensor(
+    seg0 = GeoArray(
         np.full((1, 2, 3), 1, dtype=np.int16),
         transform=Affine(1, 0, 0, 0, -1, 6),
         crs="EPSG:4326",
-        fill_value_default=-1,
+        fill_value=-1,
         attrs={"__geotoolz_segment_meta__": {"segment_index": 0, "n_segments": 3}},
     )
-    seg2 = GeoTensor(
+    seg2 = GeoArray(
         np.full((1, 2, 3), 3, dtype=np.int16),
         transform=Affine(1, 0, 0, 0, -1, 2),
         crs="EPSG:4326",
-        fill_value_default=-1,
+        fill_value=-1,
         attrs={"__geotoolz_segment_meta__": {"segment_index": 2, "n_segments": 3}},
     )
 
@@ -1020,17 +1032,17 @@ def test_segment_stitch_integer_dtype_uses_existing_fill() -> None:
     assert arr.dtype == np.int16
     # Missing middle segment is filled with the segments' existing fill (-1).
     assert (arr[..., 2:4, :] == -1).all()
-    assert out.fill_value_default == -1
+    assert out.fill_value == -1
 
 
 def test_segment_stitch_rejects_duplicate_segment_index() -> None:
-    seg0 = GeoTensor(
+    seg0 = GeoArray(
         np.zeros((1, 2, 3), dtype=np.float32),
         transform=Affine(1, 0, 0, 0, -1, 4),
         crs="EPSG:4326",
         attrs={"__geotoolz_segment_meta__": {"segment_index": 0, "n_segments": 2}},
     )
-    dup = GeoTensor(
+    dup = GeoArray(
         np.zeros((1, 2, 3), dtype=np.float32),
         transform=Affine(1, 0, 0, 0, -1, 4),
         crs="EPSG:4326",
@@ -1042,7 +1054,7 @@ def test_segment_stitch_rejects_duplicate_segment_index() -> None:
 
 
 def test_segment_stitch_handles_attrs_none_with_clear_error() -> None:
-    bad = GeoTensor(
+    bad = GeoArray(
         np.zeros((1, 2, 3), dtype=np.float32),
         transform=Affine(1, 0, 0, 0, -1, 4),
         crs="EPSG:4326",
@@ -1054,11 +1066,11 @@ def test_segment_stitch_handles_attrs_none_with_clear_error() -> None:
 
 def test_antimeridian_split_rejects_mismatched_lon_shape() -> None:
     values = np.arange(1 * 2 * 4, dtype=np.float32).reshape(1, 2, 4)
-    gt = GeoTensor(
+    gt = GeoArray(
         values,
         transform=Affine(1, 0, 170, 0, -1, 10),
         crs="EPSG:4326",
-        fill_value_default=-9999,
+        fill_value=-9999,
         attrs={"lons": np.array([170.0, 175.0, -179.0])},  # wrong length
     )
     with pytest.raises(ValueError, match="lons"):
@@ -1066,17 +1078,17 @@ def test_antimeridian_split_rejects_mismatched_lon_shape() -> None:
 
 
 def test_mosaic_methods_cover_adjacent_tiles() -> None:
-    left = GeoTensor(
+    left = GeoArray(
         np.ones((1, 3, 4), dtype=np.float32),
         transform=Affine(1, 0, 10, 0, -1, 20),
         crs="EPSG:4326",
-        fill_value_default=-9999,
+        fill_value=-9999,
     )
-    right = GeoTensor(
+    right = GeoArray(
         np.full((1, 3, 4), 2, dtype=np.float32),
         transform=Affine(1, 0, 14, 0, -1, 20),
         crs="EPSG:4326",
-        fill_value_default=-9999,
+        fill_value=-9999,
     )
 
     for method in ("first", "mean", "median", "max", "min"):
@@ -1097,34 +1109,34 @@ def test_mosaic_methods_cover_adjacent_tiles() -> None:
 def test_resample_non_square_pixels() -> None:
     """Each axis is scaled by its own resolution ratio (x: 1 -> 2, y: 2 -> 2).
 
-    ``GeoTensor.resize(resolution_dst=...)`` scales the height by the x
+    ``GeoArray.resize(resolution_dst=...)`` scales the height by the x
     ratio, which gave ``(1, 5, 20)`` here.
     """
-    gt = GeoTensor(
+    gt = GeoArray(
         np.ones((1, 10, 20), dtype=np.float32),
         transform=Affine(1, 0, 0, 0, -2, 0),
         crs="EPSG:32629",
-        fill_value_default=-9999,
+        fill_value=-9999,
     )
 
     out = gz.geom.Resample(resolution=(2, 2), anti_aliasing=False)(gt)
 
     assert out.shape == (1, 10, 10)
     assert out.res == pytest.approx((2.0, 2.0))
-    assert out.transform == Affine(2, 0, 0, 0, -2, 0)
+    assert affine_of(out) == Affine(2, 0, 0, 0, -2, 0)
     assert out.bounds == pytest.approx(gt.bounds)
     # Resize with a non-uniform scale shares the per-axis transform fix.
     resized = gz.geom.Resize(shape=(5, 10), anti_aliasing=False)(gt)
-    assert resized.transform == Affine(2, 0, 0, 0, -4, 0)
+    assert affine_of(resized) == Affine(2, 0, 0, 0, -4, 0)
     assert resized.bounds == pytest.approx(gt.bounds)
 
 
 def test_reproject_same_crs_applies_resolution() -> None:
-    gt = GeoTensor(
+    gt = GeoArray(
         np.arange(10 * 20, dtype=np.float32).reshape(1, 10, 20),
         transform=Affine(10, 0, 500_000, 0, -10, 4_000_000),
         crs="EPSG:32629",
-        fill_value_default=-9999,
+        fill_value=-9999,
     )
 
     out = gz.geom.Reproject(
@@ -1138,7 +1150,7 @@ def test_reproject_same_crs_applies_resolution() -> None:
     # Without a resolution a same-CRS call is still the identity.
     same = gz.geom.Reproject(dst_crs="EPSG:32629")(gt)
     assert same.shape == gt.shape
-    assert same.transform == gt.transform
+    assert affine_of(same) == affine_of(gt)
 
 
 def test_vectorize_band_axis_input() -> None:
@@ -1168,26 +1180,26 @@ def test_tile_trailing_shapes_documented() -> None:
     # Stitch masks the sentinel and crops the padding: exact round trip.
     for blend in ("average", "feather", "first", "max"):
         stitched = gz.geom.Stitch(blend=blend, feather_width=1)(tiles)
-        assert stitched.transform == gt.transform
+        assert affine_of(stitched) == affine_of(gt)
         np.testing.assert_allclose(np.asarray(stitched), np.asarray(gt))
     # Overlapping tiles round-trip too.
     overlapping = gz.geom.SlidingWindow(size=(3, 3), overlap=1)(gt)
     assert {tile.shape for tile in overlapping} == {(1, 3, 3)}
     stitched = gz.geom.Stitch()(overlapping)
     np.testing.assert_allclose(np.asarray(stitched), np.asarray(gt))
-    # Plain arrays and fill-less GeoTensors are zero-padded to ``size``.
+    # Plain arrays and fill-less GeoArrays are zero-padded to ``size``.
     plain = gz.geom.Tile(size=(3, 4))(np.ones((1, 5, 7), dtype=np.float32))
     assert [tile.shape for tile in plain] == [(1, 3, 4)] * 4
     assert plain[-1][0, 2, :].tolist() == [0.0] * 4
-    no_fill = GeoTensor(
+    no_fill = GeoArray(
         np.ones((1, 5, 7), dtype=np.float32),
         transform=gt.transform,
         crs=gt.crs,
-        fill_value_default=None,
+        fill_value=None,
     )
     no_fill_tiles = gz.geom.Tile(size=(3, 4))(no_fill)
     assert [tile.shape for tile in no_fill_tiles] == [(1, 3, 4)] * 4
-    assert no_fill_tiles[-1].transform == Affine(1, 0, 14, 0, -1, 17)
+    assert affine_of(no_fill_tiles[-1]) == Affine(1, 0, 14, 0, -1, 17)
     np.testing.assert_array_equal(
         np.asarray(no_fill_tiles[-1]),
         plain[-1],
@@ -1198,11 +1210,11 @@ def test_tile_trailing_shapes_documented() -> None:
 
 
 def test_pad_to_without_any_fill_falls_back_to_zero() -> None:
-    gt = GeoTensor(
+    gt = GeoArray(
         np.ones((1, 5, 7), dtype=np.float32),
         transform=Affine(1, 0, 10, 0, -1, 20),
         crs="EPSG:4326",
-        fill_value_default=None,
+        fill_value=None,
     )
 
     padded = gz.geom.PadTo(shape=(7, 9))(gt)
@@ -1210,7 +1222,7 @@ def test_pad_to_without_any_fill_falls_back_to_zero() -> None:
     assert padded.shape == (1, 7, 9)
     assert np.asarray(padded).sum() == 35
     assert np.asarray(padded)[0, 0, 0] == 0
-    assert padded.transform == Affine(1, 0, 9, 0, -1, 21)
+    assert affine_of(padded) == Affine(1, 0, 9, 0, -1, 21)
     # With a carrier fill, ``fill_value=None`` still uses it.
     padded_fill = gz.geom.PadTo(shape=(7, 9))(_gt())
     assert np.asarray(padded_fill)[0, 0, 0] == -9999
@@ -1246,17 +1258,17 @@ def test_mosaic_builds_frame_without_spatial_mosaic_and_handles_no_fill(
     monkeypatch.setattr(geom_operators.mosaic, "spatial_mosaic", _fail)
 
     def _pair(fill):
-        left = GeoTensor(
+        left = GeoArray(
             np.ones((1, 3, 4), dtype=np.float32),
             transform=Affine(1, 0, 10, 0, -1, 20),
             crs="EPSG:4326",
-            fill_value_default=fill,
+            fill_value=fill,
         )
-        right = GeoTensor(
+        right = GeoArray(
             np.full((1, 3, 4), 3, dtype=np.float32),
             transform=Affine(1, 0, 12, 0, -1, 18),
             crs="EPSG:4326",
-            fill_value_default=fill,
+            fill_value=fill,
         )
         return left, right
 
@@ -1265,10 +1277,10 @@ def test_mosaic_builds_frame_without_spatial_mosaic_and_handles_no_fill(
         out = gz.geom.Mosaic(method="mean", resampling="nearest")(_pair(-9999))
     values = np.asarray(out)[0]
     assert out.shape == (1, 5, 6)
-    assert out.transform == Affine(1, 0, 10, 0, -1, 20)
+    assert affine_of(out) == Affine(1, 0, 10, 0, -1, 20)
     assert values[2, 2] == 2  # overlap -> mean(1, 3)
     assert values[0, 5] == -9999  # covered by neither input
-    assert out.fill_value_default == -9999
+    assert out.fill_value == -9999
 
     for method in ("mean", "median", "max", "min", "first"):
         no_fill = gz.geom.Mosaic(method=method, resampling="nearest")(_pair(None))
@@ -1283,12 +1295,12 @@ def test_mosaic_builds_frame_without_spatial_mosaic_and_handles_no_fill(
 
 def test_stitch_rejects_mismatched_resolution() -> None:
     """A 2 m tile on a 1 m grid would be pasted at 1 m; raise instead."""
-    fine = GeoTensor(
+    fine = GeoArray(
         np.ones((1, 2, 2), dtype=np.float32),
         transform=Affine(1, 0, 0, 0, -1, 2),
         crs="EPSG:4326",
     )
-    coarse = GeoTensor(
+    coarse = GeoArray(
         np.ones((1, 2, 2), dtype=np.float32),
         transform=Affine(2, 0, 2, 0, -2, 2),
         crs="EPSG:4326",
@@ -1300,7 +1312,7 @@ def test_stitch_rejects_mismatched_resolution() -> None:
 
 
 def test_stitch_rejects_south_up_tile() -> None:
-    south_up = GeoTensor(
+    south_up = GeoArray(
         np.ones((1, 2, 2), dtype=np.float32),
         transform=Affine(1, 0, 0, 0, 1, 0),
         crs="EPSG:4326",
@@ -1310,7 +1322,7 @@ def test_stitch_rejects_south_up_tile() -> None:
 
 
 def test_carrier_referencing_operators_flagged_forbid_in_yaml() -> None:
-    """Operators that hold concrete GeoTensor / GeoDataFrame references
+    """Operators that hold concrete GeoArray / GeoDataFrame references
     must declare ``forbid_in_yaml = True`` so future YAML dumpers refuse
     to round-trip them silently."""
     like = _gt()
@@ -1321,7 +1333,7 @@ def test_carrier_referencing_operators_flagged_forbid_in_yaml() -> None:
     assert gz.geom.Rasterize(geometries=[box(0, 0, 1, 1)]).forbid_in_yaml is True
     assert (
         gz.geom.Georeference(
-            glt=GeoTensor(
+            glt=GeoArray(
                 np.zeros((2, 3, 3), dtype=np.int32),
                 transform=Affine(1, 0, 0, 0, -1, 0),
                 crs="EPSG:4326",
@@ -1377,25 +1389,25 @@ def test_yaml_safe_operators_roundtrip_through_hydra_zen(operator) -> None:
 # ----------------------------------------------------------------------------
 
 
-def _registration_pair() -> tuple[GeoTensor, GeoTensor, int, int]:
+def _registration_pair() -> tuple[GeoArray, GeoArray, int, int]:
     """Build a reference scene and an integer-pixel-shifted moving scene."""
     rng = np.random.default_rng(0)
     base = rng.uniform(0.0, 1.0, size=(48, 48)).astype(np.float32)
     yy, xx = np.ogrid[:48, :48]
     base += np.exp(-((yy - 24) ** 2 + (xx - 24) ** 2) / 32.0).astype(np.float32)
-    reference = GeoTensor(
+    reference = GeoArray(
         base[None, ...],
         transform=Affine(1.0, 0.0, 100.0, 0.0, -1.0, 200.0),
         crs="EPSG:32629",
-        fill_value_default=0.0,
+        fill_value=0.0,
     )
     dy, dx = 3, -2
     moving_arr = np.roll(base, shift=(dy, dx), axis=(0, 1))
-    moving = GeoTensor(
+    moving = GeoArray(
         moving_arr[None, ...],
         transform=Affine(1.0, 0.0, 100.0, 0.0, -1.0, 200.0),
         crs="EPSG:32629",
-        fill_value_default=0.0,
+        fill_value=0.0,
     )
     return reference, moving, dy, dx
 
@@ -1414,24 +1426,24 @@ def test_phase_align_returns_shift_when_apply_false() -> None:
 
 def test_phase_align_apply_keeps_transform_and_preserves_metadata() -> None:
     reference, moving, _dy, _dx = _registration_pair()
-    moving.attrs = {"sensor": "test"}
+    moving = moving.replace(attrs=FrozenAttrs(sensor="test"))
     aligned = gz.geom.PhaseAlign(apply=True)(moving, reference)
-    assert isinstance(aligned, GeoTensor)
+    assert isinstance(aligned, GeoArray)
     assert aligned.shape == moving.shape
     assert str(aligned.crs) == str(moving.crs)
-    assert aligned.fill_value_default == moving.fill_value_default
+    assert aligned.fill_value == moving.fill_value
     assert aligned.attrs == moving.attrs
     # The array shift carries the alignment; the grid is unchanged (#118).
-    assert aligned.transform == moving.transform
+    assert affine_of(aligned) == affine_of(moving)
 
 
 def test_phase_align_world_coordinates_match_reference() -> None:
     reference, moving, _dy, _dx = _registration_pair()
     aligned = gz.geom.PhaseAlign(apply=True)(moving, reference)
 
-    def peak_world(gt: GeoTensor) -> tuple[float, float]:
+    def peak_world(gt: GeoArray) -> tuple[float, float]:
         row, col = np.unravel_index(np.argmax(np.asarray(gt)[0]), gt.shape[-2:])
-        return gt.transform * (col + 0.5, row + 0.5)
+        return affine_of(gt) * (col + 0.5, row + 0.5)
 
     ref_x, ref_y = peak_world(reference)
     mov_x, mov_y = peak_world(moving)
@@ -1459,11 +1471,11 @@ def test_phase_align_rejects_unsupported_ndim() -> None:
 
 def test_phase_align_rejects_mismatched_shapes() -> None:
     reference, moving, _dy, _dx = _registration_pair()
-    bigger = GeoTensor(
+    bigger = GeoArray(
         np.zeros((1, 64, 64), dtype=np.float32),
         transform=moving.transform,
         crs=moving.crs,
-        fill_value_default=0.0,
+        fill_value=0.0,
     )
     with pytest.raises(ValueError, match="PhaseAlign: the reference pixel grid"):
         gz.geom.PhaseAlign()(bigger, reference)
@@ -1483,11 +1495,11 @@ def test_optical_flow_declares_nan_fill(name: str) -> None:
     reference, moving, _dy, _dx = _registration_pair()
     values = np.asarray(moving).copy()
     values[:, 5, 7] = 0.0  # nodata in the moving scene (fill 0.0)
-    moving = GeoTensor(
-        values, transform=moving.transform, crs=moving.crs, fill_value_default=0.0
+    moving = GeoArray(
+        values, transform=moving.transform, crs=moving.crs, fill_value=0.0
     )
     flow = getattr(gz.geom, name)()(moving, reference)
-    assert np.isnan(flow.fill_value_default)
+    assert np.isnan(flow.fill_value)
     arr = np.asarray(flow)
     assert np.isnan(arr[:, 5, 7]).all()
     assert np.isfinite(arr[:, 20, 20]).all()
@@ -1528,7 +1540,7 @@ _PLAIN_REFERENCE = np.ascontiguousarray(_PLAIN_VALUES[:, ::-1, :])
     ],
 )
 def test_pixel_space_operators_accept_plain_ndarray(make_op) -> None:
-    """Plain array in -> plain array out, values equal to the GeoTensor path."""
+    """Plain array in -> plain array out, values equal to the GeoArray path."""
     op = make_op()
     # The registration operators take the reference as a second carrier.
     extra = (
@@ -1539,19 +1551,19 @@ def test_pixel_space_operators_accept_plain_ndarray(make_op) -> None:
     out_arr = op(_PLAIN_VALUES.copy(), *extra)
     out_gt = op(_gt(_PLAIN_VALUES.copy()), *extra)
     assert type(out_arr) is np.ndarray
-    assert isinstance(out_gt, GeoTensor)
+    assert isinstance(out_gt, GeoArray)
     # A plain array has no fill value, so its nodata (e.g. the edge a
-    # PhaseAlign shift uncovers) is NaN where the GeoTensor holds its fill.
+    # PhaseAlign shift uncovers) is NaN where the GeoArray holds its fill.
     got = np.asarray(out_gt, dtype=float).copy()
     plain_nodata = np.isnan(np.asarray(out_arr, dtype=float)) & ~np.isnan(got)
-    np.testing.assert_array_equal(got[plain_nodata], out_gt.fill_value_default)
+    np.testing.assert_array_equal(got[plain_nodata], out_gt.fill_value)
     got[plain_nodata] = np.nan
     np.testing.assert_allclose(out_arr, got)
 
 
 def test_tile_accepts_plain_ndarray_and_zero_pads_edges() -> None:
     values = np.arange(16, dtype=np.float32).reshape(1, 4, 4)
-    # Exact-fit tiling matches the GeoTensor path bit-for-bit.
+    # Exact-fit tiling matches the GeoArray path bit-for-bit.
     tiles_arr = gz.geom.Tile(size=(2, 2))(values.copy())
     tiles_gt = gz.geom.Tile(size=(2, 2))(_gt(values.copy()))
     assert len(tiles_arr) == len(tiles_gt) == 4
@@ -1574,9 +1586,9 @@ def test_phase_align_plain_ndarray_returns_shift_tuple_when_apply_false() -> Non
 def test_georeference_accepts_plain_swath_array() -> None:
     # The GLT supplies the output geometry; the swath input itself is
     # sensor-space, so a plain ndarray is a legitimate carrier. The
-    # output is always a georeferenced GeoTensor derived from the GLT.
+    # output is always a georeferenced GeoArray derived from the GLT.
     # Identity GLT: glt[0] holds source columns, glt[1] source rows.
-    glt = GeoTensor(
+    glt = GeoArray(
         np.stack(
             [
                 np.tile(np.arange(3, dtype=np.int32), (3, 1)),  # source cols
@@ -1585,11 +1597,11 @@ def test_georeference_accepts_plain_swath_array() -> None:
         ),
         transform=Affine(1, 0, 0, 0, -1, 3),
         crs="EPSG:4326",
-        fill_value_default=-1,
+        fill_value=-1,
     )
     swath = np.arange(9, dtype=np.float32).reshape(3, 3)
     out = gz.geom.Georeference(glt=glt)(swath)
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
     np.testing.assert_array_equal(np.asarray(out), swath)
 
 
@@ -1611,17 +1623,17 @@ def test_georeference_accepts_plain_swath_array() -> None:
     ],
 )
 def test_geo_dependent_operators_reject_plain_ndarray(make_op) -> None:
-    with pytest.raises(TypeError, match="GeoTensor"):
+    with pytest.raises(TypeError, match="GeoArray"):
         make_op()(np.zeros((1, 4, 4), dtype=np.float32))
 
 
 def test_geo_dependent_list_operators_reject_plain_ndarray() -> None:
     arr = np.ones((1, 4, 4), dtype=np.float32)
-    with pytest.raises(TypeError, match="GeoTensor"):
+    with pytest.raises(TypeError, match="GeoArray"):
         gz.geom.Stitch()([arr])
-    with pytest.raises(TypeError, match="GeoTensor"):
+    with pytest.raises(TypeError, match="GeoArray"):
         gz.geom.Mosaic()([arr, arr])
-    with pytest.raises(TypeError, match="GeoTensor"):
+    with pytest.raises(TypeError, match="GeoArray"):
         gz.geom.SegmentStitch()([arr])
 
 
@@ -1648,23 +1660,23 @@ def test_4d_time_stack() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _pixel_centres(gt: GeoTensor) -> dict[float, tuple[float, float]]:
+def _pixel_centres(gt: GeoArray) -> dict[float, tuple[float, float]]:
     """World coordinate of every valid pixel centre, keyed by its unique value."""
     rows, cols = np.mgrid[0 : gt.shape[-2], 0 : gt.shape[-1]]
-    xs, ys = gt.transform * (cols + 0.5, rows + 0.5)
+    xs, ys = affine_of(gt) * (cols + 0.5, rows + 0.5)
     values = np.asarray(gt)[0]
     return {
         float(v): (float(x), float(y))
         for v, x, y in zip(values.ravel(), xs.ravel(), ys.ravel(), strict=True)
-        if v != gt.fill_value_default
+        if v != gt.fill_value
     }
 
 
-def _numbered(grid: str) -> GeoTensor:
-    from _helpers import toy_geotensor
+def _numbered(grid: str) -> GeoArray:
+    from _helpers import toy_geoarray
 
     values = np.arange(8 * 8, dtype=np.float64).reshape(1, 8, 8) + 1.0
-    return toy_geotensor(values, grid=grid)
+    return toy_geoarray(values, grid=grid)
 
 
 @pytest.mark.parametrize("grid", ["non_square", "rotated", "sheared", "geographic"])
@@ -1689,7 +1701,7 @@ def test_tile_then_stitch_round_trips_on_north_up_grids(grid: str) -> None:
     gt = _numbered(grid)
     stitched = gz.geom.Stitch()(gz.geom.Tile(size=(3, 4))(gt))
     np.testing.assert_array_equal(np.asarray(stitched), np.asarray(gt))
-    assert stitched.transform == gt.transform
+    assert affine_of(stitched) == affine_of(gt)
     assert str(stitched.crs) == str(gt.crs)
 
 
@@ -1710,11 +1722,11 @@ def test_phase_align_ignores_and_carries_fill_pixels() -> None:
     reference, _moving, _dy, _dx = _registration_pair()
     values = np.asarray(reference).copy()
     values[0, :2, :2] = -9999.0
-    moving = GeoTensor(
+    moving = GeoArray(
         values,
         transform=reference.transform,
         crs=reference.crs,
-        fill_value_default=-9999.0,
+        fill_value=-9999.0,
     )
     shift = gz.geom.PhaseAlign(apply=False)(moving, reference)
     assert shift[:2] == (0.0, 0.0)
@@ -1729,7 +1741,7 @@ def test_phase_align_marks_the_uncovered_edge_as_nodata() -> None:
     edge = np.zeros(aligned.shape, dtype=bool)
     edge[-dy:, :] = True
     edge[:, :-dx] = True
-    assert np.all(aligned[edge] == moving.fill_value_default)
+    assert np.all(aligned[edge] == moving.fill_value)
     np.testing.assert_allclose(aligned[~edge], np.asarray(reference)[0][~edge])
 
 
@@ -1738,8 +1750,8 @@ def test_rasterize_declares_a_dtype_fill_and_carries_input_nodata() -> None:
     values[0, 2, 1] = -9999.0
     burned = gz.geom.Rasterize(geometries=[box(10, 15, 17, 20)])(_gt(values))
     assert np.asarray(burned).dtype == np.uint8
-    assert type(burned.fill_value_default) is int
-    assert burned.fill_value_default == 0
+    assert type(burned.fill_value) is int
+    assert burned.fill_value == 0
     expected = np.ones((5, 7), dtype=np.uint8)
     expected[2, 1] = 0
     np.testing.assert_array_equal(np.asarray(burned), expected)
@@ -1753,15 +1765,15 @@ def test_rasterize_like_carries_input_nodata_and_checks_its_grid() -> None:
     values[0, 0] = -9999.0
     burned = op(_gt(values))
     assert np.asarray(burned).dtype == np.uint8
-    assert burned.fill_value_default == 0
+    assert burned.fill_value == 0
     assert np.asarray(burned)[0, 0] == 0
     assert np.asarray(burned).sum() == 34
     assert np.asarray(op()).all()
-    shifted = GeoTensor(
+    shifted = GeoArray(
         values,
-        transform=like.transform * Affine.translation(1, 0),
+        transform=affine_of(like) * Affine.translation(1, 0),
         crs=like.crs,
-        fill_value_default=-9999,
+        fill_value=-9999,
     )
     with pytest.raises(ValueError, match="RasterizeLike: the input is not on"):
         op(shifted)

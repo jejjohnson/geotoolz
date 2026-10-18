@@ -2,7 +2,7 @@
 
 Each Operator wraps a Tier-A primitive in
 :mod:`geoops.normalize._src.array`. Operators accept either a
-``GeoTensor`` or a plain ``np.ndarray`` and return the same carrier
+``GeoArray`` or a plain ``np.ndarray`` and return the same carrier
 kind (rewrap via :func:`geoops._src.wrap.wrap_like`). The
 carrier-aware wrappers handle:
 
@@ -20,11 +20,11 @@ carrier-aware wrappers handle:
   time series. :class:`CLAHE` equalizes each frame's bands separately.
 
 Nodata: a pixel is invalid when any band is non-finite or equals the
-carrier's ``fill_value_default`` (see :mod:`geoops._src.valid`;
+carrier's ``fill_value`` (see :mod:`geoops._src.valid`;
 per frame for ``(T, C, H, W)``). Invalid pixels are excluded from every
 fitted statistic and hold ``NaN`` in every output. Normalized values
 live on a new scale where the input's fill value (``0`` especially) can be
-a real value, so outputs always declare ``fill_value_default=NaN``.
+a real value, so outputs always declare ``fill_value=NaN``.
 
 The display-prep min-max stretch with **scalar** bounds lives in
 :class:`geoops.radiometry.MinMaxStretch`; the per-scene robust percentile
@@ -43,6 +43,7 @@ from pipekit import Operator
 
 from geoops._src.config import jsonable
 from geoops._src.fitted import fit_once
+from geoops._src.geo import reject_geotensor
 from geoops._src.stretch import percentile_stretch
 from geoops._src.valid import (
     invalid_values,
@@ -67,7 +68,7 @@ from geoops.normalize._src.array import (
 
 
 if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
+    from geoarray import GeoArray
 
 
 def _valid_mask(x: Any) -> np.ndarray:
@@ -85,7 +86,7 @@ def _masked(x: Any) -> tuple[np.ndarray, np.ndarray]:
 
 def _rewrap(gt: Any, out: np.ndarray, valid: np.ndarray) -> Any:
     """Write ``NaN`` into invalid pixels and rewrap like ``gt`` with a NaN fill."""
-    return wrap_filled(gt, out, fill_value_default=np.nan, valid=valid)
+    return wrap_filled(gt, out, fill_value=np.nan, valid=valid)
 
 
 def _array_or_none(value: Any) -> np.ndarray | None:
@@ -120,7 +121,7 @@ class PerBandStats(Operator):
         self.percentiles = [1.0, 99.0] if percentiles is None else list(percentiles)
         self.stats: dict[str, Any] = {}
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr, _ = _masked(gt)
         stats = per_band_stats(
             arr, percentiles=self.percentiles, reduce_axes=stat_axes(arr)
@@ -137,7 +138,7 @@ class CLAHE(Operator):
 
     Wraps :func:`skimage.exposure.equalize_adapthist` and applies it
     independently per band for ``(C, H, W)`` carriers while preserving
-    NaN positions and GeoTensor metadata. Nodata (fill / non-finite)
+    NaN positions and GeoArray metadata. Nodata (fill / non-finite)
     pixels are excluded from the histograms and hold the output fill.
 
     Args:
@@ -170,7 +171,7 @@ class CLAHE(Operator):
         self.clip_limit = clip_limit
         self.nbins = nbins
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr, valid = _masked(gt)
         out = clahe(
             arr,
@@ -255,7 +256,7 @@ class StandardScaler(Operator):
         self.mean_: np.ndarray | None = None
         self.std_: np.ndarray | None = None
 
-    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+    def fit(self, gt: GeoArray | np.ndarray) -> Self:
         """Learn per-band ``mean_`` / ``std_`` from the valid pixels of ``gt``.
 
         Returns:
@@ -275,7 +276,7 @@ class StandardScaler(Operator):
             return self.mean, self.std
         raise ValueError("StandardScaler requires mean/std, fit(), or fit_on_call=True")
 
-    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def transform(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Z-score ``gt`` with the fitted (or constructor) statistics.
 
         Raises:
@@ -287,16 +288,16 @@ class StandardScaler(Operator):
         axis = stat_axes(arr)
         return _rewrap(gt, standard_scale(arr, mean, std, reduce_axes=axis), valid)
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         if self.fit_on_call:
             fit_once(self, gt, lambda: self.mean_ is not None)
         return self.transform(gt)
 
-    def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def inverse(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Invert a previously applied standard scaling.
 
         Args:
-            gt: Scaled carrier (GeoTensor or plain ndarray).
+            gt: Scaled carrier (GeoArray or plain ndarray).
 
         Returns:
             The un-scaled carrier, same kind as ``gt``; nodata pixels
@@ -368,7 +369,7 @@ class RobustScaler(Operator):
         self.median_: np.ndarray | None = None
         self.iqr_: np.ndarray | None = None
 
-    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+    def fit(self, gt: GeoArray | np.ndarray) -> Self:
         """Learn per-band ``median_`` / ``iqr_`` from the valid pixels of ``gt``.
 
         Returns:
@@ -387,19 +388,19 @@ class RobustScaler(Operator):
             return self.median, self.iqr
         raise ValueError("RobustScaler requires median/iqr, fit(), or fit_on_call=True")
 
-    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def transform(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Scale ``gt`` with the fitted (or constructor) median / IQR."""
         median, iqr = self._stats()
         arr, valid = _masked(gt)
         axis = stat_axes(arr)
         return _rewrap(gt, robust_scale(arr, median, iqr, reduce_axes=axis), valid)
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         if self.fit_on_call:
             fit_once(self, gt, lambda: self.median_ is not None)
         return self.transform(gt)
 
-    def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def inverse(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Invert a previously applied robust scaling (``x = y * iqr + median``)."""
         median, iqr = self._stats()
         arr, valid = _masked(gt)
@@ -478,7 +479,7 @@ class MinMaxScaler(Operator):
         self.vmin_: np.ndarray | None = None
         self.vmax_: np.ndarray | None = None
 
-    def fit(self, gt: GeoTensor | np.ndarray) -> Self:
+    def fit(self, gt: GeoArray | np.ndarray) -> Self:
         """Learn per-band ``vmin_`` / ``vmax_`` from the valid pixels of ``gt``.
 
         Returns:
@@ -498,7 +499,7 @@ class MinMaxScaler(Operator):
             return self.vmin, self.vmax
         raise ValueError("MinMaxScaler requires vmin/vmax, fit(), or fit_on_call=True")
 
-    def transform(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def transform(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Map ``gt`` from the fitted (or constructor) bounds into ``out_range``."""
         vmin, vmax = self._stats()
         arr, valid = _masked(gt)
@@ -506,12 +507,12 @@ class MinMaxScaler(Operator):
         out = minmax_scale(arr, vmin, vmax, out_range=self.out_range, reduce_axes=axis)
         return _rewrap(gt, out, valid)
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         if self.fit_on_call:
             fit_once(self, gt, lambda: self.vmin_ is not None)
         return self.transform(gt)
 
-    def inverse(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def inverse(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Map ``out_range`` values back to the ``[vmin, vmax]`` input scale."""
         vmin, vmax = self._stats()
         arr, valid = _masked(gt)
@@ -569,7 +570,7 @@ class HistogramStretch(Operator):
         self.lower = lower
         self.upper = upper
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr, valid = _masked(gt)
         clipped = percentile_stretch(
             arr, self.lower, self.upper, reduce_axes=stat_axes(arr)
@@ -586,7 +587,7 @@ class HistogramStretch(Operator):
 
 
 class HistogramMatch(Operator):
-    """Match a GeoTensor histogram to a reference GeoTensor.
+    """Match a GeoArray histogram to a reference GeoArray.
 
     Reshapes the per-band empirical CDF of the input to match the
     reference. Useful for visual harmonisation across scenes acquired
@@ -599,11 +600,11 @@ class HistogramMatch(Operator):
     relative brightness of the frames survives the matching; a 4-D
     reference likewise pools its frames per band.
 
-    The reference is a live GeoTensor — not JSON / YAML serialisable —
+    The reference is a live GeoArray — not JSON / YAML serialisable —
     so ``forbid_in_yaml = True``.
 
     Args:
-        reference: Reference GeoTensor whose per-band CDF the input
+        reference: Reference GeoArray whose per-band CDF the input
             will be matched against.
 
     Examples:
@@ -612,14 +613,15 @@ class HistogramMatch(Operator):
         >>> matched = op(source_scene)
     """
 
-    # Holds a live GeoTensor reference, which is not JSON/YAML
+    # Holds a live GeoArray reference, which is not JSON/YAML
     # serialisable.
     forbid_in_yaml: ClassVar[bool] = True
 
-    def __init__(self, *, reference: GeoTensor | np.ndarray) -> None:
+    def __init__(self, *, reference: GeoArray | np.ndarray) -> None:
         self.reference = reference
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        reject_geotensor(self.reference, "HistogramMatch (reference)")
         arr, valid = _masked(gt)
         reference, _ = _masked(self.reference)
         # The primitive matches along a leading band axis: put the band
@@ -673,7 +675,7 @@ class LogScale(Operator):
         self.base = base
         self.eps = eps
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr, valid = _masked(gt)
         return _rewrap(gt, log_scale(arr, base=self.base, eps=self.eps), valid)
 
@@ -702,7 +704,7 @@ class AsinhScale(Operator):
     def __init__(self, *, a: float = 1.0) -> None:
         self.a = a
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr, valid = _masked(gt)
         return _rewrap(gt, asinh_scale(arr, a=self.a), valid)
 
@@ -732,7 +734,7 @@ class PowerScale(Operator):
     def __init__(self, *, gamma: float = 0.5) -> None:
         self.gamma = gamma
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr, valid = _masked(gt)
         return _rewrap(gt, power_scale(arr, gamma=self.gamma), valid)
 
@@ -797,7 +799,7 @@ class ZeroOne(Operator):
     def __init__(self, *, per_band: bool = True) -> None:
         self.per_band = per_band
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr, valid = _masked(gt)
         axis = stat_axes(arr, per_band=self.per_band)
         out = minmax_scale(

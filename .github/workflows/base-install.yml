@@ -33,7 +33,8 @@ jobs:
           import pkgutil
 
           import numpy as np
-          from georeader.geotensor import GeoTensor
+          from geoarray import GeoArray
+          from geoarray.interop.georeader import to_georeader
           from rasterio.transform import from_origin
 
           import geoops as gz
@@ -49,12 +50,19 @@ jobs:
                   importlib.import_module(info.name)
 
           values = np.arange(32, dtype="float32").reshape(2, 4, 4) + 1.0
-          gt = GeoTensor(
-              values, transform=from_origin(0, 40, 10, 10), crs="EPSG:32629",
-              fill_value_default=-9999.0,
+          gt = GeoArray(
+              values, from_origin(0, 40, 10, 10), "EPSG:32629", fill_value=-9999.0,
           )
           out = gz.NormalizedDifference(a=1, b=0)(gt)
-          assert out.shape == (4, 4), out.shape
+          assert isinstance(out, GeoArray) and out.shape == (4, 4), out.shape
+
+          # A georeader GeoTensor is refused, naming the converter.
+          try:
+              gz.NormalizedDifference(a=1, b=0)(to_georeader(gt))
+          except TypeError as exc:
+              assert "from_georeader" in str(exc), exc
+          else:
+              raise AssertionError("a GeoTensor was accepted")
 
           # Extra-backed operators construct fine and fail only on use,
           # naming the extra to install.

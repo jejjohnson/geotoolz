@@ -1,13 +1,14 @@
-"""The `GeoTensor` carrier contract, as public helpers.
+"""The `GeoArray` carrier contract, as public helpers.
 
-Every geotoolz operator keeps the same carrier rules: a `GeoTensor` in
-comes back as a `GeoTensor` on the input's grid (a plain array as a plain
-array), with a fresh ``attrs``, per-band metadata that matches the output
-bands, and a ``fill_value_default`` that marks its nodata. These are the
+Every geotoolz operator keeps the same carrier rules: a `geoarray.GeoArray`
+in comes back as a `GeoArray` on the input's grid (a plain array as a
+plain array), with per-band metadata that matches the output bands and a
+``fill_value`` that marks its nodata; a georeader ``GeoTensor`` is refused,
+naming ``geoarray.interop.georeader.from_georeader``. These are the
 helpers the built-in operators use to keep them; an operator you write on
 top of the stack uses the same ones, so it composes with everything else.
 The rules themselves are in the repository's ``AGENTS.md`` ("The two
-contracts") and ``docs/concepts.md``.
+contracts") and ``docs/operators/concepts.md``.
 
 Rewrap:
     `wrap_like` puts a result back on the input's carrier (``transform=``
@@ -37,8 +38,11 @@ Samples:
     `sample_layout` / `SampleLayout` describe the round trip.
 
 Grids:
-    `require_geotensor`, `require_projected_crs`, `require_grid_match`,
-    `grid_matches`, and `pixel_xy` (map coordinates of pixel centres).
+    `require_geoarray`, `reject_geotensor` (a georeader ``GeoTensor``
+    carrier), `reject_georeader` (any georeader object, e.g. a raster an
+    operator holds in its constructor), `require_projected_crs`,
+    `require_grid_match`, `grid_matches`, `affine_of` (the transform as an
+    ``affine.Affine``) and `pixel_xy` (map coordinates of pixel centres).
 
 Dtypes and fitting:
     `as_float` (promote integer DNs before arithmetic) and `fit_once`
@@ -74,7 +78,7 @@ Example:
             def _apply(self, gt):  # (C, H, W) -> (C, H, W) float
                 values = mask_invalid_to_nan(gt)  # nodata -> NaN, whole pixel
                 out = (values - self.mean) / self.std
-                return wrap_like(gt, out, fill_value_default=np.nan)
+                return wrap_like(gt, out, fill_value=np.nan)
 
     Check it with `geoops.testing.check_operator`.
 """
@@ -100,9 +104,12 @@ from geoops._src.config import (
 from geoops._src.dtype import as_float
 from geoops._src.fitted import fit_once
 from geoops._src.geo import (
+    affine_of,
     grid_matches,
     pixel_xy,
-    require_geotensor,
+    reject_georeader,
+    reject_geotensor,
+    require_geoarray,
     require_grid_match,
     require_projected_crs,
 )
@@ -137,6 +144,7 @@ __all__ = [
     "SENTINEL2_L2A_BANDS",
     "BandRef",
     "SampleLayout",
+    "affine_of",
     "as_float",
     "as_tuple",
     "band_axis",
@@ -158,7 +166,9 @@ __all__ = [
     "over_frames",
     "pixel_xy",
     "reject_config_summary",
-    "require_geotensor",
+    "reject_georeader",
+    "reject_geotensor",
+    "require_geoarray",
     "require_grid_match",
     "require_ndim",
     "require_projected_crs",

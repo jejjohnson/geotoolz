@@ -7,21 +7,22 @@ import json
 import numpy as np
 import pytest
 import rasterio
-from _helpers import fill_pixel_mask, toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import fill_pixel_mask, toy_fill, toy_geoarray
+from geoarray import GeoArray
 from pipekit import Operator
 
 import geoops as gz
+from geoops._src.geo import affine_of
 
 
-def _gt(values: np.ndarray) -> GeoTensor:
+def _gt(values: np.ndarray) -> GeoArray:
     # NaN fill: the toy images hold real zeros, which a ``0`` fill would
-    # mark as nodata (the segmenters honour ``fill_value_default``).
-    return GeoTensor(
-        values=values,
+    # mark as nodata (the segmenters honour ``fill_value``).
+    return GeoArray(
+        data=values,
         transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 4.0),
         crs="EPSG:4326",
-        fill_value_default=np.nan,
+        fill_value=toy_fill(values, np.nan),
     )
 
 
@@ -34,7 +35,7 @@ def test_slic_returns_int_labels_and_masks_nan_pixels() -> None:
     labels = gz.segment.SLIC(n_segments=4, compactness=1.0)(gt)
 
     assert labels.shape == gt.shape[-2:]
-    assert labels.transform == gt.transform
+    assert labels.grid == gt.grid
     assert np.asarray(labels).dtype == np.int32
     assert np.asarray(labels)[0, 0] == 0
     assert np.asarray(labels)[0, 1] > 0
@@ -70,7 +71,7 @@ def test_watershed_connectivity_is_4_or_8(
         gz.segment.Watershed(connectivity=1)  # ty: ignore[invalid-argument-type]
 
 
-def _checker_gt(shape: tuple[int, int] = (8, 8)) -> GeoTensor:
+def _checker_gt(shape: tuple[int, int] = (8, 8)) -> GeoArray:
     h, w = shape
     values = np.zeros((1, h, w), dtype=float)
     half = w // 2
@@ -86,7 +87,7 @@ def test_felzenszwalb_metadata_and_nan_mask() -> None:
 
     out = gz.segment.Felzenszwalb(scale=1.0, min_area_px=1)(gt_nan)
 
-    assert out.transform == gt_nan.transform
+    assert out.grid == gt_nan.grid
     assert out.crs == gt_nan.crs
     assert np.asarray(out).dtype == np.int32
     # Non-finite pixel must round-trip to label 0.
@@ -102,7 +103,7 @@ def test_quickshift_runs_on_single_band_geotensor() -> None:
     out = gz.segment.Quickshift(kernel_size=2.0, max_dist=4.0, ratio=0.5)(gt)
 
     assert out.shape == gt.shape[-2:]
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert np.asarray(out).dtype == np.int32
 
 
@@ -166,7 +167,7 @@ def test_random_walker_round_trips_labels() -> None:
     op = gz.segment.RandomWalker(beta=10.0, mode="cg_j")
     out = op(gt, markers)
 
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert np.asarray(out).dtype == np.int32
     assert set(np.unique(np.asarray(out))) >= {1, 2}
     # The markers are a call-time carrier, so the operator round-trips (#141).
@@ -199,9 +200,9 @@ def test_mark_boundaries_preserves_grid_and_fill() -> None:
     out = op(gt, label_img)
 
     # The overlay keeps the input grid and its (NaN) fill via wrap_like.
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert out.crs == gt.crs
-    np.testing.assert_equal(out.fill_value_default, gt.fill_value_default)
+    np.testing.assert_equal(out.fill_value, gt.fill_value)
     assert np.asarray(out).shape[-2:] == gt.shape[-2:]
     # The label image is a call-time carrier, so the operator round-trips.
     assert gz.segment.MarkBoundaries.forbid_in_yaml is False
@@ -217,7 +218,7 @@ def test_mark_boundaries_single_band_input() -> None:
 
     out_arr = np.asarray(out)
     assert out_arr.shape == (3, 6, 6)
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     # Boundary pixels carry the requested colour; interior pixels keep
     # the grey value replicated across the three channels.
     np.testing.assert_allclose(out_arr[:, 0, 3], [1.0, 0.0, 0.0])
@@ -245,7 +246,7 @@ def test_slic_accepts_2d() -> None:
     assert labels[0, 0] != labels[0, -1]
 
 
-def _labels_gt(values: np.ndarray) -> GeoTensor:
+def _labels_gt(values: np.ndarray) -> GeoArray:
     return _gt(values.astype(np.int32, copy=False))
 
 
@@ -340,7 +341,7 @@ def test_merge_nearby_instances_preserves_carrier_metadata() -> None:
     out = gz.segment.MergeNearbyInstances(start_label=7)(gt)
     out_arr = np.asarray(out)
 
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert out.crs == gt.crs
     assert out_arr.dtype == np.int32
     assert set(np.unique(out_arr)) == {0, 7}
@@ -372,7 +373,7 @@ def test_merge_nearby_instances_get_config_round_trip() -> None:
     assert gz.segment.MergeNearbyInstances(**cfg).classes == {1: 0, 2: 1}
 
 
-def _mask_stack_gt(masks: np.ndarray) -> GeoTensor:
+def _mask_stack_gt(masks: np.ndarray) -> GeoArray:
     return _gt(masks.astype(bool, copy=False))
 
 
@@ -510,7 +511,7 @@ def test_plain_ndarray_in_plain_ndarray_out(
     op: gz.Operator, values: np.ndarray, extra: tuple[np.ndarray, ...]
 ) -> None:
     """Segment ops are metadata-independent: ndarray in -> ndarray out,
-    with values identical to the GeoTensor path."""
+    with values identical to the GeoArray path."""
     out_plain = op(values, *extra)
     out_geo = op(_gt(values), *extra)
 
@@ -534,16 +535,16 @@ def test_segment_mask_is_a_call_argument(cls: type) -> None:
     assert Operator.from_state(json.loads(json.dumps(op.state))).get_config() == (
         op.get_config()
     )
-    image = toy_geotensor(_step_cube())
+    image = toy_geoarray(_step_cube())
     mask = np.ones((8, 8), dtype=bool)
     mask[:, :2] = False
     labels = np.asarray(op(image, mask))
     assert (labels[:, :2] == 0).all()
     assert (labels[:, 2:] >= 1).all()
-    shifted = toy_geotensor(
+    shifted = toy_geoarray(
         mask,
-        transform=image.transform * rasterio.Affine.translation(1, 0),
-        fill_value_default=None,
+        transform=affine_of(image) * rasterio.Affine.translation(1, 0),
+        fill_value=None,
     )
     with pytest.raises(ValueError, match=cls.__name__):
         op(image, shifted)
@@ -575,13 +576,13 @@ def _row_markers() -> np.ndarray:
     ids=["slic", "felzenszwalb", "quickshift", "watershed", "chanvese", "rw"],
 )
 def test_fill_pixels_are_excluded(op: Operator, extra: tuple[np.ndarray, ...]) -> None:
-    """#145: a ``fill_value_default`` pixel is nodata, not a region.
+    """#145: a ``fill_value`` pixel is nodata, not a region.
 
     It gets the "no segment" label 0, and the labels match those obtained
     when the same pixels are NaN (the nodata path that already worked).
     """
     fill = fill_pixel_mask((8, 8))
-    gt = toy_geotensor(_fill_step_image(), with_fill_pixels=True)
+    gt = toy_geoarray(_fill_step_image(), with_fill_pixels=True)
     as_nan = _fill_step_image()
     as_nan[:, fill] = np.nan
 
@@ -589,7 +590,7 @@ def test_fill_pixels_are_excluded(op: Operator, extra: tuple[np.ndarray, ...]) -
 
     out = np.asarray(labels)
     assert out.dtype == np.int32
-    assert labels.fill_value_default == 0
+    assert labels.fill_value == 0
     assert (out[fill] == 0).all()
     np.testing.assert_array_equal(out, np.asarray(op(as_nan, *extra)))
     if not isinstance(op, gz.segment.ChanVese):  # ChanVese: 0 = "outside"
@@ -623,10 +624,10 @@ def test_threshold_otsu_splits_bimodal_map_and_keeps_carrier() -> None:
     gt = _gt(_bimodal())
     mask = gz.segment.Threshold()(gt)
     assert mask.shape == gt.shape
-    assert mask.transform == gt.transform
+    assert mask.grid == gt.grid
     assert np.asarray(mask).dtype == bool
     np.testing.assert_array_equal(np.asarray(mask), _bimodal() > 5.0)
-    assert mask.fill_value_default is False
+    assert mask.fill_value is False
 
 
 @pytest.mark.parametrize(
@@ -642,7 +643,7 @@ def test_threshold_absolute_and_percentile_modes(
 
 def test_threshold_nodata_is_false_and_excluded_from_statistic() -> None:
     values = _bimodal()
-    gt = toy_geotensor(values, with_fill_pixels=True)
+    gt = toy_geoarray(values, with_fill_pixels=True)
     invalid = fill_pixel_mask(gt.shape)
     mask = np.asarray(gz.segment.Threshold()(gt))
     assert not mask[..., invalid].any()

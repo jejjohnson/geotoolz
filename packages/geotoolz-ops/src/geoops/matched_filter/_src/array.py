@@ -3,7 +3,7 @@
 Tier-A layer of the matched-filter module: everything here is plain
 numpy (plus scipy for filtering and distributions) operating on spectral
 cubes shaped ``(c, h, w)`` (or ``(t, c, h, w)`` stacks) — the band axis
-defaults to ``-3``, georeader's band axis, and is movable via the
+defaults to ``-3``, the carrier's band axis, and is movable via the
 ``axis`` argument. The carrier-aware Operator wrappers live in
 :mod:`geoops.matched_filter._src.operators`.
 
@@ -42,7 +42,7 @@ vector-vector dot products (``tᵀv``) use ``@``.
 Nodata: a pixel whose spectrum has any non-finite band (``NaN`` /
 ``±inf``) is invalid. The estimators fit their statistics on valid
 pixels only, and the filters score invalid pixels as ``NaN``. The
-Operator wrappers map a carrier's ``fill_value_default`` to ``NaN``
+Operator wrappers map a carrier's ``fill_value`` to ``NaN``
 before calling in here.
 """
 

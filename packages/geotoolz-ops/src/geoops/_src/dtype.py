@@ -1,4 +1,4 @@
-"""Shared dtype-promotion primitive.
+"""Shared dtype primitives: float promotion and fills a dtype can hold.
 
 Raw sensor data usually arrives as integer digital numbers (``uint16``
 for Sentinel-2 / Landsat). Doing band arithmetic in that dtype is wrong
@@ -10,12 +10,15 @@ radiometry) apply before touching their input.
 
 from __future__ import annotations
 
+import math
+from typing import Any
+
 import numpy as np
 from jaxtyping import Float, Num, Shaped
 from numpy.typing import DTypeLike
 
 
-__all__ = ["as_float"]
+__all__ = ["as_float", "fill_for", "holds_fill"]
 
 
 def as_float(
@@ -42,3 +45,49 @@ def as_float(
     if np.issubdtype(arr.dtype, np.inexact):
         return arr
     return arr.astype(np.result_type(arr, min_dtype), copy=False)
+
+
+def holds_fill(dtype: DTypeLike, fill: Any) -> bool:
+    """Whether ``dtype`` data can hold the fill value ``fill`` exactly.
+
+    Mirrors the check `geoarray.GeoArray` makes at construction: float and
+    complex data hold any fill (``NaN`` included); boolean data holds
+    ``0`` / ``1``; integer data holds an integral fill within its range.
+    ``None`` (no fill) fits every dtype.
+
+    Example:
+        >>> holds_fill(np.uint8, -9999), holds_fill(np.float32, np.nan)
+        (False, True)
+    """
+    if fill is None:
+        return True
+    dtype = np.dtype(dtype)
+    if dtype.kind not in "biu":
+        return True
+    value = fill.item() if isinstance(fill, np.generic) else fill
+    if isinstance(value, float) and (math.isnan(value) or not value.is_integer()):
+        return False
+    if dtype.kind == "b":
+        return value in (0, 1)
+    info = np.iinfo(dtype.type)
+    return bool(info.min <= value <= info.max)
+
+
+def fill_for(dtype: DTypeLike, fill: Any) -> Any:
+    """``fill`` when ``dtype`` holds it, else the canonical fill for ``dtype``.
+
+    The canonical fills follow the output's meaning: ``False`` for a
+    boolean (mask) output, whatever the input's fill, and ``0`` for an
+    integer (label / count) output that cannot hold ``fill``. ``None``
+    (no fill) stays ``None``.
+
+    Example:
+        >>> fill_for(np.uint8, np.nan), fill_for(bool, -9999), fill_for(np.int32, -9)
+        (0, False, -9)
+    """
+    if fill is None:
+        return None
+    dtype = np.dtype(dtype)
+    if dtype.kind == "b":
+        return False
+    return fill if holds_fill(dtype, fill) else 0

@@ -1,6 +1,6 @@
 # `geoops.augment` — RS-safe augmentations
 
-Curated augmentation operators for training on remote-sensing `GeoTensor`
+Curated augmentation operators for training on remote-sensing `GeoArray`
 patches. Spatial operators preserve CRS and either preserve the existing
 transform or update it consistently; radiometric operators treat bands as
 physical measurements instead of generic RGB channels.

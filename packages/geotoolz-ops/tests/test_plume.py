@@ -8,8 +8,8 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 import rasterio
-from _helpers import fill_pixel_mask, toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import fill_pixel_mask, toy_fill, toy_geoarray
+from geoarray import GeoArray
 from pipekit import Operator
 
 import geoops as gz
@@ -17,14 +17,14 @@ from geoops.plume import convert_column_units
 from geoops.segment import resolve_threshold
 
 
-def _gt(values: np.ndarray) -> GeoTensor:
-    # Explicit -9999 fill: GeoTensor's default fill of 0 would mark the
-    # zero-valued backgrounds used throughout these tests as nodata.
-    return GeoTensor(
-        values=values,
+def _gt(values: np.ndarray) -> GeoArray:
+    # Explicit -9999 fill: a fill of 0 would mark the zero-valued
+    # backgrounds used throughout these tests as nodata.
+    return GeoArray(
+        data=values,
         transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 100.0),
         crs="EPSG:32629",
-        fill_value_default=-9999,
+        fill_value=toy_fill(values),
     )
 
 
@@ -40,7 +40,7 @@ def test_plume_mask_otsu_matches_resolved_threshold() -> None:
     out = gz.plume.PlumeMask(threshold="otsu", min_area_px=1)(gt)
 
     assert np.array_equal(np.asarray(out), values > resolve_threshold(values, "otsu"))
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert str(out.crs) == "EPSG:32629"
 
 
@@ -140,7 +140,7 @@ def test_wind_advection_cone_follows_wind_orientation() -> None:
     transform = rasterio.Affine.translation(-5.5, 5.5) * rasterio.Affine.scale(
         1.0, -1.0
     )
-    gt = GeoTensor(values=np.zeros((11, 11)), transform=transform, crs="EPSG:32629")
+    gt = GeoArray(data=np.zeros((11, 11)), transform=transform, crs="EPSG:32629")
 
     east = gz.plume.WindAdvectionCone(
         source=(0.0, 0.0),
@@ -404,7 +404,7 @@ def test_skeleton_plume_length_is_deterministic_for_multi_component_mask() -> No
 _GEO_OPS = ("PlumeFootprint", "IMEEstimate", "WindAdvectionCone", "CrossSectionalFlux")
 
 
-def _geo_case(name: str, make: Callable[[np.ndarray], GeoTensor]) -> tuple:
+def _geo_case(name: str, make: Callable[[np.ndarray], GeoArray]) -> tuple:
     """Build ``(operator, inputs)`` for a metre-assuming plume operator."""
     mask_arr = np.zeros((10, 15), dtype=bool)
     mask_arr[4:6, :] = True
@@ -430,9 +430,9 @@ def _geo_case(name: str, make: Callable[[np.ndarray], GeoTensor]) -> tuple:
 )
 @pytest.mark.parametrize("name", _GEO_OPS)
 def test_geo_ops_reject_geographic_crs(crs: str, match: str, name: str) -> None:
-    def make(values: np.ndarray) -> GeoTensor:
-        return GeoTensor(
-            values=values,
+    def make(values: np.ndarray) -> GeoArray:
+        return GeoArray(
+            data=values,
             transform=rasterio.Affine(1e-4, 0.0, 0.0, 0.0, -1e-4, 0.001),
             crs=crs,
         )
@@ -449,8 +449,8 @@ def test_geo_ops_accept_projected_crs(name: str) -> None:
 
 
 def test_wind_cone_source_crs_requires_carrier_crs() -> None:
-    gt = GeoTensor(
-        values=np.zeros((5, 5)),
+    gt = GeoArray(
+        data=np.zeros((5, 5)),
         transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 50.0),
         crs=None,
     )
@@ -518,7 +518,7 @@ def test_column_to_mass_operator_preserves_metadata() -> None:
     out = gz.plume.ColumnToMass(gas="CO2", units_in="mol_m2")(gt)
 
     assert np.allclose(np.asarray(out), np.array([[0.04401, 0.08802]]))
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert str(out.crs) == "EPSG:32629"
 
 
@@ -547,7 +547,7 @@ def test_sbmp_default_sentinel2_swir_band_names_on_plain_l2a_array() -> None:
 
 
 def test_sbmp_resolves_band_names_from_carrier_attrs() -> None:
-    """A GeoTensor names its own bands: a 13-band L1C stack picks real B11."""
+    """A GeoArray names its own bands: a 13-band L1C stack picks real B11."""
     from geoops._src.bands import SENTINEL2_L2A_BANDS
 
     l1c = [*SENTINEL2_L2A_BANDS[:10], "B10", *SENTINEL2_L2A_BANDS[10:]]
@@ -555,10 +555,8 @@ def test_sbmp_resolves_band_names_from_carrier_attrs() -> None:
     reference = np.ones((13, 5, 5), dtype=float)
     scene = reference.copy()
     scene[l1c.index("B11")] = np.exp(truth)
-    ref_gt = _gt(reference)
-    ref_gt.attrs["band_names"] = l1c
-    scene_gt = _gt(scene)
-    scene_gt.attrs["band_names"] = l1c
+    ref_gt = _gt(reference).with_attrs(band_names=l1c)
+    scene_gt = _gt(scene).with_attrs(band_names=l1c)
 
     out = gz.plume.SBMP()(scene_gt, ref_gt)
 
@@ -566,7 +564,7 @@ def test_sbmp_resolves_band_names_from_carrier_attrs() -> None:
 
 
 def test_sbmp_named_bands_need_names_outside_plain_l2a_arrays() -> None:
-    # An unnamed GeoTensor never falls back to the S2 table ...
+    # An unnamed GeoArray never falls back to the S2 table ...
     with pytest.raises(ValueError, match="'B11'"):
         gz.plume.SBMP()(_gt(np.ones((12, 2, 2))))
     # ... nor does a plain array that is not 12-band (e.g. L1C).
@@ -685,7 +683,7 @@ def test_column_unit_round_trip_through_mol_m2() -> None:
 
 
 def test_plume_operators_get_config_is_json_safe() -> None:
-    """get_config dicts must be JSON-serialisable (no GeoTensors)."""
+    """get_config dicts must be JSON-serialisable (no GeoArrays)."""
     ops = [
         gz.plume.PlumeMask(threshold="otsu", min_area_px=10),
         gz.plume.PlumeContours(min_area_px=5),
@@ -910,7 +908,7 @@ def _ndarray_case_shape_filter() -> tuple[object, np.ndarray]:
 def test_plain_ndarray_in_plain_ndarray_out(
     case: Callable[[], tuple[object, np.ndarray]],
 ) -> None:
-    """Per-pixel plume ops: ndarray in -> ndarray out, values match GeoTensor."""
+    """Per-pixel plume ops: ndarray in -> ndarray out, values match GeoArray."""
     op, values = case()
 
     out_arr = op(values)
@@ -934,7 +932,7 @@ def test_geo_dependent_plume_ops_reject_plain_arrays() -> None:
         ),
     ]
     for op, extra in cases:
-        with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+        with pytest.raises(TypeError, match="georeferenced GeoArray"):
             op(arr, *extra)
 
 
@@ -983,13 +981,13 @@ def test_fill_pixels_are_excluded(case: str) -> None:
     valid = ~fill
     if case == "contours_fill":
         # -9999 is truthy: it used to be labelled as plume.
-        gt = toy_geotensor(np.ones(shape), with_fill_pixels=True)
+        gt = toy_geoarray(np.ones(shape), with_fill_pixels=True)
         labels = np.asarray(gz.plume.PlumeContours(min_area_px=1)(gt))
         assert (labels[fill] == -9999).all()
         assert (labels[valid] == 1).all()
         mask = gz.plume.PlumeContours(min_area_px=1, return_labels=False)(gt)
         np.testing.assert_array_equal(np.asarray(mask), valid)
-        assert mask.fill_value_default is False
+        assert mask.fill_value is False
     elif case == "contours_nan":
         # Issue reproduction: NaN scores used to be treated as plume.
         score = np.zeros(shape)
@@ -999,20 +997,21 @@ def test_fill_pixels_are_excluded(case: str) -> None:
         mask = gz.plume.PlumeContours(min_area_px=1, return_labels=False)(score)
         assert not mask.any()
     elif case == "contours_nan_fill":
-        gt = toy_geotensor(np.ones(shape), fill_value_default=np.nan)
-        gt.values[fill] = np.nan
+        values = np.ones(shape)
+        values[fill] = np.nan
+        gt = toy_geoarray(values, fill_value=np.nan)
         out = gz.plume.PlumeContours(min_area_px=1)(gt)
         labels = np.asarray(out)
         # NaN cannot live in int32 labels: fill pixels are background (0).
         assert (labels[fill] == 0).all()
         assert (labels[valid] == 1).all()
-        assert out.fill_value_default == 0
+        assert out.fill_value == 0
     elif case == "mask_percentile":
         values = np.arange(25, dtype=float).reshape(shape)
-        gt = toy_geotensor(values, with_fill_pixels=True)
+        gt = toy_geoarray(values, with_fill_pixels=True)
         result = gz.plume.PlumeMask(threshold="percentile:50", min_area_px=1)(gt)
         # A boolean mask declares False, not the score's -9999 (#146).
-        assert result.fill_value_default is False
+        assert result.fill_value is False
         out = np.asarray(result)
         cutoff = np.percentile(values[valid], 50)
         np.testing.assert_array_equal(out, (values > cutoff) & valid)
@@ -1021,8 +1020,8 @@ def test_fill_pixels_are_excluded(case: str) -> None:
         expected = (values > resolve_threshold(values[valid], "otsu")) & valid
         np.testing.assert_array_equal(otsu, expected)
     elif case == "ime":
-        enhancement = toy_geotensor(np.ones(shape), with_fill_pixels=True)
-        plume = toy_geotensor(np.ones(shape, dtype=bool))
+        enhancement = toy_geoarray(np.ones(shape), with_fill_pixels=True)
+        plume = toy_geoarray(np.ones(shape, dtype=bool))
         result = gz.plume.IMEEstimate(wind_speed=1.0, return_uncertainty=False)(
             enhancement, plume
         )
@@ -1030,10 +1029,10 @@ def test_fill_pixels_are_excluded(case: str) -> None:
     elif case == "column_to_mass":
         # Issue reproduction (#146): the fill pixel used to be scaled to
         # -6.6e-3 kg/m^2 while the output still declared -9999.
-        gt = toy_geotensor(np.full(shape, 1000.0), with_fill_pixels=True)
+        gt = toy_geoarray(np.full(shape, 1000.0), with_fill_pixels=True)
         result = gz.plume.ColumnToMass(units_in="ppm_m")(gt)
         out = np.asarray(result)
-        assert np.isnan(result.fill_value_default)
+        assert np.isnan(result.fill_value)
         assert np.isnan(out[fill]).all()
         assert (out[valid] > 0).all()
 
@@ -1075,9 +1074,9 @@ def test_ime_mass_scales_with_the_true_pixel_area(grid: str, area_ratio: float) 
     column = np.full((1, 8, 8), 0.5)
 
     def ime(g: str) -> float:
-        plume = toy_geotensor(mask, grid=g, fill_value_default=None)
+        plume = toy_geoarray(mask, grid=g, fill_value=None)
         op = gz.plume.IMEEstimate(wind_speed=1.0)
-        return op(toy_geotensor(column, grid=g), plume)["ime_kg"]
+        return op(toy_geoarray(column, grid=g), plume)["ime_kg"]
 
     assert ime(grid) == pytest.approx(area_ratio * ime("utm"))
 
@@ -1097,11 +1096,11 @@ def test_ime_rejects_a_plume_mask_on_another_grid() -> None:
     mask = np.zeros((8, 8), dtype=bool)
     mask[2:6, 2:6] = True
     mask_10m = _gt(mask)
-    enh_20m = GeoTensor(
-        values=np.ones((8, 8)),
+    enh_20m = GeoArray(
+        data=np.ones((8, 8)),
         transform=rasterio.Affine(20.0, 0.0, 0.0, 0.0, -20.0, 100.0),
         crs="EPSG:32629",
-        fill_value_default=-9999,
+        fill_value=-9999,
     )
     op = gz.plume.IMEEstimate(wind_speed=1.0)
     with pytest.raises(ValueError, match=r"IMEEstimate: the plume_mask pixel grid"):

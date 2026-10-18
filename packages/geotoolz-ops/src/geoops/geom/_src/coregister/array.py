@@ -2,7 +2,7 @@
 
 The two-tier discipline (``_src/array.py`` pure numpy / scipy; the
 sibling ``_src/operators.py`` carrier-aware) mirrors the rest of
-geotoolz. Operators wrap these primitives and add GeoTensor /
+geotoolz. Operators wrap these primitives and add GeoArray /
 GeoDataFrame / xvec metadata handling.
 """
 
@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING, Any, Literal
 import einx
 import numpy as np
 import rasterio.windows
+from geoarray import GeoArray
 from georeader import read
-from georeader.geotensor import GeoTensor
 
+from geoops._src.engine import to_engine
+from geoops._src.geo import affine_of
 from geoops._src.optional import import_optional
 from geoops._src.shape import require_ndim
 from geoops.geom._src.array import resolve_resampling
@@ -35,8 +37,10 @@ def _require_axis_aligned(transform: Any, op_name: str) -> None:
     and ``e/f`` affine terms. For non-axis-aligned grids (``b != 0`` or
     ``d != 0``) that's silently wrong — the world coordinates would
     drop the rotation/shear contribution. Fail loudly upfront
-    rather than emit misregistered output.
+    rather than emit misregistered output. ``transform`` is an ``Affine``,
+    six numbers or a ``(6,)`` array.
     """
+    transform = affine_of(transform)
     if transform.b != 0.0 or transform.d != 0.0:
         raise ValueError(
             f"{op_name} requires an axis-aligned affine "
@@ -57,6 +61,7 @@ def _pixel_center_coords(
     Requires an axis-aligned affine (no rotation/shear) — call
     ``_require_axis_aligned`` first.
     """
+    transform = affine_of(transform)
     h, w = shape[-2], shape[-1]
     x = transform.c + transform.a * (np.arange(w) + 0.5)
     y = transform.f + transform.e * (np.arange(h) + 0.5)
@@ -138,15 +143,13 @@ def reproject_like(
     values = np.asarray(src_values)
     if fill_value is None:
         fill_value = np.nan if np.issubdtype(values.dtype, np.floating) else 0
-    src = GeoTensor(
-        values, transform=src_transform, crs=src_crs, fill_value_default=fill_value
-    )
+    src = GeoArray(values, src_transform, src_crs, fill_value=fill_value)
     height, width = dst_shape
     return np.asarray(
         read.read_reproject(
-            src,
+            to_engine(src),
             dst_crs=dst_crs,
-            dst_transform=dst_transform,
+            dst_transform=affine_of(dst_transform),
             window_out=rasterio.windows.Window(
                 col_off=0, row_off=0, width=width, height=height
             ),
@@ -191,6 +194,7 @@ def points_to_raster_binned(
     from scipy.stats import binned_statistic_2d
 
     _require_axis_aligned(dst_transform, "points_to_raster_binned")
+    dst_transform = affine_of(dst_transform)
     xy = np.asarray(points_xy, dtype=np.float64)
     h, w = dst_shape
     # The affine maps pixel (col, row) corners → CRS coords; an H x W

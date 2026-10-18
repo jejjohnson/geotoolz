@@ -1,10 +1,10 @@
 """Shared test factories for the geotoolz suite.
 
-Every test module used to carry its own copy of a toy-GeoTensor
-factory (``_gt`` / ``_toy_geotensor``); this is the single shared
+Every test module used to carry its own copy of a toy-GeoArray
+factory (``_gt`` / ``_toy_geoarray``); this is the single shared
 implementation. Import it as::
 
-    from _helpers import toy_geotensor
+    from _helpers import toy_geoarray
 
 (pytest puts ``tests/`` on ``sys.path`` via rootdir conftest discovery).
 """
@@ -15,9 +15,10 @@ from typing import Any
 
 import numpy as np
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geoops._src.contract import frames  # noqa: F401 - re-exported for the tests
+from geoops._src.dtype import holds_fill
 
 
 #: 10 m UTM grid anchored in zone 29N — arbitrary but stable, so tests
@@ -37,6 +38,19 @@ DEFAULT_CRS = "EPSG:32629"
 #:   ``a`` / ``e``: catches code that ignores ``b`` / ``d``.
 #: * ``"geographic"`` -- an EPSG:4326 grid of 1e-4 degree pixels: metric
 #:   computations (areas, slopes, distances) must reject or convert it.
+#: The toy fill: ``-9999`` where the dtype holds it, else no fill. A
+#: GeoArray refuses a fill its data cannot hold; before it did, ``-9999``
+#: on ``bool`` / ``uint`` data matched no pixel, which ``None`` keeps.
+DEFAULT_FILL = -9999
+
+_DEFAULT: Any = object()
+
+
+def toy_fill(values: Any, fill: Any = DEFAULT_FILL) -> Any:
+    """``fill`` if ``values``' dtype holds it, else ``None`` (no fill)."""
+    return fill if holds_fill(np.asarray(values).dtype, fill) else None
+
+
 TOY_GRIDS: dict[str, tuple[rasterio.Affine, str]] = {
     "utm": (DEFAULT_TRANSFORM, DEFAULT_CRS),
     "non_square": (
@@ -60,51 +74,54 @@ TOY_GRIDS: dict[str, tuple[rasterio.Affine, str]] = {
 }
 
 
-def toy_geotensor(
+def toy_geoarray(
     values: np.ndarray,
     *,
     transform: rasterio.Affine | None = None,
     crs: Any = None,
-    fill_value_default: Any = -9999,
+    fill_value: Any = _DEFAULT,
     attrs: dict[str, Any] | None = None,
     with_fill_pixels: bool = False,
     grid: str = "utm",
-) -> GeoTensor:
-    """Wrap an array in a GeoTensor with stable toy georeferencing.
+) -> GeoArray:
+    """Wrap an array in a GeoArray with stable toy georeferencing.
 
     Args:
         values: The pixel array, 2-D ``(H, W)`` up to 4-D ``(T, C, H, W)``.
         transform: Affine geotransform; defaults to the ``grid``'s.
         crs: Coordinate reference system; defaults to the ``grid``'s.
-        fill_value_default: Fill value stored on the carrier.
+        fill_value: Fill value stored on the carrier; default `toy_fill`
+            (``-9999``, or no fill when the dtype cannot hold it).
         attrs: Optional metadata dict.
-        with_fill_pixels: Write ``fill_value_default`` into every band of
+        with_fill_pixels: Write ``fill_value`` into every band of
             the pixels marked by :func:`fill_pixel_mask` (the first and
             last pixel of the grid). ``values`` is copied first.
         grid: A :data:`TOY_GRIDS` name supplying the default transform
             and CRS. Default ``"utm"`` (10 m, EPSG:32629).
 
     Returns:
-        A ``GeoTensor`` viewing ``values`` (a copy when
+        A ``GeoArray`` viewing ``values`` (a copy when
         ``with_fill_pixels`` is set).
     """
     grid_transform, grid_crs = TOY_GRIDS[grid]
+    if fill_value is _DEFAULT:
+        fill_value = toy_fill(values)
     if with_fill_pixels:
-        if fill_value_default is None:
-            raise ValueError("with_fill_pixels needs a fill_value_default")
+        if fill_value is None:
+            raise ValueError("with_fill_pixels needs a fill_value")
         values = np.array(values, copy=True)
-        values[..., fill_pixel_mask(values.shape)] = fill_value_default
-    return GeoTensor(
+        values[..., fill_pixel_mask(values.shape)] = fill_value
+    return GeoArray(
         values,
-        transform=grid_transform if transform is None else transform,
-        crs=grid_crs if crs is None else crs,
-        fill_value_default=fill_value_default,
+        grid_transform if transform is None else transform,
+        grid_crs if crs is None else crs,
+        fill_value=fill_value,
         attrs=attrs,
     )
 
 
 def fill_pixel_mask(shape: tuple[int, ...]) -> np.ndarray:
-    """``(H, W)`` mask of the pixels ``toy_geotensor(with_fill_pixels=True)`` fills.
+    """``(H, W)`` mask of the pixels ``toy_geoarray(with_fill_pixels=True)`` fills.
 
     The first and the last pixel of the grid -- the ``[0, 0]`` and
     ``[-1, -1]`` corners -- so tests can check both edges.
@@ -131,11 +148,11 @@ def time_stack(
     shape: tuple[int, int, int, int] = TIME_STACK_SHAPE,
     *,
     seed: int = 0,
-    fill_value_default: Any = -9999,
+    fill_value: Any = _DEFAULT,
     attrs: dict[str, Any] | None = None,
     with_fill_pixels: bool = False,
-) -> GeoTensor:
-    """A ``(T, C, H, W)`` GeoTensor time stack (dims ``time, band, y, x``).
+) -> GeoArray:
+    """A ``(T, C, H, W)`` GeoArray time stack (dims ``time, band, y, x``).
 
     Values are in ``[0.01, 1)`` and differ between frames and bands. The
     default ``attrs`` carry one ``band_names`` / ``wavelengths`` entry per
@@ -144,14 +161,14 @@ def time_stack(
     Args:
         shape: ``(T, C, H, W)``. Default :data:`TIME_STACK_SHAPE`.
         seed: RNG seed. Default ``0``.
-        fill_value_default: Fill value stored on the carrier.
+        fill_value: Fill value stored on the carrier.
         attrs: Metadata; defaults to per-band ``band_names`` and
             ``wavelengths`` (nm).
         with_fill_pixels: Write the fill into every band and frame of the
             pixels marked by :func:`fill_pixel_mask`.
 
     Returns:
-        A float64 ``GeoTensor`` of the given shape.
+        A float64 ``GeoArray`` of the given shape.
     """
     n_bands = shape[1]
     if attrs is None:
@@ -160,9 +177,9 @@ def time_stack(
             "wavelengths": [490.0 + 100.0 * i for i in range(n_bands)],
         }
     values = np.random.default_rng(seed).uniform(0.01, 1.0, shape)
-    return toy_geotensor(
+    return toy_geoarray(
         values,
-        fill_value_default=fill_value_default,
+        fill_value=fill_value,
         attrs=attrs,
         with_fill_pixels=with_fill_pixels,
     )

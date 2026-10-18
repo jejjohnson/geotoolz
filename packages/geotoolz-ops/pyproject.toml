@@ -1,7 +1,7 @@
 [project]
 name = "geotoolz-ops"
 version = "0.11.0"
-description = "Composable Operator library for remote sensing on top of georeader.GeoTensor."
+description = "Composable Operator library for remote sensing on geoarray.GeoArray."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]
@@ -22,9 +22,13 @@ classifiers = [
     "Development Status :: 2 - Pre-Alpha",
 ]
 dependencies = [
-    # GeoTensor and the GeoData / AsyncGeoData protocols. Pinning to >=2.1
-    # so the v2.0 numpy-subclass GeoTensor (with __array_ufunc__) is
-    # available — that's the substrate the two-tier model depends on.
+    # The carrier every operator takes and returns (`geoarray.GeoArray`);
+    # `[georeader]` for the engine boundary (`geoops._src.engine`).
+    "geotoolz-array[georeader]>=0.1",
+    # georeader is the engine behind a few operators (reprojection,
+    # mosaics, rasterize / vectorize, windowed reads, solar geometry),
+    # called only through `geoops._src.engine`; operators never take or
+    # return its GeoTensor.
     "georeader-spaceml>=2.1",
     "numpy>=1.26",
     # Shape/dtype annotations on the Tier-A numpy primitives (the
@@ -86,7 +90,7 @@ viz = ["matplotlib>=3.10.8"]
 # usually brings scikit-learn itself.
 learn = ["scikit-learn>=1.4", "joblib>=1.3"]
 # Optional `hydra-zen` integration for declarative pipeline construction
-# (`docs/concepts.md`). The core composition layer round-trips its own
+# (`docs/operators/concepts.md`). The core composition layer round-trips its own
 # get_config() / __repr__ without hydra — this extra is only needed if
 # you want `builds()` / `instantiate()` from YAML.
 hydra = ["hydra-zen>=0.14"]

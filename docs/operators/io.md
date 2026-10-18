@@ -1,7 +1,7 @@
 # Read HDF and NetCDF files
 
 Read one dataset or variable from an HDF5, HDF4 / HDF-EOS or NetCDF-CF
-file as a `GeoTensor`, ready for any operator. `gz.io.ReadHDF` and
+file as a `GeoArray`, ready for any operator. `gz.io.ReadHDF` and
 `gz.io.ReadNetCDF` are source operators: build them with a path or any URI
 geotoolz-cloud reads (`s3://`, `gs://`, `az://`, signed `https://`), then
 call them with no input. They wrap [`geocloud.hdf`](../cloud/how-to/hdf.md):
@@ -27,7 +27,7 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geoops as gz
 
@@ -42,7 +42,7 @@ with h5py.File(path, "w") as f:
     f["lat"], f["lon"] = lat, lon
 
 reader: gz.ReadHDF = gz.io.ReadHDF(path=path, dataset="radiance", indexes=[1, 3], geolocation=("lat", "lon"))
-bands: GeoTensor = reader()                                       # (2, 20, 30) float32 · bands 1 and 3
+bands: GeoArray = reader()                                       # (2, 20, 30) float32 · bands 1 and 3
 ```
 
 HDF5 files go through `h5py`. HDF4 / HDF-EOS files are recognised by
@@ -62,7 +62,7 @@ from pathlib import Path
 
 import netCDF4
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from pyproj import CRS
 
 import geoops as gz
@@ -81,8 +81,8 @@ with netCDF4.Dataset(path, "w") as ds:
     ch4[:] = np.random.default_rng(0).uniform(1850, 1950, (20, 30))  # (20, 30) float64 → packed int16
 
 reader: gz.ReadNetCDF = gz.io.ReadNetCDF(path=path, variable="ch4", group="PRODUCT")
-methane: GeoTensor = reader()                                     # (20, 30) float64 · ppb · NaN = fill
-assert methane.crs is not None and methane.transform.a == 10
+methane: GeoArray = reader()                                     # (20, 30) float64 · ppb · NaN = fill
+assert methane.crs is not None and methane.res[0] == 10
 ```
 
 Pass `decode_cf=False` to get the raw packed integers, and

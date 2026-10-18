@@ -34,9 +34,9 @@ Remote-sensing code tends to grow into long functions that mix band
 indexing, nodata handling, rescaling and georeferencing, so nothing can
 be reused or tested on its own. `geotoolz` cuts each step into an
 **Operator** — a typed callable with a keyword-only constructor — that
-takes a georeader `GeoTensor` (or a plain `ndarray`) and returns the same
-kind of carrier with its CRS, transform, band names and fill value
-intact. Chain operators with `|` into a `Sequential`, or wire them into a
+takes a [`geoarray.GeoArray`](../geotoolz-array/README.md) (or a plain
+`ndarray`) and returns the same kind of carrier with its CRS, transform,
+band names and fill value intact. Chain operators with `|` into a `Sequential`, or wire them into a
 named `Graph` when the pipeline branches. Both are operators themselves,
 so pipelines nest; and `get_config()` round-trips every pipeline to YAML.
 About 275 operators ship across `radiometry`, `indices`, `qa`,
@@ -50,7 +50,10 @@ About 275 operators ship across `radiometry`, `indices`, `qa`,
   branches and fan-in. Both are themselves `Operator`s, so they nest.
 - **Carrier-preserving.** Outputs keep the input's CRS, transform,
   attrs and a fill value that matches the output; plain arrays in give
-  plain arrays out, so tests run on small ndarrays.
+  plain arrays out, so tests run on small ndarrays. A georeader
+  `GeoTensor` is refused with a `TypeError` naming
+  `geoarray.interop.georeader.from_georeader`, which converts it
+  without a copy.
 - **Round-trips to YAML.** `get_config()` is derived from the
   constructor, so pipelines serialise for Hydra-zen, audit, and
   reproducibility.
@@ -72,9 +75,9 @@ referenced by name, so the pipeline does not care about band order.
 
 ```python
 import geoops as gz
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
-scene: GeoTensor = ...   # (13, H, W) uint16 — band_names = B1 … B12 (no B10), SCL
+scene: GeoArray = ...   # (13, H, W) uint16 — band_names = B1 … B12 (no B10), SCL
 
 L2A: list[str] = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B11", "B12"]
 
@@ -84,7 +87,7 @@ ndvi_pipeline: gz.Sequential = (
     | gz.DNToReflectance(scale=1e-4)          # (12, H, W) uint16 → (12, H, W) float64
     | gz.NDVI(nir="B8", red="B4")             # (12, H, W)        → (H, W) float64
 )
-ndvi: GeoTensor = ndvi_pipeline(scene)        # (H, W) float64 · NaN fill · scene's CRS and transform
+ndvi: GeoArray = ndvi_pipeline(scene)         # (H, W) float64 · NaN fill · scene's CRS and transform
 ```
 
 The same steps as a `Graph`, with a cloud mask built from the SCL band
@@ -100,7 +103,7 @@ cloud: gz.Node = gz.S2SCL(targets=["cloud_shadow", "cloud", "cirrus"])(x)       
 clean: gz.Node = gz.ApplyMask()(ndvi_node, cloud)                                   # (H, W) float64, NaN under cloud
 
 graph: gz.Graph = gz.Graph(inputs={"scene": x}, outputs={"ndvi": clean, "cloud": cloud})
-out: dict[str, GeoTensor] = graph(scene=scene)  # {"ndvi": (H, W) float64, "cloud": (H, W) bool}
+out: dict[str, GeoArray] = graph(scene=scene)  # {"ndvi": (H, W) float64, "cloud": (H, W) bool}
 
 config: dict = ndvi_pipeline.get_config()       # {"operators": [{"class": "SelectBands", "config": {...}}, ...]}
 ```
@@ -113,7 +116,7 @@ result with `wrap_like`:
 
 ```python
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 from geoops import Operator, Sequential
 from geoops.carrier import wrap_like
@@ -125,7 +128,7 @@ class Scale(Operator):
     def __init__(self, *, scale: float = 1e-4) -> None:
         self.scale = scale
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:                  # (C, H, W) → (C, H, W) float32
+    def _apply(self, gt: GeoArray) -> GeoArray:                    # (C, H, W) → (C, H, W) float32
         # wrap_like keeps the input's transform / CRS / attrs / fill.
         return wrap_like(gt, np.asarray(gt, dtype=np.float32) * self.scale)
 
@@ -136,15 +139,15 @@ class NormalizedDifference(Operator):
     def __init__(self, *, a: int = 3, b: int = 2, eps: float = 1e-10) -> None:
         self.a, self.b, self.eps = a, b, eps
 
-    def _apply(self, gt: GeoTensor) -> GeoTensor:                  # (C, H, W) → (H, W) float32
+    def _apply(self, gt: GeoArray) -> GeoArray:                    # (C, H, W) → (H, W) float32
         arr: np.ndarray = np.asarray(gt, dtype=np.float32)
         a, b = arr[self.a], arr[self.b]                            # (H, W) each
         # A new float quantity declares NaN as its nodata fill.
-        return wrap_like(gt, (a - b) / (a + b + self.eps), fill_value_default=np.nan)
+        return wrap_like(gt, (a - b) / (a + b + self.eps), fill_value=np.nan)
 
 
 pipeline: Sequential = Sequential([Scale(scale=1e-4), NormalizedDifference(a=7, b=3)])
-index: GeoTensor = pipeline(scene)            # (H, W) float32
+index: GeoArray = pipeline(scene)             # (H, W) float32
 pipeline.get_config()                         # {"operators": [{"class": "Scale", "config": {"scale": 0.0001}}, ...]}
 ```
 
@@ -175,7 +178,7 @@ tiled: gz.Sequential = gz.Sequential([
     ApplyToChips(operator=ndvi_pipeline),                          # → list[Patch], (256, 256) each
     MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-stitched: GeoTensor = tiled(field)                                 # (H, W) float64, on the scene's grid
+stitched: GeoArray = tiled(field)                                  # (H, W) float64, on the scene's grid
 ```
 
 `MergePatches` places the chips on the domain's grid and keeps the band

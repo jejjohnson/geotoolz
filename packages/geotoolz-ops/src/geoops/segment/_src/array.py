@@ -1,4 +1,4 @@
-"""Tier-A primitives for :mod:`geoops.segment` -- pure numpy, no ``GeoTensor``.
+"""Tier-A primitives for :mod:`geoops.segment` -- pure numpy, no ``GeoArray``.
 
 * :func:`fill_invalid` -- median-fill nodata before a skimage segmenter.
 * :func:`otsu_threshold` / :func:`resolve_threshold` /
@@ -30,7 +30,7 @@ def fill_invalid(
     """Float copy of ``image`` with every invalid pixel set to the valid median.
 
     The fill statistic is the median over valid pixels only, so neither a
-    ``fill_value_default`` sentinel nor ``+/-inf`` can leak into it. The
+    ``fill_value`` sentinel nor ``+/-inf`` can leak into it. The
     segmenters run on the filled image, because skimage has no notion of
     nodata.
 

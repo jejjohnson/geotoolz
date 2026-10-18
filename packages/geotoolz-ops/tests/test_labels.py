@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from _helpers import toy_geotensor
+from _helpers import toy_geoarray
 from rasterio import features
 from scipy import ndimage
 from shapely.geometry import shape
@@ -97,7 +97,7 @@ def test_label_connected_components_matches_legacy_skimage_path(
     """``LabelConnectedComponents(4|8)`` == the old ``label(connectivity=1|2)``."""
     for mask in _random_masks():
         out = gz.measure.LabelConnectedComponents(connectivity=connectivity)(  # ty: ignore[invalid-argument-type]
-            toy_geotensor(mask, fill_value_default=None)
+            toy_geoarray(mask, fill_value=None)
         )
         expected = sk_label(mask, connectivity=_SK_CONNECTIVITY[connectivity])
         np.testing.assert_array_equal(np.asarray(out), expected.astype(np.int32))
@@ -316,7 +316,7 @@ def test_measure_and_plume_share_skeleton_length() -> None:
     mask[2:10, 3] = True
     mask[9, 3:10] = True
     transform = rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 120.0)
-    gt = toy_geotensor(mask, transform=transform, fill_value_default=None)
+    gt = toy_geoarray(mask, transform=transform, fill_value=None)
 
     pixels = gz.measure.SkeletonLength()(gt)
     crs_units = gz.measure.SkeletonLength(scale_to_crs=True)(gt)
@@ -343,10 +343,10 @@ def test_plume_footprint_uses_default_regionprops() -> None:
 def test_region_props_default_is_pixel_units_and_scale_to_crs_converts() -> None:
     labels = np.zeros((6, 8), dtype=np.int32)
     labels[1:4, 1:5] = 1  # 3 x 4 px rectangle
-    gt = toy_geotensor(
+    gt = toy_geoarray(
         labels,
         transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 60.0),
-        fill_value_default=0,
+        fill_value=0,
     )
 
     px = gz.measure.RegionProps()(gt)
@@ -369,10 +369,10 @@ def test_region_props_default_is_pixel_units_and_scale_to_crs_converts() -> None
 def test_region_props_scale_to_crs_rejects_lengths_on_non_square_pixels() -> None:
     labels = np.zeros((4, 4), dtype=np.int32)
     labels[1:3, 1:3] = 1
-    gt = toy_geotensor(
+    gt = toy_geoarray(
         labels,
         transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -20.0, 80.0),
-        fill_value_default=0,
+        fill_value=0,
     )
     with pytest.raises(ValueError, match="non-square pixels"):
         gz.measure.RegionProps(scale_to_crs=True)(gt)
@@ -397,7 +397,7 @@ def _legacy_footprint_geometry(labels: np.ndarray, label_id: int, transform) -> 
 def test_plume_footprint_polygons_match_legacy_rasterio_shapes() -> None:
     transform = rasterio.Affine(10.0, 0.0, 500000.0, 0.0, -10.0, 4000000.0)
     for mask in _random_masks(4):
-        gt = toy_geotensor(mask, transform=transform, fill_value_default=None)
+        gt = toy_geoarray(mask, transform=transform, fill_value=None)
         gdf = gz.plume.PlumeFootprint(min_area_m2=0.0, simplify_tolerance=None)(gt)
         labels = label_components(mask)
         assert len(gdf) == labels.max()
@@ -440,7 +440,7 @@ def _rectangle_labels() -> np.ndarray:
 
 def test_region_props_scale_to_crs_on_a_rotated_grid() -> None:
     """Rotation keeps 10 m square pixels: |a| = 8.66 must not be the scale."""
-    gt = toy_geotensor(_rectangle_labels(), grid="rotated", fill_value_default=0)
+    gt = toy_geoarray(_rectangle_labels(), grid="rotated", fill_value=0)
     px = gz.measure.RegionProps()(gt)
     crs = gz.measure.RegionProps(scale_to_crs=True)(gt)
     assert crs["area"].iloc[0] == pytest.approx(1200.0)
@@ -448,13 +448,13 @@ def test_region_props_scale_to_crs_on_a_rotated_grid() -> None:
 
     skeleton = np.zeros((9, 9), dtype=bool)
     skeleton[4, 1:8] = True
-    line = toy_geotensor(skeleton, grid="rotated", fill_value_default=None)
+    line = toy_geoarray(skeleton, grid="rotated", fill_value=None)
     assert gz.measure.SkeletonLength(scale_to_crs=True)(line) == pytest.approx(60.0)
 
 
 def test_region_props_scale_to_crs_on_a_sheared_grid() -> None:
     """Shear leaves a / e square-looking; areas use |det| and lengths refuse."""
-    gt = toy_geotensor(_rectangle_labels(), grid="sheared", fill_value_default=0)
+    gt = toy_geoarray(_rectangle_labels(), grid="sheared", fill_value=0)
     with pytest.raises(ValueError, match="non-square pixels"):
         gz.measure.RegionProps(scale_to_crs=True)(gt)
     area_only = gz.measure.RegionProps(properties=("label", "area"), scale_to_crs=True)(

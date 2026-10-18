@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from _helpers import fill_pixel_mask, toy_geotensor as _toy_geotensor
+from _helpers import fill_pixel_mask, toy_geoarray as _toy_geoarray
+from geoarray.interop.georeader import to_georeader
 
 import geoops as gz
 from geoops import qa
@@ -22,16 +23,16 @@ def test_decode_bitmask_returns_named_boolean_layers() -> None:
         ],
         dtype=np.uint16,
     )
-    gt = _toy_geotensor(qa_band)
+    gt = _toy_geoarray(qa_band)
 
     out = qa.DecodeBitmask(bits={"cloud": [10], "cirrus": [11]})(gt)
 
     assert out.dtype == np.bool_
     assert out.shape == (2, 2, 3)
-    assert out.transform == gt.transform
+    assert out.grid == gt.grid
     assert out.crs == gt.crs
-    assert out.fill_value_default is False
-    assert out.attrs["band_names"] == ["cloud", "cirrus"]
+    assert out.fill_value is False
+    assert out.attrs["band_names"] == ("cloud", "cirrus")
     np.testing.assert_array_equal(
         np.asarray(out)[0],
         [[False, True, False], [True, False, True]],
@@ -49,7 +50,7 @@ def test_decode_bitmask_selects_named_qa_band_with_default_any_mode() -> None:
             np.array([[0, 1 << 10], [1 << 11, 0]], dtype=np.uint16),
         ]
     )
-    gt = _toy_geotensor(stack, attrs={"band_names": ["B04", "QA60"]})
+    gt = _toy_geoarray(stack, attrs={"band_names": ["B04", "QA60"]})
 
     out = qa.DecodeBitmask(bits={"bad": [10, 11]}, qa_band="QA60")(gt)
 
@@ -59,7 +60,7 @@ def test_decode_bitmask_selects_named_qa_band_with_default_any_mode() -> None:
 def test_decode_bitmask_replaces_every_band_name_key() -> None:
     """Stale ``descriptions`` no longer survive next to the new names (#144)."""
     stack = np.zeros((2, 2, 2), dtype=np.uint16)
-    gt = _toy_geotensor(
+    gt = _toy_geoarray(
         stack,
         attrs={"band_names": ["B04", "QA60"], "descriptions": ["red", "qa"], "k": 1},
     )
@@ -71,7 +72,7 @@ def test_decode_bitmask_replaces_every_band_name_key() -> None:
 
 
 def test_decode_bitmask_all_mode_requires_every_bit() -> None:
-    gt = _toy_geotensor(np.array([[0, 1, 2, 3]], dtype=np.uint16))
+    gt = _toy_geoarray(np.array([[0, 1, 2, 3]], dtype=np.uint16))
     out = qa.DecodeBitmask(bits={"both": [0, 1]}, mode="all")(gt)
     np.testing.assert_array_equal(np.asarray(out)[0], [[False, False, False, True]])
 
@@ -82,7 +83,7 @@ def test_decode_bitmask_rejects_invalid_inputs() -> None:
     with pytest.raises(ValueError, match="'any' or 'all'"):
         qa.DecodeBitmask(bits={"cloud": [3]}, mode="bad")
     with pytest.raises(ValueError, match="non-negative"):
-        qa.DecodeBitmask(bits={"cloud": [-1]})(_toy_geotensor(np.zeros((1, 1))))
+        qa.DecodeBitmask(bits={"cloud": [-1]})(_toy_geoarray(np.zeros((1, 1))))
 
 
 def test_mask_clouds_uses_named_qa_band_bits() -> None:
@@ -92,7 +93,7 @@ def test_mask_clouds_uses_named_qa_band_bits() -> None:
             np.array([[0, 1 << 10, 1 << 11], [0, 0, 0]], dtype=np.uint16),
         ]
     )
-    gt = _toy_geotensor(stack, attrs={"band_names": ["B04", "QA60"]})
+    gt = _toy_geoarray(stack, attrs={"band_names": ["B04", "QA60"]})
 
     out = qa.MaskClouds(qa_band="QA60", bits=[10, 11])(gt)
 
@@ -104,14 +105,14 @@ def test_mask_clouds_uses_named_qa_band_bits() -> None:
 
 
 def test_mask_clouds_rejects_missing_named_band() -> None:
-    gt = _toy_geotensor(np.zeros((1, 2, 2)), attrs={"band_names": ["B04"]})
+    gt = _toy_geoarray(np.zeros((1, 2, 2)), attrs={"band_names": ["B04"]})
     with pytest.raises(ValueError, match="QA60"):
         qa.MaskClouds(qa_band="QA60", bits=[10])(gt)
 
 
 def test_mask_shortcuts_support_categorical_values() -> None:
     scl = np.array([[4, 6, 9], [10, 11, 3]], dtype=np.uint8)
-    gt = _toy_geotensor(scl)
+    gt = _toy_geoarray(scl)
 
     clouds = qa.MaskClouds(qa_band=None, values=[8, 9, 10])(gt)
     shadow = qa.MaskCloudShadow(qa_band=None, values=[3])(gt)
@@ -137,7 +138,7 @@ def test_mask_shortcuts_support_categorical_values() -> None:
 
 
 def test_mask_shortcuts_require_one_definition() -> None:
-    gt = _toy_geotensor(np.zeros((1, 1), dtype=np.uint8))
+    gt = _toy_geoarray(np.zeros((1, 1), dtype=np.uint8))
     with pytest.raises(ValueError, match="either bits or values"):
         qa.MaskClouds(qa_band=None)(gt)
     with pytest.raises(ValueError, match="only one"):
@@ -146,7 +147,7 @@ def test_mask_shortcuts_require_one_definition() -> None:
 
 def test_s2qa60_preset_masks_cloud_and_cirrus() -> None:
     qa60 = np.array([[0, 1 << 10], [1 << 11, 0]], dtype=np.uint16)
-    gt = _toy_geotensor(qa60[None], attrs={"band_names": ["QA60"]})
+    gt = _toy_geoarray(qa60[None], attrs={"band_names": ["QA60"]})
 
     out = qa.S2QA60()(gt)
 
@@ -172,7 +173,7 @@ def test_s2qa60_reads_the_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_s2scl_targets_mask_listed_classes() -> None:
     scl = np.array([[4, 5, 6], [9, 11, 3]], dtype=np.uint8)
-    gt = _toy_geotensor(scl[None], attrs={"band_names": ["SCL"]})
+    gt = _toy_geoarray(scl[None], attrs={"band_names": ["SCL"]})
 
     out = qa.S2SCL(targets=["cloud", "snow"])(gt)
 
@@ -200,7 +201,7 @@ def test_scl_constants_agree_with_the_registry() -> None:
 
 def test_landsat_qa_pixel_preset_targets() -> None:
     qa_pixel = np.array([[0, 1 << 3], [1 << 4, 1 << 7]], dtype=np.uint16)
-    gt = _toy_geotensor(qa_pixel[None], attrs={"band_names": ["QA_PIXEL"]})
+    gt = _toy_geoarray(qa_pixel[None], attrs={"band_names": ["QA_PIXEL"]})
 
     out = qa.LandsatQA_PIXEL(targets=["cloud", "cloud_shadow"])(gt)
 
@@ -209,7 +210,7 @@ def test_landsat_qa_pixel_preset_targets() -> None:
 
 def test_modis_state_qa_preset_targets() -> None:
     state_qa = np.array([[0, 0b01], [1 << 2, 1 << 8]], dtype=np.uint16)
-    gt = _toy_geotensor(state_qa[None], attrs={"band_names": ["state_1km"]})
+    gt = _toy_geoarray(state_qa[None], attrs={"band_names": ["state_1km"]})
 
     out = qa.MODISStateQA(targets=["cloud", "cloud_shadow"])(gt)
 
@@ -217,13 +218,13 @@ def test_modis_state_qa_preset_targets() -> None:
 
 
 def test_presets_reject_unknown_targets() -> None:
-    gt = _toy_geotensor(
+    gt = _toy_geoarray(
         np.zeros((1, 1, 1), dtype=np.uint16), attrs={"band_names": ["QA_PIXEL"]}
     )
     with pytest.raises(ValueError, match="unknown landsat_qa_pixel"):
         qa.LandsatQA_PIXEL(targets=["not_a_flag"])(gt)
 
-    scl = _toy_geotensor(
+    scl = _toy_geoarray(
         np.zeros((1, 1, 1), dtype=np.uint8), attrs={"band_names": ["SCL"]}
     )
     with pytest.raises(ValueError, match="unknown s2_scl"):
@@ -238,7 +239,7 @@ def test_mask_nodata_infers_from_fill_value() -> None:
         ],
         dtype=np.int16,
     )
-    gt = _toy_geotensor(arr, fill_value_default=-9999)
+    gt = _toy_geoarray(arr, fill_value=-9999)
 
     out = qa.MaskNoData()(gt)
 
@@ -246,14 +247,14 @@ def test_mask_nodata_infers_from_fill_value() -> None:
 
 
 def test_mask_nodata_can_decode_qa_values() -> None:
-    gt = _toy_geotensor(np.array([[0, 1], [2, 0]], dtype=np.uint8))
+    gt = _toy_geoarray(np.array([[0, 1], [2, 0]], dtype=np.uint8))
     out = qa.MaskNoData(qa_band=None, values=[0])(gt)
     np.testing.assert_array_equal(np.asarray(out), [[True, False], [False, True]])
 
 
 def test_mask_nodata_requires_fill_when_not_decoding_qa() -> None:
-    gt = _toy_geotensor(np.zeros((2, 2), dtype=np.float32), fill_value_default=None)
-    with pytest.raises(ValueError, match="fill_value_default"):
+    gt = _toy_geoarray(np.zeros((2, 2), dtype=np.float32), fill_value=None)
+    with pytest.raises(ValueError, match="fill_value"):
         qa.MaskNoData()(gt)
     with pytest.raises(ValueError, match="needs bits or values"):
         qa.MaskNoData(qa_band=0)(gt)
@@ -274,15 +275,15 @@ def test_mask_invalid_matches_georeader_invalidmask() -> None:
     arr[0, 1, 1] = -9999
     arr[2, 3, 4] = -9999
     arr[:, 0, 0] = -9999
-    gt = _toy_geotensor(arr, fill_value_default=-9999)
+    gt = _toy_geoarray(arr, fill_value=-9999)
 
     out = qa.MaskInvalid()(gt)
 
-    expected = np.asarray(gt.invalidmask()).any(axis=0)
+    expected = np.asarray(to_georeader(gt).invalidmask()).any(axis=0)
     np.testing.assert_array_equal(np.asarray(out), expected)
     assert expected.sum() == 3
     assert out.dtype == np.bool_
-    assert out.fill_value_default is False
+    assert out.fill_value is False
     # MaskNoData's fill fallback is the same mask.
     np.testing.assert_array_equal(np.asarray(qa.MaskNoData()(gt)), expected)
 
@@ -291,14 +292,16 @@ def test_mask_invalid_detects_nan_fill() -> None:
     """A NaN fill is found although georeader's ``invalidmask()`` misses it."""
     arr = np.ones((2, 3, 3), dtype=np.float32)
     arr[:, 1, 2] = np.nan
-    gt = _toy_geotensor(arr, fill_value_default=np.nan)
+    gt = _toy_geoarray(arr, fill_value=np.nan)
 
     out = qa.MaskInvalid()(gt)
 
     expected = np.zeros((3, 3), dtype=bool)
     expected[1, 2] = True
     np.testing.assert_array_equal(np.asarray(out), expected)
-    assert not np.asarray(gt.invalidmask()).any()  # georeader's blind spot
+    assert not np.asarray(
+        to_georeader(gt).invalidmask()
+    ).any()  # georeader's blind spot
 
 
 def test_mask_invalid_explicit_value_and_plain_array() -> None:
@@ -318,7 +321,7 @@ def test_fill_pixels_are_excluded(op, fill) -> None:
     """Fill pixels are flagged -- including a NaN fill (``nan == nan`` is False)."""
     rng = np.random.default_rng(0)
     arr = rng.uniform(0.0, 1.0, size=(3, 4, 4)).astype(np.float32)
-    gt = _toy_geotensor(arr, fill_value_default=fill, with_fill_pixels=True)
+    gt = _toy_geoarray(arr, fill_value=fill, with_fill_pixels=True)
 
     out = op(gt)
 
@@ -329,7 +332,7 @@ def test_fill_pixels_are_excluded(op, fill) -> None:
 def test_mask_nodata_flags_non_finite_under_numeric_fill() -> None:
     arr = np.ones((2, 2, 2), dtype=np.float32)
     arr[1, 0, 1] = np.nan
-    gt = _toy_geotensor(arr, fill_value_default=-9999)
+    gt = _toy_geoarray(arr, fill_value=-9999)
     np.testing.assert_array_equal(
         np.asarray(qa.MaskNoData()(gt)), [[False, True], [False, False]]
     )
@@ -344,7 +347,7 @@ def test_mask_saturated_infers_integer_max() -> None:
         ],
         dtype=np.uint16,
     )
-    gt = _toy_geotensor(arr)
+    gt = _toy_geoarray(arr)
 
     out = qa.MaskSaturated()(gt)
 
@@ -371,20 +374,20 @@ def test_mask_saturated_is_a_threshold_with_optional_band_reduction() -> None:
     np.testing.assert_array_equal(per_band, [[[False, True]], [[True, False]]])
     np.testing.assert_array_equal(reduced, [[True, True]])
     # Band attrs survive the per-band form.
-    gt = _toy_geotensor(arr, attrs={"band_names": ["B1", "B2"]})
+    gt = _toy_geoarray(arr, attrs={"band_names": ["B1", "B2"]})
     out = qa.MaskSaturated(saturation_value=0.5, reduce_bands=False)(gt)
-    assert out.attrs["band_names"] == ["B1", "B2"]
+    assert out.attrs["band_names"] == ("B1", "B2")
 
 
 def test_mask_saturated_never_flags_nodata() -> None:
     """A uint16 fill at the dtype max is not "saturated" (#146)."""
     counts = np.full((1, 4, 4), 100, dtype=np.uint16)
-    gt = _toy_geotensor(counts, fill_value_default=65535, with_fill_pixels=True)
+    gt = _toy_geoarray(counts, fill_value=65535, with_fill_pixels=True)
 
     out = qa.MaskSaturated()(gt)
 
     assert not np.asarray(out).any()
-    assert out.fill_value_default is False
+    assert out.fill_value is False
     # Plain arrays: NaN pixels are never saturated either.
     arr = np.array([[[np.nan, 2.0]]])
     np.testing.assert_array_equal(
@@ -398,7 +401,7 @@ def test_ml_placeholders_are_configurable_and_explicit() -> None:
     assert qa.CloudSEN12(checkpoint="y").get_config() == {"checkpoint": "y"}
     for op in (qa.S2Cloudless(), qa.OmniCloudMask(), qa.CloudSEN12()):
         with pytest.raises(ImportError, match="optional ML mask extra"):
-            op(_toy_geotensor(np.zeros((2, 2), dtype=np.float32)))
+            op(_toy_geoarray(np.zeros((2, 2), dtype=np.float32)))
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +419,7 @@ def test_landsat8_qa_pixel_cloud_bit_3_per_lsds_1619() -> None:
         ],
         dtype=np.uint16,
     )
-    gt = _toy_geotensor(qa_pixel[None], attrs={"band_names": ["QA_PIXEL"]})
+    gt = _toy_geoarray(qa_pixel[None], attrs={"band_names": ["QA_PIXEL"]})
     out = qa.LandsatQA_PIXEL(targets=("cloud", "cloud_shadow", "cirrus"))(gt)
     # cirrus(bit 2), cloud(bit 3), cloud_shadow(bit 4) → True; rest False
     np.testing.assert_array_equal(
@@ -429,7 +432,7 @@ def test_landsat7_qa_pixel_lacks_cirrus_per_lsds_1618() -> None:
     """LSDS-1618: bit 2 is unused on Landsat 4-7 (no cirrus channel)."""
     # Bit 2 set on L7 should NOT trigger the cirrus target —
     # "cirrus" isn't in the L7 registry at all.
-    gt = _toy_geotensor(
+    gt = _toy_geoarray(
         np.array([[1 << 2]], dtype=np.uint16)[None],
         attrs={"band_names": ["QA_PIXEL"]},
     )
@@ -437,7 +440,7 @@ def test_landsat7_qa_pixel_lacks_cirrus_per_lsds_1618() -> None:
         qa.LandsatQA_PIXEL(sensor="l7", targets=("cirrus",))(gt)
     # But cloud/shadow/etc work normally for L7.
     qa_pixel = np.array([[1 << 3, 1 << 4, 0]], dtype=np.uint16)
-    gt = _toy_geotensor(qa_pixel[None], attrs={"band_names": ["QA_PIXEL"]})
+    gt = _toy_geoarray(qa_pixel[None], attrs={"band_names": ["QA_PIXEL"]})
     out = qa.LandsatQA_PIXEL(sensor="l7", targets=("cloud", "cloud_shadow"))(gt)
     np.testing.assert_array_equal(np.asarray(out), [[True, True, False]])
 
@@ -458,13 +461,13 @@ def test_landsat_qa_pixel_l7_default_targets_exclude_cirrus() -> None:
 
     # And running the operator must not raise.
     qa_pixel = np.array([[1 << 3, 1 << 4, 0]], dtype=np.uint16)
-    gt = _toy_geotensor(qa_pixel[None], attrs={"band_names": ["QA_PIXEL"]})
+    gt = _toy_geoarray(qa_pixel[None], attrs={"band_names": ["QA_PIXEL"]})
     out = op(gt)
     np.testing.assert_array_equal(np.asarray(out), [[True, True, False]])
 
     # Explicitly requesting cirrus on L7 still raises a clear ValueError
     # naming the unsupported target.
-    gt_one = _toy_geotensor(
+    gt_one = _toy_geoarray(
         np.array([[1 << 2]], dtype=np.uint16)[None],
         attrs={"band_names": ["QA_PIXEL"]},
     )
@@ -480,7 +483,7 @@ def test_modis_state_qa_decodes_cloud_field_not_individual_bits() -> None:
     """
     # Field values: 0=clear, 1=cloudy, 2=mixed, 3=not-set.
     state_qa = np.array([[0b00, 0b01, 0b10, 0b11]], dtype=np.uint16)
-    gt = _toy_geotensor(state_qa[None], attrs={"band_names": ["state_1km"]})
+    gt = _toy_geoarray(state_qa[None], attrs={"band_names": ["state_1km"]})
     out = qa.MODISStateQA(targets=("cloud",))(gt)
     # 0=clear→F, 1=cloudy→T, 2=mixed→T, 3=not-set→F
     np.testing.assert_array_equal(np.asarray(out), [[False, True, True, False]])
@@ -489,7 +492,7 @@ def test_modis_state_qa_decodes_cloud_field_not_individual_bits() -> None:
 def test_modis_state_qa_cirrus_field_decoding() -> None:
     """Bits [8,9]: 0=none, 1=small, 2=average, 3=high. We flag 1/2/3."""
     state_qa = np.array([[0 << 8, 1 << 8, 2 << 8, 3 << 8]], dtype=np.uint16)
-    gt = _toy_geotensor(state_qa[None], attrs={"band_names": ["state_1km"]})
+    gt = _toy_geoarray(state_qa[None], attrs={"band_names": ["state_1km"]})
     out = qa.MODISStateQA(targets=("cirrus",))(gt)
     np.testing.assert_array_equal(np.asarray(out), [[False, True, True, True]])
 
@@ -498,7 +501,7 @@ def test_s2_scl_default_keep_classes_per_sen2cor_spec() -> None:
     """Default S2SCL keeps vegetation(4), soil(5), water(6) only."""
     # One pixel per SCL class 0-11.
     scl = np.arange(12, dtype=np.uint8).reshape(1, 12)
-    gt = _toy_geotensor(scl[None], attrs={"band_names": ["SCL"]})
+    gt = _toy_geoarray(scl[None], attrs={"band_names": ["SCL"]})
     out = qa.S2SCL()(gt)
     # Classes 4, 5, 6 are kept → False; everything else masked → True.
     expected = np.array(
@@ -614,7 +617,7 @@ def test_apply_mask_with_qa_operator_on_scl_stack() -> None:
     rng = np.random.default_rng(0)
     refl = rng.uniform(0.05, 0.6, size=(2, 2, 2)).astype(np.float32)
     scl = np.array([[9, 4], [6, 0]], dtype=np.float32)
-    stack = _toy_geotensor(
+    stack = _toy_geoarray(
         np.concatenate([refl, scl[None]]), attrs={"band_names": ["B4", "B8", "SCL"]}
     )
     op = ApplyMask(
@@ -662,21 +665,21 @@ def _plain_array_cases() -> list[tuple[object, np.ndarray]]:
     ("op", "arr"), _plain_array_cases(), ids=lambda case: type(case).__name__
 )
 def test_qa_operators_accept_plain_ndarray(op, arr) -> None:
-    """Plain ndarray in -> plain ndarray out, values match the GeoTensor path."""
+    """Plain ndarray in -> plain ndarray out, values match the GeoArray path."""
     out = op(arr)
     assert type(out) is np.ndarray
     assert out.dtype == np.bool_
-    gt_out = op(_toy_geotensor(arr))
+    gt_out = op(_toy_geoarray(arr))
     np.testing.assert_array_equal(out, np.asarray(gt_out))
 
 
-def test_string_qa_band_selector_requires_geotensor_metadata() -> None:
+def test_string_qa_band_selector_requires_geoarray_metadata() -> None:
     with pytest.raises(TypeError, match="band-name metadata"):
         qa.MaskClouds(qa_band="QA60", bits=[10])(np.zeros((2, 2, 2), dtype=np.uint16))
 
 
 def test_mask_nodata_fill_mode_rejects_plain_array() -> None:
-    with pytest.raises(ValueError, match="fill_value_default"):
+    with pytest.raises(ValueError, match="fill_value"):
         qa.MaskNoData()(np.zeros((2, 2), dtype=np.int16))
 
 
@@ -743,10 +746,10 @@ def test_4d_time_stack() -> None:
     qa_frame = np.zeros((2, 4, 4), dtype=np.uint16)
     qa_frame[1, 0, 0] = 1 << 3
     stack_values = np.stack([qa_frame, np.roll(qa_frame, 1, axis=-1)])
-    stack = _toy_geotensor(stack_values, fill_value_default=None)
+    stack = _toy_geoarray(stack_values, fill_value=None)
     mask = qa.MaskClouds(qa_band=1, bits=[3])(stack)
     assert mask.shape == (2, 1, 4, 4)
     np.testing.assert_array_equal(np.asarray(mask)[:, 0], stack_values[:, 1] > 0)
     layers = qa.DecodeBitmask(bits={"cloud": [3], "none": [5]}, qa_band=1)(stack)
     assert layers.shape == (2, 2, 4, 4)
-    assert layers.attrs["band_names"] == ["cloud", "none"]
+    assert layers.attrs["band_names"] == ("cloud", "none")

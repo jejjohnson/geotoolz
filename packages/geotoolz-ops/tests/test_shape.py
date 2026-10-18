@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 import pytest
-from _helpers import TIME_STACK_SHAPE, frames, time_stack, toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import TIME_STACK_SHAPE, frames, time_stack, toy_geoarray
+from geoarray import GeoArray
 
 from geoops._src.shape import (
     BAND_AXIS,
@@ -22,10 +22,10 @@ from geoops._src.shape import (
 
 def test_time_stack_fixture_is_time_band_y_x() -> None:
     stack = time_stack()
-    assert isinstance(stack, GeoTensor)
+    assert isinstance(stack, GeoArray)
     assert stack.shape == TIME_STACK_SHAPE == (2, 3, 4, 4)
     assert stack.dims == ("time", "band", "y", "x")
-    assert stack.attrs["band_names"] == ["b0", "b1", "b2"]
+    assert stack.attrs["band_names"] == ("b0", "b1", "b2")
     assert len(stack.attrs["wavelengths"]) == 3
     # Frames and bands differ, so a time/band mix-up is observable.
     values = np.asarray(stack)
@@ -37,8 +37,8 @@ def test_frames_keep_grid_and_attrs() -> None:
     stack = time_stack()
     out = frames(stack)
     assert [f.shape for f in out] == [(3, 4, 4), (3, 4, 4)]
-    assert all(f.transform == stack.transform for f in out)
-    assert all(f.attrs == stack.attrs and f.attrs is not stack.attrs for f in out)
+    assert all(f.grid == stack[0].grid for f in out)
+    assert all(f.attrs == stack.attrs for f in out)
     np.testing.assert_array_equal(np.asarray(out[1]), np.asarray(stack)[1])
 
 
@@ -81,14 +81,14 @@ def test_keep_band_axis() -> None:
 def test_map_frames_restacks_per_frame_results() -> None:
     stack = time_stack(attrs={"band_names": ["a", "b", "c"], "sensor": "toy"})
 
-    def band_sum(frame: Any) -> GeoTensor:
-        return toy_geotensor(np.asarray(frame).sum(axis=0), fill_value_default=0)
+    def band_sum(frame: Any) -> GeoArray:
+        return toy_geoarray(np.asarray(frame).sum(axis=0), fill_value=0)
 
     out = map_frames(band_sum, stack, name="BandSum")
-    assert isinstance(out, GeoTensor)
+    assert isinstance(out, GeoArray)
     assert out.shape == (2, 1, 4, 4)
-    assert out.transform == stack.transform
-    assert out.fill_value_default == 0
+    assert out[0].grid == stack[0].grid
+    assert out.fill_value == 0
     np.testing.assert_allclose(np.asarray(out)[:, 0], np.asarray(stack).sum(axis=1))
 
 

@@ -12,24 +12,24 @@ operator whose state is JSON and rebuilds anywhere.
 
 ```python
 import numpy as np
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 from rasterio.transform import from_origin
 
 import geoops as gz
 
 rng: np.random.Generator = np.random.default_rng(0)
-grid: dict = {"transform": from_origin(750_000, 4_350_000, 10, 10), "crs": "EPSG:32610", "fill_value_default": np.nan}
-train: GeoTensor = GeoTensor(rng.normal(0.2, 0.05, (4, 64, 64)), **grid)  # (4, 64, 64) float64
-test: GeoTensor = GeoTensor(rng.normal(0.2, 0.05, (4, 64, 64)), **grid)   # (4, 64, 64) float64
+grid: dict = {"transform": from_origin(750_000, 4_350_000, 10, 10), "crs": "EPSG:32610", "fill_value": np.nan}
+train: GeoArray = GeoArray(rng.normal(0.2, 0.05, (4, 64, 64)), **grid)  # (4, 64, 64) float64
+test: GeoArray = GeoArray(rng.normal(0.2, 0.05, (4, 64, 64)), **grid)   # (4, 64, 64) float64
 
 fitted: gz.StandardScaler = gz.normalize.StandardScaler().fit(train)
 frozen: gz.StandardScaler = gz.normalize.StandardScaler(mean=fitted.mean_, std=fitted.std_)
 state: dict = frozen.state                                                # JSON: class name + per-band mean / std
 
 deployed: gz.Operator = gz.Operator.from_state(state)
-normed: GeoTensor = deployed(test)                                        # (4, 64, 64) float64 → (4, 64, 64) float64
-restored: GeoTensor = deployed.inverse(normed)                            # (4, 64, 64) float64 → (4, 64, 64) float64
-assert np.allclose(restored.values, test.values)
+normed: GeoArray = deployed(test)                                        # (4, 64, 64) float64 → (4, 64, 64) float64
+restored: GeoArray = deployed.inverse(normed)                            # (4, 64, 64) float64 → (4, 64, 64) float64
+assert np.allclose(np.asarray(restored), np.asarray(test))
 ```
 
 `RobustScaler` (`median_` / `iqr_`) and `MinMaxScaler` (`vmin_` /

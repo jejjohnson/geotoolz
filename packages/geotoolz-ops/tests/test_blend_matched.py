@@ -16,8 +16,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from _helpers import toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import toy_geoarray
+from geoarray import GeoArray
 from pipekit import Operator
 
 from geoops.compositing import BlendMatched, StackMatched
@@ -28,10 +28,8 @@ from geoops.compositing import BlendMatched, StackMatched
 # ---------------------------------------------------------------------------
 
 
-def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoTensor:
-    return toy_geotensor(
-        values, transform=transform, crs=crs, fill_value_default=np.nan
-    )
+def _gt(values: np.ndarray, *, transform=None, crs="EPSG:32629") -> GeoArray:
+    return toy_geoarray(values, transform=transform, crs=crs, fill_value=np.nan)
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +328,7 @@ class TestGeoMetadata:
         a = _gt(np.full((4, 4), 1.0, dtype=np.float32))
         b = _gt(np.full((4, 4), 3.0, dtype=np.float32))
         result = BlendMatched()([a, b])
-        assert result.transform == a.transform
+        assert result.grid == a.grid
         assert result.crs == a.crs
 
     def test_grid_mismatch_rejected(self) -> None:

@@ -34,6 +34,7 @@ PYPROJECT = PACKAGE_ROOT / "pyproject.toml"
 # mapping does not depend on what happens to be installed.
 IMPORT_TO_DIST = {
     "georeader": "georeader-spaceml",
+    "geoarray": "geotoolz-array",
     "skimage": "scikit-image",
     "sklearn": "scikit-learn",
     "yaml": "PyYAML",
@@ -160,7 +161,7 @@ def _all_module_scope_imports() -> dict[str, list[str]]:
 def test_scanner_sees_known_top_level_imports() -> None:
     # Guard against a scanner bug silently making the tests vacuous.
     imports = _all_module_scope_imports()
-    for expected in ("numpy", "rasterio", "affine", "pipekit", "georeader"):
+    for expected in ("numpy", "rasterio", "affine", "pipekit", "georeader", "geoarray"):
         assert expected in imports, expected
 
 
@@ -226,7 +227,7 @@ def test_missing_extra_error_names_the_extra(
     import numpy as np
 
     import geoops as gz
-    from geoops.learn._src.estimators import GeoTensorEstimator
+    from geoops.learn._src.estimators import GeoArrayEstimator
 
     real_import_module = importlib.import_module
 
@@ -239,6 +240,6 @@ def test_missing_extra_error_names_the_extra(
 
     with pytest.raises(ImportError, match=r"pip install 'geotoolz-ops\[viz\]'"):
         gz.ApplyColormap(name="viridis")(np.zeros((4, 4), dtype="float32"))
-    estimator = GeoTensorEstimator.__new__(GeoTensorEstimator)
+    estimator = GeoArrayEstimator.__new__(GeoArrayEstimator)
     with pytest.raises(ImportError, match=r"pip install 'geotoolz-ops\[learn\]'"):
         estimator.save_state(tmp_path / "state.joblib")

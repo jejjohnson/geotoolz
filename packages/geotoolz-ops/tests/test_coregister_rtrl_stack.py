@@ -13,11 +13,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from _helpers import toy_geotensor
-from georeader.geotensor import GeoTensor
+from _helpers import toy_geoarray
+from geoarray import FrozenAttrs, GeoArray
 from pipekit import Operator
 
 import geoops as gz
+from geoops._src.geo import affine_of
 from geoops.compositing import StackMatched
 from geoops.geom.coregister import RasterToRasterLike
 
@@ -32,10 +33,8 @@ def _gt(
     *,
     transform: rasterio.Affine | None = None,
     crs: str = "EPSG:32629",
-) -> GeoTensor:
-    return toy_geotensor(
-        values, transform=transform, crs=crs, fill_value_default=np.nan
-    )
+) -> GeoArray:
+    return toy_geoarray(values, transform=transform, crs=crs, fill_value=np.nan)
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +57,7 @@ class TestRasterToRasterLike:
         out = RasterToRasterLike()(src, like)
         assert out.shape == like.shape
         assert out.crs == like.crs
-        assert out.transform == like.transform
+        assert affine_of(out) == affine_of(like)
         np.testing.assert_array_equal(np.asarray(out), np.asarray(src))
 
     def test_aligns_to_like_grid(self) -> None:
@@ -73,16 +72,16 @@ class TestRasterToRasterLike:
         out = RasterToRasterLike(resampling="bilinear")(src, like)
         assert out.shape == like.shape
         assert out.crs == like.crs
-        assert out.transform == like.transform
+        assert affine_of(out) == affine_of(like)
 
     def test_plain_array_inputs_rejected(self) -> None:
         # Coregistration is geo-dependent on both sides; a plain array
         # (no transform/CRS) must raise a clear TypeError.
         arr = np.zeros((4, 4), dtype=np.float32)
         like = _gt(np.zeros((4, 4), dtype=np.float32))
-        with pytest.raises(TypeError, match="GeoTensor"):
+        with pytest.raises(TypeError, match="GeoArray"):
             RasterToRasterLike()(arr, like)
-        with pytest.raises(TypeError, match="GeoTensor"):
+        with pytest.raises(TypeError, match="GeoArray"):
             RasterToRasterLike()(like, arr)
 
     def test_resampling_kwarg_propagates(self) -> None:
@@ -129,14 +128,15 @@ class TestStackMatchedBasics:
 class TestStackMatchedSequence:
     def test_band_names_are_concatenated(self) -> None:
         """Per-band attrs stack in order; partial keys are dropped (#144)."""
-        a = _gt(np.zeros((2, 4, 4), dtype=np.float32))
-        a.attrs = {"band_names": ["m1", "m2"], "wavelengths": [1.0, 2.0], "id": "a"}
-        b = _gt(np.ones((4, 4), dtype=np.float32))
-        b.attrs = {"band_names": ["s1"]}
+        a = _gt(np.zeros((2, 4, 4), dtype=np.float32)).replace(
+            attrs=FrozenAttrs(band_names=["m1", "m2"], wavelengths=[1.0, 2.0], id="a")
+        )
+        b = _gt(np.ones((4, 4), dtype=np.float32)).replace(
+            attrs=FrozenAttrs(band_names=["s1"])
+        )
         out = StackMatched()([a, b])
-        assert out.attrs == {"band_names": ["m1", "m2", "s1"], "id": "a"}
-        assert out.attrs is not a.attrs
-        assert a.attrs["band_names"] == ["m1", "m2"]
+        assert out.attrs == {"band_names": ("m1", "m2", "s1"), "id": "a"}
+        assert a.attrs["band_names"] == ("m1", "m2")
 
     def test_two_2d_tensors_stack_to_2_bands(self) -> None:
         a = _gt(np.full((4, 4), 1.0, dtype=np.float32))
@@ -147,7 +147,7 @@ class TestStackMatchedSequence:
         np.testing.assert_array_equal(np.asarray(out)[1], 2.0)
         # Geo-metadata copies from the first input.
         assert out.crs == a.crs
-        assert out.transform == a.transform
+        assert affine_of(out) == affine_of(a)
 
     def test_3d_tensors_concatenated_along_bands(self) -> None:
         # MODIS (4 bands) + S2 (3 bands) → 7-band output.
@@ -164,35 +164,40 @@ class TestStackMatchedSequence:
         out = StackMatched()([a, b])
         assert out.shape == (3, 8, 8)
 
-    def test_matches_geotensor_concatenate_where_it_applies(self) -> None:
+    def test_matches_georeader_concatenate_where_it_applies(self) -> None:
         """Same grid, band count and finite fill: identical to georeader.
 
-        ``GeoTensor.concatenate`` asserts equal full shapes and equal
-        ``fill_value_default`` (so NaN fills and differing band counts
-        are refused) and keeps only the first input's attrs, which is why
-        `StackMatched` does not delegate to it (#157).
+        georeader's ``GeoTensor.concatenate`` (the oracle here) asserts equal
+        full shapes and equal ``fill_value_default`` (so NaN fills and
+        differing band counts are refused) and keeps only the first input's
+        attrs, which is why `StackMatched` does not delegate to it (#157).
         """
+        from geoarray.interop.georeader import from_georeader, to_georeader
+        from georeader.geotensor import GeoTensor
+
         transform = rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0)
-        a = toy_geotensor(
+        a = toy_geoarray(
             np.arange(32, dtype=np.float32).reshape(2, 4, 4),
             transform=transform,
-            fill_value_default=-1.0,
+            fill_value=-1.0,
         )
-        b = toy_geotensor(
+        b = toy_geoarray(
             np.arange(32, 64, dtype=np.float32).reshape(2, 4, 4),
             transform=transform,
-            fill_value_default=-1.0,
+            fill_value=-1.0,
         )
         out = StackMatched()([a, b])
-        expected = GeoTensor.concatenate([a, b], axis=0)
+        expected = from_georeader(
+            GeoTensor.concatenate([to_georeader(a), to_georeader(b)], axis=0)
+        )
         np.testing.assert_array_equal(np.asarray(out), np.asarray(expected))
-        assert out.transform == expected.transform
+        assert affine_of(out) == affine_of(expected)
         assert out.crs == expected.crs
-        assert out.fill_value_default == expected.fill_value_default
+        assert out.fill_value == expected.fill_value
         assert out.dtype == expected.dtype
 
     def test_higher_dim_input_rejected(self) -> None:
-        # 4-D (T, C, H, W) isn't a valid GeoTensor shape for this op.
+        # 4-D (T, C, H, W) isn't a valid GeoArray shape for this op.
         a = _gt(np.zeros((1, 2, 8, 8), dtype=np.float32))
         with pytest.raises(ValueError, match=r"2-D .* or 3-D"):
             StackMatched()([a])

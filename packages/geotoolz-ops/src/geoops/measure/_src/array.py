@@ -1,4 +1,4 @@
-"""Tier-A primitives for :mod:`geoops.measure` -- no ``GeoTensor`` here.
+"""Tier-A primitives for :mod:`geoops.measure` -- no ``GeoArray`` here.
 
 The label / region / skeleton maths is shared with :mod:`geoops.plume`
 and :mod:`geoops.mask`, so it lives in :mod:`geoops._src.labels` and

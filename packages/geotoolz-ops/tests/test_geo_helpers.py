@@ -5,14 +5,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
-from _helpers import DEFAULT_TRANSFORM, toy_geotensor
+from _helpers import DEFAULT_TRANSFORM, toy_geoarray
 
 import geoops as gz
 from geoops._src.geo import (
     grid_matches,
     ground_pixel_size,
     pixel_xy,
-    require_geotensor,
+    require_geoarray,
     require_projected_crs,
 )
 
@@ -29,37 +29,37 @@ def _old_xy(transform, row: float, col: float) -> tuple[float, float]:
     return float(x), float(y)
 
 
-# --- require_geotensor -------------------------------------------------------
+# --- require_geoarray -------------------------------------------------------
 
 
-def test_require_geotensor_returns_georeferenced_input() -> None:
-    gt = toy_geotensor(np.zeros((2, 2)))
-    assert require_geotensor(gt, "Op") is gt
+def test_require_geoarray_returns_georeferenced_input() -> None:
+    gt = toy_geoarray(np.zeros((2, 2)))
+    assert require_geoarray(gt, "Op") is gt
 
 
-def test_require_geotensor_message() -> None:
+def test_require_geoarray_message() -> None:
     with pytest.raises(TypeError) as excinfo:
-        require_geotensor(np.zeros((2, 2)), "MyOp")
+        require_geoarray(np.zeros((2, 2)), "MyOp")
     assert str(excinfo.value) == (
-        "MyOp requires a georeferenced GeoTensor input; got a plain array (ndarray)."
+        "MyOp requires a georeferenced GeoArray input; got a plain array (ndarray)."
     )
 
 
-def test_require_geotensor_arg_and_hint() -> None:
+def test_require_geoarray_arg_and_hint() -> None:
     with pytest.raises(
         TypeError,
-        match=r"^Op requires a georeferenced GeoTensor like; got a plain array "
+        match=r"^Op requires a georeferenced GeoArray like; got a plain array "
         r"\(list\)\. Pass it explicitly\.$",
     ):
-        require_geotensor([1, 2], "Op", arg="like", hint="Pass it explicitly.")
+        require_geoarray([1, 2], "Op", arg="like", hint="Pass it explicitly.")
 
 
-def test_require_geotensor_rejects_transform_none() -> None:
+def test_require_geoarray_rejects_transform_none() -> None:
     class Carrier:
         transform = None
 
     with pytest.raises(TypeError, match="Carrier"):
-        require_geotensor(Carrier(), "Op")
+        require_geoarray(Carrier(), "Op")
 
 
 @pytest.mark.parametrize(
@@ -72,11 +72,11 @@ def test_require_geotensor_rejects_transform_none() -> None:
     ],
     ids=lambda op: type(op).__name__,
 )
-def test_operators_share_require_geotensor_message(op) -> None:
+def test_operators_share_require_geoarray_message(op) -> None:
     with pytest.raises(TypeError) as excinfo:
         op(np.zeros((4, 4), dtype=np.float32))
     assert str(excinfo.value) == (
-        f"{type(op).__name__} requires a georeferenced GeoTensor input; "
+        f"{type(op).__name__} requires a georeferenced GeoArray input; "
         "got a plain array (ndarray)."
     )
 
@@ -85,48 +85,48 @@ def test_operators_share_require_geotensor_message(op) -> None:
 
 
 def test_grid_matches_identical_grids() -> None:
-    a = toy_geotensor(np.zeros((2, 3, 3)))
-    assert grid_matches(a, toy_geotensor(np.ones((2, 3, 3))))
+    a = toy_geoarray(np.zeros((2, 3, 3)))
+    assert grid_matches(a, toy_geoarray(np.ones((2, 3, 3))))
 
 
 def test_grid_matches_default_is_exact() -> None:
-    a = toy_geotensor(np.zeros((3, 3)))
-    b = toy_geotensor(np.zeros((3, 3)), transform=_shifted(1e-9))
+    a = toy_geoarray(np.zeros((3, 3)))
+    b = toy_geoarray(np.zeros((3, 3)), transform=_shifted(1e-9))
     assert not grid_matches(a, b)
 
 
 def test_grid_matches_atol_is_absolute_per_coefficient() -> None:
-    a = toy_geotensor(np.zeros((3, 3)))
-    drift = toy_geotensor(np.zeros((3, 3)), transform=_shifted(1e-9))
+    a = toy_geoarray(np.zeros((3, 3)))
+    drift = toy_geoarray(np.zeros((3, 3)), transform=_shifted(1e-9))
     assert grid_matches(a, drift, atol=1e-6)
     # No relative term: a 0.5 m shift on a 500 km origin is not "close"
     # even though it is within numpy's default rtol=1e-5.
-    half_metre = toy_geotensor(np.zeros((3, 3)), transform=_shifted(0.5))
+    half_metre = toy_geoarray(np.zeros((3, 3)), transform=_shifted(0.5))
     assert not grid_matches(a, half_metre, atol=1e-6)
     assert grid_matches(a, half_metre, atol=0.5)
 
 
 def test_grid_matches_crs_mismatch() -> None:
-    a = toy_geotensor(np.zeros((3, 3)))
-    b = toy_geotensor(np.zeros((3, 3)), crs="EPSG:32630")
+    a = toy_geoarray(np.zeros((3, 3)))
+    b = toy_geoarray(np.zeros((3, 3)), crs="EPSG:32630")
     assert not grid_matches(a, b, atol=1.0)
 
 
 def test_grid_matches_spatial_only_ignores_band_axis() -> None:
-    a = toy_geotensor(np.zeros((2, 3, 3)))
-    b = toy_geotensor(np.zeros((4, 3, 3)))
+    a = toy_geoarray(np.zeros((2, 3, 3)))
+    b = toy_geoarray(np.zeros((4, 3, 3)))
     assert grid_matches(a, b)
     assert not grid_matches(a, b, spatial_only=False)
 
 
 def test_grid_matches_spatial_shape_mismatch() -> None:
-    a = toy_geotensor(np.zeros((3, 3)))
-    b = toy_geotensor(np.zeros((3, 4)))
+    a = toy_geoarray(np.zeros((3, 3)))
+    b = toy_geoarray(np.zeros((3, 4)))
     assert not grid_matches(a, b)
 
 
 def test_grid_matches_plain_arrays_compare_shape_only() -> None:
-    gt = toy_geotensor(np.zeros((2, 3, 3)))
+    gt = toy_geoarray(np.zeros((2, 3, 3)))
     assert grid_matches(np.zeros((3, 3)), gt)
     assert grid_matches(gt, np.zeros((5, 3, 3)))
     assert not grid_matches(gt, np.zeros((5, 3, 3)), spatial_only=False)
@@ -136,15 +136,15 @@ def test_grid_matches_plain_arrays_compare_shape_only() -> None:
 def test_dnbr_rejects_sub_pixel_drift() -> None:
     # dNBR used to accept a 1e-9 origin drift (np.allclose defaults) while
     # the compositing operators rejected it; the shared check is exact.
-    pre = toy_geotensor(np.ones((3, 3), dtype=np.float32))
-    post = toy_geotensor(np.ones((3, 3), dtype=np.float32), transform=_shifted(1e-9))
+    pre = toy_geoarray(np.ones((3, 3), dtype=np.float32))
+    post = toy_geoarray(np.ones((3, 3), dtype=np.float32), transform=_shifted(1e-9))
     with pytest.raises(ValueError, match="dNBR inputs must share"):
         gz.indices.dNBR()(pre, post)
 
 
 def test_median_composite_requires_full_shape_match() -> None:
-    a = toy_geotensor(np.zeros((2, 3, 3), dtype=np.float32))
-    b = toy_geotensor(np.zeros((3, 3, 3), dtype=np.float32))
+    a = toy_geoarray(np.zeros((2, 3, 3), dtype=np.float32))
+    b = toy_geoarray(np.zeros((3, 3, 3), dtype=np.float32))
     with pytest.raises(ValueError, match="MedianComposite: the frame 1 pixel grid"):
         gz.compositing.MedianComposite()([a, b])
 
@@ -204,7 +204,7 @@ def test_find_contours_vertices_unchanged() -> None:
     transform = rasterio.Affine(0.3, 0.07, -122.1, -0.05, -0.3, 37.9)
     arr = np.zeros((6, 6), dtype=np.float32)
     arr[2:4, 1:5] = 1.0
-    gt = toy_geotensor(arr, transform=transform, fill_value_default=None)
+    gt = toy_geoarray(arr, transform=transform, fill_value=None)
     contours = gz.measure.FindContours(level=0.5)(gt)
     from skimage.measure import find_contours
 
@@ -217,10 +217,10 @@ def test_find_contours_vertices_unchanged() -> None:
 
 def test_regionprops_centroids_unchanged() -> None:
     transform = rasterio.Affine(0.3, 0.07, -122.1, -0.05, -0.3, 37.9)
-    labels = toy_geotensor(
+    labels = toy_geoarray(
         np.array([[1, 1, 0], [0, 2, 2], [0, 2, 2]], dtype=np.int32),
         transform=transform,
-        fill_value_default=0,
+        fill_value=0,
     )
     props = gz.measure.RegionProps()(labels)
     assert len(props) == 2
@@ -235,7 +235,7 @@ def test_peak_local_max_points_unchanged() -> None:
     arr = np.zeros((9, 9), dtype=np.float32)
     arr[2, 3] = 5.0
     arr[6, 6] = 3.0
-    gt = toy_geotensor(arr, transform=transform, fill_value_default=None)
+    gt = toy_geoarray(arr, transform=transform, fill_value=None)
     peaks = gz.feature.PeakLocalMax(min_distance=1)(gt)
     assert len(peaks) == 2
     for row, col, geom in zip(peaks["row"], peaks["col"], peaks.geometry, strict=True):
@@ -251,23 +251,56 @@ def test_peak_local_max_points_unchanged() -> None:
 )
 def test_ground_pixel_size_is_the_step_length(grid, expected) -> None:
     """``(hypot(b, e), hypot(a, d))``: on the rotated grid |a| = |e| = 8.66."""
-    transform = toy_geotensor(np.zeros((2, 2)), grid=grid).transform
+    transform = toy_geoarray(np.zeros((2, 2)), grid=grid).transform
     np.testing.assert_allclose(ground_pixel_size(transform, "Op"), expected)
 
 
 def test_ground_pixel_size_rejects_a_sheared_grid() -> None:
-    transform = toy_geotensor(np.zeros((2, 2)), grid="sheared").transform
+    transform = toy_geoarray(np.zeros((2, 2)), grid="sheared").transform
     with pytest.raises(ValueError, match=r"^Op needs perpendicular .* sheared"):
         ground_pixel_size(transform, "Op")
 
 
 def test_require_projected_crs_messages() -> None:
-    geographic = toy_geotensor(np.zeros((2, 2)), grid="geographic")
+    geographic = toy_geoarray(np.zeros((2, 2)), grid="geographic")
     with pytest.raises(ValueError, match=r"^Op computes slopes .*geographic"):
         require_projected_crs(geographic, "Op", what="slopes")
-    feet = toy_geotensor(np.zeros((2, 2)), crs="EPSG:2263")
+    feet = toy_geoarray(np.zeros((2, 2)), crs="EPSG:2263")
     with pytest.raises(ValueError, match="linear units"):
         require_projected_crs(feet, "Op")
     require_projected_crs(feet, "Op", metres=False)
-    require_projected_crs(toy_geotensor(np.zeros((2, 2))), "Op")
+    require_projected_crs(toy_geoarray(np.zeros((2, 2))), "Op")
     require_projected_crs(np.zeros((2, 2)), "Op")
+
+
+# --- the engine boundary refuses georeader objects --------------------------
+
+
+def test_to_engine_refuses_a_geotensor() -> None:
+    """GD1 at the engine boundary: only geotoolz carriers cross into georeader."""
+    from geoarray.interop.georeader import to_georeader
+
+    from geoops._src.engine import to_engine
+
+    gt = to_georeader(toy_geoarray(np.zeros((2, 2))))
+    with pytest.raises(TypeError, match=r"ReprojectLike .*from_georeader"):
+        to_engine(gt, "ReprojectLike")
+
+
+def test_to_engine_refuses_a_georeader_reader(tmp_path) -> None:
+    from georeader.rasterio_reader import RasterioReader
+
+    from geoops._src.engine import to_engine
+
+    path = tmp_path / "scene.tif"
+    gz.io.WriteGeoTIFF(path=str(path))(toy_geoarray(np.ones((1, 4, 4))))
+    with pytest.raises(TypeError, match="source_from_georeader"):
+        to_engine(RasterioReader(str(path)))
+
+
+def test_to_engine_converts_geotoolz_carriers() -> None:
+    from geoops._src.engine import to_engine
+    from geoops._src.geo import is_geotensor
+
+    assert is_geotensor(to_engine(toy_geoarray(np.zeros((2, 2)))))
+    assert to_engine(None) is None

@@ -21,9 +21,9 @@ Transposes, renames, spatial reductions, channels-last outputs, pooled
 axes, bracketed vmap axes, and patterns with no explicit ``->`` all
 count as *not survived* — the result then carries no geotransform and
 is returned as a plain array. This is deliberately conservative:
-`georeader.GeoTensor.array_as_geotensor` requires the trailing two dims
-to keep their sizes, so only size-and-position-preserving patterns can
-rewrap safely.
+`geoops._src.wrap.wrap_like` only checks that the trailing two dims keep
+their sizes, so only size-and-position-preserving patterns can rewrap
+safely.
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ def spatial_survives(
         spatial_axes: The (row, column) axis names, default ``("y", "x")``.
 
     Returns:
-        Whether a ``GeoTensor`` carrier's transform / CRS remain valid
+        Whether a ``GeoArray`` carrier's transform / CRS remain valid
         for the output.
 
     Examples:

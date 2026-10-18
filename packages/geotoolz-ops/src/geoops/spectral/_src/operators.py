@@ -2,8 +2,8 @@
 
 Each Operator wraps a Tier-A primitive in `array.py` and re-attaches
 geospatial metadata via :func:`geoops._src.wrap.wrap_like`: a
-GeoTensor input comes back as a GeoTensor (``transform``, ``crs``,
-``fill_value_default``, and a copy of ``attrs`` propagated) while a
+GeoArray input comes back as a GeoArray (``transform``, ``crs``,
+``fill_value``, and a copy of ``attrs`` propagated) while a
 plain ``np.ndarray`` input comes back as a plain ndarray. When the band
 axis is *altered* (selected, reordered, binned, stacked, etc.) the
 per-band ``attrs`` entries (``band_names``, ``descriptions``,
@@ -13,13 +13,13 @@ the correct labels (plain-array carriers have no attrs, so this
 bookkeeping is skipped for them).
 
 Nodata: pixels that are non-finite or equal the input's
-``fill_value_default`` in any band (see :mod:`geoops._src.valid`) hold
+``fill_value`` in any band (see :mod:`geoops._src.valid`) hold
 the output's fill value. Band subsets and stacks keep the input's fill;
 value-preserving transforms (binning, smoothing) keep it too, switching
 to ``NaN`` when integer input is promoted to float
 (:func:`geoops._src.valid.carried_fill`); derived products
 (:class:`BandMath`, :class:`BandRatio`, :class:`ContinuumRemoval`) hold
-``NaN`` and declare ``fill_value_default=NaN``.
+``NaN`` and declare ``fill_value=NaN``.
 
 Band names are resolved from an explicit ``band_names=`` constructor
 argument when present; otherwise through the package-wide resolver
@@ -32,7 +32,7 @@ On plain arrays the attrs fallbacks are unavailable, so a string band
 reference raises ``TypeError`` and a missing wavelength table raises
 ``ValueError`` unless the values are given explicitly.
 
-The band axis is ``-3`` by default (georeader's ``(C, H, W)`` /
+The band axis is ``-3`` by default (the carrier's ``(C, H, W)`` /
 ``(T, C, H, W)`` layout). On a ``(T, C, H, W)`` time stack every operator
 works per frame: band-collapsing products (:class:`BandMath`,
 :class:`BandRatio`) come back as ``(T, 1, H, W)``.
@@ -44,9 +44,10 @@ place each: :class:`geoops.indices.NormalizedDifference` and
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
+from geoarray import GeoArray
 from pipekit import Operator
 
 from geoops._src.bands import (
@@ -60,7 +61,7 @@ from geoops._src.bands import (
     take_band_attrs,
 )
 from geoops._src.config import jsonable
-from geoops._src.geo import grid_matches
+from geoops._src.geo import grid_matches, reject_geotensor
 from geoops._src.shape import keep_band_axis
 from geoops._src.valid import carried_fill, wrap_filled
 from geoops._src.wrap import wrap_like
@@ -74,18 +75,14 @@ from geoops.spectral._src.array import (
 )
 
 
-if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
-
-
-def _attrs(gt: GeoTensor | np.ndarray) -> dict[str, Any]:
+def _attrs(gt: GeoArray | np.ndarray) -> dict[str, Any]:
     """Return a shallow copy of ``gt.attrs`` (or ``{}`` if missing)."""
     attrs = getattr(gt, "attrs", None)
     return {} if attrs is None else dict(attrs)
 
 
 def _names_or_attrs(
-    gt: GeoTensor | np.ndarray, override: list[str] | None
+    gt: GeoArray | np.ndarray, override: list[str] | None
 ) -> list[str | None] | None:
     """An explicit ``names`` override, else the carrier's band names."""
     return list(override) if override is not None else band_names(gt)
@@ -115,14 +112,14 @@ class SelectBands(Operator):
         >>> from geoops import spectral
         >>> # Sentinel-2 RGB stacked as (B2, B3, B4, B8) -> keep (B4, B3, B2).
         >>> rgb = spectral.SelectBands(bands=["B4", "B3", "B2"])
-        >>> out = rgb(reflectance_geotensor)
+        >>> out = rgb(reflectance_geoarray)
     """
 
     def __init__(self, *, bands: list[BandRef], axis: int = -3) -> None:
         self.bands = bands
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr = np.asarray(gt)
         indexes = resolve_bands(gt, self.bands)
         attrs = _attrs(gt)
@@ -160,7 +157,7 @@ class ReorderBands(SelectBands):
         >>> from geoops import spectral
         >>> # Reorder a BGRN stack to RGBN.
         >>> reorder = spectral.ReorderBands(order=[2, 1, 0, 3])
-        >>> rgbn = reorder(bgrn_geotensor)
+        >>> rgbn = reorder(bgrn_geoarray)
     """
 
     def __init__(self, *, order: list[BandRef], axis: int = -3) -> None:
@@ -182,17 +179,17 @@ def _same_fill(a: Any, b: Any) -> bool:
 class StackBands(Operator):
     """Concatenate carriers along the band axis.
 
-    The checks of :meth:`georeader.GeoTensor.concatenate`, extended to
-    inputs with different band counts: every input must sit on the first
+    The checks of :func:`geoarray.concatenate`, extended to plain arrays,
+    2-D inputs and any band ``axis``: every input must sit on the first
     input's pixel grid (:func:`geoops._src.geo.grid_matches` -- equal
     spatial shape, CRS and transform) and declare the same
-    ``fill_value_default`` (``NaN`` matches ``NaN``), since the stack can
+    ``fill_value`` (``NaN`` matches ``NaN``), since the stack can
     declare only one fill. Each per-band attrs key (``band_names``,
     ``descriptions``, ``wavelengths``, ...) is concatenated in input order
     when every input carries it with one entry per band; otherwise that
     key is dropped on the output. Other attrs come from the first input.
     Plain ``np.ndarray`` inputs are supported (only the spatial shape is
-    checked and a plain array is returned); mixing GeoTensors and plain
+    checked and a plain array is returned); mixing GeoArrays and plain
     arrays raises because their georeferencing cannot agree.
 
     Args:
@@ -201,7 +198,7 @@ class StackBands(Operator):
 
     Raises:
         TypeError: If given a single array instead of a sequence.
-        ValueError: If the sequence is empty, mixes GeoTensors and plain
+        ValueError: If the sequence is empty, mixes GeoArrays and plain
             arrays, or the inputs differ in grid or fill value.
 
     Examples:
@@ -213,21 +210,23 @@ class StackBands(Operator):
     def __init__(self, *, axis: int = -3) -> None:
         self.axis = axis
 
-    def _apply(self, tensors: list[GeoTensor | np.ndarray]) -> GeoTensor | np.ndarray:
-        if isinstance(tensors, np.ndarray):
+    def _apply(self, tensors: list[GeoArray | np.ndarray]) -> GeoArray | np.ndarray:
+        if isinstance(tensors, np.ndarray | GeoArray):
             raise TypeError(
                 "StackBands takes a sequence of carriers to concatenate along the "
                 f"band axis; got a single {tensors.ndim}-D array"
             )
         if not tensors:
-            raise ValueError("StackBands requires at least one GeoTensor")
+            raise ValueError("StackBands requires at least one GeoArray")
+        for gt in tensors:
+            reject_geotensor(gt, "StackBands")
         first = tensors[0]
-        georeferenced = getattr(first, "transform", None) is not None
-        first_fill = getattr(first, "fill_value_default", None)
+        georeferenced = isinstance(first, GeoArray)
+        first_fill = getattr(first, "fill_value", None)
         for idx, gt in enumerate(tensors[1:], start=1):
-            if (getattr(gt, "transform", None) is not None) != georeferenced:
+            if isinstance(gt, GeoArray) != georeferenced:
                 raise ValueError(
-                    "StackBands cannot mix GeoTensors and plain arrays; input "
+                    "StackBands cannot mix GeoArrays and plain arrays; input "
                     f"{idx} differs from input 0"
                 )
             if not grid_matches(first, gt):
@@ -236,10 +235,10 @@ class StackBands(Operator):
                     f"input {idx} (shape {np.shape(gt)}) is on a different grid "
                     f"than input 0 (shape {np.shape(first)})"
                 )
-            fill = getattr(gt, "fill_value_default", None)
+            fill = getattr(gt, "fill_value", None)
             if not _same_fill(fill, first_fill):
                 raise ValueError(
-                    "All inputs must share fill_value_default; input "
+                    "All inputs must share fill_value; input "
                     f"{idx} has {fill!r}, input 0 has {first_fill!r}"
                 )
         arrays = [
@@ -258,7 +257,7 @@ class StackBands(Operator):
 
 
 class SplitBands(Operator):
-    """Split a multiband GeoTensor into one single-band GeoTensor per band.
+    """Split a multiband GeoArray into one single-band GeoArray per band.
 
     Plain ``np.ndarray`` input is supported and yields a list of plain
     single-band arrays.
@@ -271,7 +270,7 @@ class SplitBands(Operator):
 
     Examples:
         >>> from geoops import spectral
-        >>> bands = spectral.SplitBands()(rgb_geotensor)  # list of (1, H, W)
+        >>> bands = spectral.SplitBands()(rgb_geoarray)  # list of (1, H, W)
         >>> red, green, blue = bands
     """
 
@@ -279,7 +278,7 @@ class SplitBands(Operator):
         self.names = names
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> list[GeoTensor | np.ndarray]:
+    def _apply(self, gt: GeoArray | np.ndarray) -> list[GeoArray | np.ndarray]:
         arr = np.asarray(gt)
         axis = self.axis + arr.ndim if self.axis < 0 else self.axis
         if not 0 <= axis < arr.ndim:
@@ -331,7 +330,7 @@ class BandMath(Operator):
         >>> from geoops import spectral
         >>> # NDVI by name (assumes gt.attrs["band_names"] contains B4/B8).
         >>> ndvi = spectral.BandMath(expression="(B8 - B4) / (B8 + B4 + 1e-6)")
-        >>> ndvi_map = ndvi(reflectance_geotensor)
+        >>> ndvi_map = ndvi(reflectance_geoarray)
     """
 
     def __init__(
@@ -345,7 +344,7 @@ class BandMath(Operator):
         self.band_names = band_names
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         arr = np.asarray(gt)
         names = _names_or_attrs(gt, self.band_names) or _default_band_names(
             arr.shape[self.axis]
@@ -365,9 +364,7 @@ class BandMath(Operator):
             fill = np.nan
         else:
             fill = carried_fill(gt, out.dtype)
-        return wrap_filled(
-            gt, out, fill_value_default=fill, attrs=strip_band_attrs(_attrs(gt))
-        )
+        return wrap_filled(gt, out, fill_value=fill, attrs=strip_band_attrs(_attrs(gt)))
 
 
 class BandRatio(Operator):
@@ -387,7 +384,7 @@ class BandRatio(Operator):
         >>> from geoops import spectral
         >>> # Simple Ratio Vegetation Index (NIR / Red).
         >>> srvi = spectral.BandRatio(numerator="B8", denominator="B4")
-        >>> ratio = srvi(reflectance_geotensor)
+        >>> ratio = srvi(reflectance_geoarray)
     """
 
     def __init__(
@@ -403,7 +400,7 @@ class BandRatio(Operator):
         self.eps = eps
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = band_ratio(
             np.asarray(gt),
             resolve_band(gt, self.numerator),
@@ -414,7 +411,7 @@ class BandRatio(Operator):
         return wrap_filled(
             gt,
             keep_band_axis(out, gt),
-            fill_value_default=np.nan,
+            fill_value=np.nan,
             attrs=strip_band_attrs(_attrs(gt)),
         )
 
@@ -454,7 +451,7 @@ class ContinuumRemoval(Operator):
         >>> from geoops import spectral
         >>> # Continuum-remove a SWIR-2 mineral absorption window.
         >>> cr = spectral.ContinuumRemoval(method="convex_hull")
-        >>> band_depth = cr(swir2_geotensor)  # (B, H, W), values in (0, 1]
+        >>> band_depth = cr(swir2_geoarray)  # (B, H, W), values in (0, 1]
     """
 
     def __init__(
@@ -468,14 +465,14 @@ class ContinuumRemoval(Operator):
         self.wavelengths = wavelengths
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = continuum_removal(
             np.asarray(gt),
             resolve_wavelengths(gt, self.wavelengths),
             axis=self.axis,
             method=self.method,
         )
-        return wrap_filled(gt, out, fill_value_default=np.nan)
+        return wrap_filled(gt, out, fill_value=np.nan)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -519,7 +516,7 @@ class SpectralBinning(Operator):
         ...     width=30.0,
         ...     method="weighted_mean",
         ... )
-        >>> coarse = binner(hyperspectral_geotensor)
+        >>> coarse = binner(hyperspectral_geoarray)
     """
 
     def __init__(
@@ -537,7 +534,7 @@ class SpectralBinning(Operator):
         self.source_wavelengths = source_wavelengths
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         target_wavelengths = np.asarray(self.target_wavelengths, dtype=float)
         out = spectral_binning(
             np.asarray(gt),
@@ -554,7 +551,7 @@ class SpectralBinning(Operator):
         return wrap_filled(
             gt,
             out,
-            fill_value_default=carried_fill(gt, out.dtype),
+            fill_value=carried_fill(gt, out.dtype),
             attrs=attrs,
         )
 
@@ -577,7 +574,7 @@ class SpectralBinning(Operator):
 class SpectralSmoothing(Operator):
     """Smooth spectra along the band axis.
 
-    Pure per-spectrum math — accepts a GeoTensor or a plain
+    Pure per-spectrum math — accepts a GeoArray or a plain
     ``np.ndarray`` and returns the same carrier kind.
 
     Args:
@@ -595,7 +592,7 @@ class SpectralSmoothing(Operator):
         >>> smooth = spectral.SpectralSmoothing(
         ...     method="savgol", window=9, polyorder=2
         ... )
-        >>> denoised = smooth(hyperspectral_geotensor)
+        >>> denoised = smooth(hyperspectral_geoarray)
     """
 
     def __init__(
@@ -611,7 +608,7 @@ class SpectralSmoothing(Operator):
         self.polyorder = polyorder
         self.axis = axis
 
-    def _apply(self, gt: GeoTensor | np.ndarray) -> GeoTensor | np.ndarray:
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = spectral_smoothing(
             np.asarray(gt),
             axis=self.axis,
@@ -619,4 +616,4 @@ class SpectralSmoothing(Operator):
             window=self.window,
             polyorder=self.polyorder,
         )
-        return wrap_filled(gt, out, fill_value_default=carried_fill(gt, out.dtype))
+        return wrap_filled(gt, out, fill_value=carried_fill(gt, out.dtype))

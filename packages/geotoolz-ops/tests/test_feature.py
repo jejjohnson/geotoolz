@@ -6,19 +6,19 @@ import numpy as np
 import pandas as pd
 import pytest
 import rasterio
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geoops as gz
 
 
-def _gt(values: np.ndarray) -> GeoTensor:
-    return GeoTensor(
-        values=values,
+def _gt(values: np.ndarray) -> GeoArray:
+    return GeoArray(
+        data=values,
         transform=rasterio.Affine(2.0, 0.0, 100.0, 0.0, -2.0, 200.0),
         crs="EPSG:32629",
-        # 0 is real data in these images; georeader would treat a 0 fill
-        # as nodata, which the feature maps then mask out.
-        fill_value_default=None,
+        # 0 is real data in these images; a 0 fill would mark it as
+        # nodata, which the feature maps then mask out.
+        fill_value=None,
     )
 
 
@@ -46,7 +46,7 @@ def test_canny_returns_boolean_geotensor() -> None:
     edges = gz.feature.Canny(sigma=0.5)(gt)
 
     assert edges.shape == gt.shape
-    assert edges.transform == gt.transform
+    assert edges.grid == gt.grid
     assert np.asarray(edges).dtype == bool
 
 
@@ -86,7 +86,7 @@ def test_canny_int64_input_still_supported() -> None:
     assert edges.any()
 
 
-def _blob_scene() -> GeoTensor:
+def _blob_scene() -> GeoArray:
     rng = np.random.default_rng(0)
     image = rng.uniform(0.0, 0.1, size=(32, 32))
     yy, xx = np.ogrid[:32, :32]
@@ -226,7 +226,7 @@ def _step_image() -> np.ndarray:
 )
 def test_plain_ndarray_in_plain_result_out(op: gz.Operator, values: np.ndarray) -> None:
     """Metadata-independent feature ops accept plain ndarrays and match
-    the GeoTensor path (array outputs stay plain ndarrays)."""
+    the GeoArray path (array outputs stay plain ndarrays)."""
     out_plain = op(values)
     out_geo = op(_gt(values))
 
@@ -247,8 +247,8 @@ def test_plain_ndarray_in_plain_result_out(op: gz.Operator, values: np.ndarray) 
     ],
 )
 def test_geo_dependent_ops_reject_plain_arrays(op: gz.Operator) -> None:
-    """Ops whose output geometry needs the transform stay GeoTensor-only."""
-    with pytest.raises(TypeError, match="georeferenced GeoTensor"):
+    """Ops whose output geometry needs the transform stay GeoArray-only."""
+    with pytest.raises(TypeError, match="georeferenced GeoArray"):
         op(np.zeros((6, 6), dtype=float))
 
 

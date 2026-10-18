@@ -1,4 +1,4 @@
-"""Explicit compositing operators for co-registered GeoTensor stacks."""
+"""Explicit compositing operators for co-registered GeoArray stacks."""
 
 from __future__ import annotations
 
