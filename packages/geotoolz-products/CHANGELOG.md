@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.5.0...geotoolz-products-v0.6.0) (2026-10-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **geotoolz:** geotoolz installs a stack whose public APIs take and return geoarray.GeoArray and geoarray.RasterSource; a georeader GeoTensor or reader is refused with a TypeError naming from_georeader / source_from_georeader.
+* **products:** readers return geoarray.GeoArray and are geoarray.RasterSources, not georeader GeoData; read_from_window(Window) is read_window(PixelWindow); fill_value_default is fill_value; load(boundless=) is load(); CMSourceRaster.from_geodata is from_source.
+
+### Features
+
+* **geotoolz:** describe the stack on geoarray.GeoArray and require the GeoArray releases ([#507](https://github.com/jejjohnson/geotoolz/issues/507)) ([336156d](https://github.com/jejjohnson/geotoolz/commit/336156da80925020cfc2247692ba9674dc0b5cd7))
+* **products:** readers are geoarray RasterSources that read GeoArray ([#504](https://github.com/jejjohnson/geotoolz/issues/504)) ([d600e4c](https://github.com/jejjohnson/geotoolz/commit/d600e4c2f831962604942691070979c5a0ea3ef3))
+
 ## [0.5.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.4.2...geotoolz-products-v0.5.0) (2026-10-17)
 
 

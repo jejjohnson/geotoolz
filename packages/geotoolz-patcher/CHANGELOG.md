@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.11.0...geotoolz-patcher-v0.12.0) (2026-10-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **geotoolz:** geotoolz installs a stack whose public APIs take and return geoarray.GeoArray and geoarray.RasterSource; a georeader GeoTensor or reader is refused with a TypeError naming from_georeader / source_from_georeader.
+* **patcher:** fields take geoarray RasterSources and return GeoArray; RasterDomain is no longer georeader's GeoDataBase (custom domains need a grid); fill_value_default is fill_value.
+
+### Features
+
+* **geotoolz:** describe the stack on geoarray.GeoArray and require the GeoArray releases ([#507](https://github.com/jejjohnson/geotoolz/issues/507)) ([336156d](https://github.com/jejjohnson/geotoolz/commit/336156da80925020cfc2247692ba9674dc0b5cd7))
+* **patcher:** fields read geoarray RasterSources and return GeoArray ([#503](https://github.com/jejjohnson/geotoolz/issues/503)) ([7062563](https://github.com/jejjohnson/geotoolz/commit/70625637574aef553b580208788b4d80aec50cb9))
+
 ## [0.11.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.10.2...geotoolz-patcher-v0.11.0) (2026-10-17)
 
 

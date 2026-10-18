@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.6.0...geotoolz-catalog-v0.7.0) (2026-10-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **geotoolz:** geotoolz installs a stack whose public APIs take and return geoarray.GeoArray and geoarray.RasterSource; a georeader GeoTensor or reader is refused with a TypeError naming from_georeader / source_from_georeader.
+* **catalog:** the loaders return geoarray.GeoArray instead of georeader.GeoTensor (no .values; the transform is a (6,) array; attrs are immutable). Convert with geoarray.interop.georeader.to_georeader where a GeoTensor is still needed. A field_for(materialize=False) field's domain is a geoarray.RasterSource: read its CRS from domain.grid.crs.
+
+### Features
+
+* **catalog:** loaders return geoarray.GeoArray on the slice grid ([#505](https://github.com/jejjohnson/geotoolz/issues/505)) ([cb50939](https://github.com/jejjohnson/geotoolz/commit/cb50939b146d5159f8e2e7803f977bc753e12af5))
+* **geotoolz:** describe the stack on geoarray.GeoArray and require the GeoArray releases ([#507](https://github.com/jejjohnson/geotoolz/issues/507)) ([336156d](https://github.com/jejjohnson/geotoolz/commit/336156da80925020cfc2247692ba9674dc0b5cd7))
+
 ## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.5.1...geotoolz-catalog-v0.6.0) (2026-10-17)
 
 

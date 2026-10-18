@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.11.0...geotoolz-v0.12.0) (2026-10-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **geotoolz:** geotoolz installs a stack whose public APIs take and return geoarray.GeoArray and geoarray.RasterSource; a georeader GeoTensor or reader is refused with a TypeError naming from_georeader / source_from_georeader.
+
+### Features
+
+* **geotoolz:** describe the stack on geoarray.GeoArray and require the GeoArray releases ([#507](https://github.com/jejjohnson/geotoolz/issues/507)) ([336156d](https://github.com/jejjohnson/geotoolz/commit/336156da80925020cfc2247692ba9674dc0b5cd7))
+
 ## [0.11.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-v0.10.3...geotoolz-v0.11.0) (2026-10-17)
 
 

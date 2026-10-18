@@ -1,9 +1,9 @@
 {
-  "packages/geotoolz": "0.11.0",
-  "packages/geotoolz-ops": "0.11.0",
-  "packages/geotoolz-patcher": "0.11.0",
-  "packages/geotoolz-catalog": "0.6.0",
-  "packages/geotoolz-products": "0.5.0",
-  "packages/geotoolz-cloud": "0.5.0",
-  "packages/geotoolz-array": "0.1.0"
+  "packages/geotoolz": "0.12.0",
+  "packages/geotoolz-ops": "0.12.0",
+  "packages/geotoolz-patcher": "0.12.0",
+  "packages/geotoolz-catalog": "0.7.0",
+  "packages/geotoolz-products": "0.6.0",
+  "packages/geotoolz-cloud": "0.6.0",
+  "packages/geotoolz-array": "0.2.0"
 }

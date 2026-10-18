@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.1.0...geotoolz-array-v0.2.0) (2026-10-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ops:** geoops operators no longer accept georeader GeoTensor or GeoData; convert with geoarray.interop.georeader.from_georeader / source_from_georeader. wrap_like(fill_value_default=) is now wrap_like(fill_value=); require_geotensor is require_geoarray; GeoTensorEstimator is GeoArrayEstimator.
+
+### Features
+
+* **array:** add the RasterSource protocols and georeader reader adapters ([#500](https://github.com/jejjohnson/geotoolz/issues/500)) ([d4aea92](https://github.com/jejjohnson/geotoolz/commit/d4aea9287f52e8f7bdd513a373763d73a7294b1e))
+* **ops:** take and return geoarray.GeoArray instead of GeoTensor ([#501](https://github.com/jejjohnson/geotoolz/issues/501)) ([7522c70](https://github.com/jejjohnson/geotoolz/commit/7522c7016f1a3c18b769d587a46540e1e205578b))
+
 ## 0.1.0 (2026-10-17)
 
 

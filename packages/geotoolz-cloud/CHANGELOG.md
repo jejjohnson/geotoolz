@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.5.0...geotoolz-cloud-v0.6.0) (2026-10-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **geotoolz:** geotoolz installs a stack whose public APIs take and return geoarray.GeoArray and geoarray.RasterSource; a georeader GeoTensor or reader is refused with a TypeError naming from_georeader / source_from_georeader.
+* **cloud:** geocloud returns geoarray.GeoArray, never GeoTensor; CogSource / CogDomain / AsyncCogReader fill_value_default is fill_value; write_cog no longer accepts a GeoTensor or georeader reader.
+
+### Features
+
+* **cloud:** read and write geoarray.GeoArray instead of GeoTensor ([#502](https://github.com/jejjohnson/geotoolz/issues/502)) ([e04df54](https://github.com/jejjohnson/geotoolz/commit/e04df54fbfda97271b34d7ec9ccf5d7e1a68ed41))
+* **geotoolz:** describe the stack on geoarray.GeoArray and require the GeoArray releases ([#507](https://github.com/jejjohnson/geotoolz/issues/507)) ([336156d](https://github.com/jejjohnson/geotoolz/commit/336156da80925020cfc2247692ba9674dc0b5cd7))
+
 ## [0.5.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.4.1...geotoolz-cloud-v0.5.0) (2026-10-17)
 
 
