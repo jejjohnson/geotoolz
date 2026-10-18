@@ -61,7 +61,9 @@ assert methane.crs is not None and methane.res == (10.0, 10.0)
 
 `open_hdf5` hands you an `h5py.File` over ranged reads, for code that
 walks a product's own layout. `read_hdf` reads one dataset as a
-`GeoArray`, with 1-based band `indexes` and optional swath `geolocation`.
+`GeoArray`, with 1-based band `indexes`. A swath's latitude and
+longitude are datasets too, on the same pixel grid: read each with
+`read_hdf`.
 
 ```python
 import tempfile
@@ -69,7 +71,7 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-from geoarray import GeoArray
+from geoarray import GeoArray, stack
 from obstore.store import MemoryStore
 
 from geocloud import files
@@ -79,12 +81,18 @@ from geocloud.store import mount
 path: Path = Path(tempfile.mkdtemp()) / "swath.h5"
 with h5py.File(path, "w") as f:
     f["radiance"] = np.random.default_rng(0).random((3, 200, 300)).astype("f4")  # (3, 200, 300) float32
+    f["lat"] = np.linspace(40.0, 38.0, 200 * 300, dtype="f4").reshape(200, 300)  # (200, 300) float32
+    f["lon"] = np.linspace(-1.0, 1.0, 200 * 300, dtype="f4").reshape(200, 300)   # (200, 300) float32
 
 mount("s3://demo-h5", MemoryStore())
 files.upload(path, "s3://demo-h5/swath.h5")
 with open_hdf5("s3://demo-h5/swath.h5") as f:
     corner: np.ndarray = f["radiance"][0, :10, :10]           # (10, 10) float32, one chunk fetched
 bands: GeoArray = read_hdf("s3://demo-h5/swath.h5", "radiance", indexes=[3, 1])  # (2, 200, 300) float32
+lat: GeoArray = read_hdf("s3://demo-h5/swath.h5", "lat")    # (200, 300) float32 · degrees north
+lon: GeoArray = read_hdf("s3://demo-h5/swath.h5", "lon")    # (200, 300) float32 · degrees east
+assert lat.grid == bands.grid                               # the swath's pixel grid
+latlon: GeoArray = stack([lat, lon])                        # (2, 200, 300) float32
 ```
 
 ## Decode CF packing yourself
@@ -102,10 +110,12 @@ read attributes and coordinates as plain Python values.
   on the pool.
 - **The result has an identity transform**, with a `UserWarning`, when
   the file has neither a `GeoTransform` nor evenly spaced 1-D coordinates.
-  Swath products ship 2-D latitude / longitude arrays instead: read them
-  with `read_hdf(..., geolocation=("lat", "lon"))` for an HDF / NetCDF-4
-  file, or with netCDF4 for a NetCDF-3 one. A carrier's attrs are frozen,
-  so `attrs["geolocation"]["latitude"]` is a tuple of row tuples:
-  `np.asarray` it back into an array.
+  Swath products ship 2-D latitude / longitude datasets instead: read
+  each as its own carrier (`read_hdf(path, "lat")`, or `read_netcdf` for
+  a NetCDF-3 file); they share the data's pixel grid. Attrs are frozen
+  and hashable, so they never hold the arrays.
+- **Stacking latitude and longitude** with `geoarray.stack` needs equal
+  fills. When the two datasets declare different ones, stack the arrays
+  yourself: `lat.with_data(np.stack([np.asarray(lat), np.asarray(lon)]))`.
 - **No declared fill** means `fill_value` is `0` (`fill_value_from_attrs`'s default); check
   `out.attrs["attrs"]` for what the file declares.

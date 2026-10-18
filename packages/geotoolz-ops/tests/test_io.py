@@ -91,16 +91,17 @@ def test_read_hdf5_reads_dataset_indexes_and_metadata(tmp_path: Path) -> None:
         path=path,
         dataset="EV_1KM_RefSB",
         indexes=[2],
-        geolocation=("Latitude", "Longitude"),
         metadata_groups=["metadata"],
     )()
 
     np.testing.assert_array_equal(np.asarray(out), values[1:2])
     assert out.fill_value == -9999
     assert out.attrs["metadata"]["metadata"]["sensor"] == "MODIS"
-    np.testing.assert_array_equal(
-        out.attrs["geolocation"]["latitude"], np.ones((3, 4), dtype=np.float32)
-    )
+    assert "geolocation" not in out.attrs
+
+    latitude = io.ReadHDF(path=path, dataset="Latitude")()  # (3, 4) float32
+    assert latitude.grid == out.grid  # the swath's pixel grid
+    np.testing.assert_array_equal(np.asarray(latitude), np.ones((3, 4)))
 
 
 def test_read_hdf5_missing_dependency_has_clear_message(

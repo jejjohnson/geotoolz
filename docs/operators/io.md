@@ -18,8 +18,9 @@ pip install 'geotoolz-ops[hdf4]'            # pyhdf, for HDF4 / HDF-EOS (MODIS)
 ## Read an HDF dataset
 
 Pick a dataset by path inside the file and, optionally, 1-based band
-`indexes`. `geolocation=` names the latitude and longitude datasets of a
-swath; they travel in `attrs["geolocation"]`.
+`indexes`. A swath's latitude and longitude are datasets on the same
+pixel grid as its data: read each with its own `ReadHDF`, and stack them
+with `geoarray.stack` when you want one `(2, H, W)` carrier.
 
 ```python
 import tempfile
@@ -27,7 +28,7 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-from geoarray import GeoArray
+from geoarray import GeoArray, stack
 
 import geoops as gz
 
@@ -41,8 +42,12 @@ with h5py.File(path, "w") as f:
     f["radiance"] = rng.random((3, 20, 30)).astype(np.float32)   # (3, 20, 30) float32
     f["lat"], f["lon"] = lat, lon
 
-reader: gz.ReadHDF = gz.io.ReadHDF(path=path, dataset="radiance", indexes=[1, 3], geolocation=("lat", "lon"))
+reader: gz.ReadHDF = gz.io.ReadHDF(path=path, dataset="radiance", indexes=[1, 3])
 bands: GeoArray = reader()                                       # (2, 20, 30) float32 · bands 1 and 3
+latitude: GeoArray = gz.io.ReadHDF(path=path, dataset="lat")()   # (20, 30) float64 · degrees north
+longitude: GeoArray = gz.io.ReadHDF(path=path, dataset="lon")()  # (20, 30) float64 · degrees east
+assert latitude.grid == bands.grid                               # one pixel grid, identity transform
+latlon: GeoArray = stack([latitude, longitude])                  # (2, 20, 30) float64 · needs equal fills
 ```
 
 HDF5 files go through `h5py`. HDF4 / HDF-EOS files are recognised by

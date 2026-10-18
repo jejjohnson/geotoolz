@@ -510,19 +510,6 @@ def _geoarray(
     )
 
 
-def _geolocation(latitude: Any, longitude: Any) -> dict[str, Any]:
-    """Latitude / longitude arrays as nested tuples, hashable in `FrozenAttrs`.
-
-    A carrier's attrs are frozen and hashable, so a 2-D array is stored as
-    a tuple of row tuples; ``np.asarray(attrs["geolocation"]["latitude"])``
-    gives the array back.
-    """
-    return {
-        "latitude": np.asarray(latitude).tolist(),
-        "longitude": np.asarray(longitude).tolist(),
-    }
-
-
 # --- GeoArray readers --------------------------------------------------------------
 
 
@@ -531,7 +518,6 @@ def read_hdf(
     dataset: str,
     *,
     indexes: list[int] | None = None,
-    geolocation: tuple[str, str] | None = None,
     metadata_groups: list[str] | None = None,
     storage_options: Mapping[str, Any] | None = None,
 ) -> GeoArray:
@@ -540,16 +526,15 @@ def read_hdf(
     The format is told by the file signature. HDF5 is read through h5py
     with ranged reads (`open_hdf5`), only the requested bands off disk;
     HDF4 through pyhdf on a local copy (`geocloud.cache.localize`). The
-    result has an identity transform: swath products carry their
-    georeferencing in ``geolocation`` arrays instead.
+    result has an identity transform. A swath product carries its
+    georeferencing in latitude / longitude datasets on the same pixel grid:
+    read each with its own ``read_hdf`` call (attrs are frozen and
+    hashable, so they never hold 2-D arrays).
 
     Args:
         source: A URI in any form the pool accepts, or a local path.
         dataset: Dataset path inside the file.
         indexes: 1-based band indexes along the leading dataset axis.
-        geolocation: ``(latitude_dataset, longitude_dataset)`` to load into
-            ``attrs["geolocation"]`` (``{"latitude", "longitude"}``, each a
-            tuple of row tuples — attrs are hashable; ``np.asarray`` it).
         metadata_groups: HDF5 group paths whose attributes are copied into
             ``attrs["metadata"]``.
         storage_options: Forwarded to `geocloud.store.get_obstore`.
@@ -566,11 +551,9 @@ def read_hdf(
     """
     signature = _signature(source, storage_options)
     if signature.startswith(HDF5_SIGNATURE):
-        return _read_hdf5(
-            source, dataset, indexes, geolocation, metadata_groups, storage_options
-        )
+        return _read_hdf5(source, dataset, indexes, metadata_groups, storage_options)
     if signature.startswith(HDF4_SIGNATURE):
-        return _read_hdf4(source, dataset, indexes, geolocation, storage_options)
+        return _read_hdf4(source, dataset, indexes, storage_options)
     raise ValueError(f"{os.fspath(source)!r} is neither an HDF5 nor an HDF4 file.")
 
 
@@ -578,7 +561,6 @@ def _read_hdf5(
     source: Location,
     dataset: str,
     indexes: list[int] | None,
-    geolocation: tuple[str, str] | None,
     metadata_groups: list[str] | None,
     storage_options: Mapping[str, Any] | None,
 ) -> GeoArray:
@@ -588,9 +570,6 @@ def _read_hdf5(
         attrs = _plain(dict(var.attrs))
         values = read_indexes(var, indexes)
         out_attrs: dict[str, Any] = {"attrs": attrs}
-        if geolocation is not None:
-            lat, lon = geolocation
-            out_attrs["geolocation"] = _geolocation(f[lat][...], f[lon][...])
         if metadata_groups is not None:
             out_attrs["metadata"] = {
                 group: _plain(dict(f[group].attrs)) for group in metadata_groups
@@ -602,7 +581,6 @@ def _read_hdf4(
     source: Location,
     dataset: str,
     indexes: list[int] | None,
-    geolocation: tuple[str, str] | None,
     storage_options: Mapping[str, Any] | None,
 ) -> GeoArray:
     sd = _require("pyhdf.SD", "hdf4", "geocloud.hdf.read_hdf (HDF4)")
@@ -612,11 +590,6 @@ def _read_hdf4(
         attrs = _plain(dict(var.attributes()))
         values = select_indexes(var.get(), indexes)
         out_attrs: dict[str, Any] = {"attrs": attrs}
-        if geolocation is not None:
-            lat, lon = geolocation
-            out_attrs["geolocation"] = _geolocation(
-                hdf.select(lat).get(), hdf.select(lon).get()
-            )
     finally:
         hdf.end()
     return _geoarray(values, fill_value=fill_value_from_attrs(attrs), attrs=out_attrs)
@@ -699,8 +672,7 @@ def _coordinate_affine(
         ):
             return (
                 "its coordinates are 2-D (curvilinear); read the latitude / "
-                "longitude arrays alongside it (netCDF4, or read_hdf(..., "
-                "geolocation=...) for a NetCDF-4 file)"
+                "longitude variables alongside it (read_netcdf on each)"
             )
         return f"no 1-D coordinate variable for {', '.join(map(repr, missing))}"
     axes = []

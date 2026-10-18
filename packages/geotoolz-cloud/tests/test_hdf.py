@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from geoarray import GeoArray
+from geoarray import GeoArray, stack
 from obstore.store import MemoryStore
 
 
@@ -61,22 +61,24 @@ def test_open_hdf5_reads_local_and_remote_files(h5_file: Path, bucket: str):
 def test_read_hdf_selects_bands_and_metadata(h5_file: Path, bucket: str):
     files.upload(h5_file, f"{bucket}/swath.h5")
     for source in (h5_file, f"{bucket}/swath.h5"):
-        out = read_hdf(
-            source,
-            "radiance",
-            indexes=[3, 1],
-            geolocation=("lat", "lon"),
-            metadata_groups=["meta"],
-        )
+        out = read_hdf(source, "radiance", indexes=[3, 1], metadata_groups=["meta"])
         with h5py.File(h5_file) as f:
             expected = f["radiance"][[0, 2]][::-1]
         assert isinstance(out, GeoArray)
         np.testing.assert_array_equal(np.asarray(out), expected)  # (2, 20, 30)
         assert out.fill_value == -9999.0
         assert out.attrs["metadata"] == {"meta": {"sensor": "toy"}}
-        latitude = np.asarray(out.attrs["geolocation"]["latitude"])
-        np.testing.assert_array_equal(latitude, np.ones((20, 30)))  # (20, 30)
-        assert hash(out.attrs)  # frozen: a 2-D array is stored as row tuples
+        assert "geolocation" not in out.attrs
+
+
+def test_read_hdf_reads_geolocation_onto_the_data_grid(h5_file: Path):
+    radiance = read_hdf(h5_file, "radiance")  # (3, 20, 30) float32
+    lat = read_hdf(h5_file, "lat")  # (20, 30) float32
+    lon = read_hdf(h5_file, "lon")  # (20, 30) float32
+    assert lat.grid == lon.grid == radiance.grid  # one identity-transform grid
+    latlon = stack([lat, lon])  # (2, 20, 30) float32
+    np.testing.assert_array_equal(np.asarray(latlon)[0], np.ones((20, 30)))
+    np.testing.assert_array_equal(np.asarray(latlon)[1], np.zeros((20, 30)))
 
 
 def test_read_hdf_rejects_other_files(tmp_path: Path):

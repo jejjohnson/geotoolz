@@ -753,21 +753,19 @@ class ReadHDF(SourceOperator):
     ranged requests (only the selected bands), HDF4 / HDF-EOS with pyhdf
     on a local copy; the format is told by the file signature. The result
     has an identity transform unless sensor-specific georeferencing is
-    applied later.
+    applied later. A swath's latitude / longitude datasets lie on the same
+    pixel grid: read each with its own ``ReadHDF``.
 
     Args:
         path: HDF file path, or any URI geotoolz-cloud reads (``s3://``,
             ``gs://``, ``az://``, signed ``https://``, ``hf://``).
         dataset: Dataset path inside the file.
         indexes: Optional 1-based band indexes along the leading dataset axis.
-        geolocation: Optional ``(latitude_dataset, longitude_dataset)`` names
-            to load into ``attrs["geolocation"]``.
         metadata_groups: Optional HDF5 group paths whose attributes are copied
             into ``attrs["metadata"]``.
 
     Returns (on call):
-        A `GeoArray`. attrs are frozen, so the 2-D geolocation arrays are
-        stored as nested tuples (``np.asarray`` gives the array back).
+        A `GeoArray` ``(..., H, W)``.
     """
 
     def __init__(
@@ -776,13 +774,11 @@ class ReadHDF(SourceOperator):
         path: str | PathLike[str],
         dataset: str,
         indexes: list[int] | None = None,
-        geolocation: tuple[str, str] | None = None,
         metadata_groups: list[str] | None = None,
     ) -> None:
         self.path = os.fspath(path)
         self.dataset = dataset
         self.indexes = indexes
-        self.geolocation = as_tuple(geolocation)
         self.metadata_groups = metadata_groups
 
     def _apply(self) -> GeoArray:
@@ -793,7 +789,6 @@ class ReadHDF(SourceOperator):
                 self.path,
                 self.dataset,
                 indexes=self.indexes,
-                geolocation=self.geolocation,
                 metadata_groups=self.metadata_groups,
             )
 

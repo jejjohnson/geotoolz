@@ -44,8 +44,9 @@ rasterio `Window` is accepted too).
   exception is a streamed write (`open(uri, "wb")`): a multipart upload cannot
   be replayed without buffering the whole object, so it is not retried.
 - **`geocloud.hdf`** (`[hdf5]` / `[netcdf]` / `[hdf4]`) — the stack's HDF5 /
-  NetCDF / HDF4 readers: `read_netcdf`, `read_hdf` (GeoArrays; 2-D swath
-  `geolocation` is frozen into attrs as row tuples), `open_hdf5`
+  NetCDF / HDF4 readers: `read_netcdf`, `read_hdf` (GeoArrays; a swath's
+  latitude / longitude are read as datasets of their own, never into the
+  frozen attrs), `open_hdf5`
   (h5py over ranged reads) and the CF decoders every product reader uses
   (`PackedVariable`, `attr`, `scalar`, `unpacked`, `time_attr`,
   `grid_variables`, `fill_value_from_attrs`, `affine_from_geotransform`,
