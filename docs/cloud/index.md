@@ -17,7 +17,9 @@ builds an [obstore](https://developmentseed.org/obstore/) client the first
 time a bucket is touched, then hands every later caller the same one. Credentials are registered once per store
 root in `geocloud.credentials`, so code downstream handles nothing but
 URIs. `geocloud.files` (whole-object verbs) and `geocloud.cog` (COG reads
-and writes) sit on that pool, and the other packages build on them.
+and writes) sit on that pool, and the other packages build on them. Every
+raster it reads or writes is a [`geoarray.GeoArray`](../array/index.md),
+and its COG readers are `geoarray.RasterSource`s.
 
 ![geocloud's layers: geopatcher's CogField, geoproducts' readers and bucket helpers, geocatalog's stage and your code call geocloud.files and geocloud.cog; both take their client from the geocloud.store pool, which merges the grants in geocloud.credentials (also handed to GDAL by gdal_access) and keeps one client per s3, gs, Azure, https or hf root](../assets/diagrams/cloud-pool.png)
 
@@ -31,7 +33,7 @@ pip install 'geotoolz-cloud[fsspec]'  # + geocloud.fs, for xarray / zarr / pyarr
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
-| *(base)* | obstore, georeader, rasterio, numpy | `geocloud.store`, `geocloud.files`, `geocloud.credentials`, `geocloud.cog.write_cog` |
+| *(base)* | obstore, geotoolz-array (+ its georeader adapter), rasterio, numpy | `geocloud.store`, `geocloud.files`, `geocloud.credentials`, `geocloud.cog.write_cog` |
 | `[cog]` | async-geotiff | `geocloud.cog.CogSource`, `AsyncCogReader` and the async `read_*` functions |
 | `[fsspec]` | fsspec (no s3fs / gcsfs / adlfs) | `geocloud.fs`, the fsspec filesystem on the pool |
 | `[hdf5]` / `[netcdf]` / `[hdf4]` | h5py / netCDF4 / pyhdf | `geocloud.hdf` readers for HDF5 + NetCDF-4 / NetCDF-3 / HDF4 |
@@ -46,8 +48,7 @@ two overlapping windows of its red band. Their shared tiles are fetched
 once.
 
 ```python
-from georeader.geotensor import GeoTensor
-from rasterio.windows import Window
+from geoarray import GeoArray, PixelWindow
 
 from geocloud import credentials, files
 from geocloud.cog import CogSource
@@ -57,10 +58,11 @@ credentials.set_credentials("s3://sentinel-cogs", anonymous=True, region="us-wes
 scene: str = "s3://sentinel-cogs/sentinel-s2-l2a-cogs/10/S/DG/2024/7/S2A_10SDG_20240702_0_L2A/"
 objects: list[files.ObjectInfo] = files.ls(scene)        # B01.tif … TCI.tif, metadata
 src: CogSource = CogSource.open(scene + "B04.tif")       # one header fetch
-src.domain.shape                                          # (1, 10980, 10980) · EPSG:32610, 10 m
-chips: list[GeoTensor] = src.read_windows(
-    [Window(0, 0, 512, 512), Window(256, 0, 512, 512)]
-)                                                         # 2 × (1, 512, 512) uint16
+src.shape                                                 # (1, 10980, 10980) · EPSG:32610, 10 m
+chips: list[GeoArray] = src.read_windows([
+    PixelWindow(col_off=0, row_off=0, width=512, height=512),
+    PixelWindow(col_off=256, row_off=0, width=512, height=512),
+])                                                        # 2 × (1, 512, 512) uint16
 ```
 
 ## What's inside

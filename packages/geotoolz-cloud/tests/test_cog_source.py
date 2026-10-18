@@ -12,6 +12,7 @@ Every fixture uses a lossless codec, so reads must match
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import http.server
 import pickle
@@ -32,7 +33,7 @@ from rasterio.windows import Window
 pytest.importorskip("obstore")
 pytest.importorskip("async_geotiff")
 
-from georeader.geotensor import GeoTensor
+from geoarray import AsyncRasterSource, GeoArray, Grid, PixelWindow, RasterSource
 from obstore.store import LocalStore
 
 from geocloud._src.cog_source import (
@@ -191,9 +192,9 @@ def test_read_window_matches_rasterio(cog_path: Path, cog_source: CogSource):
     with rasterio.open(cog_path) as src:
         expected = src.read(window=window)
         expected_transform = rasterio.windows.transform(window, src.transform)
-    assert isinstance(got, GeoTensor)
-    np.testing.assert_array_equal(got.values, expected)
-    assert got.transform == expected_transform
+    assert isinstance(got, GeoArray)
+    np.testing.assert_array_equal(got.data, expected)
+    assert got.grid.affine == expected_transform
 
 
 def test_read_windows_matches_per_window_selects(cog_source: CogSource):
@@ -208,8 +209,8 @@ def test_read_windows_matches_per_window_selects(cog_source: CogSource):
     individual = [cog_source.read_window(w) for w in windows]
     assert len(batched) == len(individual) == 4
     for got, want in zip(batched, individual, strict=True):
-        np.testing.assert_array_equal(got.values, want.values)
-        assert got.transform == want.transform
+        np.testing.assert_array_equal(got.data, want.data)
+        assert got.grid == want.grid
 
 
 def test_read_windows_empty_returns_empty(cog_source: CogSource):
@@ -263,6 +264,55 @@ def test_read_windows_dedups_tile_fetches(cog_source: CogSource, monkeypatch):
     assert len(observed) == 1  # one batched call
     # De-dup: should be exactly one tile (0,0), not two.
     assert observed[0] == [(0, 0)]
+
+
+# ---------------------------------------------------------------------------
+# The geoarray RasterSource / AsyncRasterSource protocols
+# ---------------------------------------------------------------------------
+
+
+def test_cog_source_is_a_raster_source(cog_path: Path, cog_source: CogSource):
+    assert isinstance(cog_source, RasterSource)
+    assert isinstance(cog_source, AsyncRasterSource)
+    with rasterio.open(cog_path) as src:
+        expected = Grid.from_affine(src.transform, src.crs, src.shape)
+        values = src.read()
+    assert cog_source.grid == expected == cog_source.domain.grid
+    assert cog_source.shape == (1, 64, 64)
+    assert cog_source.dtype == np.float32
+    assert cog_source.fill_value == 0
+    assert dict(cog_source.attrs) == {}
+    loaded = cog_source.load()
+    assert isinstance(loaded, GeoArray)
+    assert loaded.grid == cog_source.grid and loaded.shape == cog_source.shape
+    np.testing.assert_array_equal(loaded.data, values)
+    assert asyncio.run(cog_source.aload()).identical(loaded)
+
+
+def test_read_window_takes_a_pixel_window(cog_source: CogSource):
+    """A PixelWindow and the same rasterio Window read the same chip."""
+    window = PixelWindow(col_off=8, row_off=12, width=24, height=20)
+    chip = cog_source.read_window(window)
+    assert chip.identical(cog_source.read_window(Window(8, 12, 24, 20)))
+    # The chip sits where the window says on the source grid.
+    assert chip.grid == cog_source.grid.crop(window)
+    # A window read from the loaded carrier is the same chip.
+    assert chip.identical(cog_source.load().read_window(window))
+    async_chip = asyncio.run(cog_source.aread_window(window))
+    assert async_chip.identical(chip)
+
+
+def test_boundless_false_clips_to_the_image(cog_source: CogSource):
+    window = PixelWindow(col_off=50, row_off=-4, width=20, height=10)
+    clipped = cog_source.read_window(window, boundless=False)
+    assert clipped.shape == (1, 6, 14)
+    inside = PixelWindow(col_off=50, row_off=0, width=14, height=6)
+    assert clipped.identical(cog_source.read_window(inside))
+    assert cog_source.read_window(window).shape == (1, 10, 20)  # boundless
+    with pytest.raises(ValueError, match="does not overlap"):
+        cog_source.read_window(
+            PixelWindow(col_off=100, row_off=0, width=4, height=4), boundless=False
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -354,13 +404,11 @@ def _assert_matches_rasterio(
         )
         transform = rasterio.windows.transform(window, src.transform)
         crs = src.crs
-    assert isinstance(chip, GeoTensor)
-    np.testing.assert_array_equal(chip.values, expected)
-    assert chip.values.dtype == expected.dtype
-    assert chip.transform.almost_equals(transform, precision=1e-9)
-    assert chip.fill_value_default == fill or (
-        np.isnan(chip.fill_value_default) and np.isnan(fill)
-    )
+    assert isinstance(chip, GeoArray)
+    np.testing.assert_array_equal(chip.data, expected)
+    assert chip.dtype == expected.dtype
+    assert chip.grid.affine.almost_equals(transform, precision=1e-9)
+    assert chip.fill_value == fill or (np.isnan(chip.fill_value) and np.isnan(fill))
     assert (chip.crs is None) == (crs is None)
     if crs is not None:
         assert rasterio.crs.CRS.from_user_input(chip.crs) == crs
@@ -397,12 +445,13 @@ def test_nodata_propagates(tmp_path: Path, dtype: str, nodata: float):
     path = _write_cog(tmp_path / "nd.tif", _ramp(1, dtype), nodata=nodata)
     source = _open(path)
     assert source.domain.nodata == nodata
-    assert source.fill_value_default == nodata
+    assert source.fill_value == source.domain.fill_value == nodata
     for window in _WINDOWS:
         _assert_matches_rasterio(source, path, window)
     # Out-of-image region is nodata, not 0.
     chip = source.read_window(Window(_W - 2, 0, 4, 4))
-    assert (chip.values[..., 2:] == nodata).all()
+    assert (chip.data[..., 2:] == nodata).all()
+    assert not chip.valid_mask()[:, 2:].any()
 
 
 def test_nan_nodata(tmp_path: Path):
@@ -412,15 +461,15 @@ def test_nan_nodata(tmp_path: Path):
     source = _open(path)
     assert np.isnan(source.domain.nodata)
     _assert_matches_rasterio(source, path, Window(-2, -2, 8, 8))
-    assert np.isnan(source.read_window(Window(-2, -2, 8, 8)).values[0, 0, 0])
+    assert np.isnan(source.read_window(Window(-2, -2, 8, 8)).data[0, 0, 0])
 
 
 def test_no_nodata_fills_zero(tmp_path: Path):
     path = _write_cog(tmp_path / "plain.tif", _ramp(1) + 1)
     source = _open(path)
     assert source.domain.nodata is None
-    assert source.fill_value_default == 0
-    np.testing.assert_array_equal(source.read_window(Window(_W, 0, 4, 4)).values, 0)
+    assert source.fill_value == 0
+    np.testing.assert_array_equal(source.read_window(Window(_W, 0, 4, 4)).data, 0)
 
 
 def test_pixel_is_point_origin(tmp_path: Path):
@@ -495,8 +544,8 @@ def test_internal_mask_matches_masked_rasterio_read(tmp_path: Path):
     chip = source.read_window(Window(0, 0, _W, _H))
     with rasterio.open(path) as src:
         masked = src.read(masked=True)
-    np.testing.assert_array_equal(chip.values, masked.filled(0))
-    assert (chip.values[:, :20, :25] == 0).all()
+    np.testing.assert_array_equal(chip.data, masked.filled(0))
+    assert (chip.data[:, :20, :25] == 0).all()
 
 
 @pytest.mark.parametrize(
@@ -540,7 +589,7 @@ def test_unbuildable_crs_warns_instead_of_failing(tmp_path: Path):
     with rasterio.open(path) as src:
         assert source.domain.transform.almost_equals(src.transform, precision=1e-9)
         np.testing.assert_array_equal(
-            source.read_window(Window(0, 0, _W, _H)).values, src.read()
+            source.read_window(Window(0, 0, _W, _H)).data, src.read()
         )
 
 
@@ -577,7 +626,7 @@ def test_pickle_roundtrip(tmp_path: Path):
     assert clone.domain == source.domain
     window = Window(-2, 1, 9, 9)
     np.testing.assert_array_equal(
-        clone.read_window(window).values, source.read_window(window).values
+        clone.read_window(window).data, source.read_window(window).data
     )
 
 
@@ -590,8 +639,8 @@ def test_fractional_and_negative_windows_snap_outward(tmp_path: Path):
     snapped = Window(-3, 3, 11, 8)
     assert chip.shape == (1, 8, 11)
     _assert_matches_rasterio(source, path, snapped)
-    np.testing.assert_array_equal(chip.values, source.read_window(snapped).values)
-    assert chip.transform == source.read_window(snapped).transform
+    np.testing.assert_array_equal(chip.data, source.read_window(snapped).data)
+    assert chip.grid == source.read_window(snapped).grid
     # Float noise does not grow the window.
     assert source.read_window(Window(4.0000001, 2.9999999, 8, 8)).shape == (1, 8, 8)
 
@@ -659,7 +708,7 @@ def test_http_store_via_pool(tmp_path: Path, http_root: str):
     clone = pickle.loads(pickle.dumps(source))
     window = Window(3, 5, 20, 17)
     np.testing.assert_array_equal(
-        clone.read_window(window).values, source.read_window(window).values
+        clone.read_window(window).data, source.read_window(window).data
     )
 
 
@@ -676,7 +725,7 @@ def test_jpeg_within_documented_tolerance(tmp_path: Path, photometric: str, atol
         blockxsize=32,
         blockysize=32,
     )
-    got = _open(path).read_window(Window(0, 0, 64, 64)).values.astype(int)
+    got = _open(path).read_window(Window(0, 0, 64, 64)).data.astype(int)
     with rasterio.open(path) as src:
         expected = src.read().astype(int)
     assert np.abs(got - expected).max() <= atol

@@ -19,12 +19,16 @@ Surface
 ``CogSource.open(url, ...)`` (``await CogSource.aopen(...)``) opens a
 remote COG and exposes:
 
-- ``domain`` — a `CogDomain` with ``crs``, ``transform``, ``shape``,
-  ``bounds``, ``res`` and ``nodata``.
+- ``domain`` — a `CogDomain` with ``crs``, ``transform``, ``grid``,
+  ``shape``, ``bounds``, ``res``, ``nodata`` and ``fill_value``.
 - ``read_window(window)`` / ``read_windows(windows)`` — one window, or a
-  batch sharing tile fetches; each a ``GeoTensor`` carrying the window's
-  transform, the CRS and the nodata fill value (``aread_*`` twins for
-  callers inside an event loop).
+  batch sharing tile fetches; each a `geoarray.GeoArray` carrying the
+  window's transform, the CRS and the nodata fill value (``aread_*`` twins
+  for callers inside an event loop). ``load()`` / ``aload()`` read the
+  whole image.
+- ``grid``, ``shape``, ``dtype``, ``fill_value``, ``attrs`` — so a source is
+  a `geoarray.RasterSource` and a `geoarray.AsyncRasterSource`: code written
+  for any lazy raster reads a COG window by window.
 - ``identity()`` / ``object_version()`` — what the source reads, and the
   object's ETag (else size + last-modified), for caches that must notice
   an object overwritten in place.
@@ -46,14 +50,15 @@ upstream gaps are covered here:
   datums) becomes ``domain.crs = None`` with a ``RuntimeWarning``
   instead of failing the open.
 
-``GDAL_NODATA`` becomes ``domain.nodata`` / ``fill_value_default``;
+``GDAL_NODATA`` becomes ``domain.nodata`` / ``fill_value``;
 out-of-image parts of a window, and pixels the COG's internal mask
 marks invalid, are filled with it (``0`` when the COG declares no
 nodata) — the same values as a masked GDAL read.
 
-Windows are snapped outward to whole pixels (offsets floored, far
-edges ceiled — georeader's ``round_outer_window`` convention) and the
-returned transform describes the snapped window exactly.
+Windows (a `geoarray.PixelWindow` or a ``rasterio.windows.Window``) are
+snapped outward to whole pixels (offsets floored, far edges ceiled —
+georeader's ``round_outer_window`` convention) and the returned transform
+describes the snapped window exactly.
 
 Codec fidelity: lossless codecs (deflate, LZW, zstd, none, ...) decode
 bit-for-bit identical to GDAL. JPEG tiles are decoded by async-tiff's
@@ -73,9 +78,11 @@ import json
 import math
 import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NamedTuple, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
+from affine import Affine
+from geoarray import FrozenAttrs, GeoArray, Grid, PixelWindow
 
 from geocloud._src.aio import _run_coroutine_safely
 from geocloud._src.extras import missing_extra
@@ -83,7 +90,6 @@ from geocloud._src.retry import awith_bucket_retry, with_bucket_retry
 
 
 if TYPE_CHECKING:
-    from georeader.geotensor import GeoTensor
     from rasterio.windows import Window
 
 
@@ -148,11 +154,23 @@ class CogDomain:
     """Raster-domain view over a remote COG IFD.
 
     The I/O-free metadata twin of a `CogSource` (``crs``, ``transform``,
-    ``shape``, ``bounds``, ``res``) — the attributes geopatcher's samplers
-    and geometries expect from a raster domain — without holding the IFD.
+    ``shape``, ``bounds``, ``res``, ``grid``) — the attributes geopatcher's
+    samplers and geometries expect from a raster domain — without holding
+    the IFD.
 
-    ``nodata`` is the parsed ``GDAL_NODATA`` tag (cast to the pixel
-    dtype's kind), or ``None`` when the COG declares none.
+    ``transform`` is an ``affine.Affine``; ``grid`` is the same georeferencing
+    as a hashable `geoarray.Grid`. ``nodata`` is the parsed ``GDAL_NODATA``
+    tag (cast to the pixel dtype's kind), or ``None`` when the COG declares
+    none; ``fill_value`` is what reads fill with.
+
+    Example:
+        >>> from affine import Affine
+        >>> domain = CogDomain(
+        ...     crs=None, transform=Affine(10, 0, 0, 0, -10, 0), shape=(1, 4, 6),
+        ...     bounds=(0.0, -40.0, 60.0, 0.0), res=(10.0, 10.0),
+        ... )
+        >>> domain.grid.shape, domain.fill_value
+        ((4, 6), 0)
     """
 
     crs: Any
@@ -163,9 +181,14 @@ class CogDomain:
     nodata: float | int | None = None
 
     @property
-    def fill_value_default(self) -> float | int:
-        """Value used for out-of-image pixels: ``nodata``, else ``0``."""
+    def fill_value(self) -> float | int:
+        """Value used for out-of-image and masked pixels: ``nodata``, else ``0``."""
         return 0 if self.nodata is None else self.nodata
+
+    @property
+    def grid(self) -> Grid:
+        """The pixel grid: ``transform``, ``crs`` and ``(H, W)``."""
+        return Grid.from_affine(self.transform, self.crs, self.shape[-2:])
 
 
 def _dtype(geotiff: Any, *, url: str) -> np.dtype:
@@ -240,8 +263,6 @@ def _build_domain(level: Any, geotiff: Any, *, url: str) -> CogDomain:
             GeoTIFF tags).
         url: The COG's URL, for error / warning messages.
     """
-    from rasterio.transform import Affine
-
     width = int(level.width)
     height = int(level.height)
     transform = level.transform
@@ -386,10 +407,13 @@ class CogSource:
 
     Open via :meth:`open` (or ``await`` :meth:`aopen`); the constructor
     takes the parsed handles. ``read_window`` / ``read_windows`` return
-    `georeader.GeoTensor` chips with the window's transform, the CRS and
-    the COG's nodata as ``fill_value_default``; out-of-image pixels, and
-    pixels the COG's internal mask marks invalid, are filled with it. The
-    source pickles by URL (see ``__reduce__``).
+    `geoarray.GeoArray` chips ``(bands, h, w)`` with the window's
+    transform, the CRS and the COG's nodata as ``fill_value``; out-of-image
+    pixels, and pixels the COG's internal mask marks invalid, are filled
+    with it. A source is a `geoarray.RasterSource` (``grid``, ``shape``,
+    ``dtype``, ``fill_value``, ``attrs``, ``read_window``, ``load``) and a
+    `geoarray.AsyncRasterSource` (``aread_window``, ``aload``). It pickles
+    by URL (see ``__reduce__``).
 
     Note:
         Lossless codecs match ``rasterio.read`` exactly. JPEG tiles are
@@ -423,9 +447,11 @@ class CogSource:
         Two overlapping windows share their tile fetches::
 
             src = CogSource.open("s3://bucket/scene.tif")
-            src.domain.shape                     # (bands, H, W)
-            a, b = src.read_windows([Window(0, 0, 256, 256),
-                                     Window(128, 0, 256, 256)])
+            src.shape                            # (bands, H, W)
+            a, b = src.read_windows([
+                PixelWindow(col_off=0, row_off=0, width=256, height=256),
+                PixelWindow(col_off=128, row_off=0, width=256, height=256),
+            ])                                   # 2 x (bands, 256, 256)
     """
 
     url: str
@@ -646,25 +672,64 @@ class CogSource:
             return None
         return f"size:{meta.get('size')}:{last_modified}"
 
+    # ------------------------------------------------------------- RasterSource
     @property
-    def fill_value_default(self) -> float | int:
-        """Fill for out-of-image pixels and padding: nodata, else ``0``."""
-        return self.domain.fill_value_default
+    def grid(self) -> Grid:
+        """The pixel grid of the opened IFD (`CogDomain.grid`)."""
+        return self.domain.grid
 
-    def read_window(self, window: Window) -> GeoTensor:
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """``(bands, H, W)``, the shape `load` returns."""
+        return tuple(int(n) for n in self.domain.shape)
+
+    @property
+    def fill_value(self) -> float | int:
+        """Fill for out-of-image and masked pixels: nodata, else ``0``."""
+        return self.domain.fill_value
+
+    @property
+    def attrs(self) -> FrozenAttrs:
+        """Metadata every read carries (none: a COG chip is pixels + grid)."""
+        return FrozenAttrs()
+
+    def _whole(self) -> PixelWindow:
+        _, height, width = self.shape
+        return PixelWindow(col_off=0, row_off=0, width=width, height=height)
+
+    def load(self) -> GeoArray:
+        """Every pixel of the opened IFD, ``(bands, H, W)``.
+
+        Raises:
+            TimeoutError: The tile fetch + decode did not finish within
+                ``self.timeout`` seconds.
+        """
+        return self.read_window(self._whole())
+
+    async def aload(self) -> GeoArray:
+        """Async twin of :meth:`load`."""
+        return await self.aread_window(self._whole())
+
+    def read_window(
+        self, window: PixelWindow | Window, *, boundless: bool = True
+    ) -> GeoArray:
         """Read one window via the COG's tile grid.
 
         A thin wrapper around ``read_windows([window])``, so the
         single-window path goes through the same tile-coalescing code as
-        the batched path.
+        the batched path; see :meth:`aread_windows` for the semantics.
         """
-        return self.read_windows([window])[0]
+        return self.read_windows([window], boundless=boundless)[0]
 
-    async def aread_window(self, window: Window) -> GeoTensor:
+    async def aread_window(
+        self, window: PixelWindow | Window, *, boundless: bool = True
+    ) -> GeoArray:
         """Async twin of :meth:`read_window`."""
-        return (await self.aread_windows([window]))[0]
+        return (await self.aread_windows([window], boundless=boundless))[0]
 
-    def read_windows(self, windows: list[Window]) -> list[GeoTensor]:
+    def read_windows(
+        self, windows: list[PixelWindow | Window], *, boundless: bool = True
+    ) -> list[GeoArray]:
         """Bulk-read every window, fetching each overlapping tile once.
 
         Sync facade over :meth:`aread_windows` (safe inside a running
@@ -672,12 +737,15 @@ class CogSource:
         there for the read semantics.
 
         Raises:
+            ValueError: ``boundless=False`` and a window misses the image.
             TimeoutError: The tile fetch + decode did not finish within
                 ``self.timeout`` seconds.
         """
-        return _run_coroutine_safely(self.aread_windows(windows))
+        return _run_coroutine_safely(self.aread_windows(windows, boundless=boundless))
 
-    async def aread_windows(self, windows: list[Window]) -> list[GeoTensor]:
+    async def aread_windows(
+        self, windows: list[PixelWindow | Window], *, boundless: bool = True
+    ) -> list[GeoArray]:
         """Async bulk read: every window, each overlapping tile fetched once.
 
         The headline path: collect every unique tile coordinate
@@ -687,24 +755,24 @@ class CogSource:
         intersection.
 
         Args:
-            windows: Sequence of ``rasterio.windows.Window`` to read.
-                Fractional windows are snapped outward to whole pixels;
-                windows may extend past (or lie entirely outside) the
-                image — those pixels get ``fill_value_default``.
+            windows: `geoarray.PixelWindow` (or ``rasterio.windows.Window``)
+                rectangles to read. Fractional windows are snapped outward
+                to whole pixels.
+            boundless: ``True`` (default) returns each window whole: parts
+                past (or entirely outside) the image get ``fill_value``.
+                ``False`` clips each window to the image first.
 
         Returns:
-            One ``GeoTensor`` per input window, in input order, each
-            shaped ``(bands, height, width)`` with the (snapped)
-            window's transform, the domain CRS and
-            ``fill_value_default`` set to the COG's nodata.
+            One `geoarray.GeoArray` per input window, in input order, each
+            shaped ``(bands, height, width)`` with the (snapped, clipped)
+            window's transform, the domain CRS and ``fill_value`` set to the
+            COG's nodata (else ``0``).
 
         Raises:
+            ValueError: ``boundless=False`` and a window misses the image.
             TimeoutError: The batched tile fetch + decode did not
                 finish within ``self.timeout`` seconds.
         """
-        from georeader.geotensor import GeoTensor
-        from rasterio.transform import Affine
-
         if len(windows) == 0:
             return []
 
@@ -715,6 +783,11 @@ class CogSource:
 
         # Collect the unique tile coordinates spanned by all windows.
         pixel_windows = [_snap_window(w) for w in windows]
+        if not boundless:
+            image = PixelWindow(col_off=0, row_off=0, width=image_w, height=image_h)
+            pixel_windows = [
+                _clip_window(w, image, url=self.url) for w in pixel_windows
+            ]
         tile_coords: dict[tuple[int, int], None] = {}
         per_window_tile_ranges: list[tuple[int, int, int, int]] = []
         for w in pixel_windows:
@@ -750,9 +823,10 @@ class CogSource:
         # the right shape/dtype even when no tile was fetched.
         bands = int(self.domain.shape[0])
         dtype = np.dtype(self.dtype)
-        fill = self.fill_value_default
+        fill = self.fill_value
+        attrs = self.attrs
 
-        results: list[GeoTensor] = []
+        results: list[GeoArray] = []
         for window, (tx_min, ty_min, tx_max, ty_max) in zip(
             pixel_windows, per_window_tile_ranges, strict=True
         ):
@@ -772,12 +846,13 @@ class CogSource:
                 fill=fill,
             )
             results.append(
-                GeoTensor(
-                    values=values,
-                    transform=self.domain.transform
+                GeoArray(
+                    values,
+                    self.domain.transform
                     * Affine.translation(window.col_off, window.row_off),
-                    crs=self.domain.crs,
-                    fill_value_default=fill,
+                    self.domain.crs,
+                    fill_value=fill,
+                    attrs=attrs,
                 )
             )
         return results
@@ -788,18 +863,11 @@ class CogSource:
 # ---------------------------------------------------------------------------
 
 
-class _PixelWindow(NamedTuple):
-    """Integer pixel window (duck-types ``rasterio.windows.Window``)."""
+def _snap_window(window: Any) -> PixelWindow:
+    """Snap ``window`` outward to a whole-pixel `geoarray.PixelWindow`.
 
-    col_off: int
-    row_off: int
-    width: int
-    height: int
-
-
-def _snap_window(window: Any) -> _PixelWindow:
-    """Snap ``window`` outward to whole pixels.
-
+    ``window`` is anything with ``col_off`` / ``row_off`` / ``width`` /
+    ``height`` (a `geoarray.PixelWindow`, a ``rasterio.windows.Window``).
     Offsets are floored and far edges ceiled (after rounding to
     ``_PIXEL_PRECISION`` decimals to absorb float noise) — the same
     convention as ``georeader.window_utils.round_outer_window``.
@@ -821,11 +889,28 @@ def _snap_window(window: Any) -> _PixelWindow:
         raise ValueError(
             f"CogSource: window {window!r} has a negative width or height."
         )
-    return _PixelWindow(col0, row0, col1 - col0, row1 - row0)
+    return PixelWindow(
+        col_off=col0, row_off=row0, width=col1 - col0, height=row1 - row0
+    )
+
+
+def _clip_window(window: PixelWindow, image: PixelWindow, *, url: str) -> PixelWindow:
+    """``window`` clipped to ``image`` (a ``boundless=False`` read).
+
+    Raises:
+        ValueError: The window does not overlap the image.
+    """
+    inside = window.intersection(image)
+    if inside is None:
+        raise ValueError(
+            f"CogSource: window {window} does not overlap the image "
+            f"{image.shape} of {url!r} (boundless=False)."
+        )
+    return inside
 
 
 def _tile_range_for_window(
-    window: Window | _PixelWindow,
+    window: Window | PixelWindow,
     *,
     tile_w: int,
     tile_h: int,
@@ -894,7 +979,7 @@ async def _fetch_and_decode_tiles(
 
 
 def _assemble_window(
-    window: _PixelWindow,
+    window: PixelWindow,
     *,
     tile_data: dict[tuple[int, int], np.ndarray],
     tx_min: int,
@@ -922,7 +1007,8 @@ def _assemble_window(
     into the window — those pixels keep ``fill`` (the nodata value), as
     do pixels masked invalid in a `numpy.ma.MaskedArray` tile.
     """
-    col_off, row_off, w, h = window
+    col_off, row_off = window.col_off, window.row_off
+    w, h = window.width, window.height
     out = np.full((bands, h, w), fill, dtype=dtype)
 
     if tx_max < tx_min or ty_max < ty_min:

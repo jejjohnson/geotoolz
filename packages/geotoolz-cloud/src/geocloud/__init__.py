@@ -21,7 +21,10 @@ Seven modules, each the one home of its names:
 - `geocloud.cog` — Cloud-Optimized GeoTIFF reads on that pool:
   `CogSource` (batched window reads, each tile fetched once) and
   `AsyncCogReader` with the async ``read_*`` mirrors of
-  ``georeader.read`` (``[cog]`` extra).
+  ``georeader.read`` (``[cog]`` extra); `write_cog`.
+
+Every raster it reads or writes is a `geoarray.GeoArray`, and its COG
+readers are `geoarray.RasterSource` / `geoarray.AsyncRasterSource`.
 
 geopatcher's `CogField` and geoproducts' cloud byte reads (its
 ``[obstore]`` extra) both build on it.

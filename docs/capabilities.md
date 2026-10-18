@@ -1045,12 +1045,12 @@ current).
 | `PackedVariable` | class | How to decode one CF-packed variable. |
 | `affine_from_geotransform` | function | Parse a GDAL ``GeoTransform`` attribute into an ``Affine``. |
 | `attr` | function | An HDF5 attribute as a plain Python scalar / ``str`` (arrays kept). |
-| `fill_value_from_attrs` | function | The scalar fill value declared in ``attrs`` (default ``0``). |
+| `fill_value_from_attrs` | function | The scalar fill value declared in ``attrs``, or ``None`` when none is. |
 | `grid_variables` | function | Names of the file's top-level variables of shape ``shape``. |
 | `open_hdf5` | function | An open ``h5py.File`` on ``source``, read-only. |
-| `read_hdf` | function | Read one dataset of an HDF5 or HDF4 / HDF-EOS file as a ``GeoTensor``. |
+| `read_hdf` | function | Read one dataset of an HDF5 or HDF4 / HDF-EOS file as a `geoarray.GeoArray`. |
 | `read_indexes` | function | Read 1-based band ``indexes`` from a lazily sliced dataset. |
-| `read_netcdf` | function | Read one variable of a NetCDF-3 / NetCDF-4 file as a ``GeoTensor``. |
+| `read_netcdf` | function | Read one variable of a NetCDF-3 / NetCDF-4 file as a `geoarray.GeoArray`. |
 | `scalar` | function | A scalar variable as ``float``; ``NaN`` when absent or filled. |
 | `select_indexes` | function | Select 1-based band ``indexes`` along the leading axis of ``values``. |
 | `time_attr` | function | An ISO-8601 attribute (``time_coverage_start``, …) as a ``datetime``. |

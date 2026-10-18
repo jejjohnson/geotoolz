@@ -2,8 +2,23 @@
 
 Cloud object storage for the whole stack. The root
 [`AGENTS.md`](../../AGENTS.md) applies too; this file adds what is specific
-to `geocloud`. It depends on georeader and obstore only — never on another
-workspace package.
+to `geocloud`. It depends on obstore, geoarray (`geotoolz-array[georeader]`)
+and georeader only — never on another workspace package (geoops included).
+
+## The carrier
+
+Every public raster in and out is a `geoarray.GeoArray`; the fill attribute
+is `fill_value` everywhere (never `fill_value_default`). georeader is an
+internal engine only (`georeader.read`'s window maths and reprojection in
+`_src/cog_reader.py`): convert at that boundary with
+`geoarray.interop.georeader` (`to_georeader` in, `from_georeader` out), and
+never let a `GeoTensor` leave a public function. A georeader `GeoTensor` or
+reader passed in raises `TypeError` naming `from_georeader` /
+`source_from_georeader` (`_src/carrier.py`'s `reject_georeader`, which reads
+the class hierarchy and never imports georeader). Lazy readers (`CogSource`,
+`AsyncCogReader`) implement `geoarray.RasterSource` /
+`geoarray.AsyncRasterSource`; windows are `geoarray.PixelWindow` (a
+rasterio `Window` is accepted too).
 
 ## What lives here
 
@@ -29,7 +44,9 @@ workspace package.
   exception is a streamed write (`open(uri, "wb")`): a multipart upload cannot
   be replayed without buffering the whole object, so it is not retried.
 - **`geocloud.hdf`** (`[hdf5]` / `[netcdf]` / `[hdf4]`) — the stack's HDF5 /
-  NetCDF / HDF4 readers: `read_netcdf`, `read_hdf` (GeoTensors), `open_hdf5`
+  NetCDF / HDF4 readers: `read_netcdf`, `read_hdf` (GeoArrays; a swath's
+  latitude / longitude are read as datasets of their own, never into the
+  frozen attrs), `open_hdf5`
   (h5py over ranged reads) and the CF decoders every product reader uses
   (`PackedVariable`, `attr`, `scalar`, `unpacked`, `time_attr`,
   `grid_variables`, `fill_value_from_attrs`, `affine_from_geotransform`,
@@ -52,14 +69,18 @@ workspace package.
   writes credentials to `os.environ`; error messages that show a URI pass
   it through `redact` (`_r` in `_src/store.py` / `_src/files.py`).
 - **`geocloud.cog`** (`[cog]` extra, async-geotiff) — `CogSource`
-  (`open` / `aopen`, `read_window(s)` / `aread_window(s)`, `identity()`,
-  `object_version()`; pickles by URL so it ships to process pools),
-  `CogDomain`, `AsyncCogReader` and the async `read_*` mirrors of
+  (`open` / `aopen`, `read_window(s)` / `aread_window(s)` with
+  `boundless=`, `load` / `aload`, `grid` / `shape` / `dtype` /
+  `fill_value` / `attrs`, `identity()`, `object_version()`; pickles by URL
+  so it ships to process pools), `CogDomain` (`grid`, `fill_value`),
+  `AsyncCogReader` (an `AsyncRasterSource` that keeps georeader's metadata
+  surface and lazy views) and the async `read_*` mirrors of
   `georeader.read`. Batched reads fetch every tile a set of windows touches
   exactly once. `write_cog` (base install, GDAL's COG driver) is the one
-  COG writer: staged GTiff → `COG` driver → `LAYOUT=COG` check → atomic
-  rename or `files.upload`; extend it rather than calling
-  `georeader.save.save_cog` or rasterio's COG driver elsewhere.
+  COG writer, for a `GeoArray` or any `RasterSource` (read strip by strip):
+  staged GTiff → `COG` driver → `LAYOUT=COG` check → atomic rename or
+  `files.upload`; extend it rather than calling `georeader.save.save_cog`
+  or rasterio's COG driver elsewhere.
 
 `geopatcher.fields.CogField` subclasses `CogSource`; extend `CogSource` here
 rather than adding read logic to the patcher.
@@ -85,3 +106,6 @@ same change.
 - CI's `geotoolz-cloud-base` job installs the package without extras: the
   pool must work, and anything needing async-geotiff must fail at use with
   an install hint naming `geotoolz-cloud[cog]` (`_src/extras.py`).
+- Tests build carriers with `geoarray.GeoArray`; georeader appears only as
+  an oracle (`RasterioReader` / `georeader.read`, converted with
+  `from_georeader`) and in the tests that a `GeoTensor` is refused.
