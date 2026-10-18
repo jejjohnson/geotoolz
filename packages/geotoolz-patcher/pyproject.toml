@@ -70,7 +70,7 @@ jax = ["jax>=0.4.23"]
 # Cloud-Optimized GeoTIFF field (`geopatcher.fields.CogField`) on the
 # geotoolz-cloud COG engine (obstore pool + async-geotiff, batched range
 # fetches).
-cog = ["geotoolz-cloud[cog]>=0.4.1"]
+cog = ["geotoolz-cloud[cog]>=0.6"]
 patch-full = [
     "xarray>=2024.1",
     "geopandas>=0.14",
@@ -80,7 +80,7 @@ patch-full = [
     "zarr>=3.0",
     "dask[bag]>=2024.8.3",
     "jax>=0.4.23",
-    "geotoolz-cloud[cog]>=0.4.1",
+    "geotoolz-cloud[cog]>=0.6",
 ]
 # Operator-graph bridge: pull in `pipekit` and the ~125-LOC wrappers in
 # `geopatcher.integrations.pipekit` (GridSampler / ApplyToChips / MergePatches).

@@ -104,7 +104,7 @@ hydra = ["hydra-zen>=0.14"]
 # substrate matrix. Lower bound only (workspace sibling released in
 # lockstep): 0.9 is the first release with the task-organised layout
 # (`geopatcher.config`, `geopatcher.spatial.*`) that patch_ops imports.
-patch = ["geotoolz-patcher[pipekit]>=0.9"]
+patch = ["geotoolz-patcher[pipekit]>=0.12"]
 # Vector-cube backend (`xvec`, which brings `xarray`) needed by the
 # `geom.coregister.RasterToPoints` / `PointsToRaster` operators that
 # extract raster values onto point geometries (AERONET stations, buoys,
@@ -112,12 +112,12 @@ patch = ["geotoolz-patcher[pipekit]>=0.9"]
 vector-cube = ["xvec>=0.4"]
 # `io.WriteCOG` writes through geotoolz-cloud's validated `write_cog`.
 # Lower bound only: a workspace sibling released in lockstep.
-cloud = ["geotoolz-cloud>=0.4.1"]
+cloud = ["geotoolz-cloud>=0.6"]
 # File formats for `io.ReadHDF` (HDF5 / HDF4) and `io.ReadNetCDF`: the
 # readers are geotoolz-cloud's (`geocloud.hdf`), local or remote.
-hdf5 = ["geotoolz-cloud[hdf5]>=0.4.1"]
-hdf4 = ["geotoolz-cloud[hdf4]>=0.4.1"]
-netcdf = ["geotoolz-cloud[netcdf]>=0.4.1"]
+hdf5 = ["geotoolz-cloud[hdf5]>=0.6"]
+hdf4 = ["geotoolz-cloud[hdf4]>=0.6"]
+netcdf = ["geotoolz-cloud[netcdf]>=0.6"]
 # Zarr sink (`io.WriteZarr`); targets the zarr-python 3 API
 # (`Group.create_array`).
 zarr = ["zarr>=3"]
