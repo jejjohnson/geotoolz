@@ -9,16 +9,17 @@
 
 > The [geotoolz monorepo](https://github.com/jejjohnson/geotoolz) in one install.
 
-`pip install geotoolz` installs the five packages of the stack. The umbrella
+`pip install geotoolz` installs the six packages of the stack. The umbrella
 holds no code; import each package under its own name:
 
 | Distribution | Import | Use it for |
 |---|---|---|
-| `geotoolz-ops` | `geoops` | Operator families on `GeoTensor` |
+| `geotoolz-ops` | `geoops` | Operator families on `GeoArray` |
 | `geotoolz-patcher` | `geopatcher` | Split a field into patches, process, stitch |
 | `geotoolz-catalog` | `geocatalog` | Find, index, join and load files |
 | `geotoolz-cloud` | `geocloud` | Object storage and COG reads |
 | `geotoolz-products` | `geoproducts` | Readers for Earth-observation products |
+| `geotoolz-array` | `geoarray` | `GeoArray`, the carrier every package takes and returns |
 
 ```python
 import geoops as gz

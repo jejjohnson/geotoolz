@@ -58,8 +58,11 @@ an object-store client — look it up:
 | list, download, upload, copy, sync, sign objects | `geotoolz-cloud` | `geocloud.files` (`ls`, `download`, `upload`, `copy`, `sync`, `sign`) |
 | credentials per bucket / container (SAS, keys, anonymous), GDAL options for them | `geotoolz-cloud` | `geocloud.credentials` (`set_credentials`, `load_credentials`, `gdal_access`) |
 
-Everything is `georeader.GeoTensor` in and out, and every operator is a
+Everything is `geoarray.GeoArray` in and out, and every operator is a
 `pipekit.Operator`, so steps chain with `gz.Sequential([...])` or `|`.
+A georeader `GeoTensor` from older code converts without a copy with
+`geoarray.interop.georeader.from_georeader` (a lazy georeader reader with
+`source_from_georeader`); passing one in directly raises a `TypeError`.
 
 ## The canonical pipeline
 
@@ -68,7 +71,7 @@ from glob import glob
 
 import numpy as np
 import pandas as pd
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geopatcher as gp
 import geoops as gz
@@ -106,9 +109,9 @@ ndvi = gz.Sequential([gz.DNToReflectance(scale=1e-4), gz.NDVI(nir=3, red=2)])
 # The merge grid fixes the output shape: NDVI turns 4 bands into 1, so merge
 # into a 1-band grid on the field's transform / CRS (not field.domain).
 _, height, width = field.domain.shape
-out_grid = GeoTensor(
+out_grid = GeoArray(
     np.zeros((1, height, width), np.float32),
-    transform=field.domain.transform, crs=field.domain.crs,
+    field.domain.transform, field.domain.crs,
 )
 pipeline = gz.Sequential([
     GridSampler(patcher=patcher),
@@ -120,7 +123,7 @@ ndvi_scene = pipeline(field)                          # (1, 600, 600) float, NaN
 # 4. Write. The merge returns a plain array: put it back on the merge grid,
 # declaring its NaN gaps (invalid or uncovered cells) as the nodata.
 gz.WriteCOG(path="ndvi.tif")(
-    GeoTensor(ndvi_scene, transform=out_grid.transform, crs=out_grid.crs, fill_value_default=np.nan)
+    out_grid.with_data(ndvi_scene, fill_value=np.nan)
 )
 ```
 
@@ -157,23 +160,23 @@ pipeline.
   `AssertShape` / `AssertDType`, `ThreadMap` / `ProcessMap` /
   `BatchedMap`, and `dumps` / `loads`.
 
-**`georeader.GeoTensor` (what flows between steps):**
+**`geoarray.GeoArray` (what flows between steps):**
 
 - **Shape.** A raster is `(C, H, W)`, or `(T, C, H, W)` for a time stack.
   The spatial axes are the last two and the bands are on axis `-3`, never
   `0`.
-- **Same carrier out.** A GeoTensor input returns a GeoTensor on the same
+- **Same carrier out.** A GeoArray input returns a GeoArray on the same
   `transform` and `crs`; a plain array returns a plain array. Never mutate
-  the input.
-- **Fresh, consistent `attrs`.** Every output gets a new `attrs` dict. Each
+  the input. A georeader `GeoTensor` is refused, not taken as an array.
+- **Consistent `attrs`.** `attrs` are immutable (`FrozenAttrs`). Each
   per-band key (`band_names`, `wavelengths`, …) has one entry per output
   band, or is dropped. Write band names under `band_names`.
-- **Nodata.** `fill_value_default` *is* nodata. Keep invalid pixels
+- **Nodata.** `fill_value` *is* nodata (default `None`). Keep invalid pixels
   invalid, and pick the output fill by meaning: `False` for masks, `0` for
   labels and counts, `NaN` for new float quantities.
 - **Several rasters.** They must share a grid: the same `(H, W)`, CRS and
   transform. Put them on one grid first (`geocatalog.load.load_raster`
-  onto a `GeoSlice`, or georeader's `read_reproject_like`).
+  onto a `GeoSlice`, or `gz.geom.ReprojectLike` / `ResampleLike`).
 - **Masks.** `True` means drop the pixel; this is what `gz.ApplyMask`
   expects.
 
@@ -198,7 +201,7 @@ class ZScore(Operator):
     def _apply(self, gt):  # (C, H, W) → (C, H, W) float
         values = mask_invalid_to_nan(gt)  # a float copy; an invalid pixel is NaN in every band
         out = (values - self.mean) / self.std
-        return wrap_like(gt, out, fill_value_default=np.nan)  # same carrier, fresh attrs, NaN fill
+        return wrap_like(gt, out, fill_value=np.nan)  # same carrier and attrs, NaN fill
 ```
 
 Check a new step with the same checks geotoolz runs on its own operators. It
@@ -208,7 +211,7 @@ fails naming the first broken rule:
 from geoops.testing import check_operator
 
 
-def test_zscore(scene):  # scene: GeoTensor (4, H, W) with band_names and a few nodata pixels
+def test_zscore(scene):  # scene: GeoArray (4, H, W) with band_names and a few nodata pixels
     out = check_operator(ZScore(mean=0.3, std=0.1), scene)
     assert out.shape == scene.shape
 ```
@@ -223,7 +226,7 @@ def test_zscore(scene):  # scene: GeoTensor (4, H, W) with band_names and a few 
 | `os.environ[...] = ` credentials, SAS-in-URL helpers, per-cloud config factories | `geocloud.credentials.set_credentials` / `load_credentials`, then plain URIs; `gdal_access` for rasterio |
 | boto3 / s3fs / obstore client code, upload / download / copy loops | `geocloud.files` (URI verbs on the pooled client), `geocloud.store.get_obstore`, or `geocatalog.staging.stage` |
 | band arithmetic on raw arrays (`(nir - red) / (nir + red)`) | the operator (`gz.NDVI`, `gz.spectral.BandRatio`, …) — it handles nodata, dtype and georeferencing |
-| manual nodata masks or rebuilding a `GeoTensor` by hand | the operators carry `fill_value_default` through; in your own step, `geoops.carrier` (`wrap_like`, `mask_invalid_to_nan`, `resolve_band`, `require_grid_match`) |
+| manual nodata masks or rebuilding a `GeoArray` by hand | the operators carry `fill_value` through; in your own step, `geoops.carrier` (`wrap_like`, `mask_invalid_to_nan`, `resolve_band`, `require_grid_match`) |
 | retry loops, `try` / `except` fallbacks, memo dicts or thread pools around steps | `pipekit` `Retry`, `Try` / `Coalesce`, `Cache`, `ThreadMap` / `BatchedMap` |
 | a parser for GOES / Himawari files | `geoproducts.goes`, `geoproducts.himawari` |
 

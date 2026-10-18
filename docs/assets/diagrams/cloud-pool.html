@@ -58,7 +58,7 @@
         <div class="node" id="creds"><div class="name"><code>geocloud.credentials</code></div><div class="desc">one grant per bucket / container / host · TOML file · <code>redact</code></div></div>
         <div class="node pool" id="store"><div class="name"><code>geocloud.store.get_obstore</code></div><div class="desc">built once per root, then reused (LRU); <code>mount</code> swaps in a test store; geoproducts readers take byte ranges here directly</div>
           <div class="clients"><span>s3://sentinel-cogs → S3Store</span><span>s3://noaa-goes19 → S3Store</span><span>az://account/raw → AzureStore</span></div></div>
-        <div class="node gdal" id="gdal"><div class="name"><code>gdal_access(uri)</code></div><div class="desc">the same grant as a GDAL path + options, for rasterio / georeader</div></div>
+        <div class="node gdal" id="gdal"><div class="name"><code>gdal_access(uri)</code></div><div class="desc">the same grant as a GDAL path + options, for rasterio and GDAL readers</div></div>
       </div>
     </div>
 

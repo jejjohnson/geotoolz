@@ -23,7 +23,8 @@
   .slab .lib { font-weight: 700; font-size: 15px; }
   .slab .what { font-size: 12.5px; color: var(--muted); }
   .slab code { font-family: var(--mono); font-size: 12px; color: var(--ink); }
-  #georeader { grid-column: 1 / -1; }
+  #geoarray { grid-column: 1 / -1; border-color: #8b5cf6; background: #f5f3ff; }
+  #geoarray .lib { color: #6d28d9; }
   #geocloud { grid-column: 1 / 4; }
   #pipekit { grid-column: 4 / -1; }
   .slab.cloud { border-color: #94a3b8; background: #f1f5f9; }
@@ -32,7 +33,7 @@
 <body>
 <div id="diagram">
   <div class="title">Dependency layers</div>
-  <div class="subtitle">A strict layering: every package stands on georeader, nothing depends back up, and every cross-package link is an opt-in extra.</div>
+  <div class="subtitle">A strict layering: every package stands on geotoolz-array, nothing depends back up, and every cross-package link is an opt-in extra.</div>
 
   <div class="pkgs">
     <div class="pkg-card read" id="p-products">
@@ -64,7 +65,7 @@
   <div class="slabs">
     <div class="slab cloud" id="geocloud"><span class="lib">geotoolz-cloud</span><span class="what"><code>import geocloud</code> — the one pooled <code>obstore</code> client per process · async COG reads (<code>CogSource</code>, <code>[cog]</code>)</span></div>
     <div class="slab" id="pipekit"><span class="lib">pipekit</span><span class="what"><code>Operator</code> · <code>Graph</code></span></div>
-    <div class="slab" id="georeader"><span class="lib">georeader</span><span class="what"><code>GeoTensor</code> · <code>GeoData</code> · <code>RasterioReader</code> — the carrier under all five packages</span></div>
+    <div class="slab" id="geoarray"><span class="lib">geotoolz-array</span><span class="what"><code>import geoarray</code> — <code>GeoArray</code> · <code>Grid</code> · <code>RasterSource</code>, the carrier under all five packages (georeader is only an internal engine)</span></div>
   </div>
 
   <div class="legend">

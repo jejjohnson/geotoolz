@@ -6,7 +6,7 @@ description: Add a pipekit Operator (and its numpy primitive) to a geotoolz oper
 # Add a geotoolz operator
 
 Read "The two contracts" in the root `AGENTS.md` (the pipekit `Operator`
-and the `GeoTensor` carrier), then `packages/geotoolz-ops/AGENTS.md` (family
+and the `GeoArray` carrier), then `packages/geotoolz-ops/AGENTS.md` (family
 layout, shared plumbing, parameter vocabulary). This skill is the
 step-by-step.
 
@@ -24,7 +24,7 @@ step-by-step.
 - A pure numpy function: jaxtyping-annotated
   (`Num[np.ndarray, "*batch c h w"]` → `Float[np.ndarray, "*batch h w"]`),
   integer `*_idx` band positions, `axis: int = -3`, `eps` for denominators.
-- No `GeoTensor`, no metadata, no nodata judgement, no operator state.
+- No `GeoArray`, no metadata, no nodata judgement, no operator state.
 - Google docstring: the equation (`.. math::`), the physics in a few lines,
   typical values, a reference, `Args` / `Returns`.
 - Export it from the family `__init__.py` (not from `geoops/__init__.py`).
@@ -60,7 +60,7 @@ step-by-step.
     attributes, using `geoops._src.fitted.fit_once`.
 - Need something two families share (a new band helper, a nodata rule)?
   Add it to `geoops/_src/`, not inline.
-- Docstring: what it returns (shape, dtype, `fill_value_default`), `Args`,
+- Docstring: what it returns (shape, dtype, `fill_value`), `Args`,
   and an `Examples` block with a realistic call and a shape comment.
 - Export the class from the family `__init__.py` **and** import it in
   `geoops/__init__.py` and add it to that `__all__` — every public
@@ -69,7 +69,7 @@ step-by-step.
 ## 4. Tests
 
 - Family tests in `packages/geotoolz-ops/tests/test_<family>.py`: the maths
-  against a hand-computed or published value, nodata handling, a `GeoTensor`
+  against a hand-computed or published value, nodata handling, a `GeoArray`
   and a plain ndarray input, a time stack `(T, C, H, W)`.
 - The contract suite (`tests/test_operator_contract.py`) discovers the class
   automatically; if its constructor needs arguments, register them in

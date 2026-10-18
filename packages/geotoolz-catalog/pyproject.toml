@@ -73,7 +73,7 @@ duckdb = ["duckdb>=1.1"]
 # through `geocloud.files` — one client pool and the credentials registered
 # in `geocloud.credentials` for both. Lower bound only, as for `patch`
 # below: a workspace sibling released in lockstep.
-cloud = ["geotoolz-cloud[fsspec]>=0.4.1"]
+cloud = ["geotoolz-cloud[fsspec]>=0.6"]
 # Streaming catalog builds (`engine="duckdb"` on the `build_*` helpers):
 # the writer itself is pyarrow (a base dependency); the sort-rewrite and
 # the resulting catalog are DuckDB.
@@ -101,7 +101,7 @@ gee = ["earthengine-api>=0.1.380"]
 patch = [
     "geotoolz-array[georeader]>=0.1.1",
     "georeader-spaceml>=2.1",
-    "geotoolz-patcher>=0.6",
+    "geotoolz-patcher>=0.12",
 ]
 sources-all = ["geotoolz-catalog[earthaccess,stac,gee]"]
 # The one-shot install that lights up every public surface. Composed from

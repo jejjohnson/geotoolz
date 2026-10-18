@@ -14,8 +14,9 @@ The essentials, in case you only read this file:
 - Keep the two contracts in `AGENTS.md` ("The two contracts"):
   - pipekit `Operator`: a keyword-only constructor, an auto-derived JSON
     `get_config()`, `_apply` only, carrier in and carrier out;
-  - `GeoTensor`: rewrap with `wrap_like`, fresh `attrs`, a fill value
-    that matches the output, and the band axis at `-3`.
+  - `GeoArray`: rewrap with `wrap_like`, per-band `attrs` that match the
+    output, a fill value that matches the output, the band axis at `-3`,
+    and a georeader `GeoTensor` refused.
 - Reuse the shared toolkits in each package's `_src/` instead of writing new
   helpers; add missing helpers there, not inline.
 - Before committing: `make test`, `uv run --group lint ruff check .`,

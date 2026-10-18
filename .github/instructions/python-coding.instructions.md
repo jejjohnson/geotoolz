@@ -7,7 +7,7 @@ applyTo: "packages/*/src/**/*.py,packages/*/tests/**/*.py"
 Read the root `AGENTS.md` ("Reuse before you write") and the package's own
 `packages/<package>/AGENTS.md` first: compose the shared `_src/` helpers
 instead of writing new ones, and keep "The two contracts" there (pipekit
-`Operator`, `GeoTensor` carrier).
+`Operator`, `GeoArray` carrier).
 
 ## Modern Python (3.12+)
 

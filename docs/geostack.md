@@ -6,15 +6,15 @@
 
 ![The geostack: find with geotoolz-catalog, read with geotoolz-products, cut with geotoolz-patcher, compute with geotoolz-ops, stitch back with geotoolz-patcher](assets/diagrams/stack-overview.png)
 
-Five packages, one job each. `geotoolz-cloud` sits underneath the others:
+Five packages, one job each, on one carrier (`geotoolz-array`'s `GeoArray`). `geotoolz-cloud` sits underneath the others:
 every read or write that touches a bucket goes through it.
 
 | Step | Package | Hands the next step |
 |---|---|---|
 | **Find** — which files cover my area and dates? | `geocatalog` | a `GeoSlice` query result, staged local files |
-| **Read** — open this mission's product | `geoproducts` | a georeader `GeoData` / `GeoTensor` |
-| **Cut** — make model-sized pieces and put them back | `geopatcher` | `Patch`es, then a stitched `GeoTensor` |
-| **Compute** — what do I do to each piece? | `geoops` | a `GeoTensor` with the input's georeferencing |
+| **Read** — open this mission's product | `geoproducts` | a `geoarray.RasterSource` / `GeoArray` |
+| **Cut** — make model-sized pieces and put them back | `geopatcher` | `Patch`es, then a stitched `GeoArray` |
+| **Compute** — what do I do to each piece? | `geoops` | a `GeoArray` with the input's georeferencing |
 | **Store** — buckets, credentials, COGs | `geocloud` | pooled clients, files on disk, validated COGs |
 
 ## The seams
@@ -34,7 +34,7 @@ any CRS — and wraps the result as one `geopatcher.RasterField`, so a query
 drops straight into `SpatialPatcher.split` / `merge`
 (`geotoolz-catalog[patch]`).
 
-**3. `ProductReader` — every reader is a georeader `GeoData`.**
+**3. `ProductReader` — every reader is a `geoarray.RasterSource`.**
 A `geoproducts` reader drops into `geopatcher.RasterField` or
 `geoproducts.stack` without adapters. A geotoolz operator needs pixels, so
 call `reader.load()` first. A sensor's presets bind
@@ -79,7 +79,7 @@ import pandas as pd
 import planetary_computer
 import pyproj
 import pystac_client
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geocatalog as gc
 import geopatcher as gp
@@ -117,7 +117,7 @@ swir: dict[str, gp.RasterField] = {
     )                                                    # (1, 1675, 1430) uint16 per band
     for band in ("B11", "B12")                           # SWIR-1 ≈ 1610 nm · SWIR-2 ≈ 2190 nm
 }
-scene: GeoTensor = gz.StackBands()([swir["B11"].reader, swir["B12"].reader])  # (2, 1675, 1430) uint16
+scene: GeoArray = gz.StackBands()([swir["B11"].reader, swir["B12"].reader])  # (2, 1675, 1430) uint16
 
 # 3 · patcher + operators — SWIR-ratio methane score, tile by tile
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
@@ -136,10 +136,10 @@ screen: gz.Sequential = gz.Sequential([
     ApplyToChips(operator=enhancement),                  # list[Patch] → list[Patch] (128, 128) each
     MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-score: GeoTensor = screen(field)                        # (1675, 1430) float64, on the scene's grid
+score: GeoArray = screen(field)                        # (1675, 1430) float64, on the scene's grid
 
 # 4 · products again — known sources rasterized onto the same grid as labels
-labels: GeoTensor = cm.rasterize_sources_like(sources, score, buffer_m=150.0)  # (1675, 1430) uint8 {0, 1}
+labels: GeoArray = cm.rasterize_sources_like(sources, score, buffer_m=150.0)  # (1675, 1430) uint8 {0, 1}
 
 pair: tuple[np.ndarray, np.ndarray] = (np.asarray(score), np.asarray(labels))  # aligned pixel-for-pixel
 ```

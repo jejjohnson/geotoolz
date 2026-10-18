@@ -23,10 +23,14 @@ description: Review a change or pull request in the geotoolz workspace against t
        outputs;
      - nothing that rebuilds a pipekit block (retry, fallback, cache, tap,
        parallel map).
-   - `GeoTensor`:
-     - plain array in gives plain array out, GeoTensor in gives
-       GeoTensor out, via `wrap_like`;
-     - fresh `attrs` with per-band keys that match the output;
+   - `GeoArray`:
+     - plain array in gives plain array out, GeoArray in gives
+       GeoArray out, via `wrap_like`;
+     - a georeader `GeoTensor` is refused with a `TypeError` naming
+       `from_georeader`, and no `GeoTensor` is ever returned; georeader is
+       called only through `geoops._src.engine` /
+       `geoarray.interop.georeader`;
+     - per-band `attrs` keys that match the output;
      - an output fill that fits its dtype and meaning;
      - the band axis at `-3`, with `(T, C, H, W)` handled or rejected;
      - second carriers grid-checked;

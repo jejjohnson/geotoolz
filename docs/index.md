@@ -1,7 +1,7 @@
 # The geostack
 
 > **Find the data, read it, cut it to size, compute on it — one composable stack.**
-> Five Python packages that interlock end to end, with the Operator /
+> Six Python packages that interlock end to end, with the Operator /
 > Sequential / Graph composition core supplied by
 > [pipekit](https://github.com/jejjohnson/pipekit).
 
@@ -21,8 +21,8 @@ you **write** a georeferenced result.
 Most codebases rebuild that loop per project, so every step is hard-wired
 to the next. The geostack gives each step its own package and one small,
 typed seam between neighbours: a `GeoSlice` is the request every catalog
-answers, a georeader `GeoTensor` is the array every reader returns and
-every operator takes, and a `Patch` is what the patcher hands an operator.
+answers, a [`geoarray.GeoArray`](array/index.md) is the array every reader returns
+and every operator takes, and a `Patch` is what the patcher hands an operator.
 Because operators are plain `pipekit` objects, the patcher itself becomes
 an operator — *tile → predict → stitch* is one more `Sequential`.
 
@@ -34,9 +34,10 @@ an operator — *tile → predict → stitch* is one more `Sequential`.
 | `geotoolz-patcher` | `geopatcher` | split a field into patches, run an operator per patch, stitch back (Geometry × Sampler × Window × Aggregation) | [Patcher](patcher/index.md) |
 | `geotoolz-catalog` | `geocatalog` | find, index, join, load and stage files (`GeoSlice` queries over GeoParquet) | [Catalog](catalog/index.md) |
 | `geotoolz-cloud` | `geocloud` | reach object storage: one client pool, file verbs, credentials, COG reads and writes | [Cloud](cloud/index.md) |
-| `geotoolz-products` | `geoproducts` | read Earth-observation products (GOES-R ABI, Himawari AHI, Carbon Mapper, …) as `GeoTensor`s | [Products](products/index.md) |
+| `geotoolz-products` | `geoproducts` | read Earth-observation products (GOES-R ABI, Himawari AHI, Carbon Mapper, …) as `geoarray.RasterSource`s that read `GeoArray`s | [Products](products/index.md) |
+| `geotoolz-array` | `geoarray` | carry rasters: `GeoArray` (NumPy or JAX data with transform, CRS, fill and attrs; a JAX pytree), `Grid` / `PixelWindow`, the `RasterSource` protocol, the georeader bridge | [Array](array/index.md) |
 
-![Dependency layers: the five packages stand on georeader; object storage in geotoolz-cloud; geotoolz-ops on pipekit; cross-package links are opt-in extras](assets/diagrams/stack-layers.png)
+![Dependency layers: every package stands on geotoolz-array (the GeoArray carrier); object storage in geotoolz-cloud; geotoolz-ops on pipekit; georeader is an internal engine; cross-package links are opt-in extras](assets/diagrams/stack-layers.png)
 
 Solid arrows are hard dependencies, dotted ones opt-in extras, and nothing
 points back up: install only the packages you need. [How the packages
@@ -50,6 +51,7 @@ pip install geotoolz-patcher                  # patcher
 pip install geotoolz-catalog                  # catalog
 pip install geotoolz-cloud                    # object storage, COG writes
 pip install geotoolz-products                 # product readers
+pip install geotoolz-array                    # the GeoArray carrier alone (`[jax]` for JAX)
 ```
 
 | To connect… | Install |
@@ -83,7 +85,7 @@ import numpy as np
 import pandas as pd
 import planetary_computer
 import pystac_client
-from georeader.geotensor import GeoTensor
+from geoarray import GeoArray
 
 import geocatalog as gc
 import geopatcher as gp
@@ -114,7 +116,7 @@ bands: dict[str, gc.GeoCatalog] = {
 # 2 · read — mosaic each band onto the AOI grid, stack red + NIR
 red: gp.RasterField = gc.patch.field_for(bands["B04"].query(aoi), aoi)   # (1, 4500, 4000) uint16
 nir: gp.RasterField = gc.patch.field_for(bands["B08"].query(aoi), aoi)   # (1, 4500, 4000) uint16
-scene: GeoTensor = gz.StackBands()([red.reader, nir.reader])         # (2, 4500, 4000) uint16
+scene: GeoArray = gz.StackBands()([red.reader, nir.reader])         # (2, 4500, 4000) uint16
 
 # 3 · cut + compute — 256² tiles, 64 px overlap, Hann-feathered seams
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
@@ -130,12 +132,12 @@ tiled: gz.Sequential = gz.Sequential([
     ApplyToChips(operator=ndvi),                         # list[Patch] → list[Patch] (256, 256) each
     MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-result: GeoTensor = tiled(field)                        # (4500, 4000) float64 · NaN = no data
+result: GeoArray = tiled(field)                        # (4500, 4000) float64 · NaN = no data
 ```
 
 `MergePatches` places the chips on the domain's grid and keeps the band
 axes the chips carry, so NDVI's `(h, w)` chips merge into one `(H, W)`
-`GeoTensor` on the scene's transform and CRS.
+`GeoArray` on the scene's transform and CRS.
 
 ## Next steps
 

@@ -7,9 +7,10 @@ adds its own rules in `packages/<package>/AGENTS.md`.
 
 ## What this repo is
 
-`geotoolz` is a uv workspace of five Python packages (plus a `geotoolz`
-umbrella distribution that installs all five and holds no code): a remote-sensing stack on
-`georeader.GeoTensor`, with the Operator / Sequential / Graph composition core
+`geotoolz` is a uv workspace of six Python packages (plus a `geotoolz`
+umbrella distribution that installs them and holds no code): a remote-sensing
+stack on one carrier, `geoarray.GeoArray`, with the Operator / Sequential /
+Graph composition core
 from [`pipekit`](https://github.com/jejjohnson/pipekit). People build bigger
 things on top of it, so **the packages are primitives**: new code should
 compose what is here, and anything genuinely new should land where the next
@@ -17,14 +18,15 @@ person will find and reuse it.
 
 | Package (dist) | Import | Use it for | Depends on |
 |---|---|---|---|
-| `geotoolz-ops` | `geoops` | Operator families on `GeoTensor` (radiometry, indices, mask, geom, viz, learn, …) and the `patch_ops` bridge | georeader, pipekit; `[patch]` → geotoolz-patcher |
-| `geotoolz-patcher` | `geopatcher` | Split a field into patches, process, stitch back (geometry × sampler × window × aggregation) | georeader; `[cog]` → geotoolz-cloud; `[pipekit]` |
+| `geotoolz-ops` | `geoops` | Operator families on `GeoArray` (radiometry, indices, mask, geom, viz, learn, …) and the `patch_ops` bridge | geotoolz-array, pipekit, georeader (engine); `[patch]` → geotoolz-patcher |
+| `geotoolz-patcher` | `geopatcher` | Split a field into patches, process, stitch back (geometry × sampler × window × aggregation) | geotoolz-array, georeader (engine); `[cog]` → geotoolz-cloud; `[pipekit]` |
 | `geotoolz-catalog` | `geocatalog` | Find, index, join, load and stage files (`GeoSlice` queries, GeoParquet) | geopandas / pyarrow; `[patch]` → geotoolz-patcher; `[cloud]` → geotoolz-cloud |
-| `geotoolz-cloud` | `geocloud` | Object storage: the one obstore client pool, file verbs, credentials, async COG reads | georeader, obstore |
-| `geotoolz-products` | `geoproducts` | Readers for EO products (GOES, Himawari, CarbonMapper, …) → `GeoData` / `GeoTensor` | georeader; `[goes]` / `[himawari]` → geotoolz-cloud; `[operators]` → geotoolz-ops |
-| `geotoolz-array` | `geoarray` | `GeoArray`, the NumPy/JAX carrier that will replace `GeoTensor` (not used by the other packages yet), with `Grid` / `PixelWindow` geometry | numpy, pyproj, affine; `[jax]`, `[georeader]`, `[vector]` |
+| `geotoolz-cloud` | `geocloud` | Object storage: the one obstore client pool, file verbs, credentials, async COG reads | geotoolz-array, obstore, georeader (engine) |
+| `geotoolz-products` | `geoproducts` | Readers for EO products (GOES, Himawari, CarbonMapper, …), each a `geoarray.RasterSource` that reads `GeoArray`s | geotoolz-array, georeader (engine); `[goes]` / `[himawari]` → geotoolz-cloud; `[operators]` → geotoolz-ops |
+| `geotoolz-array` | `geoarray` | `GeoArray`, the NumPy/JAX carrier every package takes and returns; `Grid` / `PixelWindow` geometry; the `RasterSource` protocol lazy readers implement; the georeader bridge (`geoarray.interop.georeader`) | numpy, pyproj, affine; `[jax]`, `[georeader]`, `[vector]` |
 
-Dependencies point one way and every cross-package link is an optional extra:
+Dependencies point one way and every cross-package link is an optional extra
+(geoarray, the bottom of the workspace, is the one base dependency they share):
 `geoops` never depends on `geoproducts`, the patcher never on `geoops`,
 and no package depends on `geotoolz-catalog`.
 
@@ -34,7 +36,7 @@ Before writing a helper, an adapter or a reader, find out whether it exists:
 
 1. **Search the capability index.**
    [`docs/capabilities.md`](docs/capabilities.md) lists every public name in
-   the five packages, once, at its home, with a one-line summary; each
+   the six packages, once, at its home, with a one-line summary; each
    package's `__init__.py` docstring maps its namespaces.
 2. **Search the private toolkits.** Shared plumbing lives in `_src/` modules
    that every family or reader of that package uses (the table below, the
@@ -70,7 +72,10 @@ Before writing a helper, an adapter or a reader, find out whether it exists:
 | Several readers on one grid | `geoproducts._src.stack.stack` |
 | Band lookup by index or name, wavelengths | `geoops._src.bands` (`resolve_band`, `resolve_bands`) |
 | Nodata handling | `geoops._src.valid` |
-| Wrapping a result back into a `GeoTensor` | `geoops._src.wrap.wrap_like` |
+| Wrapping a result back into a `GeoArray` | `geoops._src.wrap.wrap_like` |
+| Calling a georeader function (reprojection, mosaic, rasterize, windowed read, …) from an operator | `geoops._src.engine` (`to_engine` in, `from_engine` out); outside geoops, `geoarray.interop.georeader` |
+| A georeader `GeoTensor` or reader at a boundary (user code, a downstream package) | `geoarray.interop.georeader` (`from_georeader`, `source_from_georeader`; back with `to_georeader`, `source_to_georeader`) |
+| A lazy reader's interface (grid, `read_window`, `load`) | implement `geoarray.RasterSource` / `AsyncRasterSource` |
 | The carrier helpers above from another package or a downstream project | `geoops.carrier` (the same objects, public); check an operator with `geoops.testing.check_operator` |
 | A spatial index of files, a `GeoSlice` query, loading a mosaic | `geocatalog` (`build`, `query`, `load`) |
 | Tiling, overlap-blending, stitching | `geopatcher` (`SpatialPatcher` + `spatial.*` axes) |
@@ -83,11 +88,11 @@ Before writing a helper, an adapter or a reader, find out whether it exists:
 ## The two contracts
 
 Everything in the stack composes because it keeps two contracts: pipekit's
-`Operator` and georeader's `GeoTensor`. Code that breaks either runs fine
+`Operator` and geoarray's `GeoArray`. Code that breaks either runs fine
 alone and fails the moment someone puts it in a pipeline, so treat both as
 hard rules. The long form, with examples, is
-[`docs/concepts.md`](docs/concepts.md) and
-[`docs/recipes/define-an-operator.md`](docs/recipes/define-an-operator.md).
+[`docs/operators/concepts.md`](docs/operators/concepts.md) and
+[`docs/operators/how-to/define-an-operator.md`](docs/operators/how-to/define-an-operator.md).
 
 ### pipekit `Operator`: how pieces compose
 
@@ -119,13 +124,16 @@ hard rules. The long form, with examples, is
 - **Don't rebuild what pipekit already has.** Control flow, caching,
   observation, QC, parallel maps, carry-state (`StatefulOperator`) and
   serialisation are all in pipekit (see the table above). pipekit is
-  carrier-agnostic: a GeoTensor-specific need belongs in geotoolz, and a
+  carrier-agnostic: a GeoArray-specific need belongs in geotoolz, and a
   generic one upstream in pipekit.
 
-### `GeoTensor`: what flows between them
+### `GeoArray`: what flows between them
 
-`georeader.GeoTensor` is an `np.ndarray` subclass that carries
-`transform`, `crs`, `fill_value_default` and `attrs`.
+`geoarray.GeoArray` is a frozen dataclass that *holds* a NumPy or JAX
+array (`data`) with its `transform` (a `(6,)` float64 array in
+(a, b, c, d, e, f) order), `crs` (`pyproj.CRS`), `fill_value` and `attrs`
+(an immutable `FrozenAttrs`). It is not an array subclass: no arithmetic
+dunders, no ufuncs that return carriers.
 
 - **Shape.** Dimensions are `("time", "band", "y", "x")[-ndim:]`, so a
   carrier is 2-D to 4-D. The spatial axes are the last two, and the band
@@ -136,20 +144,37 @@ hard rules. The long form, with examples, is
   - A result that collapses the bands keeps a singleton band axis,
     `(T, 1, H, W)`.
 - **Both carriers in, same carrier out.** Read the data with
-  `np.asarray(x)`. A GeoTensor input returns a GeoTensor with the input's
+  `np.asarray(x)`. A GeoArray input returns a GeoArray with the input's
   georeferencing, and a plain array returns a plain array.
   - Rewrap with `geoops._src.wrap.wrap_like`. Pass `transform=` for an
     output on a new grid.
-  - Inside an operator, never build a `GeoTensor` by hand, and never
+  - Inside an operator, never build a `GeoArray` by hand, and never
     mutate the input.
-- **Fresh, consistent `attrs`.** Every output gets a new dict, never the
-  input's. Each per-band key (`band_names`, `descriptions`, `wavelengths`,
-  …) has one entry per output band, or is dropped; `wrap_like` does this
-  for you. New band names go under `band_names` only.
-- **Nodata.** `fill_value_default` *is* nodata: georeader's `validmask()`
-  is `values != fill`.
+  - For transform maths use `geoops._src.geo.affine_of(x)` (an
+    `affine.Affine`) or `x.grid`; slices, crops and windows of a carrier
+    (`x[..., r0:r1, c0:c1]`, `geoarray.crop`, `read_window`, `pad`) move
+    the transform for you.
+- **A georeader `GeoTensor` is refused.** It is an `np.ndarray` subclass,
+  so `np.asarray` would silently take it as a plain array and drop its
+  georeferencing. Every public function raises `TypeError` naming
+  `geoarray.interop.georeader.from_georeader` (zero-copy); `wrap_like`,
+  the nodata helpers and the grid checks do it for you, and anything that
+  uses none of them calls `geoops._src.geo.reject_geotensor`. georeader
+  remains an internal engine behind a few operators and readers, called
+  only through `geoops._src.engine` / `geoarray.interop.georeader`; no
+  `GeoTensor` ever leaves a public function.
+- **Consistent `attrs`.** attrs are immutable; derive an output's with
+  `wrap_like` (or `g.with_attrs`, `attrs.set` / `drop`). Each per-band key
+  (`band_names`, `descriptions`, `wavelengths`, …) has one entry per
+  output band, or is dropped; `wrap_like` and geoarray's band indexing do
+  this for you. New band names go under `band_names` only. Values must be
+  hashable: lists become tuples, 1-D numeric arrays tuples of numbers;
+  2-D arrays are refused (store `.tolist()`, or keep them out of attrs).
+- **Nodata.** `fill_value` *is* nodata; it defaults to `None` (none), so
+  readers set it explicitly.
   - A pixel is invalid when any of its bands is non-finite or equals the
-    fill (`geoops._src.valid`).
+    fill, a NaN fill matching NaN (`geoops._src.valid`,
+    `GeoArray.valid_mask`).
   - Leave invalid pixels out of statistics and fits, then write the
     output's fill back into them.
   - The output fill follows the output's dtype and meaning: `False` for
@@ -164,10 +189,12 @@ hard rules. The long form, with examples, is
   grid: the same `(H, W)`, the same CRS and an exactly equal transform
   (`geoops._src.geo.require_grid_match`). An operator that measures in
   metres requires a projected CRS (`require_projected_crs`).
-- **Readers.** A reader returns a `GeoTensor`, or a lazy georeader
-  `GeoData` (`transform`, `crs`, `shape`, `load()`, `read_from_window()`).
-  - georeader's read helpers and the patcher's `RasterField` accept a lazy
-    reader as it is.
+- **Readers.** A reader returns a `GeoArray`, or is a lazy
+  `geoarray.RasterSource` (`grid`, `shape`, `dtype`, `fill_value`,
+  `attrs`, `read_window(PixelWindow)`, `load()`; `AsyncRasterSource` for
+  coroutine reads). A `GeoArray` is itself a `RasterSource`.
+  - The patcher's `RasterField` and geoops' `io` readers accept a lazy
+    source as it is.
   - A geotoolz operator needs pixels: call `.load()` (or use an `io`
     operator) first.
 
@@ -179,8 +206,10 @@ class automatically and checks:
 - graph mode;
 - terminal outputs;
 - carriers are never constructor arguments;
-- fresh `attrs` and fills that match the dtype;
-- `(T, C, H, W)` stacks.
+- consistent per-band `attrs` and fills that match the dtype;
+- `(T, C, H, W)` stacks;
+- a georeader `GeoTensor` refused, as the first carrier and as the
+  second (gate GD1).
 
 A new operator is covered as soon as it exists. If it can't be built with no
 arguments, add it to `CTOR_KWARGS` (or `RUNTIME_CTOR_KWARGS` when it needs
@@ -210,7 +239,7 @@ enforce them. Read it before changing that package:
 - [`packages/geotoolz-products/AGENTS.md`](packages/geotoolz-products/AGENTS.md) — `ProductReader`, sensor subpackages, the reader toolkit
 - [`packages/geotoolz-array/AGENTS.md`](packages/geotoolz-array/AGENTS.md) — the carrier, the pytree split, the membership test
 
-Conventions shared by all five:
+Conventions shared by all six:
 
 - Python 3.12+, `from __future__ import annotations` in every module, type
   hints on every public function, Google-style docstrings with a short
@@ -252,7 +281,7 @@ Always run Python tools through `uv run` (never the system Python).
 
 ```bash
 make install              # uv sync --all-packages --all-groups --all-extras + hooks
-make test                 # fast tier across all five packages
+make test                 # fast tier across all six packages
 make test-all             # everything incl. slow / integration tiers
 make format               # ruff format . && ruff check --fix .
 make lint                 # ruff check .   (entire repo)

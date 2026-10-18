@@ -14,7 +14,7 @@ Produces (under ``docs/assets/``):
   ``geopatcher`` fit together.
 
 The script uses only ``matplotlib`` + synthetic data so it runs in any
-sandbox; no network, no real GeoTensors required.
+sandbox; no network, no real GeoArrays required.
 """
 
 from __future__ import annotations
@@ -195,7 +195,7 @@ def make_operator_lifecycle() -> Path:
     fig, ax = plt.subplots(figsize=(10.5, 4.2))
     ax.set_title("Operator lifecycle", fontsize=12, color=TEXT, pad=10)
 
-    _box(ax, 1.0, 2.0, 1.7, 0.7, "GeoTensor\n(in)", face="#ECFEFF", edge="#0891B2")
+    _box(ax, 1.0, 2.0, 1.7, 0.7, "GeoArray\n(in)", face="#ECFEFF", edge="#0891B2")
     _box(ax, 3.4, 2.0, 1.7, 0.7, "op.__call__(x)")
     _box(ax, 5.8, 2.65, 1.9, 0.7, "op._apply(x)\n(eager)")
     _box(
@@ -208,7 +208,7 @@ def make_operator_lifecycle() -> Path:
         face="#FEF3C7",
         edge="#D97706",
     )
-    _box(ax, 8.2, 2.0, 1.7, 0.7, "GeoTensor\n(out)", face="#ECFEFF", edge="#0891B2")
+    _box(ax, 8.2, 2.0, 1.7, 0.7, "GeoArray\n(out)", face="#ECFEFF", edge="#0891B2")
 
     _box(ax, 3.4, 0.5, 1.7, 0.55, "op.get_config()", face="#F5F3FF", edge="#7C3AED")
     _box(ax, 6.0, 0.5, 1.9, 0.55, "YAML / Hydra-zen", face="#F5F3FF", edge="#7C3AED")
@@ -268,12 +268,12 @@ def make_pipeline_ecosystem() -> Path:
     _arrow(ax, 9.5, 2.7, 9.5, 2.3)
     _arrow(ax, 9.5, 1.7, 9.5, 1.3)
 
-    # cross-package arrows (GeoTensor flows between groups)
+    # cross-package arrows (GeoArray flows between groups)
     _arrow(ax, 2.85, 2.0, 4.75, 3.0, color=ACCENT)
     _arrow(ax, 6.65, 1.0, 8.55, 3.0, color=ACCENT)
 
-    ax.text(3.35, 2.7, "GeoTensor", fontsize=9, color=ACCENT, fontstyle="italic")
-    ax.text(7.15, 2.05, "GeoTensor", fontsize=9, color=ACCENT, fontstyle="italic")
+    ax.text(3.35, 2.7, "GeoArray", fontsize=9, color=ACCENT, fontstyle="italic")
+    ax.text(7.15, 2.05, "GeoArray", fontsize=9, color=ACCENT, fontstyle="italic")
 
     ax.set_xlim(0, 11.6)
     ax.set_ylim(-0.2, 4.0)
