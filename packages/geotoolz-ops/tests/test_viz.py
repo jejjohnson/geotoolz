@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio
-from _helpers import fill_pixel_mask, toy_geoarray
+from _helpers import fill_pixel_mask, toy_fill, toy_geoarray
 from geoarray import GeoArray
 from shapely.geometry import Point, Polygon
 
@@ -36,7 +36,7 @@ from geoops.viz import (
 
 
 def _toy_geoarray(
-    values: np.ndarray, attrs: dict | None = None, fill_value: Any = -9999
+    values: np.ndarray, attrs: dict | None = None, fill_value: Any = None
 ) -> GeoArray:
     # The fill must not collide with the data: 0.0 is a real value in most
     # fixtures here, and a pixel equal to ``fill_value`` is nodata.
@@ -44,7 +44,7 @@ def _toy_geoarray(
         data=values,
         transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 4.0),
         crs="EPSG:32629",
-        fill_value=fill_value,
+        fill_value=toy_fill(values) if fill_value is None else fill_value,
         attrs=attrs,
     )
 

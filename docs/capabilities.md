@@ -1456,7 +1456,7 @@ helper is added here, not inline in one caller.
 | `geoops._src.blending` | Shared overlap-add blending primitives. | `triangular_weights`, `overlap_add`, `normalize_overlap_add` |
 | `geoops._src.config` | Shared ``get_config()`` coercion helpers. | `jsonable`, `as_tuple`, `mapping_to_pairs`, `mapping_from_pairs`, `reject_config_summary` |
 | `geoops._src.contract` | The pipekit `Operator` and `GeoArray` carrier contracts, as assertions. | `geoarrays`, `is_nested_operator`, `same`, `assert_keyword_only`, `assert_config_round_trips`, `assert_graph_mode`, `assert_same_carrier`, `assert_consistent_attrs`, `assert_fill_matches_dtype`, `assert_rejects_geotensor`, `assert_clear_rank_error`, `time_stack_of`, `frames`, `assert_time_stack` |
-| `geoops._src.dtype` | Shared dtype-promotion primitive. | `as_float` |
+| `geoops._src.dtype` | Shared dtype primitives: float promotion and fills a dtype can hold. | `as_float`, `holds_fill`, `fill_for` |
 | `geoops._src.engine` | The georeader engine boundary: geotoolz carriers in, georeader out, and back. | `to_engine`, `from_engine` |
 | `geoops._src.fitted` | Shared plumbing for fitted operators (the ``fit`` / ``transform`` seam). | `PicklableLock`, `fit_lock`, `fit_once` |
 | `geoops._src.geo` | Shared georeferencing helpers. | `is_geotensor`, `reject_geotensor`, `is_georeader_object`, `reject_georeader`, `affine_of`, `as_pixel_window`, `require_geoarray`, `require_projected_crs`, `ground_pixel_size`, `grid_matches`, `require_grid_match`, `pixel_xy` |

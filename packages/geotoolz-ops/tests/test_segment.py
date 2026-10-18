@@ -7,7 +7,7 @@ import json
 import numpy as np
 import pytest
 import rasterio
-from _helpers import fill_pixel_mask, toy_geoarray
+from _helpers import fill_pixel_mask, toy_fill, toy_geoarray
 from geoarray import GeoArray
 from pipekit import Operator
 
@@ -22,7 +22,7 @@ def _gt(values: np.ndarray) -> GeoArray:
         data=values,
         transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 4.0),
         crs="EPSG:4326",
-        fill_value=np.nan,
+        fill_value=toy_fill(values, np.nan),
     )
 
 

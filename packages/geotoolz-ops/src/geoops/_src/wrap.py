@@ -33,6 +33,7 @@ from geoops._src.bands import (
     PER_BAND_KEYS,
     band_count,
 )
+from geoops._src.dtype import fill_for
 from geoops._src.engine import from_engine
 from geoops._src.geo import reject_geotensor
 
@@ -168,8 +169,11 @@ def wrap_like(
             ``transform`` is given, its trailing two (spatial) dims must
             match ``ref``'s when ``ref`` is a GeoArray.
         fill_value: Fill value for the returned GeoArray. The default,
-            :data:`INHERIT`, propagates ``ref.fill_value``; any other value
-            is used verbatim, so ``None`` means "no fill value" and
+            :data:`INHERIT`, propagates ``ref.fill_value`` when ``out``'s
+            dtype can hold it, and otherwise takes the output's canonical
+            fill (``False`` for a boolean output, ``0`` for an integer
+            one: a NaN- or ``-9999``-filled input's mask or labels); any
+            other value is used verbatim, so ``None`` means "no fill value" and
             ``NaN`` / ``False`` / ``0`` are explicit fills. Ignored for
             plain-array carriers.
         attrs: Attributes for the output. ``None`` (default) derives them
@@ -223,7 +227,10 @@ def wrap_like(
             attrs, in_bands=out_bands, out_bands=out_bands, band_names=band_names
         )
     if fill_value is INHERIT:
-        fill_value = ref.fill_value
+        # The input's fill when the output dtype holds it; otherwise the
+        # canonical fill of the output's meaning (False for a mask, 0 for
+        # labels / counts), never a fill the data would read as a value.
+        fill_value = fill_for(values.dtype, ref.fill_value)
     return GeoArray(
         values,
         transform,

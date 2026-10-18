@@ -203,3 +203,41 @@ def test_adopt_attrs_converts_engine_output() -> None:
     assert isinstance(out, GeoArray)
     assert out.attrs == gt.attrs
     assert out.grid == gt[..., 1:3, 1:3].grid
+
+
+# --- the inherited fill follows the output dtype ------------------------------
+
+
+@pytest.mark.parametrize(
+    ("in_fill", "out_dtype", "expected"),
+    [
+        (np.nan, np.uint8, 0),  # labels / counts of a NaN-filled scene
+        (-9999.0, np.uint16, 0),
+        (np.nan, np.bool_, False),  # a mask of a NaN-filled scene
+        (-9999.0, np.bool_, False),
+        (-9999.0, np.int32, -9999),  # held: carried
+        (np.nan, np.float32, np.nan),  # held: carried
+    ],
+)
+def test_wrap_like_inherits_only_a_fill_the_output_dtype_holds(
+    in_fill: float, out_dtype: type, expected: object
+) -> None:
+    """geoarray refuses a fill the data cannot hold; INHERIT must not hand one."""
+    ref = toy_geoarray(np.ones((2, 4, 4), np.float32), fill_value=in_fill)
+    out = wrap_like(ref, np.zeros((1, 4, 4), dtype=out_dtype))
+    assert out.dtype == out_dtype
+    if isinstance(expected, float) and np.isnan(expected):
+        assert np.isnan(float(out.fill_value))
+    else:
+        assert out.fill_value == expected
+        assert isinstance(out.fill_value, bool) == isinstance(expected, bool)
+
+
+def test_wrap_like_keeps_an_explicit_fill_verbatim() -> None:
+    """Only INHERIT adapts; an explicit fill the dtype cannot hold still raises."""
+    ref = toy_geoarray(np.ones((4, 4), np.float32), fill_value=np.nan)
+    with pytest.raises(ValueError, match="cannot be held"):
+        wrap_like(ref, np.zeros((4, 4), np.uint8), fill_value=-1)
+    assert (
+        wrap_like(ref, np.zeros((4, 4), np.uint8), fill_value=None).fill_value is None
+    )

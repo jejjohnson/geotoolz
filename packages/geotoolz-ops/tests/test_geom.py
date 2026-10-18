@@ -16,6 +16,7 @@ from __future__ import annotations
 import geopandas as gpd
 import numpy as np
 import pytest
+from _helpers import toy_fill
 from affine import Affine
 from geoarray import FrozenAttrs, GeoArray
 from geopatcher import spatial
@@ -36,7 +37,7 @@ def _gt(values: np.ndarray | None = None) -> GeoArray:
         values,
         transform=Affine(1, 0, 10, 0, -1, 20),
         crs="EPSG:4326",
-        fill_value=-9999,
+        fill_value=toy_fill(values),
     )
 
 

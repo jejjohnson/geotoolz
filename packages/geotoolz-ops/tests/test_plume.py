@@ -8,7 +8,7 @@ from collections.abc import Callable
 import numpy as np
 import pytest
 import rasterio
-from _helpers import fill_pixel_mask, toy_geoarray
+from _helpers import fill_pixel_mask, toy_fill, toy_geoarray
 from geoarray import GeoArray
 from pipekit import Operator
 
@@ -24,7 +24,7 @@ def _gt(values: np.ndarray) -> GeoArray:
         data=values,
         transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 100.0),
         crs="EPSG:32629",
-        fill_value=-9999,
+        fill_value=toy_fill(values),
     )
 
 

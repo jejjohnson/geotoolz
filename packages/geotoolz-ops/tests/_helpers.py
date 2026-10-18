@@ -18,6 +18,7 @@ import rasterio
 from geoarray import GeoArray
 
 from geoops._src.contract import frames  # noqa: F401 - re-exported for the tests
+from geoops._src.dtype import holds_fill
 
 
 #: 10 m UTM grid anchored in zone 29N — arbitrary but stable, so tests
@@ -37,6 +38,19 @@ DEFAULT_CRS = "EPSG:32629"
 #:   ``a`` / ``e``: catches code that ignores ``b`` / ``d``.
 #: * ``"geographic"`` -- an EPSG:4326 grid of 1e-4 degree pixels: metric
 #:   computations (areas, slopes, distances) must reject or convert it.
+#: The toy fill: ``-9999`` where the dtype holds it, else no fill. A
+#: GeoArray refuses a fill its data cannot hold; before it did, ``-9999``
+#: on ``bool`` / ``uint`` data matched no pixel, which ``None`` keeps.
+DEFAULT_FILL = -9999
+
+_DEFAULT: Any = object()
+
+
+def toy_fill(values: Any, fill: Any = DEFAULT_FILL) -> Any:
+    """``fill`` if ``values``' dtype holds it, else ``None`` (no fill)."""
+    return fill if holds_fill(np.asarray(values).dtype, fill) else None
+
+
 TOY_GRIDS: dict[str, tuple[rasterio.Affine, str]] = {
     "utm": (DEFAULT_TRANSFORM, DEFAULT_CRS),
     "non_square": (
@@ -65,7 +79,7 @@ def toy_geoarray(
     *,
     transform: rasterio.Affine | None = None,
     crs: Any = None,
-    fill_value: Any = -9999,
+    fill_value: Any = _DEFAULT,
     attrs: dict[str, Any] | None = None,
     with_fill_pixels: bool = False,
     grid: str = "utm",
@@ -76,7 +90,8 @@ def toy_geoarray(
         values: The pixel array, 2-D ``(H, W)`` up to 4-D ``(T, C, H, W)``.
         transform: Affine geotransform; defaults to the ``grid``'s.
         crs: Coordinate reference system; defaults to the ``grid``'s.
-        fill_value: Fill value stored on the carrier.
+        fill_value: Fill value stored on the carrier; default `toy_fill`
+            (``-9999``, or no fill when the dtype cannot hold it).
         attrs: Optional metadata dict.
         with_fill_pixels: Write ``fill_value`` into every band of
             the pixels marked by :func:`fill_pixel_mask` (the first and
@@ -89,6 +104,8 @@ def toy_geoarray(
         ``with_fill_pixels`` is set).
     """
     grid_transform, grid_crs = TOY_GRIDS[grid]
+    if fill_value is _DEFAULT:
+        fill_value = toy_fill(values)
     if with_fill_pixels:
         if fill_value is None:
             raise ValueError("with_fill_pixels needs a fill_value")
@@ -131,7 +148,7 @@ def time_stack(
     shape: tuple[int, int, int, int] = TIME_STACK_SHAPE,
     *,
     seed: int = 0,
-    fill_value: Any = -9999,
+    fill_value: Any = _DEFAULT,
     attrs: dict[str, Any] | None = None,
     with_fill_pixels: bool = False,
 ) -> GeoArray:

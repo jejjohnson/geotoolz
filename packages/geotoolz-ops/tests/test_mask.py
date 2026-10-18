@@ -9,7 +9,7 @@ import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio
-from _helpers import toy_geoarray
+from _helpers import toy_fill, toy_geoarray
 from geoarray import GeoArray
 from pipekit import Operator
 from shapely.geometry import MultiPolygon, Point, box
@@ -57,7 +57,7 @@ def _toy_geoarray(values: np.ndarray) -> GeoArray:
         data=values,
         transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 4.0),
         crs="EPSG:3857",
-        fill_value=-9999,
+        fill_value=toy_fill(values),
     )
 
 
