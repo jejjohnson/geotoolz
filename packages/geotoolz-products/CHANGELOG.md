@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.5.0...geotoolz-products-v0.6.0) (2026-10-18)
+## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.5.0...geotoolz-products-v0.6.0) (2026-10-19)
 
 
 ### ⚠ BREAKING CHANGES

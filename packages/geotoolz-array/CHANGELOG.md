@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.1.0...geotoolz-array-v0.2.0) (2026-10-18)
+## [0.2.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.1.0...geotoolz-array-v0.2.0) (2026-10-19)
 
 
 ### ⚠ BREAKING CHANGES

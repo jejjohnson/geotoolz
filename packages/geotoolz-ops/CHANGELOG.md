@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.12.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.11.0...geotoolz-ops-v0.12.0) (2026-10-18)
+## [0.12.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.11.0...geotoolz-ops-v0.12.0) (2026-10-19)
 
 
 ### ⚠ BREAKING CHANGES
