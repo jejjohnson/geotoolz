@@ -1,6 +1,6 @@
 [project]
 name = "geotoolz-array"
-version = "0.1.0"
+version = "0.2.0"
 description = "One georeferenced array for the geotoolz stack — a GeoArray whose data is a NumPy or a JAX array, with its grid, window and slicing geometry."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

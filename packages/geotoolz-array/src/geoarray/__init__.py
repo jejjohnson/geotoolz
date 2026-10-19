@@ -65,7 +65,7 @@ from geoarray._src.options import HostTransferWarning, get_options, set_options
 from geoarray._src.source import AsyncRasterSource, RasterSource
 
 
-__version__ = "0.1.0"  # x-release-please-version
+__version__ = "0.2.0"  # x-release-please-version
 
 __all__ = [
     "DIMS",

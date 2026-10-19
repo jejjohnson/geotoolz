@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.12.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.11.0...geotoolz-ops-v0.12.0) (2026-10-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* **geotoolz:** geotoolz installs a stack whose public APIs take and return geoarray.GeoArray and geoarray.RasterSource; a georeader GeoTensor or reader is refused with a TypeError naming from_georeader / source_from_georeader.
+* **patcher:** fields take geoarray RasterSources and return GeoArray; RasterDomain is no longer georeader's GeoDataBase (custom domains need a grid); fill_value_default is fill_value.
+* **cloud:** geocloud returns geoarray.GeoArray, never GeoTensor; CogSource / CogDomain / AsyncCogReader fill_value_default is fill_value; write_cog no longer accepts a GeoTensor or georeader reader.
+* **ops:** geoops operators no longer accept georeader GeoTensor or GeoData; convert with geoarray.interop.georeader.from_georeader / source_from_georeader. wrap_like(fill_value_default=) is now wrap_like(fill_value=); require_geotensor is require_geoarray; GeoTensorEstimator is GeoArrayEstimator.
+
+### Features
+
+* **cloud:** read and write geoarray.GeoArray instead of GeoTensor ([#502](https://github.com/jejjohnson/geotoolz/issues/502)) ([e04df54](https://github.com/jejjohnson/geotoolz/commit/e04df54fbfda97271b34d7ec9ccf5d7e1a68ed41))
+* **geotoolz:** describe the stack on geoarray.GeoArray and require the GeoArray releases ([#507](https://github.com/jejjohnson/geotoolz/issues/507)) ([336156d](https://github.com/jejjohnson/geotoolz/commit/336156da80925020cfc2247692ba9674dc0b5cd7))
+* **ops:** take and return geoarray.GeoArray instead of GeoTensor ([#501](https://github.com/jejjohnson/geotoolz/issues/501)) ([7522c70](https://github.com/jejjohnson/geotoolz/commit/7522c7016f1a3c18b769d587a46540e1e205578b))
+* **patcher:** fields read geoarray RasterSources and return GeoArray ([#503](https://github.com/jejjohnson/geotoolz/issues/503)) ([7062563](https://github.com/jejjohnson/geotoolz/commit/70625637574aef553b580208788b4d80aec50cb9))
+
 ## [0.11.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.10.3...geotoolz-ops-v0.11.0) (2026-10-17)
 
 
