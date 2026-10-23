@@ -86,6 +86,8 @@ ignore = ["E402", "E721", "E731", "E741"]
 # coding standard asks; RUF001/002/003 would flag every symbol.
 "src/**/*.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/**/*.py" = ["RUF001", "RUF002", "RUF003", "TID251"]
+# The #516 spike (throwaway, removed with it) writes its maths the same way.
+"spike/**/*.py" = ["RUF001", "RUF002", "RUF003"]
 # The adapter is the one module that imports georeader (lazily).
 "src/geoarray/_src/georeader.py" = ["RUF001", "RUF002", "RUF003", "TID251"]
 

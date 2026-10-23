@@ -1,0 +1,40 @@
+{
+  "problem": {
+    "H": 256,
+    "W": 256,
+    "T": 8,
+    "steps_per_frame": 5,
+    "N": 20000
+  },
+  "machine": {
+    "platform": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
+    "python": "3.13.17",
+    "jax": "0.10.2",
+    "device": "cpu:0"
+  },
+  "A_l3_carrier": {
+    "traces_over_3_windows": 1,
+    "compile_s": 0.6640457689999266,
+    "per_call_ms": 18.271037000090473,
+    "per_call_ms_min": 14.642750999882992,
+    "flops": 6369482.0,
+    "bytes accessed": 52618616.0
+  },
+  "B_l1_loop": {
+    "traces_over_3_windows": 1,
+    "compile_s": 0.6082154335000496,
+    "per_call_ms": 18.13072850006847,
+    "per_call_ms_min": 15.384470000071815,
+    "bytes accessed": 52858616.0,
+    "flops": 3729482.0
+  },
+  "A_over_B_per_call": 1.0073725510371243,
+  "A_over_B_interquartile": [
+    0.9581060472861279,
+    1.0573113389286308
+  ],
+  "J_rel_diff": 0.0,
+  "grad_max_rel_diff": 6.978520366827421e-15,
+  "rule": "A if its per-call time is within 10 % of B's and it traces once",
+  "decision": "A"
+}
