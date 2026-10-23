@@ -1,0 +1,59 @@
+{
+  "machine": {
+    "platform": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "python": "3.13.17",
+    "numpy": "2.4.5",
+    "xarray": "2026.4.0",
+    "geotoolz_array": "0.2.0"
+  },
+  "method": "median over repeats of the timeit autorange mean, after warm-up",
+  "repeats": 7,
+  "rows": [
+    {
+      "shape": [
+        2,
+        64,
+        64
+      ],
+      "nd_carrier_us": 130.6987675000073,
+      "nd_xarray_us": 1524.4465999998624,
+      "window_carrier_us": 35.13089240000227,
+      "window_xarray_us": 53.25603899998441
+    },
+    {
+      "shape": [
+        2,
+        256,
+        256
+      ],
+      "nd_carrier_us": 241.127921000043,
+      "nd_xarray_us": 1724.2067949996454,
+      "window_carrier_us": 35.10253079999757,
+      "window_xarray_us": 54.84960759999922
+    },
+    {
+      "shape": [
+        2,
+        2000,
+        2000
+      ],
+      "nd_carrier_us": 24832.67379999461,
+      "nd_xarray_us": 26791.33719999527,
+      "window_carrier_us": 33.55386329999419,
+      "window_xarray_us": 56.999972199992044
+    }
+  ],
+  "import_s": {
+    "numpy": 0.06817867899997054,
+    "xarray": 0.4589864699998998
+  },
+  "misaligned_1e-7_m": {
+    "xarray_result_shape": [
+      1,
+      4,
+      0
+    ],
+    "carrier": "GridMismatchError: combine: carrier 1 has transform [20.0, 0.0, 600000.0000001,\u2026"
+  }
+}
