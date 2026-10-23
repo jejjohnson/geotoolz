@@ -53,6 +53,7 @@ Not measured: GPU.
   Under `jit` a transform is a tracer, so an exact grid check cannot be a Python `if`.
   Today's geoarray skips the transform comparison under a trace (`_require_same_grid`), so a 10⁻⁷ m offset passes silently inside `jit`.
   The prototype's adapter attaches `equinox.error_if` to the data and returns the guarded carriers; the caller must use them.
+  **Corrected 24 Oct 2026 (#541, #542):** a check carried on the data is pruned by XLA when nothing needs those values, as under `grad` with respect to another carrier. The fix on `main` uses a `jax.debug.callback`, an effect XLA keeps; W1's adapter should do the same.
   Changes jejjohnson/pipekit#100 (adapter interface) and #517 (geoarray's adapter).
 - **F2. Outputs keep the first input's dim order.**
   A gufunc puts core dims last, so the per-column score `(r,c)->(r)` with `core={"r": "y"}` comes back as `(x, y)`, which is not a `GeoArray["y x"]`.
