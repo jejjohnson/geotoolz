@@ -164,7 +164,10 @@ def _register() -> None:
 
     def flatten_with_keys(g: GeoArray) -> tuple[Any, Any]:
         leaves, aux = flatten(g)
-        return ((GetAttrKey("data"), leaves[0]), (GetAttrKey("transform"), leaves[1])), aux
+        return (
+            (GetAttrKey("data"), leaves[0]),
+            (GetAttrKey("transform"), leaves[1]),
+        ), aux
 
     def unflatten(aux: Any, leaves: Any) -> GeoArray:
         dims, crs, fill, labels = aux

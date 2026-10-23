@@ -18,8 +18,12 @@ def _jnp() -> Any:
     return jnp
 
 
-def bilinear_at(field: Any, transform: Any, xy: Any, valid: Any) -> Any:
+def bilinear_at(
+    field: Any, transform: Any, xy: Any, valid: Any, tidx: Any = None
+) -> Any:
     """L1: field (..., H, W) at map points xy (N, 2) → (..., N); 0 where not valid.
+
+    With tidx (N,), field is (T, H, W) and each point reads its own frame → (N,).
 
     transform is (a, b, c, d, e, f): x = a·col + b·row + c, y = d·col + e·row + f.
     """
@@ -39,16 +43,20 @@ def bilinear_at(field: Any, transform: Any, xy: Any, valid: Any) -> Any:
     wr = jnp.clip(row - i0, 0.0, 1.0)
     wc = jnp.clip(col - j0, 0.0, 1.0)
     # f(r, c) = ∑ corner values × bilinear weights                     (..., N)
-    f00 = field[..., i0, j0]
-    f01 = field[..., i0, j0 + 1]
-    f10 = field[..., i0 + 1, j0]
-    f11 = field[..., i0 + 1, j0 + 1]
+    lead = (Ellipsis,) if tidx is None else (tidx,)
+    f00 = field[(*lead, i0, j0)]
+    f01 = field[(*lead, i0, j0 + 1)]
+    f10 = field[(*lead, i0 + 1, j0)]
+    f11 = field[(*lead, i0 + 1, j0 + 1)]
     val = (1 - wr) * ((1 - wc) * f00 + wc * f01) + wr * ((1 - wc) * f10 + wc * f11)
     return jnp.where(valid, val, 0.0)
 
 
-def sample(g: GeoArray, xy: Any, valid: Any) -> Any:
-    """The carrier form: a GeoArray["... y x"] at points → raw (..., N)."""
+def sample(g: GeoArray, xy: Any, valid: Any, tidx: Any = None) -> Any:
+    """The carrier form: a GeoArray["... y x"] at points → raw (..., N).
+
+    tidx (N,) picks each point's frame of a GeoArray["time y x"] (tracks).
+    """
     if g.transform.ndim != 1:
         raise ValueError("sample takes one transform for every frame")
-    return bilinear_at(g.data, g.transform, xy, valid)
+    return bilinear_at(g.data, g.transform, xy, valid, tidx)

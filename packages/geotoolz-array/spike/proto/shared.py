@@ -39,7 +39,9 @@ def combine(f: Callable[..., Any], *xs: Any) -> Any:
     if isinstance(a, XarrayAdapter):
         import xarray as xr
 
-        return xr.apply_ufunc(f, *xs, dask="parallelized", join="exact", output_dtypes=[xs[0].dtype])
+        return xr.apply_ufunc(
+            f, *xs, dask="parallelized", join="exact", output_dtypes=[xs[0].dtype]
+        )
     out = f(*(a.data(x) for x in xs))
     return a.rewrap(xs[0], out, a.dims(xs[0]), xs[0].labels)
 
@@ -51,7 +53,9 @@ def stack(xs: list[Any], dim: str) -> Any:
     if isinstance(a, XarrayAdapter):
         import xarray as xr
 
-        return xr.concat(xs, dim=dim, join="exact", coords="minimal", compat="identical")
+        return xr.concat(
+            xs, dim=dim, join="exact", coords="minimal", compat="identical"
+        )
     xp = _xp(a.data(xs[0]))
     data = xp.stack([a.data(x) for x in xs])
     return a.rewrap(xs[0], data, (dim, *a.dims(xs[0])), xs[0].labels)
@@ -80,7 +84,9 @@ def isel(x: Any, dim: str, index: int) -> Any:
     kept = tuple(d for d in dims if d != dim)
     labels = tuple((d, l) for d, l in x.labels if d in kept)
     if isinstance(x, GeoArray) and dim in x.batch_dims:
-        return _build(x.data[key], x.transform[index], kept, x.crs, x.fill_value, labels)
+        return _build(
+            x.data[key], x.transform[index], kept, x.crs, x.fill_value, labels
+        )
     return a.rewrap(x, a.data(x)[key], kept, labels)
 
 
@@ -107,7 +113,9 @@ def _map_over_jax(f: Callable[[Any], Any], x: GeoArray, dim: str) -> Any:
     import jax
 
     if x.dims[0] != dim:
-        raise ValueError(f"map_over on JAX maps the leading dim; {dim!r} is not {x.dims[0]!r}")
+        raise ValueError(
+            f"map_over on JAX maps the leading dim; {dim!r} is not {x.dims[0]!r}"
+        )
     per_row = dim in x.batch_dims
     kept = x.dims[1:]
     labels = tuple((d, l) for d, l in x.labels if d in kept)
@@ -118,7 +126,9 @@ def _map_over_jax(f: Callable[[Any], Any], x: GeoArray, dim: str) -> Any:
     out = jax.vmap(one, in_axes=(0, 0 if per_row else None))(x.data, x.transform)
     if isinstance(out, GeoArray):
         transform = out.transform if per_row else out.transform[0]
-        return _build(out.data, transform, (dim, *out.dims), out.crs, out.fill_value, out.labels)
+        return _build(
+            out.data, transform, (dim, *out.dims), out.crs, out.fill_value, out.labels
+        )
     return out
 
 
@@ -130,7 +140,14 @@ def _restack(items: list[Any], dim: str) -> Any:
         rows = [np.asarray(g.transform) for g in items]
         same = all(np.array_equal(r, rows[0]) for r in rows)
         transform = first.transform if same else xp.stack([g.transform for g in items])
-        return _build(data, transform, (dim, *first.dims), first.crs, first.fill_value, first.labels)
+        return _build(
+            data,
+            transform,
+            (dim, *first.dims),
+            first.crs,
+            first.fill_value,
+            first.labels,
+        )
     a = _named(first, "map_over")
     xp = _xp(a.data(first))
     data = xp.stack([a.data(g) for g in items])

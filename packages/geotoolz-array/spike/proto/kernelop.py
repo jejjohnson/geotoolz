@@ -39,7 +39,8 @@ _GROUP = re.compile(r"\(([^)]*)\)")
 
 def _parse(part: str) -> tuple[tuple[str, ...], ...]:
     return tuple(
-        tuple(s.strip() for s in g.split(",") if s.strip()) for g in _GROUP.findall(part)
+        tuple(s.strip() for s in g.split(",") if s.strip())
+        for g in _GROUP.findall(part)
     )
 
 
@@ -83,8 +84,18 @@ class KernelOp:
 
     def __call__(self, *xs: Any) -> Any:
         if len(xs) != len(self.spec.inputs):
-            raise TypeError(f"{self.spec.signature} takes {len(self.spec.inputs)} inputs")
+            raise TypeError(
+                f"{self.spec.signature} takes {len(self.spec.inputs)} inputs"
+            )
         adapters = [adapter_for(x) for x in xs]
+        batch = getattr(xs[0], "batch_dims", ())
+        if self.geometry and batch:
+            # F4: derived geometry of a batched carrier varies along the batch
+            # dims, and keyword inputs are passed whole, never mapped.
+            raise ValueError(
+                f"geometry= on a carrier batched over {batch}: "
+                f"use map_over(op, x, {batch[0]!r}) so each item has one transform"
+            )
         kwargs = self.params | {name: fn(xs[0]) for name, fn in self.geometry.items()}
         if all(a is None for a in adapters):
             return self._call_raw(xs, kwargs, backend_name(xs[0]))
@@ -107,23 +118,31 @@ class KernelOp:
 
         return np.vectorize(f, signature=sig)
 
-    def _call_raw(self, xs: tuple[Any, ...], kwargs: dict[str, Any], backend: str) -> Any:
+    def _call_raw(
+        self, xs: tuple[Any, ...], kwargs: dict[str, Any], backend: str
+    ) -> Any:
         return self._func(kwargs, backend)(*xs)
 
     # -- carriers on NumPy or JAX -------------------------------------------
 
-    def _call_named(self, xs: tuple[Any, ...], adapters: list[Any], kwargs: dict[str, Any]) -> Any:
+    def _call_named(
+        self, xs: tuple[Any, ...], adapters: list[Any], kwargs: dict[str, Any]
+    ) -> Any:
         for i, a in enumerate(adapters):
             if a is None:
-                raise TypeError(f"input {i} is a raw array next to named carriers; name it")
+                raise TypeError(
+                    f"input {i} is a raw array next to named carriers; name it"
+                )
         backends = {backend_name(a.data(x)) for a, x in zip(adapters, xs, strict=True)}
         if len(backends) > 1:
             raise BackendError(
-                f"inputs on {sorted(backends)}: call to_jax() on the NumPy carriers first"
+                f"inputs on {sorted(backends)}: call to_jax() on the NumPy carriers"
             )
         backend = backends.pop()
         if backend not in self.spec.backends:
-            raise BackendError(f"kernel declares backends {self.spec.backends}, not {backend}")
+            raise BackendError(
+                f"kernel declares backends {self.spec.backends}, not {backend}"
+            )
         xs = _check_by_kind(xs, adapters)
         core_in = [tuple(self.core[c] for c in grp) for grp in self.spec.inputs]
         loop: list[str] = []
@@ -151,19 +170,27 @@ class KernelOp:
         wrapped = []
         for out, grp in zip(results, self.spec.outputs, strict=True):
             dims = tuple(loop) + tuple(self.core[c] for c in grp)
-            order = [d for d in first_dims if d in dims] + [d for d in dims if d not in first_dims]
+            order = [d for d in first_dims if d in dims] + [
+                d for d in dims if d not in first_dims
+            ]
             out = xp.transpose(out, [dims.index(d) for d in order])
             order_t = tuple(order)
-            wrapped.append(tad.rewrap(template, out, order_t, merged_labels(xs, order_t)))
+            wrapped.append(
+                tad.rewrap(template, out, order_t, merged_labels(xs, order_t))
+            )
         return tuple(wrapped) if many else wrapped[0]
 
     # -- xarray ---------------------------------------------------------------
 
-    def _call_xarray(self, xs: tuple[Any, ...], adapters: list[Any], kwargs: dict[str, Any]) -> Any:
+    def _call_xarray(
+        self, xs: tuple[Any, ...], adapters: list[Any], kwargs: dict[str, Any]
+    ) -> Any:
         import xarray as xr
 
         if not all(isinstance(a, XarrayAdapter) for a in adapters):
-            raise BackendError("mix of xarray and other carriers; convert with to_xarray()")
+            raise BackendError(
+                "mix of xarray and other carriers; convert with to_xarray()"
+            )
         xs = adapters[0].check_compatible(*xs)
         in_dims = [[self.core[c] for c in grp] for grp in self.spec.inputs]
         out_dims = [[self.core[c] for c in grp] for grp in self.spec.outputs]
@@ -188,7 +215,9 @@ class KernelOp:
 
         def order(da: Any) -> Any:
             dims = tuple(da.dims)
-            o = [d for d in first_dims if d in dims] + [d for d in dims if d not in first_dims]
+            o = [d for d in first_dims if d in dims] + [
+                d for d in dims if d not in first_dims
+            ]
             return da.transpose(*o)
 
         if isinstance(result, tuple):
@@ -206,11 +235,15 @@ def _xp(backend: str) -> Any:
     return np
 
 
-def _arrange(xp: Any, data: Any, dims: tuple[str, ...], loop: list[str], cores: tuple[str, ...]) -> Any:
-    """Transpose to (loop dims present, in loop order) + cores; size-1 axes for the rest."""
+def _arrange(
+    xp: Any, data: Any, dims: tuple[str, ...], loop: list[str], cores: tuple[str, ...]
+) -> Any:
+    """Transpose to (present loop dims, in loop order) + cores; size 1 for the rest."""
     present = [d for d in loop if d in dims]
     moved = xp.transpose(data, [dims.index(d) for d in present + list(cores)])
-    index = tuple(slice(None) if d in dims else None for d in loop) + (slice(None),) * len(cores)
+    index = tuple(slice(None) if d in dims else None for d in loop) + (
+        slice(None),
+    ) * len(cores)
     return moved[index]
 
 
@@ -229,7 +262,7 @@ def _check_by_kind(xs: tuple[Any, ...], adapters: list[Any]) -> tuple[Any, ...]:
 
 
 def _template(xs: tuple[Any, ...], adapters: list[Any]) -> tuple[Any, Any]:
-    """The georeferenced input outputs are rewrapped on: the first GeoArray, else the first."""
+    """The input outputs are rewrapped on: the first GeoArray, else the first."""
     for x, a in zip(xs, adapters, strict=True):
         if isinstance(a, GeoArrayAdapter):
             return x, a

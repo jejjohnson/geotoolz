@@ -13,6 +13,7 @@ carriers back, and the caller must use what it returns.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any, Protocol
 
 import numpy as np
@@ -35,7 +36,9 @@ class Adapter(Protocol):
     def dims(self, x: Any) -> tuple[str, ...]: ...
     def data(self, x: Any) -> Any: ...
     def labels(self, x: Any, dim: str) -> tuple[Any, ...] | None: ...
-    def rewrap(self, template: Any, data: Any, dims: tuple[str, ...], labels: Any) -> Any: ...
+    def rewrap(
+        self, template: Any, data: Any, dims: tuple[str, ...], labels: Any
+    ) -> Any: ...
     def check_compatible(self, *xs: Any) -> tuple[Any, ...]: ...
 
 
@@ -80,7 +83,9 @@ def backend_name(x: Any) -> str:
     return "numpy"
 
 
-def merged_labels(xs: Any, dims: tuple[str, ...]) -> tuple[tuple[str, tuple[Any, ...]], ...]:
+def merged_labels(
+    xs: Any, dims: tuple[str, ...]
+) -> tuple[tuple[str, tuple[Any, ...]], ...]:
     """Labels for ``dims``, taken from the first input that has them."""
     out: dict[str, tuple[Any, ...]] = {}
     for x in xs:
@@ -109,7 +114,9 @@ class DimArrayAdapter:
     def labels(self, x: DimArray, dim: str) -> tuple[Any, ...] | None:
         return x.labels_of(dim)
 
-    def rewrap(self, template: Any, data: Any, dims: tuple[str, ...], labels: Any) -> DimArray:
+    def rewrap(
+        self, template: Any, data: Any, dims: tuple[str, ...], labels: Any
+    ) -> DimArray:
         return DimArray(data, dims, labels)
 
     def check_compatible(self, *xs: Any) -> tuple[Any, ...]:
@@ -135,7 +142,9 @@ class GeoArrayAdapter:
     def labels(self, x: GeoArray, dim: str) -> tuple[Any, ...] | None:
         return x.labels_of(dim)
 
-    def rewrap(self, template: GeoArray, data: Any, dims: tuple[str, ...], labels: Any) -> Any:
+    def rewrap(
+        self, template: GeoArray, data: Any, dims: tuple[str, ...], labels: Any
+    ) -> Any:
         """A GeoArray while the spatial dims and the transform's batch dims survive.
 
         Otherwise a DimArray: the georeference no longer describes the data.
@@ -144,7 +153,14 @@ class GeoArrayAdapter:
         if dims[-2:] == SPATIAL and dims[: len(batch)] == batch:
             from proto.carrier import _build
 
-            return _build(data, template.transform, dims, template.crs, template.fill_value, labels)
+            return _build(
+                data,
+                template.transform,
+                dims,
+                template.crs,
+                template.fill_value,
+                labels,
+            )
         return DimArray(data, dims, labels)
 
     def check_compatible(self, *xs: GeoArray) -> tuple[GeoArray, ...]:
@@ -153,7 +169,10 @@ class GeoArrayAdapter:
         for i, g in enumerate(xs[1:], start=1):
             if g.crs != first.crs:
                 raise GridMismatchError(f"carrier {i}: CRS {g.crs} is not {first.crs}")
-            if g.shape[-2:] != first.shape[-2:] or g.transform.shape != first.transform.shape:
+            if (
+                g.shape[-2:] != first.shape[-2:]
+                or g.transform.shape != first.transform.shape
+            ):
                 raise GridMismatchError(
                     f"carrier {i}: grid {g.shape[-2:]} / {g.transform.shape} is not "
                     f"{first.shape[-2:]} / {first.transform.shape}"
@@ -176,7 +195,9 @@ def _guard_equal(g: GeoArray, first: GeoArray, i: int) -> GeoArray:
     import jax.numpy as jnp
 
     differ = jnp.any(g.transform != first.transform)
-    data = eqx.error_if(g.data, differ, f"GridMismatchError: carrier {i} transform differs")
+    data = eqx.error_if(
+        g.data, differ, f"GridMismatchError: carrier {i} transform differs"
+    )
     return g.with_data(data)
 
 
@@ -196,7 +217,9 @@ class XarrayAdapter:
             return tuple(x.coords[dim].values.tolist())
         return None
 
-    def rewrap(self, template: Any, data: Any, dims: tuple[str, ...], labels: Any) -> Any:
+    def rewrap(
+        self, template: Any, data: Any, dims: tuple[str, ...], labels: Any
+    ) -> Any:
         import xarray as xr
 
         coords = {k: v for k, v in template.coords.items() if set(v.dims) <= set(dims)}
@@ -223,7 +246,5 @@ def register_xarray() -> None:
     register_adapter(xr.DataArray, XarrayAdapter())
 
 
-try:
+with contextlib.suppress(ImportError):
     register_xarray()
-except ImportError:  # pragma: no cover
-    pass

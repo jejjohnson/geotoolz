@@ -70,22 +70,28 @@ def gradient(f: Any, *, spacing: Any) -> tuple[Any, Any]:
     xp = _xp(f)
     dy, dx = spacing[0], spacing[1]
     # interior: (f[i+1] − f[i−1]) / 2Δ; edges: one-sided      (..., Y, X)
-    gy = xp.concatenate(
-        [
-            f[..., 1:2, :] - f[..., 0:1, :],
-            (f[..., 2:, :] - f[..., :-2, :]) / 2.0,
-            f[..., -1:, :] - f[..., -2:-1, :],
-        ],
-        axis=-2,
-    ) / dy
-    gx = xp.concatenate(
-        [
-            f[..., 1:2] - f[..., 0:1],
-            (f[..., 2:] - f[..., :-2]) / 2.0,
-            f[..., -1:] - f[..., -2:-1],
-        ],
-        axis=-1,
-    ) / dx
+    gy = (
+        xp.concatenate(
+            [
+                f[..., 1:2, :] - f[..., 0:1, :],
+                (f[..., 2:, :] - f[..., :-2, :]) / 2.0,
+                f[..., -1:, :] - f[..., -2:-1, :],
+            ],
+            axis=-2,
+        )
+        / dy
+    )
+    gx = (
+        xp.concatenate(
+            [
+                f[..., 1:2] - f[..., 0:1],
+                (f[..., 2:] - f[..., :-2]) / 2.0,
+                f[..., -1:] - f[..., -2:-1],
+            ],
+            axis=-1,
+        )
+        / dx
+    )
     return gy, gx
 
 

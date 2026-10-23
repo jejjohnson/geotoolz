@@ -30,15 +30,15 @@ uv run python spike/bench_op_o8.py
 
 | Gate | Passes when | Status |
 | --- | --- | --- |
-| GA-G2 One trace, many scenes | one trace across 100 random transforms; a new CRS or shape adds exactly one | pending |
-| GA-G15 Patches | 64 patches with different transforms in one trace via `map_over`; stitch matches today's | pending |
-| GA-G16 DA gradient | `grad(cost)` with padded observations; J and ∇ₓJ unchanged by the pad length and finite with NaN padding | pending |
-| GA-G17 No JAX on I/O | geocatalog, geocloud and geoproducts import and read without JAX | pending |
-| GA-G18 Shared functions agree | each shared function identical on NumPy, JAX and dask-backed xarray | pending |
-| GA-G19 No silent alignment | `combine` and `stack` raise on a 10⁻⁷ m offset on every backend | pending |
-| GA-G20 Lossless round trip | `from_xarray(to_xarray(g))` keeps transform, dims and coordinates, rotated grids included | pending |
-| GA-G21 Patch overhead | 10k patches through a 5-op chain within a budget of today's carrier | pending |
+| GA-G2 One trace, many scenes | one trace across 100 random transforms; a new CRS or shape adds exactly one | pass |
+| GA-G15 Patches | 64 patches with different transforms in one trace via `map_over`; stitch matches today's | pass |
+| GA-G16 DA gradient | `grad(cost)` with padded observations; J and ∇ₓJ unchanged by the pad length and finite with NaN padding | pass |
+| GA-G17 No JAX on I/O | geocatalog, geocloud and geoproducts import and read without JAX | pass |
+| GA-G18 Shared functions agree | each shared function identical on NumPy, JAX and dask-backed xarray | pass (5 functions + KernelOp) |
+| GA-G19 No silent alignment | `combine` and `stack` raise on a 10⁻⁷ m offset on every backend | pass, with F1 under `jit` |
+| GA-G20 Lossless round trip | `from_xarray(to_xarray(g))` keeps transform, dims and coordinates, rotated grids included | pass |
+| GA-G21 Patch overhead | 10k patches through a 5-op chain within a budget of today's carrier | pass (budget today + 25 µs/op) |
 | GA-G22 Reproducible costs | committed benchmark (#536) | after this spike |
-| OP-O8 measurements | trace count, compile time and per-call time of `jit(grad(cost))` for an L3 and an L1 forward model | pending |
+| OP-O8 measurements | trace count, compile time and per-call time of `jit(grad(cost))` for an L3 and an L1 forward model | done: A / B = 1.007 |
 
 Results are posted on #516 and recorded in `RESULTS.md` here.

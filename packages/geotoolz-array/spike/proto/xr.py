@@ -66,7 +66,9 @@ def from_xarray(da: Any) -> GeoArray:
         y = np.asarray(da.coords["y"].values, dtype=np.float64)
     if t is None:
         if not has_xy or len(x) < 2 or len(y) < 2:
-            raise ValueError("no GeoTransform and no 1-D x/y centres with two or more points")
+            raise ValueError(
+                "no GeoTransform and no 1-D x/y centres with two or more points"
+            )
         dx, dy = x[1] - x[0], y[1] - y[0]
         t = np.array([dx, 0.0, x[0] - dx / 2, 0.0, dy, y[0] - dy / 2])
     elif has_xy and t[1] == 0 and t[3] == 0:
@@ -75,7 +77,9 @@ def from_xarray(da: Any) -> GeoArray:
         ey = f + e * (np.arange(len(y)) + 0.5)
         tol_x, tol_y = 1e-9 * abs(a), 1e-9 * abs(e)
         if np.max(np.abs(x - ex)) > tol_x or np.max(np.abs(y - ey)) > tol_y:
-            raise ValueError("x/y coordinates disagree with GeoTransform by more than 1e-9 pixel")
+            raise ValueError(
+                "x/y coordinates disagree with GeoTransform by more than 1e-9 pixel"
+            )
     crs = None
     if ref is not None and "crs_wkt" in ref.attrs:
         crs = pyproj.CRS.from_wkt(ref.attrs["crs_wkt"])
