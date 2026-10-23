@@ -374,6 +374,53 @@ class TestJoins:
         out = x64.jit(lambda a, b: combine(jnp.add, a, b))(g, g)
         np.testing.assert_array_equal(np.asarray(out.data), 2 * _scene().data)
 
+    @pytest.mark.parametrize("join", ["combine", "stack", "concatenate"])
+    @pytest.mark.parametrize("transform", ["jit", "grad", "vmap"])
+    def test_joins_check_transforms_under_transforms(
+        self, x64: ModuleType, join: str, transform: str
+    ) -> None:
+        """#541: a 1e-7 m offset raises under jit, grad and vmap, not just eagerly.
+
+        grad is taken with respect to the first carrier only, so nothing in the
+        result needs the second carrier's values: a check carried on its data
+        would be pruned, and this case catches that.
+        """
+        jnp = x64.numpy
+        joins = {
+            "combine": lambda a, b: combine(jnp.add, a, b),
+            "stack": lambda a, b: stack([a, b]),
+            "concatenate": lambda a, b: concatenate([a, b]),
+        }
+
+        def total(a: GeoArray, b: GeoArray) -> object:
+            joined = joins[join](a, b)
+            return joined.data.sum()
+
+        if transform == "vmap":
+            # a batch of two scenes per carrier: one transform row each
+            rows = np.stack([np.array(TRANSFORM)] * 2)
+            a = GeoArray(np.ones((2, 2, 8, 8)), rows, CRS).to_jax()
+            moved_rows = rows.copy()
+            moved_rows[1, 2] += 1e-7
+            moved = GeoArray(np.ones((2, 2, 8, 8)), moved_rows, CRS).to_jax()
+            run = x64.jit(x64.vmap(total))
+        else:
+            a = _scene().to_jax()
+            moved_transform = (20.0, 0.0, 600000.0 + 1e-7, 0.0, -20.0, 3550000.0)
+            moved = GeoArray(np.asarray(a.data), moved_transform, CRS).to_jax()
+            assert not np.array_equal(
+                np.asarray(a.transform), np.asarray(moved.transform)
+            )
+            run = x64.jit(x64.grad(total)) if transform == "grad" else x64.jit(total)
+        # raised on the host inside the compiled call; JAX re-raises it as a
+        # JaxRuntimeError whose message carries the GridMismatchError
+        with pytest.raises(x64.errors.JaxRuntimeError, match="GridMismatchError"):
+            x64.block_until_ready(run(a, moved))
+        # equal grids run; under grad, ∂(∑ joined)/∂a = 1 for every pixel
+        out = x64.block_until_ready(run(a, a))
+        if transform == "grad":
+            np.testing.assert_array_equal(np.asarray(out.data), np.ones(a.shape))
+
     def test_stack(self) -> None:
         g = _scene()
         out = stack([g, g, g])

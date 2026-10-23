@@ -71,6 +71,11 @@ interpolates belong in `geoops.functional`.
 - **Under a trace, host-side reads raise `GeoArrayTraceError`** (`grid`,
   `to_numpy`), naming the alternative. Never let JAX's generic
   `TracerArrayConversionError` reach the user from geoarray code.
+- **Grid checks never skip under a trace.** Traced transforms are compared
+  at run time by a `jax.debug.callback` that raises `GridMismatchError`
+  (JAX re-raises it as `JaxRuntimeError`). Not `equinox.error_if` on the
+  data: XLA prunes that check when nothing needs those values, as in
+  `grad` with respect to another carrier (#541).
 
 ## Conventions
 
