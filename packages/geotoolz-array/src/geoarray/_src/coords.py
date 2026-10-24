@@ -39,7 +39,7 @@ from typing import Any, ClassVar, Protocol, cast, runtime_checkable
 import numpy as np
 import pyproj
 
-from geoarray._src.backend import is_tracer
+from geoarray._src.backend import is_jax_array, is_tracer, namespace
 from geoarray._src.grid import apply_transform, as_crs, shift_scale_transform
 
 
@@ -366,7 +366,11 @@ class TimeAxis:
     def isel(self, index: Any) -> TimeAxis:
         """The times at ``index`` (on the stamps' own backend)."""
         positions = np.asarray(_positions(index, self.size), dtype=int)
-        return TimeAxis.from_leaf(self.stamps[positions])
+        picked = self.stamps[positions]
+        if isinstance(picked, np.ndarray):
+            # an indexed copy is writable: freeze it, as the constructor does
+            picked.setflags(write=False)
+        return TimeAxis.from_leaf(picked)
 
     def to_host(self) -> TimeAxis:
         """This axis with ``datetime64[ns]`` NumPy stamps."""
@@ -607,8 +611,13 @@ def concat_coords(parts: Sequence[Coordinate | None]) -> Coordinate | None:
             raise ValueError(f"cannot join levels of different verticals: {verticals}")
         return VerticalAxis(_joined(parts, "values"), first.vertical)
     if isinstance(first, TimeAxis):
-        hosts = [cast(TimeAxis, p).to_host().stamps for p in parts]
-        return TimeAxis(np.concatenate(hosts))
+        leaves = [cast(TimeAxis, p).as_leaf() for p in parts]
+        on_jax = [x for x in leaves if is_jax_array(x)]
+        if not on_jax:
+            hosts = [cast(TimeAxis, p).to_host().stamps for p in parts]
+            return TimeAxis(np.concatenate(hosts))
+        # traced or on device: join the int64 leaves where they are
+        return TimeAxis.from_leaf(namespace(on_jax[0]).concatenate(leaves))
     return None
 
 
