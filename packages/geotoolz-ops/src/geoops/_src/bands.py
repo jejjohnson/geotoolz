@@ -143,6 +143,33 @@ def strip_band_attrs(attrs: Mapping[str, Any] | None) -> dict[str, Any]:
     return {k: v for k, v in (attrs or {}).items() if k not in PER_BAND_KEYS}
 
 
+def take_band_coords(
+    gt: Any, indexes: Sequence[int], *, axis: int = -3
+) -> tuple[Any, ...] | None:
+    """``gt``'s coordinates with the one on ``axis``'s dim re-indexed by ``indexes``.
+
+    The coordinate counterpart of `take_band_attrs`: an operator that picks
+    or reorders entries of a dim passes the result to ``wrap_like(coords=)``,
+    so labels (``SpectralAxis`` names, wavelengths) follow the pixels.
+    ``None`` for a plain array or a carrier without coordinates (``wrap_like``
+    then keeps its default).
+
+    Example:
+        >>> import numpy as np
+        >>> from geoarray import GeoArray
+        >>> from geoarray.coords import SpectralAxis
+        >>> gt = GeoArray(np.zeros((2, 1, 1)), (1, 0, 0, 0, -1, 0), 32631,
+        ...               dims="band y x", coords=(SpectralAxis(("red", "nir")),))
+        >>> take_band_coords(gt, [1, 0])[0].names
+        ('nir', 'red')
+    """
+    coords = getattr(gt, "coords", ())
+    if not coords:
+        return None
+    dim = gt.dims[axis]
+    return tuple(c.isel(list(indexes)) if c.dim == dim else c for c in coords)
+
+
 def take_band_attrs(
     attrs: Mapping[str, Any] | None, indexes: Sequence[int], *, n_bands: int
 ) -> dict[str, Any]:

@@ -59,6 +59,7 @@ from geoops._src.bands import (
     resolve_wavelengths,
     strip_band_attrs,
     take_band_attrs,
+    take_band_coords,
 )
 from geoops._src.config import jsonable
 from geoops._src.geo import grid_matches, reject_geotensor
@@ -135,7 +136,11 @@ class SelectBands(Operator):
                 )
         out = select_bands(arr, indexes, axis=self.axis)
         return wrap_like(
-            gt, out, attrs=take_band_attrs(attrs, indexes, n_bands=band_axis_len)
+            gt,
+            out,
+            attrs=take_band_attrs(attrs, indexes, n_bands=band_axis_len),
+            # the coordinate follows the pixels, or sel(band="red") gives NIR
+            coords=take_band_coords(gt, indexes, axis=self.axis),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -301,6 +306,7 @@ class SplitBands(Operator):
                     out,
                     attrs=take_band_attrs(attrs, [idx], n_bands=n_bands),
                     band_names=None if self.names is None else [self.names[idx]],
+                    coords=take_band_coords(gt, [idx], axis=axis),
                 )
             )
         return outputs

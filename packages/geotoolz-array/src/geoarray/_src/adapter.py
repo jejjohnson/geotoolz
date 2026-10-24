@@ -30,7 +30,7 @@ import numpy as np
 from pipekit import Signature, register_adapter
 from pipekit_array import DimArray, DimArrayAdapter
 
-from geoarray._src.array import SPATIAL_DIMS, GeoArray, build
+from geoarray._src.array import SPATIAL_DIMS, GeoArray, build, fill_fits
 from geoarray._src.attrs import drop_band_keys
 from geoarray._src.backend import backend_of
 from geoarray._src.carriers import GeoPoints, GeoSwath, _build
@@ -57,18 +57,8 @@ def to_dimarray(g: Any) -> DimArray:
 
 
 def _fill_for_dtype(fill: Any, dtype: Any) -> Any:
-    """``fill`` when data of ``dtype`` can hold it; ``None`` otherwise."""
-    if fill is None:
-        return None
-    kind = np.dtype(dtype).kind
-    if kind in "fc":
-        return fill
-    if kind == "b":
-        return fill if fill in (0, 1) and isinstance(fill, bool | int) else None
-    if isinstance(fill, float) and not fill.is_integer():
-        return None
-    info = np.iinfo(dtype)
-    return fill if info.min <= fill <= info.max else None
+    """``fill`` when ``dtype`` data can hold it (the constructor's rule), else None."""
+    return fill if fill_fits(fill, dtype) else None
 
 
 class GeoArrayAdapter:
