@@ -31,9 +31,16 @@ from geoarray._src.array import (
     _check_fill_fits,
     _coord_for,
     _crs_label,
+    _index_in_order,
+    _is_advanced,
     _normalize_fill,
+    coords_to_host,
+    coords_to_jax,
+    join_stamps,
+    label_indexers,
+    split_stamps,
 )
-from geoarray._src.attrs import FrozenAttrs
+from geoarray._src.attrs import FrozenAttrs, select_bands
 from geoarray._src.backend import (
     backend_of,
     import_jax,
@@ -42,7 +49,7 @@ from geoarray._src.backend import (
     require_x64,
 )
 from geoarray._src.coords import Coordinate, CurvilinearGrid, Vertical
-from geoarray._src.errors import GeoArrayTraceError, LabelError
+from geoarray._src.errors import GeoArrayTraceError
 from geoarray._src.grid import as_crs
 
 
@@ -160,14 +167,24 @@ class _Named:
 
     def _leading_index(
         self, wanted: dict[str, Any]
-    ) -> tuple[tuple[Any, ...], tuple[str, ...], tuple[Coordinate, ...]]:
-        """Index tuple, kept dims and sliced coordinates for a selection."""
+    ) -> tuple[Any, tuple[str, ...], tuple[Coordinate, ...], FrozenAttrs, tuple]:
+        """Data, kept dims, sliced coordinates and attrs for a selection.
+
+        Per-band attrs follow a band selection (`select_bands`); the data are
+        indexed basic-first so a list index keeps its axis (`_index_in_order`).
+        Also returns the index key, for the geometry leaves.
+        """
         unknown = set(wanted) - set(self.dims)
         if unknown:
             raise KeyError(f"cannot select {sorted(unknown)}; dims are {self.dims}")
+        if sum(_is_advanced(k) for k in wanted.values()) > 1:
+            raise IndexError("at most one list / array index per selection")
         key = tuple(wanted.get(d, slice(None)) for d in self.dims)
         dims, coords = [], []
+        attrs = self.attrs
         for d, k in zip(self.dims, key, strict=True):
+            if d == "band" and not (isinstance(k, slice) and k == slice(None)):
+                attrs = select_bands(attrs, k, self.sizes["band"])
             if isinstance(k, int | np.integer):
                 continue
             dims.append(d)
@@ -175,7 +192,8 @@ class _Named:
             if c is not None:
                 full = isinstance(k, slice) and k == slice(None)
                 coords.append(c if full else c.isel(k))
-        return key, tuple(dims), tuple(coords)
+        data = _index_in_order(self.data, key, self.dims, tuple(dims))
+        return data, tuple(dims), tuple(coords), attrs, key
 
     def sel(self, selection: dict[str, Any] | None = None, **by_dim: Any) -> Any:
         """Select by exact label (one drops the dim, a list keeps it).
@@ -185,25 +203,7 @@ class _Named:
                 value is a range (select by value in xarray).
         """
         wanted = {**(selection or {}), **by_dim}
-        indexers: dict[str, Any] = {}
-        for dim, value in wanted.items():
-            labels = None if dim in self.spatial_dims else self.labels(dim)
-            if labels is None:
-                raise LabelError(
-                    f"sel: dim {dim!r} has no labels; use isel, or select by value "
-                    "in xarray (to_xarray().sel(...))"
-                )
-            if isinstance(value, slice):
-                raise LabelError(
-                    f"sel: {dim}={value} is a range; sel takes exact labels only"
-                )
-            position = {label: i for i, label in enumerate(labels)}
-            many = isinstance(value, list) or getattr(value, "ndim", 0) == 1
-            picked = list(value) if many else [value]
-            for label in picked:
-                if label not in position:
-                    raise LabelError(f"sel: {label!r} is not a label of {dim!r}")
-            indexers[dim] = [position[v] for v in picked] if many else position[value]
+        indexers = label_indexers(wanted, self.labels, self.spatial_dims)
         return cast(Any, self).isel(indexers)
 
     def _identical_static(self, other: _Named) -> bool:
@@ -371,18 +371,18 @@ class GeoSwath(_Named):
                     f"GeoSwath.isel: {d} takes a slice (an integer or a list would "
                     "not leave a swath); use the adapter or .data for profiles"
                 )
-        key, dims, coords = self._leading_index(wanted)
+        data, dims, coords, attrs, key = self._leading_index(wanted)
         n_batch = self.lat.ndim - 2
         geo_key = key[:n_batch] + key[-2:]
         return GeoSwath(
-            self.data[key],
+            data,
             self.lat[geo_key],
             self.lon[geo_key],
             dims=dims,
             coords=coords,
             crs=self.crs,
             fill_value=self.fill_value,
-            attrs=self.attrs,
+            attrs=attrs,
         )
 
     def with_data(
@@ -418,6 +418,7 @@ class GeoSwath(_Named):
             data=jax.device_put(self.data, device),
             lat=jax.device_put(self.lat, device),
             lon=jax.device_put(self.lon, device),
+            coords=coords_to_jax(self.coords, device),
         )
 
     def to_numpy(self) -> GeoSwath:
@@ -427,6 +428,7 @@ class GeoSwath(_Named):
             data=_host(self.data, "to_numpy"),
             lat=_host(self.lat, "to_numpy"),
             lon=_host(self.lon, "to_numpy"),
+            coords=coords_to_host(self.coords),
         )
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
@@ -454,12 +456,21 @@ class GeoSwath(_Named):
 
 
 def _swath_flatten(s: GeoSwath) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
-    return (s.data, s.lat, s.lon), (s.dims, s.coords, s.crs, s.fill_value, s.attrs)
+    # TimeAxis stamps are leaves (int64 ns), as on GeoArray
+    coords, stamps = split_stamps(s.coords)
+    return (s.data, s.lat, s.lon, *stamps), (
+        s.dims,
+        coords,
+        s.crs,
+        s.fill_value,
+        s.attrs,
+    )
 
 
 def _swath_unflatten(aux: tuple[Any, ...], leaves: Any) -> GeoSwath:
-    data, lat, lon = leaves
+    data, lat, lon, *stamps = leaves
     dims, coords, crs, fill, attrs = aux
+    coords = join_stamps(coords, stamps)
     matched = vmapped_dims(dims, getattr(data, "shape", None))
     if matched != dims:
         coords = tuple(c for c in coords if c.dim in matched)
@@ -599,10 +610,10 @@ class GeoPoints(_Named):
             )
         if is_tracer(k):
             raise GeoArrayTraceError("an obs index must be concrete")
-        key, dims, coords = self._leading_index(wanted)
+        data, dims, coords, attrs, _ = self._leading_index(wanted)
         leaves = {name: leaf[k] for name, leaf in self._leaves().items()}
         return GeoPoints(
-            self.data[key],
+            data,
             leaves.pop("xy"),
             **leaves,
             vertical=self.vertical,
@@ -610,7 +621,7 @@ class GeoPoints(_Named):
             coords=coords,
             crs=self.crs,
             fill_value=self.fill_value,
-            attrs=self.attrs,
+            attrs=attrs,
         )
 
     def with_data(
@@ -661,7 +672,10 @@ class GeoPoints(_Named):
         require_x64()
         moved = {k: _to_jax_leaf(v, device) for k, v in self._leaves().items()}
         return dataclasses.replace(
-            self, data=jax.device_put(self.data, device), **moved
+            self,
+            data=jax.device_put(self.data, device),
+            coords=coords_to_jax(self.coords, device),
+            **moved,
         )
 
     def to_numpy(self) -> GeoPoints:
@@ -669,7 +683,12 @@ class GeoPoints(_Named):
         moved = {k: _host(v, "to_numpy") for k, v in self._leaves().items()}
         if "time" in moved and moved["time"].dtype.kind != "M":
             moved["time"] = moved["time"].astype(np.int64).view("datetime64[ns]")
-        return dataclasses.replace(self, data=_host(self.data, "to_numpy"), **moved)
+        return dataclasses.replace(
+            self,
+            data=_host(self.data, "to_numpy"),
+            coords=coords_to_host(self.coords),
+            **moved,
+        )
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
         """The values as a NumPy array (a host copy for JAX data)."""
@@ -706,15 +725,18 @@ _POINT_LEAVES = ("xy", "z", "time", "valid")
 def _points_flatten(p: GeoPoints) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
     present = tuple(k for k in _POINT_LEAVES if getattr(p, k) is not None)
     leaves = tuple(_as_int_leaf(getattr(p, k)) for k in present)
-    aux = (present, p.vertical, p.dims, p.coords, p.crs, p.fill_value, p.attrs)
-    return (p.data, *leaves), aux
+    # TimeAxis stamps are leaves (int64 ns), as on GeoArray
+    coords, stamps = split_stamps(p.coords)
+    aux = (present, p.vertical, p.dims, coords, p.crs, p.fill_value, p.attrs)
+    return (p.data, *leaves, *stamps), aux
 
 
 def _points_unflatten(aux: tuple[Any, ...], leaves: Any) -> GeoPoints:
     present, vertical, dims, coords, crs, fill, attrs = aux
     data, *rest = leaves
     fields = dict.fromkeys(_POINT_LEAVES)
-    fields.update(zip(present, rest, strict=True))
+    fields.update(zip(present, rest[: len(present)], strict=True))
+    coords = join_stamps(coords, rest[len(present) :])
     matched = vmapped_dims(dims, getattr(data, "shape", None))
     if matched != dims:
         coords = tuple(c for c in coords if c.dim in matched)
@@ -803,16 +825,16 @@ def _register_pytrees() -> bool:
 
     def swath_keys(s: GeoSwath) -> tuple[Any, Any]:
         leaves, aux = _swath_flatten(s)
-        names = ("data", "lat", "lon")
+        names = ("data", "lat", "lon", "time_stamps")
         return tuple(
-            (GetAttrKey(k), v) for k, v in zip(names, leaves, strict=True)
+            (GetAttrKey(k), v) for k, v in zip(names, leaves, strict=False)
         ), aux
 
     def points_keys(p: GeoPoints) -> tuple[Any, Any]:
         leaves, aux = _points_flatten(p)
-        names = ("data", *aux[0])
+        names = ("data", *aux[0], "time_stamps")
         return tuple(
-            (GetAttrKey(k), v) for k, v in zip(names, leaves, strict=True)
+            (GetAttrKey(k), v) for k, v in zip(names, leaves, strict=False)
         ), aux
 
     jax.tree_util.register_pytree_with_keys(
