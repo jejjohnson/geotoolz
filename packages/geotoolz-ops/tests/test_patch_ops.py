@@ -169,7 +169,11 @@ class TestApplyToChips:
         double = Lambda(lambda gt: np.asarray(gt) * 2.0, name="double")
         config = ApplyToChips(operator=double).get_config()
         assert config == {
-            "operator": {"class": "Lambda", "config": double.get_config()}
+            "operator": {
+                "class": "Lambda",
+                "module": "pipekit.blocks",
+                "config": double.get_config(),
+            }
         }
 
 
