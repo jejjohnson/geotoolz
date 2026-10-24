@@ -56,6 +56,9 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   `GeoMapSeries`, `GeoTracks`, …): a dims pattern and a geometry kind any
   carrier can match; `check_dims` checks them at the call, and
   ``GeoArray["band y x"]`` annotates a pattern inline.
+- `to_dataset` / `to_datatree` (and ``from_*``) — several carriers on one
+  grid, or several grids, as xarray (``[xarray]``, loaded on first use);
+  ``GeoArray.to_xarray()`` / ``GeoArray.from_xarray()`` for one.
 - `geoarray.interop.georeader` — ``from_georeader`` / ``to_georeader``,
   zero-copy bridges to georeader's ``GeoTensor``, and
   ``source_from_georeader`` / ``source_to_georeader`` for its lazy readers
@@ -114,6 +117,18 @@ from geoarray._src.source import AsyncRasterSource, RasterSource
 
 
 __version__ = "0.2.1"  # x-release-please-version
+
+#: names that live in the [xarray] extra, loaded on first use
+_XARRAY_NAMES = ("from_dataset", "from_datatree", "to_dataset", "to_datatree")
+
+
+def __getattr__(name: str) -> object:
+    if name in _XARRAY_NAMES:
+        from geoarray._src.backend import xarray_module
+
+        return getattr(xarray_module(), name)
+    raise AttributeError(f"module 'geoarray' has no attribute {name!r}")
+
 
 __all__ = [
     "DIMS",

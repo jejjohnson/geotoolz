@@ -39,6 +39,9 @@ dependencies = [
 # whenever JAX is installed). The transform is float64, so JAX carriers
 # need `jax_enable_x64`.
 jax = ["jax>=0.4.30"]
+# `to_xarray` / `from_xarray`, `to_dataset`, `to_datatree`: CF spatial_ref +
+# GeoTransform, written without rioxarray. DataTree needs xarray 2024.10.
+xarray = ["xarray>=2024.10"]
 # `footprint`: a carrier's outline as a shapely Polygon.
 vector = ["shapely>=2.0"]
 # `geoarray.interop.georeader`: GeoTensor <-> GeoArray. georeader imports

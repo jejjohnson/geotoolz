@@ -2,6 +2,8 @@
 
 - `geoarray.interop.georeader` — ``from_georeader`` / ``to_georeader``
   (``geotoolz-array[georeader]``).
+- `geoarray.interop.xarray` — ``to_xarray`` / ``from_xarray``,
+  ``to_dataset``, ``to_datatree`` (``geotoolz-array[xarray]``).
 
 Each module imports its library only when a function runs, so importing
 this package needs none of them.

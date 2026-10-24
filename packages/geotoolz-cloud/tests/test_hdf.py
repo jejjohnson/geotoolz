@@ -449,3 +449,23 @@ def test_coordinates_convert_into_the_crs_axis_units():
     feet = CRS("EPSG:2263")  # NY State Plane, US survey feet
     assert _unit_factor(Coord(), feet) == pytest.approx(1 / 0.3048006096)
     assert _unit_factor(Coord(), CRS("EPSG:32630")) == 1.0
+
+
+def test_read_netcdf_reads_the_geoarray_xarray_encoding(tmp_path: Path) -> None:
+    """GF2 (geotoolz#537): a file from GeoArray.to_xarray reads back on its grid."""
+    pytest.importorskip("xarray")
+    transform = (20.0, 0.0, 600000.0, 0.0, -20.0, 3550000.0)
+    rng = np.random.default_rng(0)
+    scene = GeoArray(
+        rng.random((2, 4, 5)).astype(np.float32),
+        transform,
+        32613,
+        np.nan,
+        dims="band y x",
+    )
+    path = tmp_path / "scene.nc"
+    scene.to_xarray().to_dataset(name="radiance").to_netcdf(path)
+    out = read_netcdf(str(path), "radiance")
+    np.testing.assert_allclose(np.asarray(out.transform), transform, rtol=0, atol=2e-8)
+    assert out.crs == scene.crs
+    np.testing.assert_array_equal(np.asarray(out), scene.data)

@@ -64,7 +64,7 @@ dev = [
     "geotoolz-products[operators]",
     # The carrier package with every extra, so its JAX tests run in the
     # fast tier instead of skipping.
-    "geotoolz-array[jax,vector,georeader]",
+    "geotoolz-array[jax,vector,georeader,xarray]",
 ]
 lint = [
     "ruff>=0.15.11",

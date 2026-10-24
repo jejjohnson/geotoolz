@@ -40,6 +40,7 @@ from geoarray._src.backend import (
     is_tracer,
     namespace,
     require_x64,
+    xarray_module,
 )
 from geoarray._src.coords import Coordinate, PixelGrid, TimeAxis
 from geoarray._src.errors import GeoArrayTraceError, LabelError, X64Error
@@ -121,7 +122,11 @@ def _check_coords(
     shape: tuple[int, ...],
     spatial: tuple[str, ...] = SPATIAL_DIMS,
 ) -> tuple[Coordinate, ...]:
-    """``coords`` as a validated tuple: one per non-spatial dim at most, sized."""
+    """``coords`` as a validated tuple: one per non-spatial dim at most, sized.
+
+    Sorted in dim order, so equal carriers have equal coords whatever order
+    they were given in.
+    """
     out = tuple(coords or ())
     seen: set[str] = set()
     for c in out:
@@ -144,7 +149,7 @@ def _check_coords(
                 f"{type(c).__name__} has {c.size} entries, but dim {c.dim!r} has "
                 f"size {size}"
             )
-    return out
+    return tuple(sorted(out, key=lambda c: dims.index(c.dim)))
 
 
 def _coord_for(coords: tuple[Coordinate, ...], dim: str) -> Coordinate | None:
@@ -1223,6 +1228,37 @@ class GeoArray:
             # the caller asked for must be writable.
             return np.array(self.data, dtype=dtype, copy=True)
         return np.asarray(self.data, dtype=dtype)
+
+    # -- xarray ------------------------------------------------------------------
+
+    def to_xarray(self) -> Any:
+        """This carrier as an ``xr.DataArray`` (``geotoolz-array[xarray]``).
+
+        Same dims and values; the CRS and the transform in a CF
+        ``spatial_ref`` coordinate (``crs_wkt``, ``GeoTransform``), x and y
+        centre coordinates when axis-aligned, and each coordinate of
+        `geoarray.coords` as CF coordinates. `from_xarray` reads it back
+        exactly.
+
+        Raises:
+            ImportError: xarray is not installed.
+            ValueError: The carrier is batched.
+        """
+        return xarray_module().grid_to_xarray(self)
+
+    @classmethod
+    def from_xarray(cls, da: Any) -> GeoArray:
+        """A ``DataArray`` on an affine grid as a `GeoArray` (see `to_xarray`).
+
+        Reads the ``GeoTransform`` first, then centre coordinates, then
+        georeader's ``attrs["crs"]`` (deprecated); dask data is computed.
+
+        Raises:
+            ImportError: xarray is not installed.
+            ValueError: No grid, or irregular coordinates.
+            GridMismatchError: Centres disagree with the ``GeoTransform``.
+        """
+        return xarray_module().grid_from_xarray(da)
 
     # -- comparison and display ----------------------------------------------
 

@@ -130,3 +130,17 @@ def require_x64() -> None:
             "JAX: call jax.config.update('jax_enable_x64', True) at startup "
             "(data keeps its own dtype, e.g. float32)"
         )
+
+
+_XARRAY_HINT = (
+    "to_xarray / from_xarray need xarray: pip install 'geotoolz-array[xarray]'"
+)
+
+
+def xarray_module() -> Any:
+    """``geoarray._src.xarray``, or an ImportError naming the extra."""
+    try:
+        from geoarray._src import xarray as module
+    except ImportError as exc:
+        raise ImportError(_XARRAY_HINT) from exc
+    return module
