@@ -275,8 +275,13 @@ class VerticalAxis:
 
 
 def _array_digest(*arrays: np.ndarray) -> str:
+    """A content hash that follows ``array_equal(..., equal_nan=True)``."""
     h = hashlib.blake2b(digest_size=16)
     for a in arrays:
+        if a.dtype.kind in "fc":
+            # -0.0 == 0.0 and every NaN is equal, so they must hash alike:
+            # adding 0.0 turns -0.0 into 0.0, and every NaN becomes one NaN
+            a = np.where(np.isnan(a), np.nan, a + 0.0)
         h.update(str(a.dtype).encode())
         h.update(str(a.shape).encode())
         h.update(np.ascontiguousarray(a).tobytes())
@@ -334,7 +339,8 @@ class TimeAxis:
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, TimeAxis) and bool(
-            np.array_equal(self.stamps, other.stamps)
+            # NaT (a missing time) equals NaT, as the hash already says
+            np.array_equal(self.stamps, other.stamps, equal_nan=True)
         )
 
     def __hash__(self) -> int:
@@ -397,6 +403,9 @@ class PixelGrid:
         """
         if self.convention == "area":
             return transform
+        if not hasattr(transform, "ndim"):
+            # a tuple (a Grid's transform): the helper indexes with [..., i]
+            transform = np.asarray(transform, dtype=np.float64)
         return shift_scale_transform(transform, -0.5, -0.5)
 
     def centres(self, transform: Any) -> tuple[Any, Any]:
