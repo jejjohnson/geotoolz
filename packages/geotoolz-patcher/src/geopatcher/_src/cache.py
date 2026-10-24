@@ -685,8 +685,11 @@ def _load_entry(path: Path) -> dict[str, Any]:
     }
     if "weights" in arrays:
         payload["weights"] = arrays["weights"]
-    for i in range(len(payload["meta"].get("coords", []))):
-        payload[f"coord_{i}"] = arrays[f"coord_{i}"]
+    if payload["kind"] == "dataarray":
+        # a DataArray's coordinates are arrays beside the values; a GeoArray's
+        # are JSON configs inside meta
+        for i in range(len(payload["meta"].get("coords", []))):
+            payload[f"coord_{i}"] = arrays[f"coord_{i}"]
     return payload
 
 
