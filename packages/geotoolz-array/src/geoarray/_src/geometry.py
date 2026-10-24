@@ -140,14 +140,34 @@ def _require_same_fill(carriers: list[GeoArray], what: str) -> None:
             )
 
 
-def _promote(carriers: list[GeoArray]) -> list[GeoArray]:
-    """All carriers on JAX when any is (C1: mixed inputs promote, as ``jnp``).
+_PROMOTION_WARNING = (
+    "{what}: NumPy and JAX inputs are moved to JAX here, which is deprecated "
+    "(it hides a host-to-device copy); from geotoolz-array 0.4 it raises "
+    "pipekit_array.BackendError, as KernelOp already does. Call .to_jax() on "
+    "the NumPy inputs first."
+)
+
+
+def _warn_promotion(what: str) -> None:
+    warnings.warn(
+        _PROMOTION_WARNING.format(what=what), DeprecationWarning, stacklevel=4
+    )
+
+
+def _promote(carriers: list[GeoArray], what: str) -> list[GeoArray]:
+    """All carriers on JAX when any is, with a `DeprecationWarning` (removal of C1).
+
+    Under a trace a NumPy carrier is a constant of the traced function, as
+    in any ``jax.jit`` closure, so it joins without a warning.
 
     Raises:
         X64Error: Promotion needs ``jax_enable_x64`` (float64 transforms).
     """
-    if all(g.backend == "numpy" for g in carriers):
+    backends = {g.backend for g in carriers}
+    if backends == {"numpy"}:
         return carriers
+    if "numpy" in backends and not any(is_tracer(g.data) for g in carriers):
+        _warn_promotion(what)
     return [g.to_jax() if g.backend == "numpy" else g for g in carriers]
 
 
@@ -219,7 +239,7 @@ def combine_carriers(f: Callable[..., Any], *carriers: GeoArray) -> GeoArray:
         np.float64(0.5)
     """
     gs = _require_carriers(carriers, "combine")
-    gs = _promote(gs)
+    gs = _promote(gs, "combine")
     gs = _require_same_grid(gs, "combine")
     _require_same_fill(gs, "combine")
     gs = _in_first_order(gs, "combine")
@@ -288,7 +308,7 @@ def stack(
         ('time', 'band', 'y', 'x')
     """
     gs = _require_carriers(carriers, "stack")
-    gs = _promote(gs)
+    gs = _promote(gs, "stack")
     gs = _require_same_grid(gs, "stack")
     _require_same_fill(gs, "stack")
     gs = _in_first_order(gs, "stack")
@@ -338,11 +358,11 @@ def concat_carriers(carriers: Sequence[GeoArray], dim: str) -> GeoArray:
     if dim in ("y", "x"):
         raise ValueError(
             "concat: joining along y or x makes a new grid; mosaic with "
-            "geoops.functional instead"
+            "geoops.geom instead"
         )
     if dim not in first.dims:
         raise ValueError(f"concat: {dim!r} is not a dim of {first.dims}")
-    gs = _promote(gs)
+    gs = _promote(gs, "concat")
     batched = dim in first.batch_dims
     if batched:
         _require_same_crs_and_shape(gs, "concat")
@@ -662,6 +682,8 @@ def write_window(g: GeoArray, values: Any, window: PixelWindow) -> GeoArray:
             f"{g.dtype} data without changing their kind; cast them first"
         )
     if g.backend == "numpy" and backend_of(part) == "jax":
+        if not is_tracer(part):
+            _warn_promotion("write_window")
         g = g.to_jax()
     if g.backend == "numpy":
         data = np.array(g.data, copy=True)

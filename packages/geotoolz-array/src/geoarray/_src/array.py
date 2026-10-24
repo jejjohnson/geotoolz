@@ -1220,7 +1220,7 @@ class GeoArray:
             raise GeoArrayTraceError(
                 "NumPy code received a GeoArray's data inside jit / grad / vmap, "
                 "where the data are tracers; use a JAX function "
-                "(geoops.functional) or call the NumPy code outside the transform"
+                "(jax.numpy) or call the NumPy code outside the transform"
             )
         if copy is False:
             raise ValueError(

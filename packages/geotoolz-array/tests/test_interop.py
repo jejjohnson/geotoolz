@@ -141,7 +141,7 @@ class TestNumpyInterop:
             transforms = x64.numpy.stack([g.transform, g.transform])
             batch = GeoArray(x64.numpy.stack([g.data, g.data]), transforms, CRS)
             run = lambda: x64.vmap(numpy_loss)(batch)
-        with pytest.raises(GeoArrayTraceError, match=r"geoops\.functional"):
+        with pytest.raises(GeoArrayTraceError, match=r"jax\.numpy"):
             run()
 
     def test_transfers_warn_only_when_asked(self, x64: ModuleType) -> None:

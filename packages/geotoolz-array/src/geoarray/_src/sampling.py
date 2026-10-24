@@ -10,7 +10,7 @@ against the array namespace, so they run on NumPy and under ``jit`` /
 weights blend four pixels, so strictly it computes new values (the
 membership test of geoarray). It lives here because it is the one
 interpolation every carrier-level cost needs, and it reads nothing but the
-georeference (``geoops.functional`` holds the general resamplers).
+georeference (``geoops.geom`` holds the general resamplers).
 """
 
 from __future__ import annotations
