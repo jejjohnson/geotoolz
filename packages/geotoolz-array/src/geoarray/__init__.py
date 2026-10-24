@@ -27,14 +27,19 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   ``width``, ``height``): rasterio's ``Window`` without rasterio.
 - `FrozenAttrs` — the immutable, hashable metadata mapping;
   `PER_BAND_KEYS` names the keys that hold one entry per band.
-- Geometry (re-index or re-describe pixels, never compute new values):
-  `GeoArray.__getitem__` / `GeoArray.isel` (slices move the transform),
-  `crop` (traced offsets), `pad`, `read_window` / `write_window`,
-  `pixel_coords`, `GeoArray.valid_mask`, `GeoArray.map`, `combine`,
-  `stack` / `concat` (`concatenate`, by position), `footprint`
-  (``[vector]``).
-- `to_pixel` (map coordinates → fractional pixel centres) and `sample`
-  (H(x): a grid read at `GeoPoints`, bilinear or nearest, padding-safe).
+- Geometry: operations that read only the georeference, in three families
+  (anything that writes a new grid — warp, resample, reproject — is
+  geoops):
+
+  - **re-index** — `GeoArray.__getitem__` / `GeoArray.isel` (slices move
+    the transform), `crop` (traced offsets), `pad`, `read_window` /
+    `write_window`, and the joins `combine`, `stack` / `concat`
+    (`concatenate`, by position);
+  - **re-describe** — coordinates and dims, `pixel_coords`,
+    `GeoArray.valid_mask`, `GeoArray.map`, `footprint` (``[vector]``);
+  - **read at** — `to_pixel` (map coordinates → fractional pixel centres)
+    and `interp_at` (H(x): a grid read at `GeoPoints`, bilinear or
+    nearest, padding-safe): points in, values out.
 - `RasterSource` / `AsyncRasterSource` — what a lazy reader provides:
   its `Grid`, shape, dtype, fill and attrs, and reads that return a
   `GeoArray` (``read_window``, ``load``). A `GeoArray` is one too.
@@ -104,7 +109,7 @@ from geoarray._src.geometry import (
 )
 from geoarray._src.grid import Grid, PixelWindow, as_crs, as_transform
 from geoarray._src.options import HostTransferWarning, get_options, set_options
-from geoarray._src.sampling import sample, to_pixel
+from geoarray._src.sampling import interp_at, to_pixel
 from geoarray._src.source import AsyncRasterSource, RasterSource
 
 
@@ -141,6 +146,7 @@ __all__ = [
     "crop",
     "footprint",
     "get_options",
+    "interp_at",
     "isel",
     "map_over",
     "pad",
@@ -148,7 +154,6 @@ __all__ = [
     "pixel_coords",
     "read_window",
     "reduce",
-    "sample",
     "sel",
     "set_options",
     "stack",
