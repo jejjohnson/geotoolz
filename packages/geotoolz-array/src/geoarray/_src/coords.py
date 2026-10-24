@@ -39,6 +39,7 @@ from typing import Any, ClassVar, Protocol, cast, runtime_checkable
 import numpy as np
 import pyproj
 
+from geoarray._src.backend import is_tracer
 from geoarray._src.grid import apply_transform, as_crs, shift_scale_transform
 
 
@@ -300,6 +301,12 @@ class TimeAxis:
     Hashes and compares by value. A moving platform (along-track altimetry,
     Argo) has one time per sample instead: a ``time`` leaf on `GeoPoints`.
 
+    On a carrier the stamps are a pytree leaf, as ``int64`` nanoseconds
+    since the epoch: a new set of dates of the same length reuses the
+    compiled program. On the host they are ``datetime64[ns]`` labels; on a
+    JAX carrier (`GeoArray.to_jax`) a JAX ``int64`` array; inside ``jit``
+    a tracer, whose `labels` are ``None`` (select times outside ``jit``).
+
     Example:
         >>> dates = TimeAxis(stamps=["2026-06-01", "2026-06-11"])
         >>> dates.size, str(dates.labels[1])
@@ -316,34 +323,72 @@ class TimeAxis:
             raise ValueError(f"TimeAxis stamps are 1-D, got shape {stamps.shape}")
         object.__setattr__(self, "stamps", stamps)
 
+    @classmethod
+    def from_leaf(cls, stamps: Any) -> TimeAxis:
+        """A TimeAxis around ``int64`` nanoseconds (NumPy, JAX or a tracer).
+
+        No validation or copy: for pytree unflattening and backend moves.
+        """
+        t = object.__new__(cls)
+        object.__setattr__(t, "stamps", stamps)
+        return t
+
+    def as_leaf(self) -> Any:
+        """The stamps as ``int64`` nanoseconds since the epoch, for a pytree leaf."""
+        if isinstance(self.stamps, np.ndarray) and self.stamps.dtype.kind == "M":
+            return self.stamps.view(np.int64)
+        return self.stamps
+
+    def _host_ns(self) -> np.ndarray | None:
+        """The stamps as host ``int64`` ns, or ``None`` under a trace."""
+        if is_tracer(self.stamps):
+            return None
+        return np.asarray(self.as_leaf(), dtype=np.int64)
+
     @property
     def size(self) -> int:
         """The number of times."""
         return int(self.stamps.shape[0])
 
     @property
-    def labels(self) -> tuple[np.datetime64, ...]:
-        """The stamps, as ``numpy.datetime64[ns]``."""
-        return tuple(self.stamps)
+    def labels(self) -> tuple[np.datetime64, ...] | None:
+        """The stamps as ``numpy.datetime64[ns]``; ``None`` when traced."""
+        ns = self._host_ns()
+        return None if ns is None else tuple(ns.view("datetime64[ns]"))
 
     def isel(self, index: Any) -> TimeAxis:
-        """The times at ``index``."""
-        return TimeAxis(
-            self.stamps[np.asarray(_positions(index, self.size), dtype=int)]
-        )
+        """The times at ``index`` (on the stamps' own backend)."""
+        positions = np.asarray(_positions(index, self.size), dtype=int)
+        return TimeAxis.from_leaf(self.stamps[positions])
+
+    def to_host(self) -> TimeAxis:
+        """This axis with ``datetime64[ns]`` NumPy stamps."""
+        ns = self._host_ns()
+        if ns is None:
+            raise TypeError("TimeAxis.to_host needs concrete stamps, not a tracer")
+        return TimeAxis(ns.view("datetime64[ns]"))
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, TimeAxis) and bool(
-            np.array_equal(self.stamps, other.stamps)
-        )
+        if not isinstance(other, TimeAxis):
+            return False
+        mine, theirs = self._host_ns(), other._host_ns()
+        if mine is None or theirs is None:
+            return self is other
+        return bool(np.array_equal(mine, theirs))
 
     def __hash__(self) -> int:
-        return hash(("TimeAxis", _array_digest(self.stamps)))
+        ns = self._host_ns()
+        if ns is None:
+            raise TypeError("a traced TimeAxis is not hashable")
+        return hash(("TimeAxis", _array_digest(ns)))
 
     def __repr__(self) -> str:
-        if self.size == 0:
+        labels = self.labels
+        if labels is None:
+            return f"TimeAxis(size={self.size}, traced)"
+        if not labels:
             return "TimeAxis(size=0)"
-        return f"TimeAxis(size={self.size}, {self.stamps[0]} … {self.stamps[-1]})"
+        return f"TimeAxis(size={self.size}, {labels[0]} … {labels[-1]})"
 
 
 def _shape2(shape: Sequence[int], name: str) -> tuple[int, int]:
@@ -546,5 +591,6 @@ def concat_coords(parts: Sequence[Coordinate | None]) -> Coordinate | None:
             raise ValueError(f"cannot join levels of different verticals: {verticals}")
         return VerticalAxis(_joined(parts, "values"), first.vertical)
     if isinstance(first, TimeAxis):
-        return TimeAxis(np.concatenate([cast(TimeAxis, p).stamps for p in parts]))
+        hosts = [cast(TimeAxis, p).to_host().stamps for p in parts]
+        return TimeAxis(np.concatenate(hosts))
     return None

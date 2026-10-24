@@ -41,7 +41,7 @@ from geoarray._src.backend import (
     namespace,
     require_x64,
 )
-from geoarray._src.coords import Coordinate, PixelGrid
+from geoarray._src.coords import Coordinate, PixelGrid, TimeAxis
 from geoarray._src.errors import GeoArrayTraceError, LabelError, X64Error
 from geoarray._src.grid import (
     Grid,
@@ -1081,6 +1081,12 @@ class GeoArray[A: SupportsArray]:
             return self
         data = jax.device_put(self.data, device)
         transform = jax.device_put(self.transform, device)
+        coords = tuple(
+            TimeAxis.from_leaf(jax.device_put(c.as_leaf(), device))
+            if isinstance(c, TimeAxis)
+            else c
+            for c in self.coords
+        )
         return GeoArray(
             data,
             transform,
@@ -1088,7 +1094,7 @@ class GeoArray[A: SupportsArray]:
             self.fill_value,
             self.attrs,
             dims=self.dims,
-            coords=self.coords,
+            coords=coords,
         )
 
     def to_numpy(self) -> GeoArray:
@@ -1104,6 +1110,9 @@ class GeoArray[A: SupportsArray]:
                 "to_numpy needs concrete data, but this GeoArray is traced "
                 "(inside jit / grad / vmap): call it outside the transform"
             )
+        coords = tuple(
+            c.to_host() if isinstance(c, TimeAxis) else c for c in self.coords
+        )
         return GeoArray(
             np.asarray(self.data),
             np.asarray(self.transform, dtype=np.float64),
@@ -1111,7 +1120,7 @@ class GeoArray[A: SupportsArray]:
             self.fill_value,
             self.attrs,
             dims=self.dims,
-            coords=self.coords,
+            coords=coords,
         )
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
@@ -1247,16 +1256,39 @@ def build(
 # -- JAX pytree ---------------------------------------------------------------
 
 
-def _flatten(g: GeoArray) -> tuple[tuple[Any, Any], tuple[Any, ...]]:
-    return (g.data, g.transform), (g.crs, g.fill_value, g.attrs, g.dims, g.coords)
+class _StampSlot:
+    """Where a `TimeAxis` sits in the static coords; its stamps are a leaf."""
+
+    def __repr__(self) -> str:
+        return "STAMPS"
+
+
+_STAMPS = _StampSlot()
+
+
+def _flatten(g: GeoArray) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    # leaves: data, transform, then TimeAxis stamps (int64 ns) if any;
+    # static: everything else, with the TimeAxis replaced by a slot
+    stamps: tuple[Any, ...] = ()
+    coords = g.coords
+    if any(isinstance(c, TimeAxis) for c in coords):
+        stamps = tuple(c.as_leaf() for c in coords if isinstance(c, TimeAxis))
+        coords = tuple(_STAMPS if isinstance(c, TimeAxis) else c for c in coords)
+    aux = (g.crs, g.fill_value, g.attrs, g.dims, coords)
+    return (g.data, g.transform, *stamps), aux
 
 
 def _unflatten(aux: tuple[Any, ...], leaves: Any) -> GeoArray:
     # Never validate: JAX unflattens with placeholder leaves (None, object(),
     # ShapeDtypeStruct) while tracing, and a shape check would fail on them.
     # A bare jax.vmap maps leaves but not the static dims: match them.
-    data, transform = leaves
+    data, transform, *stamps = leaves
     crs, fill_value, attrs, dims, coords = aux
+    if stamps:
+        fills = iter(stamps)
+        coords = tuple(
+            TimeAxis.from_leaf(next(fills)) if c is _STAMPS else c for c in coords
+        )
     matched = vmapped_dims(dims, getattr(data, "shape", None))
     if matched != dims:
         coords = tuple(c for c in coords if c.dim in matched)
@@ -1273,7 +1305,10 @@ def _register_pytree() -> bool:
 
     def flatten_with_keys(g: GeoArray) -> tuple[Any, Any]:
         leaves, aux = _flatten(g)
-        keyed = ((GetAttrKey("data"), leaves[0]), (GetAttrKey("transform"), leaves[1]))
+        names = ("data", "transform", "time_stamps")
+        keyed = tuple(
+            (GetAttrKey(name), leaf) for name, leaf in zip(names, leaves, strict=False)
+        )
         return keyed, aux
 
     jax.tree_util.register_pytree_with_keys(
