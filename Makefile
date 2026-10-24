@@ -61,7 +61,7 @@ check-env-%:
 # ---------------------------------------------------------------------------
 # Phony declarations
 # ---------------------------------------------------------------------------
-.PHONY: help install lint format typecheck test test-all test-slow test-cov \
+.PHONY: help install lint imports format typecheck test test-all test-slow test-cov \
         precommit build clean version docs docs-check docs-serve docs-deploy \
         gh-labels gh-sub gh-block gh-show
 
@@ -108,10 +108,14 @@ init: ## 🔧 Bootstrap .env from .env.example (skip if .env already exists)
 ##@ Quality
 # ===========================================================================
 
-lint: ## 🧹 Lint code with ruff (no auto-fix) — entire repo
+lint: ## 🧹 Lint code with ruff (no auto-fix) and check the import contracts — entire repo
 	@printf "$(YELLOW)>>> Running ruff check...$(RESET)\n"
 	uv run --group lint ruff check .
+	uv run --group lint lint-imports
 	@printf "$(GREEN)>>> ✅ Lint passed!$(RESET)\n"
+
+imports: ## 🔗 Check the import contracts ([tool.importlinter] in pyproject.toml)
+	uv run --group lint lint-imports
 
 format: ## 🖊️  Format code with ruff (format + auto-fix) — entire repo
 	@printf "$(YELLOW)>>> Running ruff format + fix...$(RESET)\n"

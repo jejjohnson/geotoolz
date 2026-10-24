@@ -304,7 +304,7 @@ make install              # uv sync --all-packages --all-groups --all-extras + h
 make test                 # fast tier across all six packages
 make test-all             # everything incl. slow / integration tiers
 make format               # ruff format . && ruff check --fix .
-make lint                 # ruff check .   (entire repo)
+make lint                 # ruff check . (entire repo) + import contracts (lint-imports)
 make typecheck            # ty check, per package
 make docs-serve           # local MkDocs preview
 ```
