@@ -54,6 +54,8 @@ __all__ = [
     "VariableAxis",
     "Vertical",
     "VerticalAxis",
+    "coord_from_config",
+    "coord_to_config",
 ]
 
 
@@ -276,8 +278,13 @@ class VerticalAxis:
 
 
 def _array_digest(*arrays: np.ndarray) -> str:
+    """A content hash that follows ``array_equal(..., equal_nan=True)``."""
     h = hashlib.blake2b(digest_size=16)
     for a in arrays:
+        if a.dtype.kind in "fc":
+            # -0.0 == 0.0 and every NaN is equal, so they must hash alike:
+            # adding 0.0 turns -0.0 into 0.0, and every NaN becomes one NaN
+            a = np.where(np.isnan(a), np.nan, a + 0.0)
         h.update(str(a.dtype).encode())
         h.update(str(a.shape).encode())
         h.update(np.ascontiguousarray(a).tobytes())
@@ -442,6 +449,9 @@ class PixelGrid:
         """
         if self.convention == "area":
             return transform
+        if not hasattr(transform, "ndim"):
+            # a tuple (a Grid's transform): the helper indexes with [..., i]
+            transform = np.asarray(transform, dtype=np.float64)
         return shift_scale_transform(transform, -0.5, -0.5)
 
     def centres(self, transform: Any) -> tuple[Any, Any]:
@@ -600,3 +610,83 @@ def concat_coords(parts: Sequence[Coordinate | None]) -> Coordinate | None:
         hosts = [cast(TimeAxis, p).to_host().stamps for p in parts]
         return TimeAxis(np.concatenate(hosts))
     return None
+
+
+def coord_to_config(coord: Coordinate) -> dict[str, Any]:
+    """A strict-JSON config of a carrier coordinate; `coord_from_config` inverts it.
+
+    Covers the coordinates of a `GeoArray`'s non-spatial dims: `SpectralAxis`,
+    `VariableAxis`, `VerticalAxis` and `TimeAxis` (stamps as ISO strings,
+    ``"NaT"`` for a missing time).
+
+    Raises:
+        TypeError: Another kind of coordinate.
+
+    Example:
+        >>> config = coord_to_config(SpectralAxis(names=("B11", "B12")))
+        >>> coord_from_config(config) == SpectralAxis(names=("B11", "B12"))
+        True
+    """
+    if isinstance(coord, SpectralAxis):
+        return {
+            "kind": "SpectralAxis",
+            "names": list(coord.names),
+            "wavelength_nm": _list_or_none(coord.wavelength_nm),
+            "fwhm_nm": _list_or_none(coord.fwhm_nm),
+        }
+    if isinstance(coord, VariableAxis):
+        return {
+            "kind": "VariableAxis",
+            "names": list(coord.names),
+            "units": _list_or_none(coord.units),
+        }
+    if isinstance(coord, VerticalAxis):
+        v = coord.vertical
+        return {
+            "kind": "VerticalAxis",
+            "values": list(coord.values),
+            "vertical": {
+                "kind": v.kind,
+                "units": v.units,
+                "positive": v.positive,
+                "datum": v.datum,
+            },
+        }
+    if isinstance(coord, TimeAxis):
+        stamps = np.datetime_as_string(coord.to_host().stamps, unit="ns")
+        return {"kind": "TimeAxis", "stamps": [str(t) for t in stamps]}
+    raise TypeError(f"coord_to_config: no config for a {type(coord).__name__}")
+
+
+def coord_from_config(config: dict[str, Any]) -> Coordinate:
+    """The coordinate a `coord_to_config` config describes.
+
+    Raises:
+        ValueError: The config names an unknown kind.
+    """
+    kind = config.get("kind")
+    if kind == "SpectralAxis":
+        return SpectralAxis(
+            names=tuple(config["names"]),
+            wavelength_nm=_tuple_or_none(config.get("wavelength_nm")),
+            fwhm_nm=_tuple_or_none(config.get("fwhm_nm")),
+        )
+    if kind == "VariableAxis":
+        return VariableAxis(
+            names=tuple(config["names"]), units=_tuple_or_none(config.get("units"))
+        )
+    if kind == "VerticalAxis":
+        return VerticalAxis(
+            values=tuple(config["values"]), vertical=Vertical(**config["vertical"])
+        )
+    if kind == "TimeAxis":
+        return TimeAxis(np.array(config["stamps"], dtype="datetime64[ns]"))
+    raise ValueError(f"coord_from_config: unknown coordinate kind {kind!r}")
+
+
+def _list_or_none(values: tuple[Any, ...] | None) -> list[Any] | None:
+    return None if values is None else list(values)
+
+
+def _tuple_or_none(values: list[Any] | None) -> tuple[Any, ...] | None:
+    return None if values is None else tuple(values)

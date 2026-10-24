@@ -267,3 +267,75 @@ def test_padding_leaves_a_masked_cost_unchanged(x64: ModuleType) -> None:
     assert results[0][0] == pytest.approx(results[1][0], rel=1e-14)
     np.testing.assert_allclose(results[0][1], results[1][1], rtol=1e-14)
     assert np.isfinite(results[0][1]).all()
+
+
+# -- review fixes (Codex, #548) -------------------------------------------------------
+
+
+def test_swath_band_selection_moves_per_band_attrs() -> None:
+    s = _swath().with_data(_swath().data, attrs={"band_names": ("a", "b", "c")})
+    picked = s.isel(band=[2, 0])
+    assert picked.attrs["band_names"] == ("c", "a")
+    reduced = pa.reduce(s, "mean", "band")
+    assert "band_names" not in reduced.attrs
+
+
+def test_points_with_another_vertical_do_not_combine() -> None:
+    depth = _profile()
+    height = GeoPoints(
+        depth.data,
+        xy=depth.xy,
+        z=depth.z,
+        vertical=Vertical(kind="height", units="m", positive="up"),
+        time=depth.time,
+        dims=depth.dims,
+        coords=depth.coords,
+        fill_value=np.nan,
+    )
+    with pytest.raises(GridMismatchError, match="vertical"):
+        geoarray.combine(np.subtract, depth, height)
+
+
+def test_points_with_times_combine_across_backends(x64: ModuleType) -> None:
+    import warnings
+
+    p = _profile()
+    with warnings.catch_warnings():
+        # 0.3 warns on mixed backends (C1's deprecation); the times still match
+        warnings.simplefilter("ignore", DeprecationWarning)
+        out = geoarray.combine(np.add, p, p.to_jax())
+    np.testing.assert_allclose(np.asarray(out.data), 2 * np.asarray(p.data))
+
+
+def test_sel_rules_are_shared_with_geoarray() -> None:
+    s = _swath()
+    assert s.sel(band="b2").dims == ("row", "col")
+    with pytest.raises(geoarray.LabelError, match="is a range"):
+        s.sel(band=slice("b1", "b2"))
+    with pytest.raises(geoarray.LabelError, match="not a label"):
+        s.sel(band="b9")
+
+
+def test_time_axis_stamps_are_leaves_on_swath_and_points(x64: ModuleType) -> None:
+    stamps = TimeAxis(np.array(["2026-01-01", "2026-01-02"], dtype="datetime64[ns]"))
+    lat, lon = np.meshgrid(np.arange(2.0), np.arange(3.0), indexing="ij")
+    s = GeoSwath(
+        np.zeros((2, 2, 3)), lat, lon, dims="time row col", coords=(stamps,)
+    ).to_jax()
+    later = s.with_data(s.data)
+    object.__setattr__(
+        later,
+        "coords",
+        (TimeAxis(np.array(["2027-01-01", "2027-01-02"], dtype="datetime64[ns]")),),
+    )
+    traces = []
+
+    @x64.jit
+    def first_stamp(c: GeoSwath) -> Any:
+        traces.append(1)
+        return c.coord("time").stamps[0]
+
+    assert int(first_stamp(s)) == int(np.datetime64("2026-01-01", "ns").view(np.int64))
+    first_stamp(later.to_jax())
+    assert len(traces) == 1
+    assert s.to_numpy().coord("time").stamps.dtype.kind == "M"

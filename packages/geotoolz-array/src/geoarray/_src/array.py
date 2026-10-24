@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import warnings
+from collections.abc import Callable
 from typing import Any, cast
 
 import numpy as np
@@ -183,30 +184,97 @@ def _normalize_fill(fill: Any) -> _FillValue:
     raise TypeError(f"fill_value must be a number, a bool or None, got {fill!r}")
 
 
+def label_indexers(
+    wanted: dict[str, Any],
+    labels_of: Callable[[str], tuple[Any, ...] | None],
+    spatial_dims: tuple[str, ...],
+) -> dict[str, Any]:
+    """Positions for a label selection: one label → an int, a list → a list.
+
+    Shared by every carrier's ``sel``, so the rules are one: exact labels
+    only, from the dim's coordinate; a list or 1-D array keeps the dim.
+
+    Raises:
+        LabelError: The dim has no labels or is spatial, a label is missing,
+            or the value is a range (select by value in xarray).
+    """
+    indexers: dict[str, Any] = {}
+    for dim, value in wanted.items():
+        labels = labels_of(dim) if dim not in spatial_dims else None
+        if labels is None:
+            raise LabelError(
+                f"sel: dim {dim!r} has no labels; use isel, or select by value "
+                "in xarray (to_xarray().sel(...))"
+            )
+        if isinstance(value, slice):
+            raise LabelError(
+                f"sel: {dim}={value} is a range; sel takes exact labels only: "
+                "select by value in xarray (to_xarray().sel(...))"
+            )
+        position = {label: i for i, label in enumerate(labels)}
+        many = isinstance(value, list) or getattr(value, "ndim", 0) == 1
+        picked = (
+            list(value.tolist() if hasattr(value, "tolist") else value)
+            if many
+            else [value]
+        )
+        for label in picked:
+            if label not in position:
+                raise LabelError(f"sel: {label!r} is not a label of {dim!r}: {labels}")
+        indexers[dim] = [position[v] for v in picked] if many else position[value]
+    return indexers
+
+
+def _index_in_order(
+    data: Any, key: tuple[Any, ...], dims: tuple[str, ...], kept: tuple[str, ...]
+) -> Any:
+    """``data[key]`` with the axes left in ``kept`` order.
+
+    NumPy (and JAX) move an advanced index's axis to the front when an
+    integer and a list are separated by a slice; applying the basic indices
+    first and the one list after leaves every axis where its dim says.
+    """
+    advanced = [i for i, k in enumerate(key) if _is_advanced(k)]
+    if not advanced:
+        return data[key]
+    (i,) = advanced
+    basic = tuple(slice(None) if j == i else k for j, k in enumerate(key))
+    out = data[basic]
+    axis = kept.index(dims[i])
+    return out[(slice(None),) * axis + (key[i],)]
+
+
+def fill_fits(fill: _FillValue, dtype: Any) -> bool:
+    """Whether ``dtype`` data can hold ``fill`` exactly (``None`` always fits).
+
+    The one rule the constructor and every rewrap share: float and complex
+    data hold any fill, NaN included; bool holds 0 and 1; integers hold whole
+    values in their range.
+    """
+    if fill is None:
+        return True
+    dtype = np.dtype(dtype)
+    if dtype.kind == "b":
+        return fill in (0, 1)
+    if dtype.kind in "iu":
+        info = np.iinfo(dtype.str)
+        return (
+            not (isinstance(fill, float) and not fill.is_integer())
+            and info.min <= fill <= info.max
+        )
+    return True
+
+
 def _check_fill_fits(fill: _FillValue, dtype: Any) -> None:
     """Raise unless ``dtype`` data can hold ``fill`` exactly.
 
     A fill the dtype cannot hold (``-9999.0`` or ``0.5`` in ``uint16``) would
     be written as some other value, which `valid_mask` then reads as data.
-    Float and complex data hold any fill, NaN included.
     """
-    if fill is None:
-        return
-    dtype = np.dtype(dtype)
-    if dtype.kind == "b":
-        fits = fill in (0, 1)
-    elif dtype.kind in "iu":
-        info = np.iinfo(dtype.str)
-        fits = (
-            not (isinstance(fill, float) and not fill.is_integer())
-            and info.min <= fill <= info.max
-        )
-    else:
-        return
-    if not fits:
+    if not fill_fits(fill, dtype):
         raise ValueError(
-            f"fill_value={fill!r} cannot be held by {dtype} data, so filled "
-            f"pixels would read as data: pass a fill {dtype} can hold, or "
+            f"fill_value={fill!r} cannot be held by {np.dtype(dtype)} data, so "
+            "filled pixels would read as data: pass a fill it can hold, or "
             "fill_value=None"
         )
 
@@ -884,7 +952,7 @@ class GeoArray:
             coords.append(c if full else c.isel(k))
         new_dims = tuple(d for d in dims if d not in dropped)
         return GeoArray(
-            self.data[key],
+            _index_in_order(self.data, key, dims, new_dims),
             shift_scale_transform(transform, r0, c0, row_step, col_step),
             self.crs,
             self.fill_value,
@@ -943,33 +1011,7 @@ class GeoArray:
             ('y', 'x')
         """
         wanted = {**(selection or {}), **by_dim}
-        indexers: dict[str, Any] = {}
-        for dim, value in wanted.items():
-            labels = self.labels(dim) if dim not in SPATIAL_DIMS else None
-            if labels is None:
-                raise LabelError(
-                    f"sel: dim {dim!r} has no labels; use isel, or select by value "
-                    "in xarray (g.to_xarray().sel(...))"
-                )
-            if isinstance(value, slice):
-                raise LabelError(
-                    f"sel: {dim}={value} is a range; GeoArray.sel takes exact labels "
-                    "only: select by value in xarray (g.to_xarray().sel(...))"
-                )
-            position = {label: i for i, label in enumerate(labels)}
-            many = isinstance(value, list) or getattr(value, "ndim", 0) == 1
-            picked = (
-                list(value.tolist() if hasattr(value, "tolist") else value)
-                if many
-                else [value]
-            )
-            for label in picked:
-                if label not in position:
-                    raise LabelError(
-                        f"sel: {label!r} is not a label of {dim!r}: {labels}"
-                    )
-            indexers[dim] = [position[v] for v in picked] if many else position[value]
-        return self.isel(indexers)
+        return self.isel(label_indexers(wanted, self.labels, SPATIAL_DIMS))
 
     def shift_origin(self, delta: Any) -> GeoArray:
         """Move the grid by ``delta = (Δx, Δy)`` in CRS units: c + Δx, f + Δy.
@@ -1151,12 +1193,7 @@ class GeoArray:
             return self
         data = jax.device_put(self.data, device)
         transform = jax.device_put(self.transform, device)
-        coords = tuple(
-            TimeAxis.from_leaf(jax.device_put(c.as_leaf(), device))
-            if isinstance(c, TimeAxis)
-            else c
-            for c in self.coords
-        )
+        coords = coords_to_jax(self.coords, device)
         return GeoArray(
             data,
             transform,
@@ -1180,9 +1217,7 @@ class GeoArray:
                 "to_numpy needs concrete data, but this GeoArray is traced "
                 "(inside jit / grad / vmap): call it outside the transform"
             )
-        coords = tuple(
-            c.to_host() if isinstance(c, TimeAxis) else c for c in self.coords
-        )
+        coords = coords_to_host(self.coords)
         return GeoArray(
             np.asarray(self.data),
             np.asarray(self.transform, dtype=np.float64),
@@ -1383,14 +1418,48 @@ class _StampSlot:
 _STAMPS = _StampSlot()
 
 
+def split_stamps(
+    coords: tuple[Coordinate, ...],
+) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    """``(static coords, stamp leaves)``: each `TimeAxis` becomes a slot plus
+    an int64-ns leaf, so new dates never recompile (every carrier's flatten)."""
+    if not any(isinstance(c, TimeAxis) for c in coords):
+        return coords, ()
+    stamps = tuple(c.as_leaf() for c in coords if isinstance(c, TimeAxis))
+    static = tuple(_STAMPS if isinstance(c, TimeAxis) else c for c in coords)
+    return static, stamps
+
+
+def join_stamps(static: tuple[Any, ...], stamps: Any) -> tuple[Coordinate, ...]:
+    """The inverse of `split_stamps` (every carrier's unflatten)."""
+    if not stamps:
+        return static
+    fills = iter(stamps)
+    return tuple(TimeAxis.from_leaf(next(fills)) if c is _STAMPS else c for c in static)
+
+
+def coords_to_jax(
+    coords: tuple[Coordinate, ...], device: Any
+) -> tuple[Coordinate, ...]:
+    """The coordinates with `TimeAxis` stamps on a JAX device (int64 ns)."""
+    jax = import_jax()
+    return tuple(
+        TimeAxis.from_leaf(jax.device_put(c.as_leaf(), device))
+        if isinstance(c, TimeAxis)
+        else c
+        for c in coords
+    )
+
+
+def coords_to_host(coords: tuple[Coordinate, ...]) -> tuple[Coordinate, ...]:
+    """The coordinates with `TimeAxis` stamps as host ``datetime64[ns]``."""
+    return tuple(c.to_host() if isinstance(c, TimeAxis) else c for c in coords)
+
+
 def _flatten(g: GeoArray) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
     # leaves: data, transform, then TimeAxis stamps (int64 ns) if any;
     # static: everything else, with the TimeAxis replaced by a slot
-    stamps: tuple[Any, ...] = ()
-    coords = g.coords
-    if any(isinstance(c, TimeAxis) for c in coords):
-        stamps = tuple(c.as_leaf() for c in coords if isinstance(c, TimeAxis))
-        coords = tuple(_STAMPS if isinstance(c, TimeAxis) else c for c in coords)
+    coords, stamps = split_stamps(g.coords)
     aux = (g.crs, g.fill_value, g.attrs, g.dims, coords)
     return (g.data, g.transform, *stamps), aux
 
@@ -1401,11 +1470,7 @@ def _unflatten(aux: tuple[Any, ...], leaves: Any) -> GeoArray:
     # A bare jax.vmap maps leaves but not the static dims: match them.
     data, transform, *stamps = leaves
     crs, fill_value, attrs, dims, coords = aux
-    if stamps:
-        fills = iter(stamps)
-        coords = tuple(
-            TimeAxis.from_leaf(next(fills)) if c is _STAMPS else c for c in coords
-        )
+    coords = join_stamps(coords, stamps)
     matched = vmapped_dims(dims, getattr(data, "shape", None))
     if matched != dims:
         coords = tuple(c for c in coords if c.dim in matched)
