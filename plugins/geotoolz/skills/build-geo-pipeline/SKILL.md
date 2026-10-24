@@ -112,6 +112,7 @@ _, height, width = field.domain.shape
 out_grid = GeoArray(
     np.zeros((1, height, width), np.float32),
     field.domain.transform, field.domain.crs,
+    dims=("band", "y", "x"),                          # stored dims (geoarray 0.3)
 )
 pipeline = gz.Sequential([
     GridSampler(patcher=patcher),
@@ -164,7 +165,10 @@ pipeline.
 
 - **Shape.** A raster is `(C, H, W)`, or `(T, C, H, W)` for a time stack.
   The spatial axes are the last two and the bands are on axis `-3`, never
-  `0`.
+  `0`. Since geoarray 0.3 the dims are stored: build carriers with
+  `dims=("band", "y", "x")` (omitting it reads the layout from the rank
+  and is deprecated), and name band coordinates with
+  `geoarray.coords.SpectralAxis`.
 - **Same carrier out.** A GeoArray input returns a GeoArray on the same
   `transform` and `crs`; a plain array returns a plain array. Never mutate
   the input. A georeader `GeoTensor` is refused, not taken as an array.
