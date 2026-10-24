@@ -1106,7 +1106,11 @@ class GeoArray[A: SupportsArray]:
         """
         jax = import_jax()
         require_x64()
-        if self.backend == "jax" and device is None:
+        stamps_on_host = any(
+            isinstance(c, TimeAxis) and not is_jax_array(c.as_leaf())
+            for c in self.coords
+        )
+        if self.backend == "jax" and device is None and not stamps_on_host:
             return self
         data = jax.device_put(self.data, device)
         transform = jax.device_put(self.transform, device)
