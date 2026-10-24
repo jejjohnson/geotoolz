@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.2.1...geotoolz-array-v0.3.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **array:** geotoolz-array 0.3.0 stores dims and coordinates. Building a GeoArray without dims=, per-band names in attrs, stack() and expand_dims() without a dim name, and GeoArray[np.ndarray] are deprecated and removed in 0.4.0.
+* **array:** to_pixel, interp_at and the adapter-level map_over ([#550](https://github.com/jejjohnson/geotoolz/issues/550))
+* **array:** GeoArray's dims are stored. Construction without dims is deprecated and removed in 0.4.0; geoarray.stack without dim= is deprecated; geoarray.combine is pipekit_array.combine.
+
+### Features
+
+* **array:** add the GeoSwath and GeoPoints carriers with their pipekit adapters ([#548](https://github.com/jejjohnson/geotoolz/issues/548)) ([ae04513](https://github.com/jejjohnson/geotoolz/commit/ae04513d35e7b8322ca8a1a323ef8f4494e10b2b))
+* **array:** readable types in geoarray.types and check_dims ([#549](https://github.com/jejjohnson/geotoolz/issues/549)) ([b9678c3](https://github.com/jejjohnson/geotoolz/commit/b9678c395a24f840dfa815b862d543c49d2afbd6)), closes [#521](https://github.com/jejjohnson/geotoolz/issues/521)
+* **array:** standard coordinates in geoarray.coords ([#545](https://github.com/jejjohnson/geotoolz/issues/545)) ([1235980](https://github.com/jejjohnson/geotoolz/commit/12359807a51f495820e1ea771a91fdc17b8c95a1))
+* **array:** store dims and coordinates on GeoArray and register its pipekit adapter ([#546](https://github.com/jejjohnson/geotoolz/issues/546)) ([8480596](https://github.com/jejjohnson/geotoolz/commit/84805969f6e633299ef0b447a10578f6af993628))
+* **array:** store TimeAxis stamps as an int64 pytree leaf; to_jax and to_numpy move them ([#547](https://github.com/jejjohnson/geotoolz/issues/547)) ([dee154e](https://github.com/jejjohnson/geotoolz/commit/dee154e5d122ba02db250f5739184239675dacb9))
+* **array:** to_pixel, interp_at and the adapter-level map_over ([#550](https://github.com/jejjohnson/geotoolz/issues/550)) ([e563d70](https://github.com/jejjohnson/geotoolz/commit/e563d70e1489680cbcb59904aa82c1050117cc8f))
+* **array:** xarray converters with a CF spatial_ref and GeoTransform ([#551](https://github.com/jejjohnson/geotoolz/issues/551)) ([5a1ff0c](https://github.com/jejjohnson/geotoolz/commit/5a1ff0c708372856c88dd886956e214ed6f21fbf))
+
+
+### Miscellaneous
+
+* **array:** read 0.2 band_names into a SpectralAxis, toward geotoolz-array 0.3.0 ([#552](https://github.com/jejjohnson/geotoolz/issues/552)) ([7b1a091](https://github.com/jejjohnson/geotoolz/commit/7b1a0919c6c646cdd660cc8801316255382a5992))
+
 ## [0.2.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.2.0...geotoolz-array-v0.2.1) (2026-10-24)
 
 
