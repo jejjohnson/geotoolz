@@ -420,7 +420,7 @@ def _centres_transform(x: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 
 def _axis_centres(t: np.ndarray, width: int, height: int) -> tuple[Any, Any]:
-    """Centre coordinates of an axis-aligned grid: xⱼ = T(j + ½, ·), yᵢ = T(·, i + ½)."""
+    """Axis-aligned centre coordinates: xⱼ = T(j + ½, ·), yᵢ = T(·, i + ½)."""
     x, _ = apply_transform(t, np.arange(width) + 0.5, 0.5)
     _, y = apply_transform(t, 0.5, np.arange(height) + 0.5)
     return np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
