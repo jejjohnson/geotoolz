@@ -45,6 +45,10 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
 - `geoarray.coords` — the standard coordinates of named dims:
   `SpectralAxis`, `VariableAxis`, `VerticalAxis` / `Vertical`, `TimeAxis`,
   and the grids `PixelGrid`, `SwathGrid`, `CurvilinearGrid`, `PointAxis`.
+- `geoarray.types` — readable names for the common shapes (`GeoImage`,
+  `GeoMapSeries`, `GeoTracks`, …): a dims pattern and a geometry kind any
+  carrier can match; `check_dims` checks them at the call, and
+  ``GeoArray["band y x"]`` annotates a pattern inline.
 - `geoarray.interop.georeader` — ``from_georeader`` / ``to_georeader``,
   zero-copy bridges to georeader's ``GeoTensor``, and
   ``source_from_georeader`` / ``source_to_georeader`` for its lazy readers
