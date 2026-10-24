@@ -34,6 +34,7 @@ from geoarray._src.array import (
     _index_in_order,
     _is_advanced,
     _normalize_fill,
+    _subscript,
     coords_to_host,
     coords_to_jax,
     join_stamps,
@@ -307,6 +308,10 @@ class GeoSwath(_Named):
 
     spatial_dims: ClassVar[tuple[str, ...]] = ("row", "col")
 
+    def __class_getitem__(cls, item: Any) -> Any:
+        """``GeoSwath["band row col"]``: the carrier annotated with a dims pattern."""
+        return _subscript(cls, item)
+
     def __post_init__(self) -> None:
         backend = backend_of(self.data)
         lat = _float_leaf(self.lat, backend, "lat")
@@ -538,6 +543,10 @@ class GeoPoints(_Named):
     attrs: FrozenAttrs = dataclasses.field(default_factory=FrozenAttrs, kw_only=True)
 
     spatial_dims: ClassVar[tuple[str, ...]] = ("obs",)
+
+    def __class_getitem__(cls, item: Any) -> Any:
+        """``GeoPoints["variable obs"]``: the carrier annotated with a dims pattern."""
+        return _subscript(cls, item)
 
     def __post_init__(self) -> None:
         backend = backend_of(self.data)

@@ -43,6 +43,7 @@ from geoarray._src.geometry import (
     require_equal_leaves,
     stack,
 )
+from geoarray._src.types import Kind, register_kind_reader
 
 
 __all__ = ["GeoArrayAdapter", "GeoPointsAdapter", "GeoSwathAdapter", "to_dimarray"]
@@ -326,3 +327,15 @@ class GeoPointsAdapter(_GeolocatedAdapter):
 register_adapter(GeoArray, GeoArrayAdapter())
 register_adapter(GeoSwath, GeoSwathAdapter())
 register_adapter(GeoPoints, GeoPointsAdapter())
+
+# the kinds the readable types read (geoarray.types)
+register_kind_reader(GeoArray, lambda g: Kind("grid", ("y", "x")))
+register_kind_reader(GeoSwath, lambda s: Kind("swath", ("row", "col")))
+register_kind_reader(
+    GeoPoints,
+    lambda p: Kind(
+        "points",
+        ("obs",),
+        frozenset(k for k in ("z", "time", "valid") if getattr(p, k) is not None),
+    ),
+)

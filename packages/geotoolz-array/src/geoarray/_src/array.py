@@ -34,7 +34,6 @@ from pipekit_array.dimarray import vmapped_dims
 from geoarray._src.attrs import FrozenAttrs, drop_band_keys, select_bands
 from geoarray._src.backend import (
     Backend,
-    SupportsArray,
     backend_of,
     import_jax,
     is_jax_array,
@@ -387,7 +386,7 @@ _BAND_ALONE = (
 
 
 @dataclasses.dataclass(frozen=True, eq=False, repr=False)
-class GeoArray[A: SupportsArray]:
+class GeoArray:
     """A georeferenced array whose data is a NumPy or a JAX array.
 
     Every axis has a name (``dims``); the last two are ``("y", "x")``. The
@@ -436,7 +435,7 @@ class GeoArray[A: SupportsArray]:
         ('y', 'x')
     """
 
-    data: A
+    data: Any
     transform: Any
     crs: pyproj.CRS | None
     fill_value: _FillValue = None
@@ -444,6 +443,15 @@ class GeoArray[A: SupportsArray]:
     # None reads the dims from the rank (deprecated); stored as a tuple
     dims: tuple[str, ...] = dataclasses.field(default=cast(Any, None), kw_only=True)
     coords: tuple[Coordinate, ...] = dataclasses.field(default=(), kw_only=True)
+
+    def __class_getitem__(cls, item: Any) -> Any:
+        """``GeoArray["band y x"]``: the carrier annotated with a dims pattern.
+
+        An ``Annotated`` type carrying a `geoarray.types.ReadableType`, which
+        `geoarray.types.check_dims` checks. The 0.2 array-type parameter
+        (``GeoArray[np.ndarray]``) is deprecated and returns the class.
+        """
+        return _subscript(cls, item)
 
     def __post_init__(self) -> None:
         backend = backend_of(self.data)
@@ -1233,7 +1241,7 @@ class GeoArray[A: SupportsArray]:
         if not isinstance(other, GeoArray):
             return False
         mine = self.to_numpy()
-        theirs = cast("GeoArray[Any]", other).to_numpy()
+        theirs = other.to_numpy()
         fill_equal = mine.fill_value is theirs.fill_value or (
             mine.fill_value == theirs.fill_value
             and type(mine.fill_value) is type(theirs.fill_value)
@@ -1266,6 +1274,22 @@ class GeoArray[A: SupportsArray]:
             f"GeoArray({head}, crs={_crs_label(self.crs)}, {where}, "
             f"fill_value={self.fill_value!r}, attrs={keys}, dims={self.dims})"
         )
+
+
+def _subscript(cls: type, item: Any) -> Any:
+    """``Carrier["dims"]`` as an annotated type; the 0.2 generic form warns."""
+    if isinstance(item, str):
+        from geoarray._src.types import annotate
+
+        return annotate(cls, item)
+    warnings.warn(
+        f"{cls.__name__}[{getattr(item, '__name__', item)}] (the array-type "
+        "parameter) is deprecated and removed in geotoolz-array 0.4.0: the "
+        f"backend comes from the data; annotate dims with {cls.__name__}['band y x']",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    return cls
 
 
 def _restore(
