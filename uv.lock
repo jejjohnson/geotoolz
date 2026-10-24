@@ -1332,7 +1332,7 @@ dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "geotoolz-array"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/geotoolz-array" }
 dependencies = [
     { name = "affine" },

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.2.0...geotoolz-array-v0.2.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* **array:** check transforms at run time when joins run under jit ([#542](https://github.com/jejjohnson/geotoolz/issues/542)) ([44af6d9](https://github.com/jejjohnson/geotoolz/commit/44af6d9e050e6475d36e697453efd33b429b9e90))
+
 ## [0.2.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.1.0...geotoolz-array-v0.2.0) (2026-10-19)
 
 
