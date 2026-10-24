@@ -30,10 +30,10 @@ import numpy as np
 from pipekit import Signature, get_adapter, register_adapter
 from pipekit_array import DimArray, DimArrayAdapter
 
-from geoarray._src.array import SPATIAL_DIMS, GeoArray, build
+from geoarray._src.array import SPATIAL_DIMS, GeoArray, build, fill_fits
 from geoarray._src.attrs import drop_band_keys
 from geoarray._src.backend import backend_of
-from geoarray._src.carriers import GeoPoints, GeoSwath, _build
+from geoarray._src.carriers import GeoPoints, GeoSwath, _as_int_leaf, _build
 from geoarray._src.errors import GridMismatchError
 from geoarray._src.geometry import (
     _require_carriers,
@@ -58,18 +58,8 @@ def to_dimarray(g: Any) -> DimArray:
 
 
 def _fill_for_dtype(fill: Any, dtype: Any) -> Any:
-    """``fill`` when data of ``dtype`` can hold it; ``None`` otherwise."""
-    if fill is None:
-        return None
-    kind = np.dtype(dtype).kind
-    if kind in "fc":
-        return fill
-    if kind == "b":
-        return fill if fill in (0, 1) and isinstance(fill, bool | int) else None
-    if isinstance(fill, float) and not fill.is_integer():
-        return None
-    info = np.iinfo(dtype)
-    return fill if info.min <= fill <= info.max else None
+    """``fill`` when ``dtype`` data can hold it (the constructor's rule), else None."""
+    return fill if fill_fits(fill, dtype) else None
 
 
 class GeoArrayAdapter:
@@ -379,8 +369,17 @@ class _GeolocatedAdapter:
                 )
             if x.crs != first.crs:
                 raise GridMismatchError(f"carrier {i} has CRS {x.crs}, not {first.crs}")
+            if getattr(x, "vertical", None) != getattr(first, "vertical", None):
+                # z = 10 m depth and z = 10 m height are different places
+                raise GridMismatchError(
+                    f"carrier {i} has vertical {x.vertical}, not {first.vertical}"
+                )
             for name in self.leaves:
-                a, b = getattr(first, name), getattr(x, name)
+                # times compare as int64 ns: datetime64 on NumPy, int64 on JAX
+                a, b = (
+                    _as_int_leaf(getattr(first, name)),
+                    _as_int_leaf(getattr(x, name)),
+                )
                 if (a is None) != (b is None):
                     raise GridMismatchError(f"carrier {i}: {name} is set on one only")
                 if a is not None:
@@ -410,6 +409,11 @@ class _GeolocatedAdapter:
             return DimArray(data, dims, labels)
         fields = {name: getattr(x, name) for name in self._static_fields()}
         fields.update({name: getattr(x, name) for name in self.leaves})
+        if "band" in x.dims and (
+            "band" not in dims or shape[dims.index("band")] != x.sizes["band"]
+        ):
+            # per-band attrs describe bands that are gone or changed
+            fields["attrs"] = drop_band_keys(x.attrs)
         return _build(
             self.carrier,
             data=data,

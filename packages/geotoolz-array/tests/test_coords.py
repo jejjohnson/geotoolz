@@ -134,3 +134,28 @@ def test_pixel_centres(convention: str) -> None:
     xa, ya = area.centres(grid.area_transform(np.asarray(t)))
     np.testing.assert_allclose(xa, x, rtol=0, atol=1e-9)
     np.testing.assert_allclose(ya, y, rtol=0, atol=1e-9)
+
+
+# -- review fixes (Codex, #545) --------------------------------------------------------
+
+
+def test_curvilinear_hash_follows_equality_for_signed_zero_and_nan() -> None:
+    lat = np.array([[0.0, np.nan]])
+    other = np.array([[-0.0, np.float64("nan") * -1]])
+    a = CurvilinearGrid(lat, lat, "EPSG:4326")
+    b = CurvilinearGrid(other, other, "EPSG:4326")
+    assert a == b
+    assert hash(a) == hash(b)
+
+
+def test_time_axis_with_nat_equals_itself() -> None:
+    t = TimeAxis(np.array(["2026-01-01", "NaT"], dtype="datetime64[ns]"))
+    same = TimeAxis(np.array(["2026-01-01", "NaT"], dtype="datetime64[ns]"))
+    assert t == same
+    assert hash(t) == hash(same)
+
+
+def test_point_grid_area_transform_takes_a_tuple() -> None:
+    grid = PixelGrid(shape=(2, 2), crs="EPSG:32613", convention="point")
+    out = grid.area_transform((20.0, 0.0, 100.0, 0.0, -20.0, 200.0))
+    np.testing.assert_allclose(out, [20.0, 0.0, 90.0, 0.0, -20.0, 210.0])
