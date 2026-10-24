@@ -160,7 +160,7 @@ and names the fix: `geoarray.map_over(x, first_band, "time")`.
 
 geoarray holds operations that re-index or re-describe samples without
 computing new values: slicing, crops, windows, pads, pixel coordinates, the
-joins. Warping and resampling are `geoops.functional`. `sample`, the
+joins. Warping and resampling are `geoops.geom`. `sample`, the
 observation operator H(x), is the one exception: bilinear weights blend
 four pixels, but every carrier-level cost needs it and it reads nothing but
 the georeference.
