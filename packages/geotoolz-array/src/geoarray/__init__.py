@@ -28,6 +28,9 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   copies JAX data to the host (and raises `GeoArrayTraceError` under a
   trace); joins and writes promote NumPy inputs to JAX. `set_options`
   (``warn_on_transfer``) / `get_options`, `HostTransferWarning`.
+- `geoarray.coords` — the standard coordinates of named dims:
+  `SpectralAxis`, `VariableAxis`, `VerticalAxis` / `Vertical`, `TimeAxis`,
+  and the grids `PixelGrid`, `SwathGrid`, `CurvilinearGrid`, `PointAxis`.
 - `geoarray.interop.georeader` — ``from_georeader`` / ``to_georeader``,
   zero-copy bridges to georeader's ``GeoTensor``, and
   ``source_from_georeader`` / ``source_to_georeader`` for its lazy readers
