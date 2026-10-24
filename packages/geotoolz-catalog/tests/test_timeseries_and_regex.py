@@ -134,3 +134,26 @@ class TestFilenameInterval:
         iv = cat.gdf.index[0]
         assert not pd.isna(iv.left) and not pd.isna(iv.right)
         assert iv.left == pd.Timestamp("2024-06-01")
+
+
+class TestNamedDims:
+    """#525: the loaders name their dims and carry the rows' times."""
+
+    def test_time_series_dims_and_times(self, tmp_path: Path) -> None:
+        paths = [
+            _tif(tmp_path / f"S2_{day}.tif", value)
+            for day, value in (("20240603", 1), ("20240601", 2))
+        ]
+        cat = build_raster_catalog(paths, filename_regex=r"S2_(?P<date>\d{8})\.tif")
+        stack = load_raster_timeseries(cat, _slice("2024-06-01", "2024-06-30"))
+        assert stack.dims == ("time", "band", "y", "x")
+        expected = np.array(["2024-06-01", "2024-06-03"], dtype="datetime64[ns]")
+        np.testing.assert_array_equal(stack.coord("time").to_host().stamps, expected)
+        assert float(stack.sel(time=expected[0]).data[0, 0, 0]) == 2.0
+
+    def test_single_band_series_keeps_its_band_dim(self, tmp_path: Path) -> None:
+        path = _tif(tmp_path / "S2_20240601.tif", 1)
+        cat = build_raster_catalog([path], filename_regex=r"S2_(?P<date>\d{8})\.tif")
+        stack = load_raster_timeseries(cat, _slice("2024-06-01", "2024-06-30"))
+        assert stack.dims == ("time", "band", "y", "x")
+        assert stack.shape == (1, 1, 20, 20)

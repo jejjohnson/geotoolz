@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+import rasterio
+import rasterio.transform
 from geoarray import GeoArray
 
 import geocatalog._src.formats.raster as raster_module
@@ -361,3 +364,57 @@ class TestLoadersReturnGeoArray:
         scene = asyncio.run(aload_raster(catalog, sl))
         assert isinstance(scene, GeoArray)
         assert scene.grid == sl.grid
+
+
+class TestNamedDims:
+    """#525: load_raster names band y x; band descriptions become a SpectralAxis."""
+
+    @staticmethod
+    def _named(tmp_path: Path, names: tuple[str, ...]) -> Path:
+        path = tmp_path / "S2_T29SND_20240115_named.tif"
+        with rasterio.open(
+            path,
+            "w",
+            driver="GTiff",
+            height=8,
+            width=8,
+            count=len(names),
+            dtype="uint16",
+            crs="EPSG:32629",
+            transform=rasterio.transform.from_bounds(
+                500_000, 4_000_000, 500_080, 4_000_080, 8, 8
+            ),
+        ) as dst:
+            dst.write(np.ones((len(names), 8, 8), dtype=np.uint16))
+            dst.descriptions = names
+        return path
+
+    @staticmethod
+    def _slice() -> GeoSlice:
+        return GeoSlice(
+            bounds=(500_000, 4_000_000, 500_080, 4_000_080),
+            interval=pd.Interval(
+                pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-31"), closed="both"
+            ),
+            resolution=(10.0, 10.0),
+            crs="EPSG:32629",
+        )
+
+    def test_band_descriptions_become_the_band_axis(self, tmp_path: Path) -> None:
+        cat = build_raster_catalog(
+            [self._named(tmp_path, ("B02", "B03", "B04"))], filename_regex=REGEX
+        )
+        scene = load_raster(cat, self._slice())
+        assert scene.dims == ("band", "y", "x")
+        assert scene.coord("band").names == ("B02", "B03", "B04")
+        picked = load_raster(cat, self._slice(), band_indexes=[3, 1])
+        assert picked.coord("band").names == ("B04", "B02")
+
+    @pytest.mark.parametrize("names", [("B02", ""), ("B02", "B02")])
+    def test_unnamed_or_repeated_bands_stay_positional(
+        self, tmp_path: Path, names: tuple[str, ...]
+    ) -> None:
+        cat = build_raster_catalog([self._named(tmp_path, names)], filename_regex=REGEX)
+        scene = load_raster(cat, self._slice())
+        assert scene.dims == ("band", "y", "x")
+        assert scene.coords == ()

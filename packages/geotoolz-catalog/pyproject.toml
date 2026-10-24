@@ -26,7 +26,7 @@ dependencies = [
     # and `GeoSlice.grid` is a `geoarray.Grid`. No georeader on the base
     # install: only `field_for(materialize=False)` reads through it (the
     # [patch] extra).
-    "geotoolz-array>=0.1.1",
+    "geotoolz-array>=0.3.0",
     "numpy>=1.26",
     # pandas IntervalIndex + pyproj.CRS underpin GeoSlice and the catalog
     # primitives; both are part of the base surface.
@@ -99,7 +99,7 @@ gee = ["earthengine-api>=0.1.380"]
 # `geoarray.RasterSource` by the geoarray adapter ([georeader]); declared
 # here rather than relied on through geotoolz-patcher.
 patch = [
-    "geotoolz-array[georeader]>=0.1.1",
+    "geotoolz-array[georeader]>=0.3.0",
     "georeader-spaceml>=2.1",
     "geotoolz-patcher>=0.12",
 ]

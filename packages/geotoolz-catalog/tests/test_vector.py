@@ -112,6 +112,7 @@ class TestLoadVector:
             catalog, sl, task="semantic_segmentation", label_field="class_id"
         )
         assert np.asarray(tensor).shape == (1, 32, 32)
+        assert tensor.dims == ("band", "y", "x")  # #525
         # We rasterised two classes; their IDs should appear in the output.
         unique = set(np.unique(np.asarray(tensor)).tolist())
         # Background is 0; classes 1 and 2 land in the raster.
