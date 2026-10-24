@@ -48,6 +48,7 @@ from geoarray._src.coords import (
     VerticalAxis,
 )
 from geoarray._src.errors import GeoArrayTraceError, GridMismatchError
+from geoarray._src.grid import apply_transform
 from geoarray._src.types import Kind, register_kind_reader
 
 
@@ -140,7 +141,8 @@ def _attrs_out(attrs: FrozenAttrs, fill: Any) -> dict[str, Any]:
         k: list(v) if isinstance(v, tuple) else v for k, v in attrs.to_dict().items()
     }
     if fill is not None:
-        out["fill_value"] = fill
+        # netCDF has no bool attributes: a mask's fill is written as 0 / 1
+        out["fill_value"] = int(fill) if isinstance(fill, bool | np.bool_) else fill
     return out
 
 
@@ -172,12 +174,12 @@ def grid_to_xarray(g: GeoArray) -> Any:
             f"{g.batch_dims} item: select one, or concat the items first"
         )
     t = np.asarray(_host(g.transform, "to_xarray"), dtype=np.float64)
-    a, b, c, d, e, f = (float(v) for v in t)
+    _, b, _, d, _, _ = (float(v) for v in t)
     coords: dict[str, Any] = {GRID_MAPPING: _spatial_ref(g.crs, t)}
     if b == 0 and d == 0:
-        # xⱼ = c + a (j + ½), yᵢ = f + e (i + ½)
-        coords["x"] = ("x", c + a * (np.arange(g.width) + 0.5), {"axis": "X"})
-        coords["y"] = ("y", f + e * (np.arange(g.height) + 0.5), {"axis": "Y"})
+        x, y = _axis_centres(t, g.width, g.height)
+        coords["x"] = ("x", x, {"axis": "X"})
+        coords["y"] = ("y", y, {"axis": "Y"})
     coords |= _coordinate_vars(g.coords)
     da = xr.DataArray(
         _host(g.data, "to_xarray"),
@@ -339,8 +341,9 @@ def read_kind(obj: Any) -> Kind | None:
         return None
     coords = obj.coords
     lat, lon = _find(_LAT_NAMES, coords), _find(_LON_NAMES, coords)
-    if lat and lon and coords[lat].ndim == 2 and coords[lat].dims == coords[lon].dims:
-        return Kind("swath", tuple(map(str, coords[lat].dims)))
+    if lat and lon and coords[lat].ndim >= 2 and coords[lat].dims == coords[lon].dims:
+        # (…, row, col): leading dims are batch dims, the last two horizontal
+        return Kind("swath", tuple(map(str, coords[lat].dims[-2:])))
     by_axis = {
         str(c.attrs.get("axis", "")).upper(): str(c.dims[0])
         for c in coords.values()
@@ -391,7 +394,11 @@ def _fill_of(obj: Any) -> Any:
         obj.attrs.get("_FillValue"),
     ):
         if value is not None:
-            return value.item() if isinstance(value, np.generic) else value
+            value = value.item() if isinstance(value, np.generic) else value
+            if obj.dtype.kind == "b" and value in (0, 1):
+                # a mask's fill, written as 0 / 1 (netCDF has no bool)
+                return bool(value)
+            return value
     return None
 
 
@@ -412,13 +419,19 @@ def _centres_transform(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return np.array([dx, 0.0, float(x[0]) - dx / 2, 0.0, dy, float(y[0]) - dy / 2])
 
 
+def _axis_centres(t: np.ndarray, width: int, height: int) -> tuple[Any, Any]:
+    """Centre coordinates of an axis-aligned grid: xⱼ = T(j + ½, ·), yᵢ = T(·, i + ½)."""
+    x, _ = apply_transform(t, np.arange(width) + 0.5, 0.5)
+    _, y = apply_transform(t, 0.5, np.arange(height) + 0.5)
+    return np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
+
+
 def _check_centres(t: np.ndarray, x: np.ndarray, y: np.ndarray) -> None:
     """GF3: centres must sit at T(j + ½, i + ½) to 10⁻⁹ of a pixel (#464)."""
-    a, b, c, d, e, f = t
+    a, b, _, d, e, _ = t
     if b != 0 or d != 0:
         return
-    ex = c + a * (np.arange(len(x)) + 0.5)
-    ey = f + e * (np.arange(len(y)) + 0.5)
+    ex, ey = _axis_centres(t, len(x), len(y))
     if np.max(np.abs(x - ex), initial=0.0) > _PIXEL_TOL * abs(a) or np.max(
         np.abs(y - ey), initial=0.0
     ) > _PIXEL_TOL * abs(e):
@@ -648,6 +661,8 @@ def to_dataset(carriers: Mapping[str, GeoArray]) -> Any:
     Raises:
         GridMismatchError: The carriers are on different grids; use
             `to_datatree` for several grids.
+        ValueError: A shared non-spatial dim has different coordinates
+            (``red`` here, ``nir`` there): xarray would align them.
     """
     from geoarray._src.geometry import _require_same_grid
 
@@ -655,7 +670,17 @@ def to_dataset(carriers: Mapping[str, GeoArray]) -> Any:
     if not items:
         raise ValueError("to_dataset needs at least one carrier")
     _require_same_grid([g for _, g in items], "to_dataset")
-    return xr.Dataset({name: grid_to_xarray(g) for name, g in items})
+    arrays = {name: grid_to_xarray(g) for name, g in items}
+    try:
+        # one Dataset shares coordinates: never let xarray align (union) them
+        xr.align(*arrays.values(), join="exact", copy=False)
+    except ValueError as exc:
+        raise ValueError(
+            "to_dataset: the carriers' coordinates differ (band names, levels, "
+            "times, …), so xarray would align them and insert NaN; give them "
+            f"one layout first, or use to_datatree: {exc}"
+        ) from exc
+    return xr.Dataset(arrays)
 
 
 def from_dataset(ds: Any) -> dict[str, GeoArray]:
