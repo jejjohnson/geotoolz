@@ -915,8 +915,11 @@ def load_raster_timeseries(
         np.array([starts[day] for day, _ in ordered], dtype="datetime64[ns]")
     )
     last = scenes[-1]
+    # a band axis labels every step only when every day names its bands
+    # the same way; otherwise the bands stay positional
+    agreed = all(scene.coords == last.coords for scene in scenes)
     return last.with_data(
         stacked,
         dims=("time", *last.dims),
-        coords=(times, *last.coords),
+        coords=(times, *(last.coords if agreed else ())),
     )
