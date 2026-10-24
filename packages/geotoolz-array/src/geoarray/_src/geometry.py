@@ -184,7 +184,7 @@ def _in_first_order(gs: list[GeoArray], what: str) -> list[GeoArray]:
                 f"{gs[0].batch_dims}"
             )
         order = tuple(g.dims.index(d) for d in dims)
-        out.append(g.with_data(g.xp.permute_dims(g.data, order), dims=dims))
+        out.append(g.with_data(g.xp.transpose(g.data, order), dims=dims))
     return out
 
 
