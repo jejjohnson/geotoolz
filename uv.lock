@@ -1332,7 +1332,7 @@ dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "geotoolz-array"
-version = "0.2.1"
+version = "0.3.0"
 source = { editable = "packages/geotoolz-array" }
 dependencies = [
     { name = "affine" },
@@ -1394,7 +1394,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-catalog"
-version = "0.7.0"
+version = "0.8.0"
 source = { editable = "packages/geotoolz-catalog" }
 dependencies = [
     { name = "cyclopts" },
@@ -1553,7 +1553,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-cloud"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "packages/geotoolz-cloud" }
 dependencies = [
     { name = "georeader-spaceml" },
@@ -1706,7 +1706,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-ops"
-version = "0.12.0"
+version = "0.13.0"
 source = { editable = "packages/geotoolz-ops" }
 dependencies = [
     { name = "affine" },
@@ -1836,7 +1836,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-patcher"
-version = "0.12.0"
+version = "0.13.0"
 source = { editable = "packages/geotoolz-patcher" }
 dependencies = [
     { name = "georeader-spaceml" },
@@ -1980,7 +1980,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.31" }]
 
 [[package]]
 name = "geotoolz-products"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "packages/geotoolz-products" }
 dependencies = [
     { name = "affine" },

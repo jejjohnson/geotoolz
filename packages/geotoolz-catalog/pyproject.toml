@@ -1,6 +1,6 @@
 [project]
 name = "geotoolz-catalog"
-version = "0.7.0"
+version = "0.8.0"
 description = "Spatiotemporal catalog over geospatial files — a GeoSlice-driven index whose loaders return geoarray.GeoArray."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
