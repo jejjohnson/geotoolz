@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 from types import ModuleType
+from typing import Any
 
 import numpy as np
 import pytest
@@ -199,3 +200,41 @@ class TestX64Guard:
         g = GeoArray(np.zeros((2, 2)), jnp.asarray(TRANSFORM), CRS)
         assert isinstance(g.transform, np.ndarray)
         assert tuple(g.transform) == TRANSFORM
+
+
+# -- review fixes (Codex, #547) -------------------------------------------------------
+
+
+def _dated(xp: Any = np) -> GeoArray:
+    from geoarray.coords import TimeAxis
+
+    return GeoArray(
+        xp.zeros((2, 2, 2)),
+        (20.0, 0.0, 0.0, 0.0, -20.0, 0.0),
+        32613,
+        dims="time y x",
+        coords=(
+            TimeAxis(np.array(["2026-01-01", "2026-01-02"], dtype="datetime64[ns]")),
+        ),
+    )
+
+
+def test_selected_stamps_stay_read_only() -> None:
+    picked = _dated().coord("time").isel([0])
+    with pytest.raises(ValueError, match="read-only"):
+        picked.stamps[0] = np.datetime64("2030-01-01", "ns")
+
+
+def test_concat_along_time_under_jit(x64: ModuleType) -> None:
+    import geoarray
+
+    g = _dated().to_jax()
+    out = x64.jit(lambda c: geoarray.concat([c, c], "time"))(g)
+    assert out.coord("time").size == 4
+
+
+def test_to_jax_moves_stamps_of_a_carrier_built_on_jax(x64: ModuleType) -> None:
+    g = _dated(x64.numpy)
+    assert g.backend == "jax"
+    moved = g.to_jax()
+    assert type(moved.coord("time").stamps).__module__.startswith("jax")

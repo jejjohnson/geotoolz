@@ -346,12 +346,15 @@ def _require_concrete_spatial(spatial: tuple[Any, ...]) -> None:
 
 
 def _drops_axis(k: Any) -> bool:
-    """Whether index ``k`` removes its axis (an integer does)."""
-    return isinstance(k, int | np.integer)
+    """Whether index ``k`` removes its axis: an integer, or a 0-d integer array."""
+    if isinstance(k, int | np.integer):
+        return True
+    kind = getattr(getattr(k, "dtype", None), "kind", None)
+    return getattr(k, "ndim", None) == 0 and kind in ("i", "u")
 
 
 def _is_advanced(k: Any) -> bool:
-    return not isinstance(k, slice | int | np.integer)
+    return not isinstance(k, slice) and not _drops_axis(k)
 
 
 def _crs_label(crs: pyproj.CRS | None) -> str:
@@ -1138,7 +1141,11 @@ class GeoArray:
         """
         jax = import_jax()
         require_x64()
-        if self.backend == "jax" and device is None:
+        stamps_on_host = any(
+            isinstance(c, TimeAxis) and not is_jax_array(c.as_leaf())
+            for c in self.coords
+        )
+        if self.backend == "jax" and device is None and not stamps_on_host:
             return self
         data = jax.device_put(self.data, device)
         transform = jax.device_put(self.transform, device)
