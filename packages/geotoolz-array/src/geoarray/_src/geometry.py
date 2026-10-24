@@ -8,6 +8,7 @@ JAX, and inside ``jit`` where noted.
 
 from __future__ import annotations
 
+import functools
 import math
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -16,7 +17,13 @@ import numpy as np
 
 from geoarray._src.array import INHERIT, GeoArray, _normalize_fill
 from geoarray._src.attrs import concat_bands
-from geoarray._src.backend import backend_of, is_tracer, namespace, require_x64
+from geoarray._src.backend import (
+    backend_of,
+    import_jax,
+    is_tracer,
+    namespace,
+    require_x64,
+)
 from geoarray._src.errors import GridMismatchError
 from geoarray._src.grid import PixelWindow, apply_transform, shift_scale_transform
 
@@ -45,14 +52,20 @@ def _require_carriers(carriers: Sequence[Any], what: str) -> list[GeoArray]:
     return list(carriers)
 
 
-def _require_same_grid(carriers: list[GeoArray], what: str) -> None:
-    """Raise `GridMismatchError` unless every carrier shares the first's grid.
+def _require_same_grid(carriers: list[GeoArray], what: str) -> list[GeoArray]:
+    """The carriers, checked to share the first's grid; use what it returns.
 
-    CRS, spatial shape and batch shape are always compared; the transforms
-    are compared exactly when concrete (under a trace they are values JAX
-    cannot read, so the caller is responsible for them).
+    CRS, spatial shape and batch shape are compared at once. Transforms are
+    compared exactly: at once when concrete, and on device when traced
+    (inside ``jit``, ``grad`` or ``vmap`` they are only known at run time).
+    A traced pair gets a host callback that raises at run time if the
+    transforms differ.
+
+    Raises:
+        GridMismatchError: The CRS, shapes or concrete transforms differ.
     """
     first = carriers[0]
+    checked = [first]
     for i, g in enumerate(carriers[1:], start=1):
         if g.crs != first.crs:
             raise GridMismatchError(
@@ -63,14 +76,45 @@ def _require_same_grid(carriers: list[GeoArray], what: str) -> None:
                 f"{what}: carrier {i} has spatial shape {g.shape[-2:]} and batch "
                 f"{g.batch_shape}, not {first.shape[-2:]} and {first.batch_shape}"
             )
-        if not (is_tracer(g.transform) or is_tracer(first.transform)) and not (
-            np.array_equal(np.asarray(g.transform), np.asarray(first.transform))
-        ):
+        if is_tracer(g.transform) or is_tracer(first.transform):
+            checked.append(_guard_same_transform(g, first, i, what))
+            continue
+        if not np.array_equal(np.asarray(g.transform), np.asarray(first.transform)):
             theirs = np.asarray(g.transform).tolist()
             ours = np.asarray(first.transform).tolist()
             raise GridMismatchError(
                 f"{what}: carrier {i} has transform {theirs}, not {ours}"
             )
+        checked.append(g)
+    return checked
+
+
+def _guard_same_transform(g: GeoArray, first: GeoArray, i: int, what: str) -> GeoArray:
+    """g, with a run-time check that its transform equals first's.
+
+    The check is a ``jax.debug.callback``, an effect XLA never prunes. A
+    check carried on the data (``equinox.error_if``) would be pruned
+    whenever the result does not need g's values, as in ``grad`` with
+    respect to another carrier (#541).
+    """
+    jax = import_jax()
+    jnp = namespace(g.transform)
+
+    # δT = T_i − T_0, exactly; any non-zero entry is a different grid
+    differs = jnp.any(g.transform != first.transform)
+    message = (
+        f"{what}: carrier {i} has a different transform than carrier 0 "
+        "(checked at run time, inside jit/grad/vmap)"
+    )
+    raise_if = functools.partial(_raise_if_differs, message)
+    jax.debug.callback(raise_if, differs)
+    return g
+
+
+def _raise_if_differs(message: str, differs: Any) -> None:
+    """Host side of the traced grid check; ``differs`` may be batched (vmap)."""
+    if bool(np.any(differs)):
+        raise GridMismatchError(message)
 
 
 def _same_fill(a: Any, b: Any) -> bool:
@@ -129,8 +173,10 @@ def combine(f: Callable[..., Any], *carriers: GeoArray) -> GeoArray:
             on JAX.
 
     Raises:
-        GridMismatchError: The grids differ (CRS, shape, or concrete
-            transform).
+        GridMismatchError: The grids differ (CRS, shape, or transform).
+            Under ``jit``, ``grad`` or ``vmap`` a transform difference is
+            found at run time; JAX reports it as a ``JaxRuntimeError``
+            whose message carries this error.
         ValueError: The fill values differ.
         X64Error: A NumPy carrier must move to JAX and x64 is off.
 
@@ -144,7 +190,7 @@ def combine(f: Callable[..., Any], *carriers: GeoArray) -> GeoArray:
     """
     gs = _require_carriers(carriers, "combine")
     gs = _promote(gs)
-    _require_same_grid(gs, "combine")
+    gs = _require_same_grid(gs, "combine")
     _require_same_fill(gs, "combine")
     return gs[0].with_data(f(*(g.data for g in gs)))
 
@@ -169,7 +215,7 @@ def stack(carriers: Sequence[GeoArray], axis: int = 0) -> GeoArray:
     """
     gs = _require_carriers(carriers, "stack")
     gs = _promote(gs)
-    _require_same_grid(gs, "stack")
+    gs = _require_same_grid(gs, "stack")
     _require_same_fill(gs, "stack")
     first = gs[0]
     position = _leading_axis(first, axis, "stack", new=True)
@@ -199,7 +245,7 @@ def concatenate(carriers: Sequence[GeoArray], axis: int = -3) -> GeoArray:
     """
     gs = _require_carriers(carriers, "concatenate")
     gs = _promote(gs)
-    _require_same_grid(gs, "concatenate")
+    gs = _require_same_grid(gs, "concatenate")
     _require_same_fill(gs, "concatenate")
     first = gs[0]
     position = _leading_axis(first, axis, "concatenate")
