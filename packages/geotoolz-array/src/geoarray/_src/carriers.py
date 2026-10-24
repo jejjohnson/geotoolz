@@ -41,6 +41,7 @@ from geoarray._src.backend import (
     is_tracer,
     namespace,
     require_x64,
+    xarray_module,
 )
 from geoarray._src.coords import Coordinate, CurvilinearGrid, Vertical
 from geoarray._src.errors import GeoArrayTraceError, LabelError
@@ -439,6 +440,15 @@ class GeoSwath(_Named):
         out = _host(self.data, "np.asarray(GeoSwath)")
         return np.array(out, dtype=dtype, copy=True) if copy else np.asarray(out, dtype)
 
+    def to_xarray(self) -> Any:
+        """This carrier as a ``DataArray`` with 2-D lat/lon (``[xarray]``)."""
+        return xarray_module().swath_to_xarray(self)
+
+    @classmethod
+    def from_xarray(cls, obj: Any) -> GeoSwath:
+        """A ``DataArray`` with 2-D lat/lon as a `GeoSwath` (see `to_xarray`)."""
+        return xarray_module().swath_from_xarray(obj)
+
     def identical(self, other: object) -> bool:
         """Equal data, lat/lon (NaN-aware), dims, coords, CRS, fill and attrs."""
         if not isinstance(other, GeoSwath):
@@ -684,6 +694,15 @@ class GeoPoints(_Named):
         """The values as a NumPy array (a host copy for JAX data)."""
         out = _host(self.data, "np.asarray(GeoPoints)")
         return np.array(out, dtype=dtype, copy=True) if copy else np.asarray(out, dtype)
+
+    def to_xarray(self) -> Any:
+        """This carrier as a CF DSG ``Dataset`` on ``obs`` (``[xarray]``)."""
+        return xarray_module().points_to_xarray(self)
+
+    @classmethod
+    def from_xarray(cls, obj: Any) -> GeoPoints:
+        """A CF DSG ``Dataset`` on ``obs`` as a `GeoPoints` (see `to_xarray`)."""
+        return xarray_module().points_from_xarray(obj)
 
     def identical(self, other: object) -> bool:
         """Equal values and leaves (NaN-aware), vertical and static fields."""

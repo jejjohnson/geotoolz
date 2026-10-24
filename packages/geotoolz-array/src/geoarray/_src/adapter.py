@@ -24,6 +24,7 @@ adapter, never through the carrier importing pipekit-array's machinery:
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from importlib import import_module
 from typing import Any
 
 import numpy as np
@@ -43,7 +44,7 @@ from geoarray._src.geometry import (
     require_equal_leaves,
     stack,
 )
-from geoarray._src.types import Kind, register_kind_reader
+from geoarray._src.types import Kind, register_kind_reader, register_lazy_kind_reader
 
 
 __all__ = ["GeoArrayAdapter", "GeoPointsAdapter", "GeoSwathAdapter", "to_dimarray"]
@@ -223,8 +224,9 @@ def _restack(x: GeoArray, items: list[Any], dim: str) -> Any:
         else:
             _require_same_grid(list(items), "map_over")
             transform = first.transform
-        coords = first.coords + tuple(
-            c for c in x.coords if c.dim == dim and c.size == len(items)
+        coords = (
+            tuple(c for c in x.coords if c.dim == dim and c.size == len(items))
+            + first.coords
         )
         return build(
             data,
@@ -451,7 +453,14 @@ register_adapter(GeoArray, GeoArrayAdapter())
 register_adapter(GeoSwath, GeoSwathAdapter())
 register_adapter(GeoPoints, GeoPointsAdapter())
 
-# the kinds the readable types read (geoarray.types)
+
+# the kinds the readable types read (geoarray.types); a DataArray's reader
+# loads with the converters, the first time one is read (geotoolz-array[xarray])
+def _load_xarray_kind_reader() -> None:
+    import_module("geoarray._src.xarray")
+
+
+register_lazy_kind_reader("xarray.", _load_xarray_kind_reader)
 register_kind_reader(GeoArray, lambda g: Kind("grid", ("y", "x")))
 register_kind_reader(GeoSwath, lambda s: Kind("swath", ("row", "col")))
 register_kind_reader(
