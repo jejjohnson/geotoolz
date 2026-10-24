@@ -441,3 +441,15 @@ def test_variable_dim_is_a_peer_of_band() -> None:
     g = _scene((2, 4, 4), dims="variable y x", coords=(met,))
     assert g.sel(variable="psfc").dims == ("y", "x")
     assert g.count == 1
+
+
+def test_bool_carrier_keeps_a_float_fill_the_constructor_accepts() -> None:
+    """Codex #546: rewrap and the constructor share one fill rule."""
+
+    t = (20.0, 0.0, 0.0, 0.0, -20.0, 0.0)
+    g = GeoArray(
+        np.zeros((2, 3, 3), dtype=bool), t, 32613, fill_value=0.0, dims="time y x"
+    )
+    out = pa.reduce(g, "any", "time")
+    assert out.dtype == bool
+    assert out.fill_value == 0.0

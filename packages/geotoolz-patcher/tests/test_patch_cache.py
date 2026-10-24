@@ -1117,3 +1117,35 @@ def test_unconvertible_numpy_scalars_are_rejected() -> None:
 def test_cache_format_bump_orphans_old_keys(tmp_path) -> None:
     """Keys changed meaning (anchor tagging), so the format salt moved on."""
     assert cache_module._FORMAT == "geopatcher.PatchCache/3"
+
+
+def test_cache_round_trip_keeps_stored_dims_and_coords() -> None:
+    """Codex #546: a cached patch keeps its dims and coordinates."""
+    from geoarray.coords import SpectralAxis, TimeAxis
+
+    g = GeoArray(
+        np.arange(2 * 3 * 4 * 4, dtype="float32").reshape(2, 3, 4, 4),
+        from_origin(0, 40, 10, 10),
+        "EPSG:32629",
+        dims=("time", "band", "y", "x"),
+        coords=(
+            TimeAxis(np.array(["2026-01-01", "NaT"], dtype="datetime64[ns]")),
+            SpectralAxis(names=("B2", "B3", "B4"), wavelength_nm=(490.0, 560.0, 665.0)),
+        ),
+    )
+    arrays = cache_module._encode_patch(Patch(data=g, anchor=(0, 0), indices=None))
+    payload = {
+        "kind": str(arrays["kind"]),
+        "meta": json.loads(str(arrays["meta"])),
+        "values": arrays["values"],
+    }
+    back = cache_module._decode_carrier(payload)
+    assert back.dims == g.dims
+    assert back.coords == g.coords
+    np.testing.assert_array_equal(back.sel(band="B3").data, g.sel(band="B3").data)
+
+    # an entry written before stored dims still reads, in the 0.2 layout
+    payload["meta"].pop("dims")
+    payload["meta"].pop("coords")
+    old = cache_module._decode_carrier(payload)
+    assert old.dims == ("time", "band", "y", "x") and old.coords == ()
