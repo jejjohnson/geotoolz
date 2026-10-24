@@ -362,3 +362,39 @@ def test_gh2_import_without_xarray() -> None:
     )
     assert out.returncode == 0, out.stderr[-2000:]
     assert out.stdout.count("geotoolz-array[xarray]") == 2
+
+
+# -- review fixes (Codex, #551) -------------------------------------------------------
+
+
+def test_to_dataset_refuses_carriers_with_different_band_labels() -> None:
+    red = GeoArray(
+        np.zeros((1, 2, 2)), T, CRS, dims="band y x", coords=(SpectralAxis(("red",)),)
+    )
+    nir = red.with_data(red.data, coords=(SpectralAxis(("nir",)),))
+    with pytest.raises(ValueError, match="coordinates differ"):
+        geoarray.to_dataset({"red": red, "nir": nir})
+
+
+def test_batched_swath_round_trips() -> None:
+    lat, lon = np.meshgrid(np.arange(3.0), np.arange(4.0), indexing="ij")
+    s = GeoSwath(
+        np.zeros((2, 3, 4)),
+        np.stack([lat, lat + 1]),
+        np.stack([lon, lon + 1]),
+        dims="time row col",
+    )
+    back = GeoSwath.from_xarray(s.to_xarray())
+    assert back.dims == ("time", "row", "col")
+    np.testing.assert_array_equal(back.lat, s.lat)
+
+
+def test_bool_mask_writes_to_netcdf(tmp_path: Path) -> None:
+    xr = pytest.importorskip("xarray")
+    pytest.importorskip("netCDF4")
+    mask = GeoArray(np.zeros((2, 2), dtype=bool), T, CRS, fill_value=False, dims="y x")
+    path = tmp_path / "mask.nc"
+    mask.to_xarray().to_dataset(name="mask").to_netcdf(path, engine="netcdf4")
+    with xr.open_dataset(path, decode_coords="all") as ds:
+        back = GeoArray.from_xarray(ds["mask"].astype(bool))
+    assert back.fill_value is False

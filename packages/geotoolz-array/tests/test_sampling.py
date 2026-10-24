@@ -245,3 +245,90 @@ def test_ga_g16_cost_unchanged_by_padding(x64: ModuleType) -> None:
     assert np.isfinite(results[0][0]) and np.isfinite(results[0][1]).all()
     assert results[0][0] == pytest.approx(results[1][0], rel=1e-14)
     np.testing.assert_allclose(results[0][1], results[1][1], rtol=1e-14, atol=0)
+
+
+# -- review fixes (Codex, #550) -------------------------------------------------------
+
+
+def test_non_finite_positions_are_invalid() -> None:
+    # x = 0 is inside this grid, so a NaN read "at the origin" would look valid
+    g = GeoArray(np.arange(16.0).reshape(4, 4), (1, 0, 0, 0, -1, 4), None, dims="y x")
+    xy = np.array([[np.nan, 1.5], [0.5, 3.5]])
+    out = interp_at(g, GeoPoints(np.zeros(2), xy=xy, dims="obs", crs=None))
+    assert out.valid.tolist() == [False, True]
+    assert np.isnan(out.data[0])
+
+
+@pytest.mark.parametrize("method", ["nearest", "bilinear"])
+def test_nodata_pixels_are_never_observations(method: str) -> None:
+    data = np.array(_ramp().data)
+    data[2, 2] = -9999.0
+    g = GeoArray(data, T, CRS, fill_value=-9999.0, dims="y x")
+    # (2, 2) reads the nodata pixel itself; (2.4, 1.0) blends it in with
+    # weight 0 along columns but not rows; (4, 4) is far away
+    out = interp_at(g, _at(g, [(2, 2), (4, 4)]), method=method)
+    assert out.valid.tolist() == [False, True]
+    assert np.isnan(out.data[0])
+    assert out.data[1] == 44.0
+
+
+def test_a_zero_weight_nodata_neighbour_is_ignored() -> None:
+    data = np.array(_ramp().data)
+    data[3, 3] = np.nan  # the (1, 1) corner of the cell at (2, 2)
+    g = GeoArray(data, T, CRS, fill_value=np.nan, dims="y x")
+    out = interp_at(g, _at(g, [(2.0, 2.5)]))  # w_r = 0: row 3 has no weight
+    assert out.valid.tolist() == [True]
+    assert out.data[0] == pytest.approx(22.5)
+
+
+def test_jax_points_read_a_numpy_grid(x64: ModuleType) -> None:
+    g = _ramp()
+    pts = _at(g, [(1.5, 1.5)]).to_jax()
+    with pytest.warns(DeprecationWarning, match="interp_at"):
+        out = interp_at(g, pts)
+    assert type(out.data).__module__.startswith("jax")
+
+    def value(xy: Any) -> Any:
+        moved = GeoPoints(pts.data, xy=xy, dims="obs", crs=CRS)
+        return interp_at(g, moved).data.sum()
+
+    grad = x64.jit(x64.grad(value))(pts.xy)
+    # v = 10·row + col; x moves col by 1/20, y moves row by −1/20
+    np.testing.assert_allclose(np.asarray(grad), [[1 / 20, -10 / 20]])
+
+
+def test_map_over_a_non_batch_dim_keeps_batch_dims_first(x64: ModuleType) -> None:
+    transforms = np.array([T, (20.0, 0.0, 600100.0, 0.0, -20.0, 3550000.0), T])
+    data = np.arange(3 * 2 * 2 * 2, dtype=float).reshape(3, 2, 2, 2)
+    g = GeoArray(data, transforms, CRS, dims="patch band y x")
+    for carrier in (g, g.to_jax()):
+        out = geoarray.map_over(carrier, lambda item: item, "band")
+        assert out.dims == ("patch", "band", "y", "x")
+        assert out.batch_dims == ("patch",)
+        np.testing.assert_array_equal(np.asarray(out.data), data)
+        np.testing.assert_array_equal(np.asarray(out.transform), transforms)
+
+
+def test_map_over_on_jax_refuses_items_on_different_grids(x64: ModuleType) -> None:
+    g = GeoArray(np.zeros((2, 3, 3)), T, CRS, dims="time y x").to_jax()
+
+    def shift(item: GeoArray) -> GeoArray:
+        return item.shift_origin(x64.numpy.stack([item.data[0, 0] + 1.0, 0.0]))
+
+    g = g.with_data(x64.numpy.stack([x64.numpy.zeros((3, 3)), x64.numpy.ones((3, 3))]))
+    with pytest.raises(Exception, match="different grids"):
+        x64.block_until_ready(geoarray.map_over(g, shift, "time").data)
+
+
+def test_map_over_band_keeps_per_band_attrs(x64: ModuleType) -> None:
+    g = GeoArray(
+        np.zeros((2, 3, 3)),
+        T,
+        CRS,
+        dims="band y x",
+        attrs={"band_names": ("red", "nir"), "sensor": "S2A"},
+    )
+    for carrier in (g, g.to_jax()):
+        out = geoarray.map_over(carrier, lambda item: item, "band")
+        assert out.attrs["band_names"] == ("red", "nir")
+        assert out.attrs["sensor"] == "S2A"

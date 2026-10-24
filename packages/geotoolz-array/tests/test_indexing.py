@@ -225,3 +225,35 @@ class TestMapShiftSqueeze:
         assert h.expand_dims(0).shape == (1, 3, 4, 4)
         with pytest.raises(ValueError, match="before the spatial axes"):
             h.expand_dims(-1)
+
+
+def test_int_and_list_separated_by_a_slice_keep_dim_order() -> None:
+    """Codex #546: NumPy would move the list's axis to the front."""
+    data = np.arange(2 * 3 * 4 * 2 * 2, dtype=float).reshape(2, 3, 4, 2, 2)
+    g = GeoArray(
+        data, (20.0, 0.0, 0.0, 0.0, -20.0, 0.0), 32613, dims="run time band y x"
+    )
+    out = g.isel(run=0, band=[0, 2])
+    assert out.dims == ("time", "band", "y", "x")
+    assert out.shape == (3, 2, 2, 2)
+    np.testing.assert_array_equal(out.data, data[0][:, [0, 2]])
+
+
+def test_repeated_band_positions_keep_the_pixels_and_drop_the_axis() -> None:
+    """Codex #552: NumPy-style repeats still work on promoted band names."""
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        g = GeoArray(
+            np.arange(2 * 2 * 2, dtype=float).reshape(2, 2, 2),
+            (20.0, 0.0, 0.0, 0.0, -20.0, 0.0),
+            32613,
+            dims="band y x",
+            attrs={"band_names": ["a", "b"]},
+        )
+    for out in (g[[0, 0]], g.isel(band=[0, 0])):
+        assert out.shape == (2, 2, 2)
+        np.testing.assert_array_equal(out.data[1], g.data[0])
+        assert out.attrs["band_names"] == ("a", "a")
+        assert out.coords == ()

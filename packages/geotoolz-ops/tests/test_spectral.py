@@ -600,3 +600,57 @@ def test_removed_duplicates_are_gone() -> None:
     assert not hasattr(gz, "GaussianSRF")
     assert gz.ApplySRF is gz.radiometry.ApplySRF
     assert gz.NormalizedDifference is gz.indices.NormalizedDifference
+
+
+def test_select_and_reorder_bands_move_the_spectral_axis() -> None:
+    """Codex #546: the coordinate follows the pixels, so sel stays right."""
+    from geoarray.coords import SpectralAxis
+
+    data = np.stack([np.full((2, 2), v, dtype=np.float32) for v in (1.0, 2.0)])
+    gt = GeoArray(
+        data,
+        (10.0, 0.0, 0.0, 0.0, -10.0, 20.0),
+        "EPSG:32631",
+        dims="band y x",
+        coords=(SpectralAxis(names=("red", "nir"), wavelength_nm=(665.0, 842.0)),),
+    )
+    swapped = spectral.ReorderBands(order=[1, 0])(gt)
+    assert swapped.coords[0].names == ("nir", "red")
+    assert swapped.coords[0].wavelength_nm == (842.0, 665.0)
+    assert float(swapped.sel(band="red").data[0, 0]) == 1.0
+    nir = spectral.SelectBands(bands=[1])(gt)
+    assert nir.coords[0].names == ("nir",)
+
+
+def test_split_bands_keep_each_bands_coordinate() -> None:
+    from geoarray.coords import SpectralAxis
+
+    gt = GeoArray(
+        np.zeros((2, 2, 2), dtype=np.float32),
+        (10.0, 0.0, 0.0, 0.0, -10.0, 20.0),
+        "EPSG:32631",
+        dims="band y x",
+        coords=(SpectralAxis(names=("red", "nir")),),
+    )
+    red, nir = spectral.SplitBands()(gt)
+    assert red.coords[0].names == ("red",)
+    assert nir.coords[0].names == ("nir",)
+
+
+def test_select_bands_on_promoted_band_names_moves_the_axis() -> None:
+    """Codex #552: 0.2 band_names become a SpectralAxis that follows the pixels."""
+    import warnings
+
+    data = np.stack([np.full((2, 2), v, dtype=np.float32) for v in (1.0, 2.0)])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        gt = GeoArray(
+            data,
+            (10.0, 0.0, 0.0, 0.0, -10.0, 20.0),
+            "EPSG:32631",
+            dims="band y x",
+            attrs={"band_names": ["a", "b"]},
+        )
+    out = spectral.SelectBands(bands=["b", "a"])(gt)
+    assert out.coords[0].names == ("b", "a")
+    assert float(out.sel(band="a").data[0, 0]) == 1.0
