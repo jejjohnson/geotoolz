@@ -284,7 +284,8 @@ def test_a_zero_weight_nodata_neighbour_is_ignored() -> None:
 def test_jax_points_read_a_numpy_grid(x64: ModuleType) -> None:
     g = _ramp()
     pts = _at(g, [(1.5, 1.5)]).to_jax()
-    out = interp_at(g, pts)
+    with pytest.warns(DeprecationWarning, match="interp_at"):
+        out = interp_at(g, pts)
     assert type(out.data).__module__.startswith("jax")
 
     def value(xy: Any) -> Any:

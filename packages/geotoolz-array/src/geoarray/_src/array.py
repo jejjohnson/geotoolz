@@ -184,6 +184,20 @@ def _normalize_fill(fill: Any) -> _FillValue:
     raise TypeError(f"fill_value must be a number, a bool or None, got {fill!r}")
 
 
+def sliced_coord(c: Coordinate, index: Any) -> Coordinate | None:
+    """``c.isel(index)``, or ``None`` when the index repeats a position.
+
+    NumPy indexing may repeat entries (``g[[0, 0]]``) but a coordinate's
+    labels are unique, so a repeating selection keeps the pixels and drops
+    the coordinate, as `concat` does for repeated names.
+    """
+    if not isinstance(index, slice):
+        positions = np.atleast_1d(np.arange(c.size)[index]).tolist()
+        if len(set(positions)) != len(positions):
+            return None
+    return c.isel(index)
+
+
 def label_indexers(
     wanted: dict[str, Any],
     labels_of: Callable[[str], tuple[Any, ...] | None],
@@ -949,7 +963,9 @@ class GeoArray:
                     "so the selection must be known when tracing; index g.data "
                     "instead, or select outside jit"
                 )
-            coords.append(c if full else c.isel(k))
+            sliced = c if full else sliced_coord(c, k)
+            if sliced is not None:
+                coords.append(sliced)
         new_dims = tuple(d for d in dims if d not in dropped)
         return GeoArray(
             _index_in_order(self.data, key, dims, new_dims),

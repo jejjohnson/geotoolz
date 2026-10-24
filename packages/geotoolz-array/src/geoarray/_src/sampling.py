@@ -18,8 +18,9 @@ from __future__ import annotations
 from typing import Any
 
 from geoarray._src.array import SPATIAL_DIMS, GeoArray
-from geoarray._src.backend import backend_of, namespace
+from geoarray._src.backend import backend_of, is_tracer, namespace
 from geoarray._src.carriers import GeoPoints
+from geoarray._src.geometry import _warn_promotion
 
 
 __all__ = ["interp_at", "to_pixel"]
@@ -125,7 +126,10 @@ def interp_at(
             f"interp_at: method is 'bilinear' or 'nearest', got {method!r}"
         )
     if grid.backend == "numpy" and backend_of(points.xy) == "jax":
-        # compute where the positions live: JAX points, traced or not
+        # compute where the positions live; eagerly that hides a host-to-
+        # device copy (C1's deprecation), under a trace the grid is a constant
+        if not is_tracer(points.xy):
+            _warn_promotion("interp_at")
         grid = grid.to_jax()
     xp = grid.xp
     xy = xp.asarray(points.xy)
