@@ -97,9 +97,10 @@ What a reader provides so code can read windows of it on demand; a
 ## Backends and interop
 
 `to_jax()` / `to_numpy()` cross between the backends (see
-[When to jit](how-to/when-to-jit.md)); the joins promote NumPy carriers to
-JAX when mixed, and `np.asarray(g)` copies JAX data to the host and raises
-`GeoArrayTraceError` under a trace.
+[When to jit](how-to/when-to-jit.md)). Nothing crosses silently: mixed
+NumPy and JAX inputs to the joins warn in 0.3 and raise `BackendError` from
+0.4, so call `to_jax()` first. `np.asarray(g)` copies JAX data to the host
+and raises `GeoArrayTraceError` under a trace.
 
 ::: geoarray.set_options
 ::: geoarray.get_options
