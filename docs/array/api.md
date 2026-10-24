@@ -46,7 +46,7 @@ fast paths:
 ## Sampling at points
 
 ::: geoarray.to_pixel
-::: geoarray.sample
+::: geoarray.interp_at
 
 ## `Grid`
 

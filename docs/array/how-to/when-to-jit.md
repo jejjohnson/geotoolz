@@ -90,7 +90,7 @@ one trace.
 
 ## One 4D-Var cost (along-track SSH)
 
-The observation operator H(x) is `geoarray.sample`: the state read at the
+The observation operator H(x) is `geoarray.interp_at`: the state read at the
 observation points. Observations come in sets of different sizes; pad them
 to a fixed N with `pad_points`, and mask with `valid`, so every window
 reuses one compiled cost and the padding changes neither J nor ∇J.
@@ -100,7 +100,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from geoarray import GeoArray, GeoPoints, pad_points, sample
+from geoarray import GeoArray, GeoPoints, interp_at, pad_points
 
 jax.config.update("jax_enable_x64", True)
 
@@ -127,7 +127,7 @@ obs: GeoPoints = pad_points(track, 64).to_jax()      # (64,) float64, valid on 3
 @jax.jit
 def cost(state: GeoArray, observations: GeoPoints, sigma: float) -> jnp.ndarray:
     # H(x): the state at the observation points
-    predicted: GeoPoints = sample(state, observations)
+    predicted: GeoPoints = interp_at(state, observations)
     # d = y − H(x), zero on the padded slots
     d = jnp.where(observations.valid, observations.data - predicted.data, 0.0)
     # J = ½ dᵀ R⁻¹ d, R = σ² I

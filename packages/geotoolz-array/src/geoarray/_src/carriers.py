@@ -66,7 +66,7 @@ def _float_leaf(value: Any, backend: str, name: str) -> Any:
 
 
 def _time_leaf(value: Any, backend: str) -> Any:
-    """Per-sample times: ``datetime64[ns]`` on NumPy, ``int64`` ns on JAX."""
+    """Per-point times: ``datetime64[ns]`` on NumPy, ``int64`` ns on JAX."""
     if is_tracer(value):
         return value
     if backend == "jax":
@@ -501,7 +501,7 @@ class GeoPoints(_Named):
     - **xy** — ``(obs, 2)`` positions in ``crs`` (lon, lat for WGS 84).
     - **z** — ``(obs,)`` vertical positions, described by ``vertical``
       (height, depth or pressure: never a third column of xy).
-    - **time** — ``(obs,)`` per-sample times, for moving platforms
+    - **time** — ``(obs,)`` per-point times, for moving platforms
       (along-track altimetry, Argo). Shared times are a ``time`` dim with a
       `TimeAxis` instead; both together raise.
     - **valid** — ``(obs,)`` booleans, False on padding (`pad_points`).
@@ -584,8 +584,8 @@ class GeoPoints(_Named):
         _init_named(self, 0, self.spatial_dims, "GeoPoints")
         if self.time is not None and "time" in self.dims:
             raise ValueError(
-                "a time dim and a per-sample time leaf together: shared times are "
-                "a time dim (TimeAxis), one time per sample is the time leaf"
+                "a time dim and a per-point time leaf together: shared times are "
+                "a time dim (TimeAxis), one time per point is the time leaf"
             )
 
     @property
@@ -610,7 +610,7 @@ class GeoPoints(_Named):
 
         Raises:
             IndexError: An integer on ``obs`` (the result would not be a point
-                set; take ``[k]`` to keep one sample).
+                set; take ``[k]`` to keep one point).
         """
         wanted = {**(selection or {}), **by_dim}
         k = wanted.get("obs", slice(None))
@@ -662,7 +662,7 @@ class GeoPoints(_Named):
         )
 
     def valid_mask(self) -> Any:
-        """``(obs,)`` True where a sample holds data: valid, finite, not the fill."""
+        """``(obs,)`` True where a point holds data: valid, finite, not the fill."""
         xp = self.xp
         data = self.data
         bad = (
@@ -765,9 +765,9 @@ def _points_unflatten(aux: tuple[Any, ...], leaves: Any) -> GeoPoints:
 def pad_points(points: GeoPoints, n: int) -> GeoPoints:
     """``points`` padded to ``n`` samples, with ``valid=False`` on the pad.
 
-    Pad samples sit at the first sample's position (finite, so gradients
+    Pad points sit at the first point's position (finite, so gradients
     through a sampling operator stay finite), carry the fill value (NaN for
-    float data without one) and time / z of the first sample. A cost that
+    float data without one) and time / z of the first point. A cost that
     masks with ``valid`` is then unchanged by the pad length (GA-G16).
 
     Raises:
@@ -785,7 +785,7 @@ def pad_points(points: GeoPoints, n: int) -> GeoPoints:
     if n < have:
         raise ValueError(f"pad_points: n={n} is smaller than the {have} samples")
     if have == 0:
-        raise ValueError("pad_points needs at least one sample to place the pad")
+        raise ValueError("pad_points needs at least one point to place the pad")
     xp = points.xp
     extra = n - have
     fill = points.fill_value

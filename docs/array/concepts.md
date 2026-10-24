@@ -122,7 +122,7 @@ subclass. Slicing a `GeoImageSeries` at one date simply is a `GeoImage`.
 | `GeoSwathImage` | swath `band row col` |
 | `GeoSwathProfile` | swath `level row col` |
 | `GeoTimeSeries` | points `time variable obs` |
-| `GeoTracks` | points `variable obs`, with a per-sample time |
+| `GeoTracks` | points `variable obs`, with a per-point time |
 | `GeoProfiles` | points `variable obs`, with a z |
 
 A time series is not a video: an image series is frames on a grid; a time
@@ -158,12 +158,24 @@ and names the fix: `geoarray.map_over(x, first_band, "time")`.
 
 ## The membership test
 
-geoarray holds operations that re-index or re-describe samples without
-computing new values: slicing, crops, windows, pads, pixel coordinates, the
-joins. Warping and resampling are `geoops.geom`. `sample`, the
-observation operator H(x), is the one exception: bilinear weights blend
-four pixels, but every carrier-level cost needs it and it reads nothing but
-the georeference.
+geoarray holds the operations that read only the georeference. They come
+in three families:
+
+```
+re-index      isel, crop, read_window, pad, the joins
+re-describe   coords, dims, pixel_coords, footprint
+read at       to_pixel, interp_at   (points in, values out)
+```
+
+Anything that **writes a new grid** (warp, resample, reproject, mosaic) is
+`geoops.geom`. `interp_at`, the observation operator H(x), blends
+neighbouring pixels, but its output lives on the points it was given, not
+on a new grid: it reads the field at those points, which is why every
+carrier-level cost can use it with geoarray alone.
+
+`sample` and `member` are dim names, not functions: a `sample` is one
+item of an ML batch, a `member` one draw of an ensemble, and `obs` one
+point of a `GeoPoints`.
 
 ## Moving from 0.2
 

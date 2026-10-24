@@ -178,7 +178,7 @@ def test_time_dim_and_time_leaf_together_raise() -> None:
         coords=(hours, ARGO),
     )
     assert stations.dims == ("time", "variable", "obs")
-    with pytest.raises(ValueError, match="per-sample time"):
+    with pytest.raises(ValueError, match="per-point time"):
         GeoPoints(
             np.zeros((3, 4)),
             xy=np.zeros((4, 2)),

@@ -142,7 +142,7 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 | `geoarray.coords` | `SpectralAxis`, `VariableAxis`, `VerticalAxis`, `TimeAxis` and the grid coordinates |
 | `geoarray.types` | Readable names (`GeoImage`, `GeoMapSeries`, `GeoTracks`, …) any carrier can match; `check_dims` |
 | Dim-level functions | `isel`, `sel`, `transpose`, `reduce`, `argreduce`, `take_along`, `map_over`, `concat`, `combine`: pipekit-array's, on every named carrier |
-| `to_pixel`, `sample` | Map coordinates to pixels; H(x) at points, under `jit` / `grad` |
+| `to_pixel`, `interp_at` | Map coordinates to pixels; H(x) at points, under `jit` / `grad` |
 | `to_xarray`, `from_xarray`, `to_dataset`, `to_datatree` | Lossless xarray converters with a CF `spatial_ref` (`[xarray]`) |
 | `Grid` | A pixel grid with no data; hashable, with `bounds`, `res`, `shift`, `crop`, `from_bounds`, `isclose`, `get_config` |
 | `PixelWindow` | A rectangle of pixels, rasterio's `Window` without rasterio; `Grid.window` / `Grid.bounds_of` convert to and from map bounds |

@@ -318,7 +318,7 @@ def _map_over_jax(x: GeoArray, fn: Callable[[Any], Any], dim: str) -> Any:
 
 
 class _GeolocatedAdapter:
-    """The adapter of a carrier located by per-sample leaves (swath, points).
+    """The adapter of a carrier located by per-point leaves (swath, points).
 
     Subclasses name the carrier, its geometry leaves and how a rewrap
     carries them.
