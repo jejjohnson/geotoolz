@@ -22,19 +22,19 @@ Carriers whose georeference is not an affine grid: per-pixel lat/lon on
 
 ## Dim-level functions
 
-pipekit-array's functions, shared with every named carrier
-(`geoarray.reduce is pipekit_array.reduce`); geoarray's adapters are
-registered with pipekit at import.
+pipekit-array's functions, re-exported: `geoarray.reduce is
+pipekit_array.reduce`. They are documented in pipekit-array; geoarray's
+adapters are registered with pipekit at import, and give carriers these
+fast paths:
 
-::: geoarray.isel
-::: geoarray.sel
-::: geoarray.transpose
-::: geoarray.reduce
-::: geoarray.argreduce
-::: geoarray.take_along
-::: geoarray.map_over
-::: geoarray.concat
-::: geoarray.combine
+| Function | On a geoarray carrier |
+| --- | --- |
+| `isel(x, **dims)`, `sel(x, **labels)` | slice the data, coordinates and geometry; an index that breaks the grid gives a `DimArray` |
+| `transpose(x, order)` | a carrier while the spatial dims stay last; else a `DimArray` |
+| `reduce(x, fn, dim)`, `argreduce(x, fn, dim)`, `take_along(x, index, dim)` | a carrier while the spatial (and batch) dims survive; else a `DimArray` |
+| `map_over(x, fn, dim)` | one `jax.vmap` over the data and the matching leaves on JAX; a loop on NumPy |
+| `concat(xs, dim)` | joins coordinates, per-band attrs and, along a batch dim, transforms |
+| `combine(fn, *xs)` | one exact grid, one fill; NumPy promotes to JAX when mixed |
 
 ## The named-array adapters
 

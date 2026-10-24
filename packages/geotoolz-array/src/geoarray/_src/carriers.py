@@ -514,7 +514,10 @@ class GeoPoints(_Named):
         time: Optional ``(obs,)`` times (``datetime64`` or ``int64`` ns).
         valid: Optional ``(obs,)`` booleans; omitted means all valid.
         dims: One name per axis, ending in ``"obs"``.
-        coords, crs, fill_value, attrs: As for `GeoSwath`.
+        coords: Coordinates of non-spatial dims (`VariableAxis`, …).
+        crs: The CRS of xy; WGS 84 by default.
+        fill_value: The nodata marker.
+        attrs: Whole-carrier metadata.
 
     Example:
         >>> import numpy as np
