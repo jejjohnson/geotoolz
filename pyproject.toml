@@ -43,6 +43,8 @@ bypass-selection = true
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    # The umbrella's import-contract tests run lint-imports (#481).
+    "import-linter>=2.1",
     "pytest-cov>=7.1.0",
     "pre-commit>=4.5.1",
     # Property-based suites in geotoolz-patcher and geotoolz-catalog.
