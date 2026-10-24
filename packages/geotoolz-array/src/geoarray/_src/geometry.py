@@ -17,7 +17,13 @@ import numpy as np
 
 from geoarray._src.array import INHERIT, GeoArray, _normalize_fill
 from geoarray._src.attrs import concat_bands
-from geoarray._src.backend import backend_of, is_tracer, namespace, require_x64
+from geoarray._src.backend import (
+    backend_of,
+    import_jax,
+    is_tracer,
+    namespace,
+    require_x64,
+)
 from geoarray._src.errors import GridMismatchError
 from geoarray._src.grid import PixelWindow, apply_transform, shift_scale_transform
 
@@ -91,8 +97,8 @@ def _guard_same_transform(g: GeoArray, first: GeoArray, i: int, what: str) -> Ge
     whenever the result does not need g's values, as in ``grad`` with
     respect to another carrier (#541).
     """
-    import jax
-    import jax.numpy as jnp
+    jax = import_jax()
+    jnp = namespace(g.transform)
 
     # δT = T_i − T_0, exactly; any non-zero entry is a different grid
     differs = jnp.any(g.transform != first.transform)
