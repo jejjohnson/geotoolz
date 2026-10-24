@@ -168,30 +168,56 @@ def _normalize_fill(fill: Any) -> _FillValue:
     raise TypeError(f"fill_value must be a number, a bool or None, got {fill!r}")
 
 
+def _index_in_order(
+    data: Any, key: tuple[Any, ...], dims: tuple[str, ...], kept: tuple[str, ...]
+) -> Any:
+    """``data[key]`` with the axes left in ``kept`` order.
+
+    NumPy (and JAX) move an advanced index's axis to the front when an
+    integer and a list are separated by a slice; applying the basic indices
+    first and the one list after leaves every axis where its dim says.
+    """
+    advanced = [i for i, k in enumerate(key) if _is_advanced(k)]
+    if not advanced:
+        return data[key]
+    (i,) = advanced
+    basic = tuple(slice(None) if j == i else k for j, k in enumerate(key))
+    out = data[basic]
+    axis = kept.index(dims[i])
+    return out[(slice(None),) * axis + (key[i],)]
+
+
+def fill_fits(fill: _FillValue, dtype: Any) -> bool:
+    """Whether ``dtype`` data can hold ``fill`` exactly (``None`` always fits).
+
+    The one rule the constructor and every rewrap share: float and complex
+    data hold any fill, NaN included; bool holds 0 and 1; integers hold whole
+    values in their range.
+    """
+    if fill is None:
+        return True
+    dtype = np.dtype(dtype)
+    if dtype.kind == "b":
+        return fill in (0, 1)
+    if dtype.kind in "iu":
+        info = np.iinfo(dtype.str)
+        return (
+            not (isinstance(fill, float) and not fill.is_integer())
+            and info.min <= fill <= info.max
+        )
+    return True
+
+
 def _check_fill_fits(fill: _FillValue, dtype: Any) -> None:
     """Raise unless ``dtype`` data can hold ``fill`` exactly.
 
     A fill the dtype cannot hold (``-9999.0`` or ``0.5`` in ``uint16``) would
     be written as some other value, which `valid_mask` then reads as data.
-    Float and complex data hold any fill, NaN included.
     """
-    if fill is None:
-        return
-    dtype = np.dtype(dtype)
-    if dtype.kind == "b":
-        fits = fill in (0, 1)
-    elif dtype.kind in "iu":
-        info = np.iinfo(dtype.str)
-        fits = (
-            not (isinstance(fill, float) and not fill.is_integer())
-            and info.min <= fill <= info.max
-        )
-    else:
-        return
-    if not fits:
+    if not fill_fits(fill, dtype):
         raise ValueError(
-            f"fill_value={fill!r} cannot be held by {dtype} data, so filled "
-            f"pixels would read as data: pass a fill {dtype} can hold, or "
+            f"fill_value={fill!r} cannot be held by {np.dtype(dtype)} data, so "
+            "filled pixels would read as data: pass a fill it can hold, or "
             "fill_value=None"
         )
 
@@ -814,7 +840,7 @@ class GeoArray[A: SupportsArray]:
             coords.append(c if full else c.isel(k))
         new_dims = tuple(d for d in dims if d not in dropped)
         return GeoArray(
-            self.data[key],
+            _index_in_order(self.data, key, dims, new_dims),
             shift_scale_transform(transform, r0, c0, row_step, col_step),
             self.crs,
             self.fill_value,

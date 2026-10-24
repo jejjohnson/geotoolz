@@ -26,6 +26,8 @@ from geoarray._src.coords import (
     VariableAxis,
     Vertical,
     VerticalAxis,
+    coord_from_config,
+    coord_to_config,
 )
 
 
@@ -40,4 +42,6 @@ __all__ = [
     "VariableAxis",
     "Vertical",
     "VerticalAxis",
+    "coord_from_config",
+    "coord_to_config",
 ]
