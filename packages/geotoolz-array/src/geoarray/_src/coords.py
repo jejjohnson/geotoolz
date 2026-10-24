@@ -566,9 +566,12 @@ def concat_coords(parts: Sequence[Coordinate | None]) -> Coordinate | None:
     Every part must have a coordinate of one type; fields some part lacks
     (a wavelength list) are dropped. ``None`` when a part has none.
 
+    ``None`` too when joined band or variable names would repeat (they
+    could not be looked up).
+
     Raises:
-        ValueError: The parts are of different types, `VerticalAxis` parts
-            measure different things, or the joined names repeat.
+        ValueError: The parts are of different types, or `VerticalAxis`
+            parts measure different things.
     """
     if not parts or any(p is None for p in parts):
         return None
@@ -577,14 +580,17 @@ def concat_coords(parts: Sequence[Coordinate | None]) -> Coordinate | None:
         names = sorted(k.__name__ for k in kinds)
         raise ValueError(f"cannot join coordinates of different types: {names}")
     first = parts[0]
+    if isinstance(first, SpectralAxis | VariableAxis):
+        names = _joined(parts, "names")
+        if len(set(names)) != len(names):
+            # repeated names cannot be looked up: the joined dim has no labels
+            return None
     if isinstance(first, SpectralAxis):
         return SpectralAxis(
-            _joined(parts, "names"),
-            _joined(parts, "wavelength_nm"),
-            _joined(parts, "fwhm_nm"),
+            names, _joined(parts, "wavelength_nm"), _joined(parts, "fwhm_nm")
         )
     if isinstance(first, VariableAxis):
-        return VariableAxis(_joined(parts, "names"), _joined(parts, "units"))
+        return VariableAxis(names, _joined(parts, "units"))
     if isinstance(first, VerticalAxis):
         verticals = {cast(VerticalAxis, p).vertical for p in parts}
         if len(verticals) > 1:

@@ -41,7 +41,7 @@ from geoarray._src.backend import (
     require_x64,
     xarray_module,
 )
-from geoarray._src.coords import Coordinate, PixelGrid, TimeAxis
+from geoarray._src.coords import Coordinate, PixelGrid, SpectralAxis, TimeAxis
 from geoarray._src.errors import GeoArrayTraceError, LabelError, X64Error
 from geoarray._src.grid import (
     Grid,
@@ -301,6 +301,50 @@ def _crs_label(crs: pyproj.CRS | None) -> str:
     return repr(crs.name)
 
 
+_BAND_NAMES_WARNING = (
+    "band names in attrs['band_names'] are read into a SpectralAxis; passing "
+    "them in attrs is deprecated: pass coords=(SpectralAxis(names, "
+    "wavelength_nm),) (the attrs keys stay for one release)"
+)
+
+
+def _promote_band_names(
+    attrs: Any,
+    dims: tuple[str, ...],
+    shape: tuple[int, ...],
+    coords: tuple[Coordinate, ...],
+) -> tuple[Coordinate, ...]:
+    """A ``SpectralAxis`` from 0.2's ``attrs["band_names"]``, when ``band`` has none.
+
+    Wavelengths come from ``attrs["wavelengths"]`` / ``["wavelengths_nm"]``
+    when they have one entry per band. The attrs are left as they are, so
+    0.2 code reading them keeps working. Attrs passed as a plain mapping
+    (a caller's) warn; a carrier's own `FrozenAttrs`, passed on by library
+    code, do not.
+    """
+    if "band" not in dims or _coord_for(coords, "band") is not None or not attrs:
+        return coords
+    names = attrs.get("band_names")
+    size = shape[dims.index("band")]
+    if not isinstance(names, list | tuple) or len(names) != size:
+        return coords
+    if len({str(n) for n in names}) != size:
+        return coords  # repeated names: not a valid axis; leave the attrs alone
+    wavelengths = None
+    for key in ("wavelengths_nm", "wavelengths"):
+        values = attrs.get(key)
+        if isinstance(values, list | tuple | np.ndarray) and len(values) == size:
+            try:
+                wavelengths = tuple(float(v) for v in values)
+            except (TypeError, ValueError):
+                wavelengths = None
+            break
+    if not isinstance(attrs, FrozenAttrs):
+        warnings.warn(_BAND_NAMES_WARNING, DeprecationWarning, stacklevel=4)
+    axis = SpectralAxis(tuple(str(n) for n in names), wavelengths)
+    return tuple(sorted((*coords, axis), key=lambda c: dims.index(c.dim)))
+
+
 def _keeps_coord(c: Coordinate, dims: tuple[str, ...], shape: tuple[int, ...]) -> bool:
     return c.dim in dims and shape[dims.index(c.dim)] == c.size
 
@@ -412,7 +456,9 @@ class GeoArray:
         else:
             dims = _check_dims(self.dims, data_shape, len(batch))
         object.__setattr__(self, "dims", dims)
-        object.__setattr__(self, "coords", _check_coords(self.coords, dims, data_shape))
+        coords = _check_coords(self.coords, dims, data_shape)
+        coords = _promote_band_names(self.attrs, dims, data_shape, coords)
+        object.__setattr__(self, "coords", coords)
         object.__setattr__(self, "transform", transform)
         object.__setattr__(self, "crs", as_crs(self.crs))
         object.__setattr__(self, "fill_value", _normalize_fill(self.fill_value))
