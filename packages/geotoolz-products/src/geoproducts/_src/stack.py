@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from geoarray import DIMS, GeoArray, RasterSource
+from geoarray import DIMS, FrozenAttrs, GeoArray, RasterSource
 from rasterio.enums import Resampling
 
 from geoproducts._src.carrier import require_source
@@ -141,7 +141,8 @@ def _concatenate(
         ref.transform,
         ref.crs,
         fill_value=parts[0].fill_value if integer else np.nan,
-        attrs=attrs,
+        # the readers' attrs, carried: the 0.2 per-band keys stay as they are
+        attrs=FrozenAttrs(attrs),
         dims=DIMS[-arrays[0].ndim :],
     )
 

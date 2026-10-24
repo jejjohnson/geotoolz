@@ -39,6 +39,7 @@ from geoarray._src.array import (
     coords_to_jax,
     join_stamps,
     label_indexers,
+    sliced_coord,
     split_stamps,
 )
 from geoarray._src.attrs import FrozenAttrs, select_bands
@@ -193,7 +194,9 @@ class _Named:
             c = _coord_for(self.coords, d)
             if c is not None:
                 full = isinstance(k, slice) and k == slice(None)
-                coords.append(c if full else c.isel(k))
+                sliced = c if full else sliced_coord(c, k)
+                if sliced is not None:
+                    coords.append(sliced)
         data = _index_in_order(self.data, key, self.dims, tuple(dims))
         return data, tuple(dims), tuple(coords), attrs, key
 

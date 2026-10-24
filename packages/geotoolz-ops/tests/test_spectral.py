@@ -635,3 +635,22 @@ def test_split_bands_keep_each_bands_coordinate() -> None:
     red, nir = spectral.SplitBands()(gt)
     assert red.coords[0].names == ("red",)
     assert nir.coords[0].names == ("nir",)
+
+
+def test_select_bands_on_promoted_band_names_moves_the_axis() -> None:
+    """Codex #552: 0.2 band_names become a SpectralAxis that follows the pixels."""
+    import warnings
+
+    data = np.stack([np.full((2, 2), v, dtype=np.float32) for v in (1.0, 2.0)])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        gt = GeoArray(
+            data,
+            (10.0, 0.0, 0.0, 0.0, -10.0, 20.0),
+            "EPSG:32631",
+            dims="band y x",
+            attrs={"band_names": ["a", "b"]},
+        )
+    out = spectral.SelectBands(bands=["b", "a"])(gt)
+    assert out.coords[0].names == ("b", "a")
+    assert float(out.sel(band="a").data[0, 0]) == 1.0

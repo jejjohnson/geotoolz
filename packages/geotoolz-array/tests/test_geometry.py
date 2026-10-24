@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from types import ModuleType
 
 import numpy as np
@@ -230,7 +231,10 @@ class TestReadWriteWindow:
         )
         assert float(out[0, 0]) == 0.0
         assert float(out[2, 2]) == float(g.data[2, 2])
-        eager = write_window(g, x64.numpy.ones((2, 2), dtype=x64.numpy.float32), window)
+        with pytest.warns(DeprecationWarning, match="write_window"):
+            eager = write_window(
+                g, x64.numpy.ones((2, 2), dtype=x64.numpy.float32), window
+            )
         assert eager.backend == "jax"
 
     def test_write_window_jax(self, x64: ModuleType) -> None:
@@ -349,22 +353,40 @@ class TestJoins:
         assert stack([single, single], axis=1).shape == (2, 2, 4, 4)
         assert stack([single, single], axis=1).batch_shape == (2,)
 
-    def test_mixed_backends_promote_to_jax(self, x64: ModuleType) -> None:
+    def test_mixed_backends_promote_to_jax_with_a_warning(
+        self, x64: ModuleType
+    ) -> None:
+        """C1 is deprecated: mixed inputs still promote in 0.3, and warn."""
         g = _scene()
-        out = combine(x64.numpy.add, g, g.to_jax())
+        with pytest.warns(DeprecationWarning, match=r"combine: .*to_jax\(\)"):
+            out = combine(x64.numpy.add, g, g.to_jax())
         assert out.backend == "jax"
         # Output stays where the computation ran: a NumPy function -> NumPy.
-        assert combine(np.add, g, g.to_jax()).backend == "numpy"
-        assert stack([g, g.to_jax()]).backend == "jax"
-        assert concatenate([g.to_jax(), g]).backend == "jax"
+        with pytest.warns(DeprecationWarning, match="0.4"):
+            assert combine(np.add, g, g.to_jax()).backend == "numpy"
+        with pytest.warns(DeprecationWarning, match="stack"):
+            assert stack([g, g.to_jax()], "time").backend == "jax"
+        with pytest.warns(DeprecationWarning, match="concat"):
+            assert concatenate([g.to_jax(), g]).backend == "jax"
+
+    def test_one_backend_and_traced_closures_do_not_warn(self, x64: ModuleType) -> None:
+        g = _scene()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            combine(np.add, g, g)
+            combine(x64.numpy.add, g.to_jax(), g.to_jax())
+            # under jit a NumPy carrier is a constant of the trace
+            x64.jit(lambda d: combine(x64.numpy.add, g, g.to_jax().with_data(d)).data)(
+                x64.numpy.asarray(g.data)
+            )
 
     def test_promotion_needs_x64(self, x64: ModuleType) -> None:
         g = _scene()
         on_jax = g.to_jax()
         x64.config.update("jax_enable_x64", False)
         try:
-            with pytest.raises(X64Error):
-                stack([g, on_jax])
+            with pytest.raises(X64Error), pytest.warns(DeprecationWarning):
+                stack([g, on_jax], "time")
         finally:
             x64.config.update("jax_enable_x64", True)
 

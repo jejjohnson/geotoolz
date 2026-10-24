@@ -40,7 +40,7 @@ class GridMismatchError(GeoArrayError, ValueError):
 
     `combine`, `stack` and `concatenate` need the same CRS, spatial shape,
     batch shape and (when concrete) an exactly equal transform. Resample
-    one carrier onto the other's grid first (``geoops.functional``).
+    one carrier onto the other's grid first (``geoops.geom``).
     """
 
 

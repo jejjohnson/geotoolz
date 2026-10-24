@@ -29,7 +29,7 @@ import geoarray
 import numpy as np
 import rasterio.windows
 from affine import Affine
-from geoarray import DIMS, GeoArray
+from geoarray import DIMS, FrozenAttrs, GeoArray
 from georeader import (
     griddata,
     mosaic,
@@ -1171,7 +1171,8 @@ class Stitch(Operator):
             transform,
             self.target_crs or first.crs,
             fill_value=fill,
-            attrs=_copied_attrs(first, values),
+            # a carrier's attrs, carried: the 0.2 per-band keys stay as they are
+            attrs=FrozenAttrs(_copied_attrs(first, values)),
             dims=DIMS[-values.ndim :],
         )
 
