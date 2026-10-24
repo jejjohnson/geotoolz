@@ -69,6 +69,7 @@ dev = [
     "geotoolz-array[jax,vector,georeader,xarray]",
 ]
 lint = [
+    "import-linter>=2.1",
     "ruff>=0.15.11",
 ]
 typecheck = [
@@ -124,3 +125,18 @@ known-first-party = ["geotoolz", "geoops", "geopatcher", "geocatalog", "geoarray
 
 [tool.ty.environment]
 python-version = "3.12"
+
+# Import contracts (`make imports`, run in CI's test job), checked with
+# import-linter over every geotoolz package, imports inside functions included.
+[tool.importlinter]
+root_packages = ["geoops", "geopatcher", "geocatalog", "geocloud", "geoproducts", "geoarray"]
+include_external_packages = true
+
+# plumax and radtrax depend on geotoolz through their `[geo]` extras, so an
+# import back would close a cycle (geostack docs/geomodels/package_boundaries.md,
+# rule 1; gate P2).
+[[tool.importlinter.contracts]]
+name = "geotoolz never imports plumax or radtrax"
+type = "forbidden"
+source_modules = ["geoops", "geopatcher", "geocatalog", "geocloud", "geoproducts", "geoarray"]
+forbidden_modules = ["plumax", "radtrax"]
