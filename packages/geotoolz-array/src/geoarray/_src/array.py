@@ -87,8 +87,14 @@ def infer_dims(ndim: int, n_batch: int) -> tuple[str, ...]:
     return batch + DIMS[-element:]
 
 
-def _check_dims(dims: Any, shape: tuple[int, ...], n_batch: int) -> tuple[str, ...]:
-    """``dims`` as a validated tuple for data of ``shape``."""
+def _check_dims(
+    dims: Any,
+    shape: tuple[int, ...],
+    n_batch: int,
+    spatial: tuple[str, ...] = SPATIAL_DIMS,
+    carrier: str = "GeoArray",
+) -> tuple[str, ...]:
+    """``dims`` as a validated tuple for data of ``shape``, ending in ``spatial``."""
     if isinstance(dims, str):
         dims = tuple(dims.split())
     out = tuple(dims)
@@ -100,15 +106,20 @@ def _check_dims(dims: Any, shape: tuple[int, ...], n_batch: int) -> tuple[str, .
         raise ValueError(
             f"dims {out} name {len(out)} axes, but the data has shape {shape}"
         )
-    if out[-2:] != SPATIAL_DIMS:
-        raise ValueError(f"a GeoArray's dims end in {SPATIAL_DIMS}, got {out}")
-    if n_batch > len(out) - 2:
-        raise ValueError(f"a ({n_batch}, …, 6) transform needs {n_batch} batch dims")
+    if out[len(out) - len(spatial) :] != spatial:
+        raise ValueError(f"a {carrier}'s dims end in {spatial}, got {out}")
+    if n_batch > len(out) - len(spatial):
+        raise ValueError(
+            f"a georeference with {n_batch} leading axes needs {n_batch} batch dims"
+        )
     return out
 
 
 def _check_coords(
-    coords: Any, dims: tuple[str, ...], shape: tuple[int, ...]
+    coords: Any,
+    dims: tuple[str, ...],
+    shape: tuple[int, ...],
+    spatial: tuple[str, ...] = SPATIAL_DIMS,
 ) -> tuple[Coordinate, ...]:
     """``coords`` as a validated tuple: one per non-spatial dim at most, sized."""
     out = tuple(coords or ())
@@ -119,7 +130,7 @@ def _check_coords(
                 f"coords holds geoarray.coords axes (SpectralAxis, TimeAxis, …), "
                 f"got {type(c).__name__}"
             )
-        if c.dim not in dims or c.dim in SPATIAL_DIMS:
+        if c.dim not in dims or c.dim in spatial:
             raise ValueError(
                 f"{type(c).__name__} describes dim {c.dim!r}, which is not a "
                 f"non-spatial dim of {dims}"
