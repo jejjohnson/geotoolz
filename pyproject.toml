@@ -23,12 +23,14 @@ geotoolz-products = { workspace = true }
 geotoolz-cloud = { workspace = true }
 geotoolz-array = { workspace = true }
 # The Operator / Sequential / Graph composition core lives in the pipekit
-# monorepo. Pull it from GitHub until the first PyPI release lands; the
-# published wheel metadata still carries the PyPI-flavoured `pipekit>=…`
-# requirement from each member's [project] table.
-pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", rev = "a0e7c9c8c884c4c701add9fb5579dbcdc75b2578" }  # W1 stack head (pipekit#115), until pipekit 0.2.0
-pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", rev = "a0e7c9c8c884c4c701add9fb5579dbcdc75b2578" }  # W1 stack head (pipekit#115), until pipekit-array 0.1.0
-pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", rev = "a0e7c9c8c884c4c701add9fb5579dbcdc75b2578" }  # same pipekit commit as above
+# monorepo, which is not on PyPI (the PyPI name `pipekit` is another
+# project), so it comes from GitHub at a release tag; the published wheel
+# metadata still carries the PyPI-flavoured `pipekit>=…` requirement from
+# each member's [project] table.
+pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", tag = "pipekit-v0.1.2" }
+pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", tag = "pipekit-array-v0.0.4" }
+# pipekit-train has no release since the W1 stack: the same commit as the tags above
+pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", rev = "969175ccdff18d08dee8888201fc4bb4227d25a1" }
 
 [build-system]
 requires = ["hatchling"]
