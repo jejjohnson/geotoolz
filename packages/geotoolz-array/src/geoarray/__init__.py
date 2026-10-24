@@ -18,6 +18,9 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   pipekit at import, so they, and pipekit-array's ``KernelOp``, run on
   carriers; a result that consumed ``y`` or ``x`` is a
   ``pipekit_array.DimArray`` (`to_dimarray`).
+- `GeoSwath` (per-pixel lat/lon on ``row col``) and `GeoPoints` (xy, and
+  optional z, time and valid on ``obs``): the carriers whose georeference
+  is not an affine grid; `pad_points` pads a point set to a fixed N.
 - `Grid` — a pixel grid with no data: transform, CRS and ``(H, W)``;
   hashable, so it can be a warp target or static config.
 - `PixelWindow` — a rectangle of pixels (``col_off``, ``row_off``,
@@ -67,9 +70,15 @@ from pipekit_array import (
     transpose,
 )
 
-from geoarray._src.adapter import GeoArrayAdapter, to_dimarray
+from geoarray._src.adapter import (
+    GeoArrayAdapter,
+    GeoPointsAdapter,
+    GeoSwathAdapter,
+    to_dimarray,
+)
 from geoarray._src.array import DIMS, SPATIAL_DIMS, GeoArray
 from geoarray._src.attrs import PER_BAND_KEYS, FrozenAttrs
+from geoarray._src.carriers import GeoPoints, GeoSwath, pad_points
 from geoarray._src.errors import (
     GeoArrayError,
     GeoArrayTraceError,
@@ -104,6 +113,10 @@ __all__ = [
     "GeoArrayAdapter",
     "GeoArrayError",
     "GeoArrayTraceError",
+    "GeoPoints",
+    "GeoPointsAdapter",
+    "GeoSwath",
+    "GeoSwathAdapter",
     "Grid",
     "GridMismatchError",
     "HostTransferWarning",
@@ -124,6 +137,7 @@ __all__ = [
     "isel",
     "map_over",
     "pad",
+    "pad_points",
     "pixel_coords",
     "read_window",
     "reduce",

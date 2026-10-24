@@ -745,3 +745,32 @@ def footprint(g: GeoArray, crs: Any = None, *, densify: int = 21) -> Any:
     to_crs = pyproj.Transformer.from_crs(grid.crs, crs, always_xy=True)
     tx, ty = to_crs.transform(xs, ys)
     return Polygon(list(zip(tx, ty, strict=True)))
+
+
+def require_equal_leaves(a: Any, b: Any, message: str) -> None:
+    """Raise `GridMismatchError` unless two georeference leaves are equal.
+
+    Exactly, NaN matching NaN (padding in lat/lon). Concrete leaves are
+    compared at once; traced ones at run time by a ``jax.debug.callback``,
+    which XLA never prunes (#541).
+    """
+    if a is b:
+        return
+    if tuple(a.shape) != tuple(b.shape):
+        raise GridMismatchError(
+            f"{message}: shapes {tuple(a.shape)} and {tuple(b.shape)}"
+        )
+    if not (is_tracer(a) or is_tracer(b)):
+        floating = np.asarray(a).dtype.kind in "fc"
+        if not np.array_equal(np.asarray(a), np.asarray(b), equal_nan=floating):
+            raise GridMismatchError(message)
+        return
+    jax = import_jax()
+    xp = namespace(a if is_tracer(a) else b)
+    differs = a != b
+    if xp.asarray(a).dtype.kind in "fc":
+        differs = differs & ~(xp.isnan(a) & xp.isnan(b))
+    jax.debug.callback(
+        functools.partial(_raise_if_differs, f"{message} (checked at run time)"),
+        xp.any(differs),
+    )

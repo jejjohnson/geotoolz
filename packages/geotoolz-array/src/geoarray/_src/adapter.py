@@ -33,22 +33,25 @@ from pipekit_array import DimArray, DimArrayAdapter
 from geoarray._src.array import SPATIAL_DIMS, GeoArray, build, fill_fits
 from geoarray._src.attrs import drop_band_keys
 from geoarray._src.backend import backend_of
+from geoarray._src.carriers import GeoPoints, GeoSwath, _as_int_leaf, _build
+from geoarray._src.errors import GridMismatchError
 from geoarray._src.geometry import (
     _require_carriers,
     _require_same_grid,
     combine_carriers,
     concat_carriers,
+    require_equal_leaves,
     stack,
 )
 
 
-__all__ = ["GeoArrayAdapter", "to_dimarray"]
+__all__ = ["GeoArrayAdapter", "GeoPointsAdapter", "GeoSwathAdapter", "to_dimarray"]
 
 _DIMARRAY = DimArrayAdapter()
 
 
-def to_dimarray(g: GeoArray) -> DimArray:
-    """``g``'s data, dims and labels as a ``pipekit_array.DimArray``; no grid."""
+def to_dimarray(g: Any) -> DimArray:
+    """A carrier's data, dims and labels as a ``pipekit_array.DimArray``; no grid."""
     labels = {c.dim: c.labels for c in g.coords if c.labels is not None}
     return DimArray(g.data, g.dims, labels)
 
@@ -174,4 +177,152 @@ class GeoArrayAdapter:
         return concat_carriers(xs, dim)
 
 
+class _GeolocatedAdapter:
+    """The adapter of a carrier located by per-sample leaves (swath, points).
+
+    Subclasses name the carrier, its geometry leaves and how a rewrap
+    carries them.
+    """
+
+    carrier: type
+    leaves: tuple[str, ...]
+
+    def dims(self, x: Any) -> tuple[str, ...]:
+        """The stored dims."""
+        return x.dims
+
+    def data(self, x: Any) -> Any:
+        """The raw NumPy or JAX array."""
+        return x.data
+
+    def labels(self, x: Any, dim: str) -> tuple[Any, ...] | None:
+        """The dim's coordinate labels; ``None`` for the spatial dims."""
+        return None if dim in x.spatial_dims else x.labels(dim)
+
+    def batch_dims(self, x: Any) -> tuple[str, ...]:
+        """The dims the geometry leaves vary along (F4)."""
+        return x.batch_dims
+
+    def signature(self, x: Any) -> Signature:
+        """Dims with their sizes, and the dtype's name."""
+        return Signature(
+            dims=tuple(zip(x.dims, x.shape, strict=True)), dtype=str(x.dtype)
+        )
+
+    def _keeps_geometry(self, k: Any) -> bool:
+        return isinstance(k, slice) or (
+            self.carrier is GeoPoints and not isinstance(k, int | np.integer)
+        )
+
+    def isel(self, x: Any, indexers: dict[str, Any]) -> Any:
+        """Select by position; an index that breaks the geometry gives a DimArray."""
+        if all(
+            self._keeps_geometry(k) for d, k in indexers.items() if d in x.spatial_dims
+        ):
+            return x.isel(indexers)
+        geo = {d: k for d, k in indexers.items() if d not in x.spatial_dims}
+        rest = {d: k for d, k in indexers.items() if d in x.spatial_dims}
+        return _DIMARRAY.isel(to_dimarray(x.isel(geo) if geo else x), rest)
+
+    def check_compatible(self, *xs: Any) -> tuple[Any, ...]:
+        """The carriers, checked to share one geolocation exactly.
+
+        Raises:
+            TypeError: One of them is another carrier type.
+            GridMismatchError: CRS or a geometry leaf differs (traced: at run
+                time).
+        """
+        first = xs[0]
+        for i, x in enumerate(xs[1:], start=1):
+            if not isinstance(x, self.carrier):
+                raise TypeError(
+                    f"{self.carrier.__name__} carriers combine with their own kind, "
+                    f"got {type(x).__name__}"
+                )
+            if x.crs != first.crs:
+                raise GridMismatchError(f"carrier {i} has CRS {x.crs}, not {first.crs}")
+            if getattr(x, "vertical", None) != getattr(first, "vertical", None):
+                # z = 10 m depth and z = 10 m height are different places
+                raise GridMismatchError(
+                    f"carrier {i} has vertical {x.vertical}, not {first.vertical}"
+                )
+            for name in self.leaves:
+                # times compare as int64 ns: datetime64 on NumPy, int64 on JAX
+                a, b = (
+                    _as_int_leaf(getattr(first, name)),
+                    _as_int_leaf(getattr(x, name)),
+                )
+                if (a is None) != (b is None):
+                    raise GridMismatchError(f"carrier {i}: {name} is set on one only")
+                if a is not None:
+                    require_equal_leaves(
+                        a, b, f"carrier {i} has a different {name} than carrier 0"
+                    )
+        return xs
+
+    def rewrap(self, x: Any, data: Any, dims: tuple[str, ...]) -> Any:
+        """The carrier while its spatial and batch dims survive; else a DimArray."""
+        dims = tuple(dims)
+        shape = tuple(data.shape)
+        spatial = x.spatial_dims
+        n = len(spatial)
+        batch = x.batch_dims
+        on_geometry = (
+            dims[len(dims) - n :] == spatial
+            and shape[len(shape) - n :] == x.shape[x.ndim - n :]
+            and dims[: len(batch)] == batch
+            and shape[: len(batch)] == x.shape[: len(batch)]
+        )
+        kept = tuple(
+            c for c in x.coords if c.dim in dims and shape[dims.index(c.dim)] == c.size
+        )
+        if not on_geometry:
+            labels = {c.dim: c.labels for c in kept if c.labels is not None}
+            return DimArray(data, dims, labels)
+        fields = {name: getattr(x, name) for name in self._static_fields()}
+        fields.update({name: getattr(x, name) for name in self.leaves})
+        if "band" in x.dims and (
+            "band" not in dims or shape[dims.index("band")] != x.sizes["band"]
+        ):
+            # per-band attrs describe bands that are gone or changed
+            fields["attrs"] = drop_band_keys(x.attrs)
+        return _build(
+            self.carrier,
+            data=data,
+            dims=dims,
+            coords=kept,
+            fill_value=_fill_for_dtype(x.fill_value, data.dtype),
+            **fields,
+        )
+
+    def _static_fields(self) -> tuple[str, ...]:
+        return ("crs", "attrs")
+
+
+class GeoSwathAdapter(_GeolocatedAdapter):
+    """The `pipekit.NamedArrayAdapter` for `GeoSwath`: lat/lon must match exactly.
+
+    A reduction over ``row`` or ``col`` (per-column statistics) is a
+    ``DimArray``.
+    """
+
+    carrier = GeoSwath
+    leaves = ("lat", "lon")
+
+
+class GeoPointsAdapter(_GeolocatedAdapter):
+    """The `pipekit.NamedArrayAdapter` for `GeoPoints`: xy, z, time, valid match.
+
+    A reduction over ``obs`` is a ``DimArray``.
+    """
+
+    carrier = GeoPoints
+    leaves = ("xy", "z", "time", "valid")
+
+    def _static_fields(self) -> tuple[str, ...]:
+        return ("crs", "attrs", "vertical")
+
+
 register_adapter(GeoArray, GeoArrayAdapter())
+register_adapter(GeoSwath, GeoSwathAdapter())
+register_adapter(GeoPoints, GeoPointsAdapter())
