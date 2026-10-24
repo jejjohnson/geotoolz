@@ -5,5 +5,5 @@
   "packages/geotoolz-catalog": "0.7.0",
   "packages/geotoolz-products": "0.6.0",
   "packages/geotoolz-cloud": "0.6.0",
-  "packages/geotoolz-array": "0.2.0"
+  "packages/geotoolz-array": "0.2.1"
 }
