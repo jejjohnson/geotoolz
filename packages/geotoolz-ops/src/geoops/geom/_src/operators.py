@@ -29,7 +29,7 @@ import geoarray
 import numpy as np
 import rasterio.windows
 from affine import Affine
-from geoarray import GeoArray
+from geoarray import DIMS, GeoArray
 from georeader import (
     griddata,
     mosaic,
@@ -251,7 +251,7 @@ def _nan_masked(gt: GeoArray) -> GeoArray:
     fill = gt.fill_value
     if fill is not None and not np.isnan(fill):
         arr = np.where(arr == fill, np.float32(np.nan), arr)
-    return GeoArray(arr, gt.transform, gt.crs, fill_value=np.nan)
+    return gt.with_data(arr, fill_value=np.nan)
 
 
 def _nan_first(stack: np.ndarray, axis: int = 0) -> np.ndarray:
@@ -1172,6 +1172,7 @@ class Stitch(Operator):
             self.target_crs or first.crs,
             fill_value=fill,
             attrs=_copied_attrs(first, values),
+            dims=DIMS[-values.ndim :],
         )
 
     def _target_grid(

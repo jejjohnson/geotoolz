@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from geoarray import GeoArray, RasterSource
+from geoarray import DIMS, GeoArray, RasterSource
 from rasterio.enums import Resampling
 
 from geoproducts._src.carrier import require_source
@@ -142,6 +142,7 @@ def _concatenate(
         ref.crs,
         fill_value=parts[0].fill_value if integer else np.nan,
         attrs=attrs,
+        dims=DIMS[-arrays[0].ndim :],
     )
 
 

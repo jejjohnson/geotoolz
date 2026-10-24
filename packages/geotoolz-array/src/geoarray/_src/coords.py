@@ -34,7 +34,7 @@ import dataclasses
 import hashlib
 import math
 from collections.abc import Sequence
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, cast, runtime_checkable
 
 import numpy as np
 import pyproj
@@ -53,6 +53,8 @@ __all__ = [
     "VariableAxis",
     "Vertical",
     "VerticalAxis",
+    "coord_from_config",
+    "coord_to_config",
 ]
 
 
@@ -515,3 +517,125 @@ class PointAxis:
             raise ValueError(f"PointAxis size is non-negative, got {self.size}")
         object.__setattr__(self, "size", int(self.size))
         object.__setattr__(self, "crs", as_crs(self.crs))
+
+
+def _joined(parts: Sequence[Any], field: str) -> Any:
+    values = [getattr(p, field) for p in parts]
+    if any(v is None for v in values):
+        return None
+    return tuple(item for v in values for item in v)
+
+
+def concat_coords(parts: Sequence[Coordinate | None]) -> Coordinate | None:
+    """One coordinate for carriers joined along its dim, or ``None``.
+
+    Every part must have a coordinate of one type; fields some part lacks
+    (a wavelength list) are dropped. ``None`` when a part has none.
+
+    Raises:
+        ValueError: The parts are of different types, `VerticalAxis` parts
+            measure different things, or the joined names repeat.
+    """
+    if not parts or any(p is None for p in parts):
+        return None
+    kinds = {type(p) for p in parts}
+    if len(kinds) > 1:
+        names = sorted(k.__name__ for k in kinds)
+        raise ValueError(f"cannot join coordinates of different types: {names}")
+    first = parts[0]
+    if isinstance(first, SpectralAxis):
+        return SpectralAxis(
+            _joined(parts, "names"),
+            _joined(parts, "wavelength_nm"),
+            _joined(parts, "fwhm_nm"),
+        )
+    if isinstance(first, VariableAxis):
+        return VariableAxis(_joined(parts, "names"), _joined(parts, "units"))
+    if isinstance(first, VerticalAxis):
+        verticals = {cast(VerticalAxis, p).vertical for p in parts}
+        if len(verticals) > 1:
+            raise ValueError(f"cannot join levels of different verticals: {verticals}")
+        return VerticalAxis(_joined(parts, "values"), first.vertical)
+    if isinstance(first, TimeAxis):
+        return TimeAxis(np.concatenate([cast(TimeAxis, p).stamps for p in parts]))
+    return None
+
+
+def coord_to_config(coord: Coordinate) -> dict[str, Any]:
+    """A strict-JSON config of a carrier coordinate; `coord_from_config` inverts it.
+
+    Covers the coordinates of a `GeoArray`'s non-spatial dims: `SpectralAxis`,
+    `VariableAxis`, `VerticalAxis` and `TimeAxis` (stamps as ISO strings,
+    ``"NaT"`` for a missing time).
+
+    Raises:
+        TypeError: Another kind of coordinate.
+
+    Example:
+        >>> config = coord_to_config(SpectralAxis(names=("B11", "B12")))
+        >>> coord_from_config(config) == SpectralAxis(names=("B11", "B12"))
+        True
+    """
+    if isinstance(coord, SpectralAxis):
+        return {
+            "kind": "SpectralAxis",
+            "names": list(coord.names),
+            "wavelength_nm": _list_or_none(coord.wavelength_nm),
+            "fwhm_nm": _list_or_none(coord.fwhm_nm),
+        }
+    if isinstance(coord, VariableAxis):
+        return {
+            "kind": "VariableAxis",
+            "names": list(coord.names),
+            "units": _list_or_none(coord.units),
+        }
+    if isinstance(coord, VerticalAxis):
+        v = coord.vertical
+        return {
+            "kind": "VerticalAxis",
+            "values": list(coord.values),
+            "vertical": {
+                "kind": v.kind,
+                "units": v.units,
+                "positive": v.positive,
+                "datum": v.datum,
+            },
+        }
+    if isinstance(coord, TimeAxis):
+        stamps = np.datetime_as_string(coord.stamps, unit="ns")
+        return {"kind": "TimeAxis", "stamps": [str(t) for t in stamps]}
+    raise TypeError(f"coord_to_config: no config for a {type(coord).__name__}")
+
+
+def coord_from_config(config: dict[str, Any]) -> Coordinate:
+    """The coordinate a `coord_to_config` config describes.
+
+    Raises:
+        ValueError: The config names an unknown kind.
+    """
+    kind = config.get("kind")
+    if kind == "SpectralAxis":
+        return SpectralAxis(
+            names=tuple(config["names"]),
+            wavelength_nm=_tuple_or_none(config.get("wavelength_nm")),
+            fwhm_nm=_tuple_or_none(config.get("fwhm_nm")),
+        )
+    if kind == "VariableAxis":
+        return VariableAxis(
+            names=tuple(config["names"]), units=_tuple_or_none(config.get("units"))
+        )
+    if kind == "VerticalAxis":
+        return VerticalAxis(
+            values=tuple(config["values"]), vertical=Vertical(**config["vertical"])
+        )
+    if kind == "TimeAxis":
+        return TimeAxis(np.array(config["stamps"], dtype="datetime64[ns]"))
+    raise ValueError(f"coord_from_config: unknown coordinate kind {kind!r}")
+
+
+def _list_or_none(values: tuple[Any, ...] | None) -> list[Any] | None:
+    return None if values is None else list(values)
+
+
+def _tuple_or_none(values: list[Any] | None) -> tuple[Any, ...] | None:
+    return None if values is None else tuple(values)

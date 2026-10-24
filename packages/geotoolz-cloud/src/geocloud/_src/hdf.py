@@ -33,7 +33,7 @@ from typing import IO, Any, cast
 
 import numpy as np
 from affine import Affine
-from geoarray import GeoArray
+from geoarray import DIMS, GeoArray
 
 from geocloud._src.extras import missing_extra
 from geocloud._src.store import Location, local_path
@@ -508,6 +508,7 @@ def _geoarray(
         crs,
         fill_value=_representable_fill(fill_value, values.dtype),
         attrs=attrs or {},
+        dims=DIMS[-values.ndim :],
     )
 
 

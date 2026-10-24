@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import einx
 import numpy as np
 import rasterio.windows
-from geoarray import GeoArray
+from geoarray import DIMS, GeoArray
 from georeader import read
 
 from geoops._src.engine import to_engine
@@ -143,7 +143,9 @@ def reproject_like(
     values = np.asarray(src_values)
     if fill_value is None:
         fill_value = np.nan if np.issubdtype(values.dtype, np.floating) else 0
-    src = GeoArray(values, src_transform, src_crs, fill_value=fill_value)
+    src = GeoArray(
+        values, src_transform, src_crs, fill_value=fill_value, dims=DIMS[-values.ndim :]
+    )
     height, width = dst_shape
     return np.asarray(
         read.read_reproject(

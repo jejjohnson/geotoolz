@@ -61,7 +61,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from geoarray import GeoArray
+from geoarray import DIMS, GeoArray
+from geoarray.coords import coord_from_config, coord_to_config
 
 from geopatcher._src._digest import array_digest
 from geopatcher._src.carrier import raster_grid
@@ -684,8 +685,11 @@ def _load_entry(path: Path) -> dict[str, Any]:
     }
     if "weights" in arrays:
         payload["weights"] = arrays["weights"]
-    for i in range(len(payload["meta"].get("coords", []))):
-        payload[f"coord_{i}"] = arrays[f"coord_{i}"]
+    if payload["kind"] == "dataarray":
+        # a DataArray's coordinates are arrays beside the values; a GeoArray's
+        # are JSON configs inside meta
+        for i in range(len(payload["meta"].get("coords", []))):
+            payload[f"coord_{i}"] = arrays[f"coord_{i}"]
     return payload
 
 
@@ -708,6 +712,8 @@ def _encode_patch(patch: Patch) -> dict[str, Any]:
             "crs": _encode_crs(data.crs),
             "fill_value": _to_json(data.fill_value, what="GeoArray.fill_value"),
             "attrs": _to_json(data.attrs.to_dict(), what="GeoArray.attrs"),
+            "dims": list(data.dims),
+            "coords": [coord_to_config(c) for c in data.coords],
         }
     elif _is_dataarray(data):
         kind = "dataarray"
@@ -750,6 +756,9 @@ def _decode_carrier(payload: dict[str, Any]) -> Any:
             _decode_crs(meta["crs"]),
             fill_value=_from_json(meta[fill_key]),
             attrs=_from_json(meta["attrs"]),
+            # entries written before stored dims hold the 0.2 layout
+            dims=tuple(meta["dims"]) if "dims" in meta else DIMS[-np.ndim(values) :],
+            coords=tuple(coord_from_config(c) for c in meta.get("coords", ())),
         )
     if kind == "dataarray":
         return _dataarray_from(payload)

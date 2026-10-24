@@ -25,7 +25,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import numpy as np
-from geoarray import FrozenAttrs, GeoArray
+from geoarray import DIMS, FrozenAttrs, GeoArray
 
 from geoops._src.bands import (
     BAND_NAME_KEYS,
@@ -159,6 +159,7 @@ def wrap_like(
     attrs: Mapping[str, Any] | None = None,
     transform: Affine | Any | None = None,
     band_names: Sequence[str] | None = None,
+    coords: Sequence[Any] | None = None,
 ) -> GeoArray | np.ndarray:
     """Rewrap a computed array to match the carrier of ``ref``.
 
@@ -189,6 +190,11 @@ def wrap_like(
         band_names: Names of the output bands, written under
             ``attrs["band_names"]``. Must have one entry per output band
             (``out.shape[-3]`` for 3-D / 4-D outputs, 1 for 2-D).
+        coords: Coordinates for the output's non-spatial dims. ``None``
+            (default) keeps each of ``ref``'s coordinates whose dim keeps its
+            size; an operator that reorders or picks entries of a dim (band
+            selection) passes them re-indexed, or the old labels would name
+            the wrong pixels.
 
     Returns:
         A new GeoArray with ``ref``'s CRS when ``ref`` is a GeoArray,
@@ -231,10 +237,15 @@ def wrap_like(
         # canonical fill of the output's meaning (False for a mask, 0 for
         # labels / counts), never a fill the data would read as a value.
         fill_value = fill_for(values.dtype, ref.fill_value)
-    return GeoArray(
+    # the input's dims while the rank holds; the 0.2 layout otherwise
+    # (geoops reads the band axis as -3 until its kernels take dim=, W3)
+    dims = ref.dims if values.ndim == ref.ndim else DIMS[-values.ndim :]
+    extra = {} if coords is None else {"coords": tuple(coords)}
+    return ref.with_data(
         values,
-        transform,
-        ref.crs,
+        transform=transform,
         fill_value=fill_value,
         attrs=FrozenAttrs(new_attrs),
+        dims=dims,
+        **extra,
     )

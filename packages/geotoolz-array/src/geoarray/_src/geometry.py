@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import functools
 import math
+import warnings
 from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
 
-from geoarray._src.array import INHERIT, GeoArray, _normalize_fill
+from geoarray._src.array import INHERIT, GeoArray, _normalize_fill, infer_dims
 from geoarray._src.attrs import concat_bands
 from geoarray._src.backend import (
     backend_of,
@@ -24,12 +25,14 @@ from geoarray._src.backend import (
     namespace,
     require_x64,
 )
+from geoarray._src.coords import concat_coords
 from geoarray._src.errors import GridMismatchError
 from geoarray._src.grid import PixelWindow, apply_transform, shift_scale_transform
 
 
 __all__ = [
-    "combine",
+    "combine_carriers",
+    "concat_carriers",
     "concatenate",
     "crop",
     "footprint",
@@ -161,14 +164,40 @@ def _leading_axis(g: GeoArray, axis: int, what: str, *, new: bool = False) -> in
     return normalised
 
 
-def combine(f: Callable[..., Any], *carriers: GeoArray) -> GeoArray:
+def _in_first_order(gs: list[GeoArray], what: str) -> list[GeoArray]:
+    """Every carrier's data in the first one's dim order (by name, never by rank).
+
+    Raises:
+        ValueError: A carrier has other dims.
+    """
+    dims = gs[0].dims
+    out = [gs[0]]
+    for i, g in enumerate(gs[1:], start=1):
+        if g.dims == dims:
+            out.append(g)
+            continue
+        if sorted(g.dims) != sorted(dims):
+            raise ValueError(f"{what}: carrier {i} has dims {g.dims}, not {dims}")
+        if g.batch_dims != gs[0].batch_dims:
+            raise ValueError(
+                f"{what}: carrier {i} has batch dims {g.batch_dims}, not "
+                f"{gs[0].batch_dims}"
+            )
+        order = tuple(g.dims.index(d) for d in dims)
+        out.append(g.with_data(g.xp.transpose(g.data, order), dims=dims))
+    return out
+
+
+def combine_carriers(f: Callable[..., Any], *carriers: GeoArray) -> GeoArray:
     """Apply ``f`` to the data of carriers that share one pixel grid.
 
-    The result keeps the first carrier's grid, CRS, fill value and attrs.
+    What ``geoarray.combine`` (``pipekit_array.combine``) runs for carriers.
+    Inputs are put in the first carrier's dim order by name; the result
+    keeps its grid, dims, coordinates, CRS, fill value and attrs.
 
     Args:
-        f: A function of the data arrays, returning one ``(..., H, W)``
-            array (``jnp.divide``, ``lambda a, b: a - b``, …).
+        f: A function of the data arrays, returning one array of the first
+            carrier's shape (``jnp.divide``, ``lambda a, b: a - b``, …).
         *carriers: GeoArrays on the same grid; NumPy carriers join JAX ones
             on JAX.
 
@@ -177,57 +206,193 @@ def combine(f: Callable[..., Any], *carriers: GeoArray) -> GeoArray:
             Under ``jit``, ``grad`` or ``vmap`` a transform difference is
             found at run time; JAX reports it as a ``JaxRuntimeError``
             whose message carries this error.
-        ValueError: The fill values differ.
+        ValueError: The fill values or the dims differ.
         X64Error: A NumPy carrier must move to JAX and x64 is off.
 
     Example:
         >>> import numpy as np
-        >>> from geoarray import GeoArray
-        >>> b11 = GeoArray(np.full((1, 2, 2), 2.0), (20, 0, 0, 0, -20, 0), 32613)
+        >>> import geoarray
+        >>> t = (20, 0, 0, 0, -20, 0)
+        >>> b11 = geoarray.GeoArray(np.full((1, 2, 2), 2.0), t, 32613, dims="band y x")
         >>> b12 = b11.with_data(np.full((1, 2, 2), 1.0))
-        >>> combine(np.divide, b12, b11).data[0, 0, 0]
+        >>> geoarray.combine(np.divide, b12, b11).data[0, 0, 0]
         np.float64(0.5)
     """
     gs = _require_carriers(carriers, "combine")
     gs = _promote(gs)
     gs = _require_same_grid(gs, "combine")
     _require_same_fill(gs, "combine")
+    gs = _in_first_order(gs, "combine")
     return gs[0].with_data(f(*(g.data for g in gs)))
 
 
-def stack(carriers: Sequence[GeoArray], axis: int = 0) -> GeoArray:
-    """Stack carriers on one grid along a new leading axis.
+def _stacked_dims(
+    first: GeoArray, dim: Any, axis: int | None
+) -> tuple[tuple[str, ...], int]:
+    """The result's dims and the new axis's position for `stack`.
 
-    Three ``(C, H, W)`` scenes become one ``(3, C, H, W)`` time stack. The
-    result keeps the first carrier's fill value and attrs.
+    Named (``dim="time"``): the new dim goes first after the batch dims, or
+    at ``axis``. Unnamed (the 0.2 form, ``axis`` defaulting to 0): every dim
+    is read from the result's rank, as 0.2 did, with a warning.
+    """
+    if isinstance(dim, int | np.integer):
+        axis, dim = int(dim), None
+    n_batch = len(first.batch_shape)
+    if dim is not None:
+        position = (
+            n_batch if axis is None else _leading_axis(first, axis, "stack", new=True)
+        )
+        if dim in first.dims:
+            raise ValueError(
+                f"stack: {dim!r} is already a dim of {first.dims}; use concat"
+            )
+        return (*first.dims[:position], dim, *first.dims[position:]), position
+    position = _leading_axis(first, 0 if axis is None else axis, "stack", new=True)
+    dims = infer_dims(first.ndim + 1, n_batch)
+    warnings.warn(
+        f"stack without dim= reads the result's dims from its rank ({dims}); this "
+        "is deprecated: pass dim=",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    return dims, position
+
+
+def stack(
+    carriers: Sequence[GeoArray], dim: str | None = None, *, axis: int | None = None
+) -> GeoArray:
+    """Stack carriers on one grid along a new dim.
+
+    Three ``(band, y, x)`` scenes become one ``(time, band, y, x)`` stack.
+    The new dim goes first, after any batch dims, unless ``axis`` puts it
+    elsewhere; the result keeps the first carrier's coordinates, fill value
+    and attrs.
+
+    Args:
+        carriers: GeoArrays on one grid with the same dims.
+        dim: The new dim's name. Omitted (or an int, the 0.2 ``axis``), it
+            is named from the rank with a ``DeprecationWarning``.
+        axis: Where the new dim goes; the default is first.
 
     Raises:
         GridMismatchError: The grids differ.
-        ValueError: The fill values differ, the result would have more
-            than 4 dims, or ``axis`` is a batch or spatial axis.
+        ValueError: The fill values differ, the name is taken, or ``axis``
+            is a batch or spatial axis.
 
     Example:
         >>> import numpy as np
         >>> from geoarray import GeoArray
-        >>> g = GeoArray(np.zeros((2, 4, 4)), (20, 0, 0, 0, -20, 0), 32613)
-        >>> stack([g, g, g]).shape
-        (3, 2, 4, 4)
+        >>> t = (20, 0, 0, 0, -20, 0)
+        >>> g = GeoArray(np.zeros((2, 4, 4)), t, 32613, dims="band y x")
+        >>> stack([g, g, g], "time").dims
+        ('time', 'band', 'y', 'x')
     """
     gs = _require_carriers(carriers, "stack")
     gs = _promote(gs)
     gs = _require_same_grid(gs, "stack")
     _require_same_fill(gs, "stack")
+    gs = _in_first_order(gs, "stack")
     first = gs[0]
-    position = _leading_axis(first, axis, "stack", new=True)
+    dims, position = _stacked_dims(first, dim, axis)
     data = first.xp.stack([g.data for g in gs], axis=position)
-    return first.with_data(data)
+
+    def moved(i: int) -> int:
+        return i + 1 if i >= position else i
+
+    # a coordinate stays only where its dim kept its name (the unnamed form
+    # may rename every dim)
+    coords = tuple(
+        c for c in first.coords if dims[moved(first.dims.index(c.dim))] == c.dim
+    )
+    return first.with_data(data, dims=dims, coords=coords)
+
+
+def concat_carriers(carriers: Sequence[GeoArray], dim: str) -> GeoArray:
+    """Join carriers on one grid along an existing non-spatial dim.
+
+    What ``geoarray.concat`` (``pipekit_array.concat``) runs for carriers.
+    The dim's coordinates are joined (`SpectralAxis` names and
+    wavelengths, `TimeAxis` stamps, …); along ``band`` the per-band attrs
+    are joined too when every carrier has them. Along a batch dim
+    (``patch``) the transforms are joined, so the carriers' transforms may
+    differ.
+
+    Raises:
+        GridMismatchError: The grids differ (outside the joined batch dim).
+        ValueError: The fill values or the other dims differ, or ``dim`` is
+            spatial.
+
+    Example:
+        >>> import numpy as np
+        >>> import geoarray
+        >>> from geoarray.coords import SpectralAxis
+        >>> t = (20, 0, 0, 0, -20, 0)
+        >>> b4 = geoarray.GeoArray(np.zeros((1, 4, 4)), t, 32613, dims="band y x",
+        ...                        coords=(SpectralAxis(("B4",)),))
+        >>> b8 = b4.with_data(np.ones((1, 4, 4)), coords=(SpectralAxis(("B8",)),))
+        >>> geoarray.concat([b4, b8], "band").labels("band")
+        ('B4', 'B8')
+    """
+    gs = _require_carriers(carriers, "concat")
+    first = gs[0]
+    if dim in ("y", "x"):
+        raise ValueError(
+            "concat: joining along y or x makes a new grid; mosaic with "
+            "geoops.functional instead"
+        )
+    if dim not in first.dims:
+        raise ValueError(f"concat: {dim!r} is not a dim of {first.dims}")
+    gs = _promote(gs)
+    batched = dim in first.batch_dims
+    if batched:
+        _require_same_crs_and_shape(gs, "concat")
+    else:
+        gs = _require_same_grid(gs, "concat")
+    _require_same_fill(gs, "concat")
+    gs = _in_first_order(gs, "concat")
+    first = gs[0]
+    position = first.dims.index(dim)
+    for i, g in enumerate(gs[1:], start=1):
+        others = [n for d, n in zip(g.dims, g.shape, strict=True) if d != dim]
+        mine = [n for d, n in zip(first.dims, first.shape, strict=True) if d != dim]
+        if others != mine:
+            raise ValueError(
+                f"concat: carrier {i} has shape {g.shape} off {dim!r}, not "
+                f"{first.shape}"
+            )
+    data = first.xp.concatenate([g.data for g in gs], axis=position)
+    transform = (
+        namespace(first.transform).concatenate([g.transform for g in gs], axis=position)
+        if batched
+        else first.transform
+    )
+    joined = concat_coords([g.coord(dim) for g in gs])
+    coords = tuple(c for c in first.coords if c.dim != dim) + (
+        () if joined is None else (joined,)
+    )
+    attrs = (
+        concat_bands([(g.attrs, g.count) for g in gs]) if dim == "band" else first.attrs
+    )
+    return first.with_data(
+        data, transform=transform, attrs=attrs, dims=first.dims, coords=coords
+    )
+
+
+def _require_same_crs_and_shape(carriers: list[GeoArray], what: str) -> None:
+    first = carriers[0]
+    for i, g in enumerate(carriers[1:], start=1):
+        if g.crs != first.crs or g.shape[-2:] != first.shape[-2:]:
+            raise GridMismatchError(
+                f"{what}: carrier {i} has CRS {g.crs} and spatial shape "
+                f"{g.shape[-2:]}, not {first.crs} and {first.shape[-2:]}"
+            )
 
 
 def concatenate(carriers: Sequence[GeoArray], axis: int = -3) -> GeoArray:
-    """Join carriers on one grid along an existing leading axis.
+    """Join carriers on one grid along an existing leading axis, by position.
 
-    Along the band axis (−3, the default) the per-band attrs are joined
-    too, when every carrier has them; otherwise they are dropped.
+    The 0.2 form of `concat`: ``axis`` picks the dim (−3, the default, is
+    ``band`` in the 0.2 layout). Prefer ``geoarray.concat(carriers, dim)``.
 
     Raises:
         GridMismatchError: The grids differ.
@@ -238,21 +403,15 @@ def concatenate(carriers: Sequence[GeoArray], axis: int = -3) -> GeoArray:
         >>> import numpy as np
         >>> from geoarray import GeoArray
         >>> t = (20, 0, 0, 0, -20, 0)
-        >>> b04 = GeoArray(np.zeros((1, 4, 4)), t, 32613, attrs={"band_names": ["B04"]})
+        >>> b04 = GeoArray(np.zeros((1, 4, 4)), t, 32613, attrs={"band_names": ["B04"]},
+        ...                dims="band y x")
         >>> b08 = b04.with_data(np.ones((1, 4, 4)), attrs={"band_names": ["B08"]})
         >>> concatenate([b04, b08]).attrs["band_names"]
         ('B04', 'B08')
     """
     gs = _require_carriers(carriers, "concatenate")
-    gs = _promote(gs)
-    gs = _require_same_grid(gs, "concatenate")
-    _require_same_fill(gs, "concatenate")
-    first = gs[0]
-    position = _leading_axis(first, axis, "concatenate")
-    data = first.xp.concatenate([g.data for g in gs], axis=position)
-    on_bands = position == first.ndim - 3 and not first.batch_shape
-    attrs = concat_bands([(g.attrs, g.count) for g in gs]) if on_bands else None
-    return first.with_data(data, attrs=attrs)
+    position = _leading_axis(gs[0], axis, "concatenate")
+    return concat_carriers(gs, gs[0].dims[position])
 
 
 def _whole(g: GeoArray) -> PixelWindow:

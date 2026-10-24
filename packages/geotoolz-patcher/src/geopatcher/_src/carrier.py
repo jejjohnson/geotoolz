@@ -239,13 +239,15 @@ class _WireGeoArray:
     one built there.
     """
 
-    __slots__ = ("attrs", "data", "fill_value", "grid")
+    __slots__ = ("attrs", "coords", "data", "dims", "fill_value", "grid")
 
     def __init__(self, g: GeoArray) -> None:
         self.data = g.data
         self.grid = g.grid.get_config()
         self.fill_value = g.fill_value
         self.attrs = g.attrs.to_dict()
+        self.dims = g.dims
+        self.coords = g.coords
 
     def __getstate__(self) -> tuple[Any, ...]:
         return tuple(getattr(self, name) for name in self.__slots__)
@@ -262,6 +264,8 @@ class _WireGeoArray:
             grid.crs,
             fill_value=self.fill_value,
             attrs=self.attrs,
+            dims=self.dims,
+            coords=self.coords,
         )
 
 

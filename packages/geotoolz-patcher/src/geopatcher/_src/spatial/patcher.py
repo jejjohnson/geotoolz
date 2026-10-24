@@ -31,7 +31,7 @@ from threading import BoundedSemaphore, Condition, Event
 from typing import Any
 
 import numpy as np
-from geoarray import GeoArray
+from geoarray import DIMS, GeoArray
 
 from geopatcher._src._serialize import patcher_config
 from geopatcher._src.carrier import (
@@ -1302,7 +1302,13 @@ def _source_fill(field: Any) -> Any:
 
 
 def _is_xarray(obj: Any) -> bool:
-    """An xarray object, whose attribute lookup also reaches its ``attrs``."""
+    """An xarray object, whose attribute lookup also reaches its ``attrs``.
+
+    A `GeoArray` has ``dims`` and ``coords`` too (geotoolz-array 0.3), but
+    its ``fill_value`` is a real field.
+    """
+    if isinstance(obj, GeoArray):
+        return False
     return hasattr(obj, "dims") and hasattr(obj, "coords")
 
 
@@ -1750,7 +1756,9 @@ def _placeholder_carrier(
     if not 2 <= data.ndim <= 4:
         return data
     chip = grid.crop(as_pixel_window(window))
-    return GeoArray(data, chip.transform, chip.crs, fill_value=np.nan)
+    return GeoArray(
+        data, chip.transform, chip.crs, fill_value=np.nan, dims=DIMS[-data.ndim :]
+    )
 
 
 def _indices_hw(indices: Any) -> tuple[int, int]:

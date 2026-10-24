@@ -730,6 +730,7 @@ def test_append_index_get_config_is_jsonable() -> None:
     assert decoded == {
         "index_op": {
             "class": "NDVI",
+            "module": "geoops.indices._src.operators",
             "config": {"nir": 7, "red": 3, "axis": -3, "eps": 1e-10},
         },
         "axis": 0,

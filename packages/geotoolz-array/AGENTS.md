@@ -3,8 +3,8 @@
 The georeferenced array every package of the stack will share. The root
 [`AGENTS.md`](../../AGENTS.md) applies too; this file adds what is specific
 to `geoarray`. It is the bottom of the workspace: it depends on numpy,
-pyproj and affine only, and never imports another workspace package or
-rasterio. georeader is imported by one module only, the `[georeader]`
+pyproj, affine, pipekit core (pure Python) and pipekit-array only, and
+never imports another workspace package or rasterio. georeader is imported by one module only, the `[georeader]`
 adapter `_src/georeader.py`, and lazily (ruff's `TID251` rejects it
 anywhere else).
 
@@ -12,7 +12,16 @@ anywhere else).
 
 - **`GeoArray`** (`_src/array.py`) — a frozen dataclass that *holds* a
   NumPy or JAX array (composition: JAX arrays cannot be subclassed) with
-  its transform, CRS, fill value and attrs.
+  its stored dims (ending in `y x`), coordinates, transform, CRS, fill
+  value and attrs.
+- **Coordinates** (`_src/coords.py`, public as `geoarray.coords`) —
+  `SpectralAxis`, `VariableAxis`, `VerticalAxis`, `TimeAxis` and the grid
+  coordinates; frozen and hashable by value, sliced with their dim.
+- **The named-array adapter** (`_src/adapter.py`) — `GeoArrayAdapter`,
+  registered with pipekit at import, so pipekit-array's dim-level
+  functions and `KernelOp` run on carriers. geoarray re-exports those
+  functions (`geoarray.reduce is pipekit_array.reduce`); never write a
+  geoarray-local copy, add an adapter fast path instead.
 - **`Grid`, `PixelWindow`** (`_src/grid.py`) — a pixel grid without data,
   and a rectangle of pixels (named apart from geopatcher's window
   *functions*, in rasterio's `Window` field order); all affine maths
@@ -57,9 +66,17 @@ interpolates belong in `geoops.functional`.
 | Field | Pytree role | Changing it |
 |---|---|---|
 | `data` | leaf | never recompiles |
-| `transform` (`(6,)` float64) | leaf | never recompiles; differentiable |
-| `crs`, `fill_value`, `attrs` | static | recompiles |
+| `transform` (`(*batch, 6)` float64) | leaf | never recompiles; differentiable |
+| `dims`, `coords`, `crs`, `fill_value`, `attrs` | static | recompiles |
 
+- **Stored dims are the source of truth.** Never read a layout from
+  `ndim`; code that builds a carrier passes `dims=` (library code that
+  still has only the 0.2 layout passes `DIMS[-ndim:]` explicitly, so the
+  `DeprecationWarning` reaches users only). The first `transform.ndim - 1`
+  dims are batch dims.
+- **A bare `jax.vmap` maps the leading dim only**: `_unflatten` matches the
+  static dims to the leaves (`pipekit_array.dimarray.vmapped_dims`). Map a
+  named dim with `geoarray.map_over`.
 - **Static fields must be hashable and compare equal when equal.** `attrs`
   go through `FrozenAttrs`; every NaN (fill or attr) is normalised to the
   one `math.nan` object, because `nan != nan` would otherwise make equal
@@ -79,9 +96,11 @@ interpolates belong in `geoops.functional`.
 
 ## Conventions
 
-- **A 4-D carrier never loses its band axis alone**: an integer band
-  index or a squeeze that would turn `(T, C, H, W)` into `(T, H, W)`
-  raises, because `(T, H, W)` reads as `(C, H, W)`.
+- **Positionally, a 4-D carrier never loses its band axis alone**: an
+  integer band index (`g[:, k]`) or a squeeze that would turn
+  `(time, band, y, x)` into `(time, y, x)` raises, because 0.2 code (the
+  geoops kernels, `axis=-3`) reads `(T, H, W)` as `(C, H, W)`. By name
+  (`isel`, `sel`) the stored dims say what is left, so it is allowed.
 - **NumPy and JAX mix eagerly (design decision C1).** Mixed inputs promote
   to JAX (`_promote` in `_src/geometry.py`); output stays where the
   computation ran; `__array__` copies JAX data to the host eagerly and

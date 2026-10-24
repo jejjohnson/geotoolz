@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from affine import Affine
-from geoarray import FrozenAttrs, GeoArray, Grid, PixelWindow
+from geoarray import DIMS, FrozenAttrs, GeoArray, Grid, PixelWindow
 
 
 if TYPE_CHECKING:
@@ -229,6 +229,7 @@ class ProductReader(ABC):
             self.grid.crs,
             fill_value=self.fill_value,
             attrs=self.attrs,
+            dims=DIMS[-np.ndim(values) :],
         )
 
     def load(self) -> GeoArray:

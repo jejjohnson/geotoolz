@@ -594,7 +594,7 @@ def test_runtime_io_operators_are_forbid_in_yaml(op_cls: type) -> None:
 def test_io_source_given_as_object_is_refused_by_from_state() -> None:
     reader = object()
     op = io.ReadWindow(src=reader, window=(0, 0, 4, 4))
-    with pytest.raises(RuntimeError, match="non-primitive"):
+    with pytest.raises(RuntimeError, match=r"cannot reconstruct ReadWindow\.src"):
         Operator.from_state(op.state)
 
 

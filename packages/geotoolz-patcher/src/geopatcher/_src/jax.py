@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
-from geoarray import GeoArray
+from geoarray import DIMS, GeoArray
 
 from geopatcher._src.patch import Patch
 
@@ -221,6 +221,8 @@ def _template(data: Any) -> Any:
             data.crs,
             fill_value=data.fill_value,
             attrs=data.attrs,
+            dims=data.dims,
+            coords=data.coords,
         )
     if _is_dataarray(data):
         placeholder = np.broadcast_to(np.zeros((), dtype=data.dtype), data.shape)
@@ -247,7 +249,8 @@ def _rebuild(template: Any, row: Any) -> Any:
         return template.copy(deep=False, data=values)
     if values.shape[-2:] != template.shape[-2:] or not 2 <= values.ndim <= 4:
         return row
-    return template.with_data(values)
+    dims = template.dims if values.ndim == template.ndim else DIMS[-values.ndim :]
+    return template.with_data(values, dims=dims)
 
 
 def _flatten(batch: BatchedPatch) -> tuple[tuple[Any, Any], _StaticMeta]:

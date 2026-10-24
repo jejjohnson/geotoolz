@@ -207,7 +207,16 @@ def map_frames(fn: Callable[[Any], Any], x: Any, *, name: str) -> Any:
     stacked = np.stack(arrays)
     if not isinstance(first, GeoArray):
         return stacked
-    return first.with_data(stacked, attrs=first.attrs)
+    frame_dims = first.dims if first.ndim == 3 else ("band", *first.dims)
+    # each frame lost the time coordinate; the frames are in order, so the
+    # input's comes back with the restacked time dim
+    time = tuple(c for c in getattr(x, "coords", ()) if c.dim == "time")
+    return first.with_data(
+        stacked,
+        attrs=first.attrs,
+        dims=("time", *frame_dims),
+        coords=time + tuple(c for c in first.coords if c.dim in frame_dims),
+    )
 
 
 def over_frames(apply: Callable[..., Any]) -> Callable[..., Any]:

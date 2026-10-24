@@ -23,6 +23,7 @@ from typing import Any
 
 import numpy as np
 from geoarray import (
+    DIMS,
     PER_BAND_KEYS,
     AsyncRasterSource,
     FrozenAttrs,
@@ -193,7 +194,15 @@ def _rewrap(source: Any, array: Any, grid: Grid) -> GeoArray:
     if np.issubdtype(values.dtype, np.floating) and not (source_float and same_bands):
         fill = np.nan
     fill = output_fill(fill, values.dtype)
-    return GeoArray(values, grid.transform, grid.crs, fill_value=fill, attrs=attrs)
+    source_dims = getattr(source, "dims", None)
+    dims = (
+        tuple(source_dims)
+        if source_dims is not None and len(source_dims) == values.ndim
+        else DIMS[-values.ndim :]
+    )
+    return GeoArray(
+        values, grid.transform, grid.crs, fill_value=fill, attrs=attrs, dims=dims
+    )
 
 
 def _pack_reader_state(state: dict[str, Any]) -> dict[str, Any]:

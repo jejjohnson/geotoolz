@@ -661,7 +661,7 @@ def test_column_enhancement_obs_model_refuses_reload() -> None:
 
     op = ColumnEnhancement(obs_model=obs_model)
     assert op.get_config()["obs_model"] == {"callable": "obs_model"}
-    with pytest.raises(RuntimeError, match="non-primitive"):
+    with pytest.raises(TypeError, match="cannot be rebuilt from a config"):
         Operator.from_state(json.loads(json.dumps(op.state)))
 
     plain = ColumnEnhancement()

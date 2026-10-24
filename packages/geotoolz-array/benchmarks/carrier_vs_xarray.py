@@ -53,7 +53,7 @@ def scene_carrier(shape: tuple[int, int, int], seed: int = 0) -> geoarray.GeoArr
     """A float32 (2, H, W) carrier on the chip's grid."""
     rng = np.random.default_rng(seed)
     data = rng.random(shape, dtype=np.float32)
-    return geoarray.GeoArray(data, TRANSFORM, CRS)
+    return geoarray.GeoArray(data, TRANSFORM, CRS, dims=("band", "y", "x"))
 
 
 def scene_xarray(g: geoarray.GeoArray) -> xr.DataArray:
@@ -130,9 +130,9 @@ def import_seconds(module: str, repeats: int = 5) -> float:
 
 def misaligned() -> dict[str, Any]:
     """Two 1 × 4 × 4 grids whose x differ by 1e-7 m, added on each side."""
-    g = geoarray.GeoArray(np.ones((1, 4, 4)), TRANSFORM, CRS)
+    g = geoarray.GeoArray(np.ones((1, 4, 4)), TRANSFORM, CRS, dims="band y x")
     shifted = (20.0, 0.0, 600000.0 + 1e-7, 0.0, -20.0, 3550000.0)
-    h = geoarray.GeoArray(np.ones((1, 4, 4)), shifted, CRS)
+    h = geoarray.GeoArray(np.ones((1, 4, 4)), shifted, CRS, dims="band y x")
     da, db = scene_xarray_1band(g), scene_xarray_1band(h)
     xarray_shape = tuple(int(n) for n in (da + db).shape)
     try:

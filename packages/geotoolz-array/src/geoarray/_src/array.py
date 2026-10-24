@@ -1,26 +1,34 @@
-"""`GeoArray`: a NumPy or JAX array with its affine transform, CRS, fill and attrs.
+"""`GeoArray`: a NumPy or JAX array with its dims, transform, CRS, fill and attrs.
 
 Composition, not subclassing: JAX operations always return a plain
 ``jax.Array``, so a subclass would lose its metadata on the first ``jnp``
 call. A GeoArray *holds* its array and is registered as a JAX pytree:
 
-    leaves  data       (..., H, W)  NumPy or JAX
-            transform  (6,) float64 (a, b, c, d, e, f)
-    static  crs, fill_value, attrs
+    leaves  data       (..., y, x)  NumPy or JAX
+            transform  (*batch, 6) float64 (a, b, c, d, e, f)
+    static  crs, fill_value, attrs, dims, coords
 
 Changing a leaf never recompiles a jitted function; changing a static field
 does. So a new transform (another scene, another patch) reuses the compiled
 code, and gradients reach the georeferencing.
+
+The dims are stored, one name per axis, ending in ``("y", "x")``; the first
+``transform.ndim - 1`` of them index the transform's rows (the batch dims:
+one transform per patch or per frame). A carrier built without ``dims``
+reads them from its rank, ``DIMS[-ndim:]``, with a ``DeprecationWarning``
+(removed in 0.4.0).
 """
 
 from __future__ import annotations
 
 import dataclasses
 import math
+import warnings
 from typing import Any, cast
 
 import numpy as np
 import pyproj
+from pipekit_array.dimarray import vmapped_dims
 
 from geoarray._src.attrs import FrozenAttrs, drop_band_keys, select_bands
 from geoarray._src.backend import (
@@ -33,7 +41,8 @@ from geoarray._src.backend import (
     namespace,
     require_x64,
 )
-from geoarray._src.errors import GeoArrayTraceError, X64Error
+from geoarray._src.coords import Coordinate, PixelGrid
+from geoarray._src.errors import GeoArrayTraceError, LabelError, X64Error
 from geoarray._src.grid import (
     Grid,
     PixelWindow,
@@ -45,11 +54,93 @@ from geoarray._src.grid import (
 from geoarray._src.options import warn_host_transfer
 
 
-__all__ = ["DIMS", "GeoArray"]
+__all__ = ["DIMS", "SPATIAL_DIMS", "GeoArray"]
 
-#: Names of the axes of a 4-D carrier; a carrier with ``ndim`` axes uses
-#: ``DIMS[-ndim:]``, so the spatial axes are always the last two.
+#: The dims a carrier built without ``dims`` reads from its rank:
+#: ``DIMS[-ndim:]`` (deprecated in 0.3.0, removed in 0.4.0; pass ``dims=``).
 DIMS: tuple[str, str, str, str] = ("time", "band", "y", "x")
+
+#: The spatial dims every `GeoArray` ends in.
+SPATIAL_DIMS: tuple[str, str] = ("y", "x")
+
+_INFER_WARNING = (
+    "GeoArray dims read from the data's rank ({dims}) are deprecated and "
+    "removed in geotoolz-array 0.4.0: pass dims={dims!r}"
+)
+
+
+def infer_dims(ndim: int, n_batch: int) -> tuple[str, ...]:
+    """The 0.2 layout: ``n_batch`` batch dims, then ``DIMS[-k:]`` for the rest.
+
+    Raises:
+        ValueError: The non-batch part is not 2-D to 4-D.
+    """
+    element = ndim - n_batch
+    if not 2 <= element <= 4:
+        raise ValueError(
+            f"a GeoArray built without dims is 2-D to 4-D with dims {DIMS}[-ndim:], "
+            f"got {ndim} axes"
+            + (f" with {n_batch} batch axes" if n_batch else "")
+            + "; pass dims= for any other layout"
+        )
+    batch = tuple("batch" if k == 0 else f"batch_{k}" for k in range(n_batch))
+    return batch + DIMS[-element:]
+
+
+def _check_dims(dims: Any, shape: tuple[int, ...], n_batch: int) -> tuple[str, ...]:
+    """``dims`` as a validated tuple for data of ``shape``."""
+    if isinstance(dims, str):
+        dims = tuple(dims.split())
+    out = tuple(dims)
+    if not all(isinstance(d, str) and d for d in out):
+        raise TypeError(f"dims are non-empty strings, got {dims!r}")
+    if len(set(out)) != len(out):
+        raise ValueError(f"dims repeat a name: {out}")
+    if len(out) != len(shape):
+        raise ValueError(
+            f"dims {out} name {len(out)} axes, but the data has shape {shape}"
+        )
+    if out[-2:] != SPATIAL_DIMS:
+        raise ValueError(f"a GeoArray's dims end in {SPATIAL_DIMS}, got {out}")
+    if n_batch > len(out) - 2:
+        raise ValueError(f"a ({n_batch}, …, 6) transform needs {n_batch} batch dims")
+    return out
+
+
+def _check_coords(
+    coords: Any, dims: tuple[str, ...], shape: tuple[int, ...]
+) -> tuple[Coordinate, ...]:
+    """``coords`` as a validated tuple: one per non-spatial dim at most, sized."""
+    out = tuple(coords or ())
+    seen: set[str] = set()
+    for c in out:
+        if not isinstance(c, Coordinate):
+            raise TypeError(
+                f"coords holds geoarray.coords axes (SpectralAxis, TimeAxis, …), "
+                f"got {type(c).__name__}"
+            )
+        if c.dim not in dims or c.dim in SPATIAL_DIMS:
+            raise ValueError(
+                f"{type(c).__name__} describes dim {c.dim!r}, which is not a "
+                f"non-spatial dim of {dims}"
+            )
+        if c.dim in seen:
+            raise ValueError(f"two coordinates for dim {c.dim!r}")
+        seen.add(c.dim)
+        size = shape[dims.index(c.dim)]
+        if c.size != size:
+            raise ValueError(
+                f"{type(c).__name__} has {c.size} entries, but dim {c.dim!r} has "
+                f"size {size}"
+            )
+    return out
+
+
+def _coord_for(coords: tuple[Coordinate, ...], dim: str) -> Coordinate | None:
+    for c in coords:
+        if c.dim == dim:
+            return c
+    return None
 
 
 class _Inherit:
@@ -77,30 +168,56 @@ def _normalize_fill(fill: Any) -> _FillValue:
     raise TypeError(f"fill_value must be a number, a bool or None, got {fill!r}")
 
 
+def _index_in_order(
+    data: Any, key: tuple[Any, ...], dims: tuple[str, ...], kept: tuple[str, ...]
+) -> Any:
+    """``data[key]`` with the axes left in ``kept`` order.
+
+    NumPy (and JAX) move an advanced index's axis to the front when an
+    integer and a list are separated by a slice; applying the basic indices
+    first and the one list after leaves every axis where its dim says.
+    """
+    advanced = [i for i, k in enumerate(key) if _is_advanced(k)]
+    if not advanced:
+        return data[key]
+    (i,) = advanced
+    basic = tuple(slice(None) if j == i else k for j, k in enumerate(key))
+    out = data[basic]
+    axis = kept.index(dims[i])
+    return out[(slice(None),) * axis + (key[i],)]
+
+
+def fill_fits(fill: _FillValue, dtype: Any) -> bool:
+    """Whether ``dtype`` data can hold ``fill`` exactly (``None`` always fits).
+
+    The one rule the constructor and every rewrap share: float and complex
+    data hold any fill, NaN included; bool holds 0 and 1; integers hold whole
+    values in their range.
+    """
+    if fill is None:
+        return True
+    dtype = np.dtype(dtype)
+    if dtype.kind == "b":
+        return fill in (0, 1)
+    if dtype.kind in "iu":
+        info = np.iinfo(dtype.str)
+        return (
+            not (isinstance(fill, float) and not fill.is_integer())
+            and info.min <= fill <= info.max
+        )
+    return True
+
+
 def _check_fill_fits(fill: _FillValue, dtype: Any) -> None:
     """Raise unless ``dtype`` data can hold ``fill`` exactly.
 
     A fill the dtype cannot hold (``-9999.0`` or ``0.5`` in ``uint16``) would
     be written as some other value, which `valid_mask` then reads as data.
-    Float and complex data hold any fill, NaN included.
     """
-    if fill is None:
-        return
-    dtype = np.dtype(dtype)
-    if dtype.kind == "b":
-        fits = fill in (0, 1)
-    elif dtype.kind in "iu":
-        info = np.iinfo(dtype.str)
-        fits = (
-            not (isinstance(fill, float) and not fill.is_integer())
-            and info.min <= fill <= info.max
-        )
-    else:
-        return
-    if not fits:
+    if not fill_fits(fill, dtype):
         raise ValueError(
-            f"fill_value={fill!r} cannot be held by {dtype} data, so filled "
-            f"pixels would read as data: pass a fill {dtype} can hold, or "
+            f"fill_value={fill!r} cannot be held by {np.dtype(dtype)} data, so "
+            "filled pixels would read as data: pass a fill it can hold, or "
             "fill_value=None"
         )
 
@@ -177,12 +294,15 @@ def _require_concrete_spatial(spatial: tuple[Any, ...]) -> None:
 
 
 def _drops_axis(k: Any) -> bool:
-    """Whether index ``k`` removes its axis (an integer does)."""
-    return isinstance(k, int | np.integer)
+    """Whether index ``k`` removes its axis: an integer, or a 0-d integer array."""
+    if isinstance(k, int | np.integer):
+        return True
+    kind = getattr(getattr(k, "dtype", None), "kind", None)
+    return getattr(k, "ndim", None) == 0 and kind in ("i", "u")
 
 
 def _is_advanced(k: Any) -> bool:
-    return not isinstance(k, slice | int | np.integer)
+    return not isinstance(k, slice) and not _drops_axis(k)
 
 
 def _crs_label(crs: pyproj.CRS | None) -> str:
@@ -195,41 +315,72 @@ def _crs_label(crs: pyproj.CRS | None) -> str:
     return repr(crs.name)
 
 
+def _keeps_coord(c: Coordinate, dims: tuple[str, ...], shape: tuple[int, ...]) -> bool:
+    return c.dim in dims and shape[dims.index(c.dim)] == c.size
+
+
+def _drops_band_alone(dims: tuple[str, ...], dropped: set[str]) -> bool:
+    """Dropping ``band`` but keeping ``time`` leaves (T, H, W), which 0.2 code
+    (the geoops kernels, ``axis=-3``) reads as (C, H, W)."""
+    return "band" in dropped and "time" in dims and "time" not in dropped
+
+
+_BAND_ALONE = (
+    "dropping the band dim of a (time, band, y, x) carrier would leave "
+    "(time, y, x), which code reading the band axis as -3 takes for "
+    "(band, y, x); keep a size-1 band ([k] instead of k) until the geoops "
+    "kernels take dim= (W3)"
+)
+
+
 @dataclasses.dataclass(frozen=True, eq=False, repr=False)
 class GeoArray[A: SupportsArray]:
     """A georeferenced array whose data is a NumPy or a JAX array.
 
-    The last two axes are spatial (H, W); a carrier is 2-D to 4-D with dims
-    ``("time", "band", "y", "x")[-ndim:]``, so the band axis is always −3.
+    Every axis has a name (``dims``); the last two are ``("y", "x")``. The
+    first ``transform.ndim - 1`` dims are batch dims, one transform row per
+    item (patches, or frames with their own grids). Non-spatial dims may
+    have a coordinate in ``coords`` (`geoarray.coords`: band names and
+    wavelengths, level values, time stamps).
 
     Args:
-        data: ``(..., H, W)`` array, ``numpy.ndarray`` or ``jax.Array``.
+        data: ``(..., y, x)`` array, ``numpy.ndarray`` or ``jax.Array``.
         transform: The affine transform (a, b, c, d, e, f): an
-            ``affine.Affine``, six numbers, or a ``(6,)`` array. Stored as a
-            ``(6,)`` float64 array on the data's backend.
+            ``affine.Affine``, six numbers, or a ``(6,)`` (or ``(*batch, 6)``)
+            array. Stored as float64 on the data's backend.
         crs: Anything ``pyproj.CRS.from_user_input`` accepts, or ``None``.
         fill_value: The nodata marker (NaN allowed); ``None`` means none.
-        attrs: Metadata, frozen into a hashable `FrozenAttrs`.
+        attrs: Whole-carrier metadata, frozen into a hashable `FrozenAttrs`.
+        dims: One name per axis, ending in ``("y", "x")``, as a tuple or a
+            space-separated string (``"band y x"``). Omitted, they are read
+            from the rank (``DIMS[-ndim:]``) with a ``DeprecationWarning``.
+        coords: Coordinates of non-spatial dims, at most one per dim, each
+            with one entry per index of its dim.
 
     Raises:
-        TypeError: ``data`` is neither a NumPy nor a JAX array.
-        ValueError: ``data`` is not 2-D to 4-D, or ``transform`` / ``crs``
-            cannot be parsed.
+        TypeError: ``data`` is neither a NumPy nor a JAX array, or a
+            ``coords`` entry is not a coordinate.
+        ValueError: ``dims`` do not fit the data (wrong count, repeated,
+            not ending in ``y x``), a coordinate has the wrong size, or
+            ``transform`` / ``crs`` cannot be parsed.
         X64Error: JAX data without ``jax_enable_x64``.
 
     Example:
         >>> import numpy as np
+        >>> from geoarray.coords import SpectralAxis
+        >>> swir = SpectralAxis(names=("B11", "B12"), wavelength_nm=(1610.0, 2190.0))
         >>> scene = GeoArray(
         ...     np.zeros((2, 600, 600), dtype=np.float32),
         ...     (20.0, 0.0, 600000.0, 0.0, -20.0, 3550000.0),
         ...     "EPSG:32613",
         ...     fill_value=np.nan,
-        ...     attrs={"band_names": ["B11", "B12"]},
+        ...     dims=("band", "y", "x"),
+        ...     coords=(swir,),
         ... )
         >>> scene.dims, scene.res
         (('band', 'y', 'x'), (20.0, 20.0))
-        >>> scene.attrs["band_names"]
-        ('B11', 'B12')
+        >>> scene.sel(band="B12").dims
+        ('y', 'x')
     """
 
     data: A
@@ -237,6 +388,9 @@ class GeoArray[A: SupportsArray]:
     crs: pyproj.CRS | None
     fill_value: _FillValue = None
     attrs: FrozenAttrs = dataclasses.field(default_factory=FrozenAttrs)
+    # None reads the dims from the rank (deprecated); stored as a tuple
+    dims: tuple[str, ...] = dataclasses.field(default=cast(Any, None), kw_only=True)
+    coords: tuple[Coordinate, ...] = dataclasses.field(default=(), kw_only=True)
 
     def __post_init__(self) -> None:
         backend = backend_of(self.data)
@@ -248,17 +402,84 @@ class GeoArray[A: SupportsArray]:
                 f"a batched transform {tuple(transform.shape)} needs data with the "
                 f"same leading batch shape {batch}, got data {data_shape}"
             )
-        if not 2 <= len(data_shape) - len(batch) <= 4:
-            raise ValueError(
-                f"a GeoArray is 2-D to 4-D with dims {DIMS}[-ndim:], got shape "
-                f"{data_shape}" + (f" with batch shape {batch}" if batch else "")
+        if self.dims is None:
+            if not 2 <= len(data_shape) - len(batch) <= 4:
+                raise ValueError(
+                    f"a GeoArray is 2-D to 4-D with dims {DIMS}[-ndim:], got shape "
+                    f"{data_shape}"
+                    + (f" with batch shape {batch}" if batch else "")
+                    + "; pass dims= for any other layout"
+                )
+            dims = infer_dims(len(data_shape), len(batch))
+            warnings.warn(
+                _INFER_WARNING.format(dims=dims), DeprecationWarning, stacklevel=3
             )
+        else:
+            dims = _check_dims(self.dims, data_shape, len(batch))
+        object.__setattr__(self, "dims", dims)
+        object.__setattr__(self, "coords", _check_coords(self.coords, dims, data_shape))
         object.__setattr__(self, "transform", transform)
         object.__setattr__(self, "crs", as_crs(self.crs))
         object.__setattr__(self, "fill_value", _normalize_fill(self.fill_value))
         _check_fill_fits(self.fill_value, self.data.dtype)
         if not isinstance(self.attrs, FrozenAttrs):
             object.__setattr__(self, "attrs", FrozenAttrs(self.attrs or {}))
+
+    @classmethod
+    def from_coords(
+        cls,
+        data: Any,
+        *coords: Coordinate | PixelGrid | str,
+        transform: Any,
+        fill_value: Any = None,
+        attrs: Any = None,
+    ) -> GeoArray:
+        """A carrier from its coordinates, one per dim in axis order.
+
+        Each entry describes the next axis or axes: a 1-D axis
+        (`SpectralAxis`, `TimeAxis`, …) one dim, a dim name (``"patch"``) a
+        dim without a coordinate, and the last entry a `PixelGrid`, which
+        gives ``y x``, the CRS and the expected spatial shape. A
+        point-convention grid's transform is shifted to the area convention
+        carriers store (`PixelGrid.area_transform`).
+
+        Raises:
+            TypeError: The last entry is not a `PixelGrid`.
+            ValueError: The data does not fit the coordinates.
+
+        Example:
+            >>> import numpy as np
+            >>> from geoarray.coords import PixelGrid, SpectralAxis, TimeAxis
+            >>> dates = TimeAxis(stamps=["2026-06-01", "2026-06-11"])
+            >>> swir = SpectralAxis(names=("B11", "B12"))
+            >>> grid = PixelGrid(shape=(4, 4), crs="EPSG:32613")
+            >>> t = (20.0, 0.0, 600000.0, 0.0, -20.0, 3550000.0)
+            >>> data = np.zeros((2, 2, 4, 4))
+            >>> g = GeoArray.from_coords(data, dates, swir, grid, transform=t)
+            >>> g.dims
+            ('time', 'band', 'y', 'x')
+        """
+        if not coords or not isinstance(coords[-1], PixelGrid):
+            raise TypeError("from_coords ends with a PixelGrid for the y x dims")
+        grid = coords[-1]
+        leading = coords[:-1]
+        dims = tuple(c if isinstance(c, str) else c.dim for c in leading) + SPATIAL_DIMS
+        if tuple(data.shape[-2:]) != grid.shape:
+            raise ValueError(
+                f"the PixelGrid has shape {grid.shape}, but the data's spatial "
+                f"shape is {tuple(data.shape[-2:])}"
+            )
+        backend = backend_of(data)
+        t = _coerce_transform(transform, backend)
+        return cls(
+            data,
+            grid.area_transform(t),
+            grid.crs,
+            fill_value,
+            attrs,
+            dims=dims,
+            coords=tuple(c for c in leading if not isinstance(c, str)),
+        )
 
     # -- what it is ---------------------------------------------------------
 
@@ -279,7 +500,7 @@ class GeoArray[A: SupportsArray]:
 
     @property
     def ndim(self) -> int:
-        """2, 3 or 4."""
+        """The number of axes (``len(dims)``)."""
         return len(self.data.shape)
 
     @property
@@ -288,19 +509,23 @@ class GeoArray[A: SupportsArray]:
         return self.data.dtype
 
     @property
+    def sizes(self) -> dict[str, int]:
+        """Each dim's size: ``{"band": 2, "y": 600, "x": 600}``."""
+        return dict(zip(self.dims, self.shape, strict=True))
+
+    @property
     def batch_shape(self) -> tuple[int, ...]:
         """Leading batch axes: ``()`` for one scene, ``(P,)`` for P patches.
 
-        A batched carrier (one transform per element, ``(*batch, 6)``) is what
-        ``jax.vmap`` builds and returns; index or ``vmap`` it to get scenes.
+        A batched carrier has one transform per item, ``(*batch, 6)``;
+        `batch_dims` names those axes.
         """
         return tuple(self.transform.shape[:-1])
 
     @property
-    def dims(self) -> tuple[str, ...]:
-        """Axis names, ``("time", "band", "y", "x")[-n:]``, after any batch axes."""
-        n_batch = len(self.batch_shape)
-        return ("batch",) * n_batch + DIMS[-(self.ndim - n_batch) :]
+    def batch_dims(self) -> tuple[str, ...]:
+        """The dims that index transform rows: ``()``, or ``("patch",)``."""
+        return self.dims[: len(self.batch_shape)]
 
     @property
     def height(self) -> int:
@@ -314,8 +539,25 @@ class GeoArray[A: SupportsArray]:
 
     @property
     def count(self) -> int:
-        """The number of bands: ``shape[-3]``, or 1 for a 2-D carrier."""
-        return int(self.data.shape[-3]) if self.ndim - len(self.batch_shape) >= 3 else 1
+        """The number of bands: the size of the ``band`` dim, or 1 without one."""
+        if "band" not in self.dims:
+            return 1
+        return int(self.data.shape[self.dims.index("band")])
+
+    def coord(self, dim: str) -> Coordinate | None:
+        """The coordinate of ``dim``, or ``None``.
+
+        Raises:
+            KeyError: ``dim`` is not one of this carrier's dims.
+        """
+        if dim not in self.dims:
+            raise KeyError(f"{dim!r} is not a dim of {self.dims}")
+        return _coord_for(self.coords, dim)
+
+    def labels(self, dim: str) -> tuple[Any, ...] | None:
+        """The exact labels of ``dim`` (band names, level values), or ``None``."""
+        c = self.coord(dim)
+        return None if c is None else c.labels
 
     # -- where it is --------------------------------------------------------
 
@@ -345,6 +587,11 @@ class GeoArray[A: SupportsArray]:
         )
 
     @property
+    def pixel_grid(self) -> PixelGrid:
+        """The ``y x`` coordinate: shape and CRS, area convention."""
+        return PixelGrid((self.height, self.width), self.crs)
+
+    @property
     def res(self) -> tuple[float, float]:
         """Pixel size ``(x, y)`` in CRS units (see `Grid.res`)."""
         return self.grid.res
@@ -360,20 +607,46 @@ class GeoArray[A: SupportsArray]:
         # Rebuild through the constructor, so a NaN fill is the one
         # ``math.nan`` again and attrs are re-frozen in the new process.
         return (
-            GeoArray,
-            (self.data, self.transform, self.crs, self.fill_value, self.attrs),
+            _restore,
+            (
+                self.data,
+                self.transform,
+                self.crs,
+                self.fill_value,
+                self.attrs,
+                self.dims,
+                self.coords,
+            ),
         )
 
     def replace(self, **changes: Any) -> GeoArray:
-        """A copy with fields replaced (``data``, ``transform``, ``crs``, …).
+        """A copy with fields replaced (``data``, ``transform``, ``dims``, …).
 
         Example:
             >>> import numpy as np
-            >>> g = GeoArray(np.zeros((4, 4)), (1, 0, 0, 0, -1, 0), None)
+            >>> g = GeoArray(np.zeros((4, 4)), (1, 0, 0, 0, -1, 0), None, dims="y x")
             >>> g.replace(fill_value=0).fill_value
             0
         """
         return dataclasses.replace(self, **changes)
+
+    def _dims_for(self, data: Any, transform: Any) -> tuple[str, ...]:
+        """Dims for new data when none are given: ours, or a guess with a warning."""
+        ndim = len(data.shape)
+        if ndim == self.ndim:
+            return self.dims
+        n_batch = max(len(getattr(transform, "shape", (6,))) - 1, 0)
+        if ndim < self.ndim and n_batch == len(self.batch_shape) == 0:
+            # fewer axes: the leading dims went (a reduction keeping y x)
+            return self.dims[self.ndim - ndim :]
+        dims = infer_dims(ndim, n_batch)
+        warnings.warn(
+            f"with_data could not tell the new dims from {self.dims}; reading "
+            f"them from the rank as {dims} is deprecated: pass dims=",
+            DeprecationWarning,
+            stacklevel=4,
+        )
+        return dims
 
     def with_data(
         self,
@@ -382,6 +655,8 @@ class GeoArray[A: SupportsArray]:
         transform: Any = None,
         fill_value: Any = INHERIT,
         attrs: Any = None,
+        dims: Any = None,
+        coords: Any = INHERIT,
     ) -> GeoArray:
         """A carrier with new data on this carrier's grid (or ``transform``).
 
@@ -392,6 +667,10 @@ class GeoArray[A: SupportsArray]:
             fill_value: The new fill; omitted keeps this carrier's.
             attrs: New attrs; omitted keeps this carrier's, without the
                 per-band keys when the band count changed.
+            dims: The new data's dims; omitted keeps this carrier's when the
+                rank is unchanged, and drops leading dims when it fell.
+            coords: New coordinates; omitted keeps each of this carrier's
+                whose dim survives with the same size.
 
         Raises:
             ValueError: The spatial shape changed and no ``transform`` was
@@ -399,7 +678,8 @@ class GeoArray[A: SupportsArray]:
 
         Example:
             >>> import numpy as np
-            >>> g = GeoArray(np.ones((2, 4, 4)), (1, 0, 0, 0, -1, 0), None)
+            >>> t = (1, 0, 0, 0, -1, 0)
+            >>> g = GeoArray(np.ones((2, 4, 4)), t, None, dims="band y x")
             >>> g.with_data(np.zeros((1, 4, 4), dtype=bool), fill_value=False).shape
             (1, 4, 4)
         """
@@ -410,12 +690,24 @@ class GeoArray[A: SupportsArray]:
                     f"{tuple(data.shape[-2:])}: pass transform= for data on a new grid"
                 )
             transform = self.transform
+        new_dims = self._dims_for(data, transform) if dims is None else dims
+        if isinstance(new_dims, str):
+            new_dims = tuple(new_dims.split())
+        shape = tuple(data.shape)
+        if coords is INHERIT:
+            coords = tuple(
+                c
+                for c in self.coords
+                if len(new_dims) == len(shape) and _keeps_coord(c, new_dims, shape)
+            )
         if attrs is None:
             attrs = self.attrs
-            batch_ndim = max(len(getattr(transform, "shape", (6,))) - 1, 0)
-            element_ndim = len(data.shape) - batch_ndim
-            count = int(data.shape[-3]) if element_ndim >= 3 else 1
-            if count != self.count:
+            band = (
+                shape[new_dims.index("band")]
+                if "band" in new_dims and len(new_dims) == len(shape)
+                else 1
+            )
+            if band != self.count:
                 attrs = drop_band_keys(attrs)
         return GeoArray(
             data,
@@ -423,6 +715,8 @@ class GeoArray[A: SupportsArray]:
             self.crs,
             self.fill_value if fill_value is INHERIT else fill_value,
             attrs,
+            dims=new_dims,
+            coords=coords,
         )
 
     def with_attrs(self, **items: Any) -> GeoArray:
@@ -447,7 +741,8 @@ class GeoArray[A: SupportsArray]:
 
         Example:
             >>> import numpy as np
-            >>> g = GeoArray(np.ones((4, 4)), (1, 0, 0, 0, -1, 0), None, np.nan)
+            >>> t = (1, 0, 0, 0, -1, 0)
+            >>> g = GeoArray(np.ones((4, 4)), t, None, np.nan, dims="y x")
             >>> g.astype(np.uint8, fill_value=255).fill_value
             255
         """
@@ -465,7 +760,8 @@ class GeoArray[A: SupportsArray]:
 
         Example:
             >>> import numpy as np
-            >>> g = GeoArray(np.full((2, 2), 9.0), (1, 0, 0, 0, -1, 0), None)
+            >>> t = (1, 0, 0, 0, -1, 0)
+            >>> g = GeoArray(np.full((2, 2), 9.0), t, None, dims="y x")
             >>> g.map(np.sqrt).data[0, 0]
             np.float64(3.0)
         """
@@ -484,20 +780,25 @@ class GeoArray[A: SupportsArray]:
         """Index like NumPy; spatial slices move the transform.
 
         The last two (spatial) axes take slices with positive steps only;
-        the leading axes (batch, time, band) take anything NumPy indexing
-        allows, with at most one list / array index. Indexing the band
-        axis selects the per-band attrs too.
+        the leading axes take anything NumPy indexing allows, with at most
+        one list / array index. An integer drops its dim and that dim's
+        coordinate; other indices slice the coordinate with the data, and
+        indexing the band dim selects the per-band attrs too.
 
         Example:
             >>> import numpy as np
             >>> g = GeoArray(
             ...     np.zeros((3, 8, 8)), (20, 0, 600000, 0, -20, 3550000), 32613,
-            ...     attrs={"band_names": ["B04", "B08", "B11"]},
+            ...     attrs={"band_names": ["B04", "B08", "B11"]}, dims="band y x",
             ... )
             >>> sub = g[1:, 2:6, ::2]
             >>> sub.shape, sub.res, sub.attrs["band_names"]
             ((2, 4, 4), (40.0, 20.0), ('B08', 'B11'))
         """
+        return self._index(key, guard_band=True)
+
+    def _index(self, key: Any, *, guard_band: bool) -> GeoArray:
+        """``g[key]``; ``guard_band`` refuses dropping ``band`` alone (positional)."""
         ndim = self.ndim
         key = _expand_key(key, ndim)
         _require_concrete_spatial(key[-2:])
@@ -515,11 +816,9 @@ class GeoArray[A: SupportsArray]:
         leading = key[:-2]
         if sum(_is_advanced(k) for k in leading) > 1:
             raise IndexError("at most one list / array index on the leading axes")
-        if (
-            ndim - n_batch == 4
-            and _drops_axis(leading[-1])
-            and not _drops_axis(leading[-2])
-        ):
+        dims = self.dims
+        dropped = {d for d, k in zip(dims, key, strict=True) if _drops_axis(k)}
+        if guard_band and _drops_band_alone(dims, dropped):
             raise IndexError(
                 "an integer band index on a (T, C, H, W) carrier would leave "
                 "(T, H, W), which reads as (C, H, W); index with [k] to keep a "
@@ -527,40 +826,109 @@ class GeoArray[A: SupportsArray]:
             )
         transform = self.transform[key[:n_batch]] if n_batch else self.transform
         attrs = self.attrs
-        if ndim - n_batch >= 3:
-            band_key = leading[-1]
-            if not (isinstance(band_key, slice) and band_key == slice(None)):
-                attrs = select_bands(attrs, band_key, self.count)
+        coords = []
+        for d, k in zip(dims[:-2], leading, strict=True):
+            c = _coord_for(self.coords, d)
+            full = isinstance(k, slice) and k == slice(None)
+            if d == "band" and not full:
+                attrs = select_bands(attrs, k, self.count)
+            if c is None or d in dropped:
+                continue
+            if not full and is_tracer(k):
+                raise GeoArrayTraceError(
+                    f"an index on {d!r} must be concrete: its coordinate is static, "
+                    "so the selection must be known when tracing; index g.data "
+                    "instead, or select outside jit"
+                )
+            coords.append(c if full else c.isel(k))
+        new_dims = tuple(d for d in dims if d not in dropped)
         return GeoArray(
-            self.data[key],
+            _index_in_order(self.data, key, dims, new_dims),
             shift_scale_transform(transform, r0, c0, row_step, col_step),
             self.crs,
             self.fill_value,
             attrs,
+            dims=new_dims,
+            coords=tuple(coords),
         )
 
     def isel(self, selection: dict[str, Any] | None = None, **by_dim: Any) -> GeoArray:
         """Index by dim name: ``g.isel(band=[0, 2], y=slice(0, 100))``.
 
-        Names are those of `dims` (``time``, ``band``, ``y``, ``x``); the
-        rules of ``g[...]`` apply.
+        The rules of ``g[...]`` apply: ``y`` and ``x`` take positive-step
+        slices and move the origin; other dims take ints, slices or
+        positions, and slice their coordinate. By name, an integer may drop
+        ``band`` from ``(time, band, y, x)``: the stored dims say what is
+        left.
 
         Raises:
             KeyError: A name is not one of this carrier's dims.
 
         Example:
             >>> import numpy as np
-            >>> g = GeoArray(np.zeros((3, 8, 8)), (20, 0, 0, 0, -20, 0), 32613)
+            >>> t = (20, 0, 0, 0, -20, 0)
+            >>> g = GeoArray(np.zeros((3, 8, 8)), t, 32613, dims="band y x")
             >>> g.isel(band=0, x=slice(0, 4)).shape
             (8, 4)
         """
         wanted = {**(selection or {}), **by_dim}
         dims = self.dims
         unknown = set(wanted) - set(dims)
-        if unknown or "batch" in wanted:
-            bad = sorted(unknown | ({"batch"} & set(wanted)))
-            raise KeyError(f"cannot select {bad}; dims are {dims}")
-        return self[tuple(wanted.get(name, slice(None)) for name in dims)]
+        if unknown:
+            raise KeyError(f"cannot select {sorted(unknown)}; dims are {dims}")
+        # by name, the result's dims say what is left: no 0.2 band guard
+        key = tuple(wanted.get(name, slice(None)) for name in dims)
+        return self._index(key, guard_band=False)
+
+    def sel(self, selection: dict[str, Any] | None = None, **by_dim: Any) -> GeoArray:
+        """Select by exact label: ``g.sel(band="B12")``, ``g.sel(band=["B8", "B4"])``.
+
+        One label drops its dim; a list keeps it. Labels come from the dim's
+        coordinate (`labels`).
+
+        Raises:
+            LabelError: The dim has no labels or is spatial, a label is
+                missing, or the value is a range (a ``slice``): selection by
+                value lives in xarray (``to_xarray()``).
+            KeyError: A name is not one of this carrier's dims.
+
+        Example:
+            >>> import numpy as np
+            >>> from geoarray.coords import SpectralAxis
+            >>> bands = SpectralAxis(names=("B4", "B8"))
+            >>> g = GeoArray(np.zeros((2, 4, 4)), (20, 0, 0, 0, -20, 0), 32613,
+            ...              dims="band y x", coords=(bands,))
+            >>> g.sel(band="B8").dims
+            ('y', 'x')
+        """
+        wanted = {**(selection or {}), **by_dim}
+        indexers: dict[str, Any] = {}
+        for dim, value in wanted.items():
+            labels = self.labels(dim) if dim not in SPATIAL_DIMS else None
+            if labels is None:
+                raise LabelError(
+                    f"sel: dim {dim!r} has no labels; use isel, or select by value "
+                    "in xarray (g.to_xarray().sel(...))"
+                )
+            if isinstance(value, slice):
+                raise LabelError(
+                    f"sel: {dim}={value} is a range; GeoArray.sel takes exact labels "
+                    "only: select by value in xarray (g.to_xarray().sel(...))"
+                )
+            position = {label: i for i, label in enumerate(labels)}
+            many = isinstance(value, list) or getattr(value, "ndim", 0) == 1
+            picked = (
+                list(value.tolist() if hasattr(value, "tolist") else value)
+                if many
+                else [value]
+            )
+            for label in picked:
+                if label not in position:
+                    raise LabelError(
+                        f"sel: {label!r} is not a label of {dim!r}: {labels}"
+                    )
+            indexers[dim] = [position[v] for v in picked] if many else position[value]
+        return self.isel(indexers)
 
     def shift_origin(self, delta: Any) -> GeoArray:
         """Move the grid by ``delta = (Δx, Δy)`` in CRS units: c + Δx, f + Δy.
@@ -570,7 +938,8 @@ class GeoArray[A: SupportsArray]:
 
         Example:
             >>> import numpy as np
-            >>> g = GeoArray(np.zeros((2, 2)), (20, 0, 600000, 0, -20, 3550000), 32613)
+            >>> t = (20, 0, 600000, 0, -20, 3550000)
+            >>> g = GeoArray(np.zeros((2, 2)), t, 32613, dims="y x")
             >>> g.shift_origin((7.3, 0.0)).transform[2]
             np.float64(600007.3)
         """
@@ -596,35 +965,40 @@ class GeoArray[A: SupportsArray]:
         too: ``(T, H, W)`` would read as ``(C, H, W)``.
 
         Raises:
-            ValueError: ``axis`` names a spatial axis.
+            ValueError: ``axis`` names a spatial or batch axis.
         """
         n_batch = len(self.batch_shape)
         leading = range(n_batch, self.ndim - 2)
-        band = self.ndim - 3
-        time = self.ndim - 4
-        keeps_time = self.ndim - n_batch == 4
+        dims = self.dims
         if axis is None:
             axes = tuple(i for i in leading if self.data.shape[i] == 1)
-            if keeps_time and band in axes and time not in axes:
-                axes = tuple(i for i in axes if i != band)
+            names = {dims[i] for i in axes}
+            if _drops_band_alone(dims, names):
+                axes = tuple(i for i in axes if dims[i] != "band")
         else:
             requested = (axis,) if isinstance(axis, int) else tuple(axis)
             axes = tuple(i + self.ndim if i < 0 else i for i in requested)
             if any(i not in leading for i in axes):
                 raise ValueError(f"squeeze: {axis} is not a leading, non-batch axis")
-            if keeps_time and band in axes and time not in axes:
+            if _drops_band_alone(dims, {dims[i] for i in axes}):
                 raise ValueError(
                     "squeeze: dropping the band axis of (T, 1, H, W) would leave "
                     "(T, H, W), which reads as (C, H, W)"
                 )
-        return self.with_data(self.xp.squeeze(self.data, axis=axes))
+        kept = tuple(d for i, d in enumerate(dims) if i not in axes)
+        return self.with_data(self.xp.squeeze(self.data, axis=axes), dims=kept)
 
-    def expand_dims(self, axis: int) -> GeoArray:
-        """Insert a size-1 leading axis at ``axis``; the result stays ≤ 4-D.
+    def expand_dims(self, axis: int, dim: str | None = None) -> GeoArray:
+        """Insert a size-1 leading axis at ``axis``, named ``dim``.
+
+        Args:
+            axis: Where the new axis goes, before the spatial axes.
+            dim: Its name. Omitted, it is the name the 0.2 layout gives that
+                position (``DIMS[-ndim:]``), with a ``DeprecationWarning``.
 
         Raises:
-            ValueError: ``axis`` is not before the spatial axes, or the
-                result would be 5-D.
+            ValueError: ``axis`` is not before the spatial axes, or the name
+                is taken.
         """
         ndim = self.ndim + 1
         position = axis + ndim if axis < 0 else axis
@@ -633,24 +1007,40 @@ class GeoArray[A: SupportsArray]:
             raise ValueError(
                 f"expand_dims: axis {axis} must come before the spatial axes"
             )
-        return self.with_data(self.xp.expand_dims(self.data, axis=position))
+        if dim is None:
+            if ndim - n_batch > 4:
+                raise ValueError(
+                    f"expand_dims: a {ndim}-D result needs a name: pass dim="
+                )
+            dim = infer_dims(ndim, n_batch)[position]
+            warnings.warn(
+                f"expand_dims without dim= names the new axis {dim!r} from the "
+                "rank; this is deprecated: pass dim=",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if dim in self.dims:
+            raise ValueError(f"expand_dims: {dim!r} is already a dim of {self.dims}")
+        dims = (*self.dims[:position], dim, *self.dims[position:])
+        return self.with_data(self.xp.expand_dims(self.data, axis=position), dims=dims)
 
     # -- nodata ----------------------------------------------------------------
 
     def valid_mask(self, *, keep_time: bool = False) -> Any:
         """Which pixels hold data: ``(H, W)`` booleans, True where valid.
 
-        A pixel is valid when every band there is finite and differs from
-        the fill value (a NaN fill matches NaN). The leading axes collapse;
-        ``keep_time=True`` keeps a 4-D carrier's time axis, ``(T, H, W)``.
-        Batch axes are kept. Works inside ``jit``.
+        A pixel is valid when every entry there (over the non-batch,
+        non-spatial dims) is finite and differs from the fill value (a NaN
+        fill matches NaN). ``keep_time=True`` keeps a ``time`` dim,
+        ``(T, H, W)``. Batch axes are kept. Works inside ``jit``.
 
         v_ij = ∧ₖ [isfinite(x_kij) ∧ x_kij ≠ φ]
 
         Example:
             >>> import numpy as np
             >>> data = np.array([[[1.0, np.nan]], [[2.0, 3.0]]])
-            >>> GeoArray(data, (1, 0, 0, 0, -1, 0), None, np.nan).valid_mask().tolist()
+            >>> g = GeoArray(data, (1, 0, 0, 0, -1, 0), None, np.nan, dims="band y x")
+            >>> g.valid_mask().tolist()
             [[True, False]]
         """
         xp = self.xp
@@ -661,11 +1051,11 @@ class GeoArray[A: SupportsArray]:
         if fill is not None and not (isinstance(fill, float) and math.isnan(fill)):
             invalid = invalid | (data == fill)
         n_batch = len(self.batch_shape)
-        element_ndim = self.ndim - n_batch
-        if element_ndim == 4 and keep_time:
-            axes: tuple[int, ...] = (n_batch + 1,)
-        else:
-            axes = tuple(range(n_batch, self.ndim - 2))
+        axes = tuple(
+            i
+            for i in range(n_batch, self.ndim - 2)
+            if not (keep_time and self.dims[i] == "time")
+        )
         return ~invalid.any(axis=axes) if axes else ~invalid
 
     # -- RasterSource ----------------------------------------------------------
@@ -679,7 +1069,8 @@ class GeoArray[A: SupportsArray]:
         Example:
             >>> import numpy as np
             >>> from geoarray import PixelWindow
-            >>> g = GeoArray(np.ones((4, 4)), (20, 0, 0, 0, -20, 0), 32613, 0.0)
+            >>> t = (20, 0, 0, 0, -20, 0)
+            >>> g = GeoArray(np.ones((4, 4)), t, 32613, 0.0, dims="y x")
             >>> window = PixelWindow(col_off=2, row_off=2, width=4, height=4)
             >>> g.read_window(window).shape
             (4, 4)
@@ -709,7 +1100,7 @@ class GeoArray[A: SupportsArray]:
             >>> import numpy as np
             >>> jax.config.update("jax_enable_x64", True)
             >>> data = np.zeros((4, 4), np.float32)
-            >>> g = GeoArray(data, (1, 0, 0, 0, -1, 0), None).to_jax()
+            >>> g = GeoArray(data, (1, 0, 0, 0, -1, 0), None, dims="y x").to_jax()
             >>> g.backend, str(g.dtype), str(g.transform.dtype)
             ('jax', 'float32', 'float64')
         """
@@ -719,7 +1110,15 @@ class GeoArray[A: SupportsArray]:
             return self
         data = jax.device_put(self.data, device)
         transform = jax.device_put(self.transform, device)
-        return GeoArray(data, transform, self.crs, self.fill_value, self.attrs)
+        return GeoArray(
+            data,
+            transform,
+            self.crs,
+            self.fill_value,
+            self.attrs,
+            dims=self.dims,
+            coords=self.coords,
+        )
 
     def to_numpy(self) -> GeoArray:
         """This carrier with data and transform copied to NumPy on the host.
@@ -740,6 +1139,8 @@ class GeoArray[A: SupportsArray]:
             self.crs,
             self.fill_value,
             self.attrs,
+            dims=self.dims,
+            coords=self.coords,
         )
 
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
@@ -785,13 +1186,14 @@ class GeoArray[A: SupportsArray]:
     # -- comparison and display ----------------------------------------------
 
     def identical(self, other: object) -> bool:
-        """Equal data (NaN-aware), transform, CRS, fill value and attrs.
+        """Equal data (NaN-aware), transform, dims, coords, CRS, fill and attrs.
 
         Both carriers must be concrete; the backends may differ.
 
         Example:
             >>> import numpy as np
-            >>> g = GeoArray(np.zeros((2, 2)), (1, 0, 0, 0, -1, 0), "EPSG:4326")
+            >>> t = (1, 0, 0, 0, -1, 0)
+            >>> g = GeoArray(np.zeros((2, 2)), t, "EPSG:4326", dims="y x")
             >>> g.identical(g.with_data(np.zeros((2, 2))))
             True
         """
@@ -812,6 +1214,8 @@ class GeoArray[A: SupportsArray]:
                 )
             )
             and bool(np.array_equal(mine.transform, theirs.transform))
+            and mine.dims == theirs.dims
+            and mine.coords == theirs.coords
             and mine.crs == theirs.crs
             and fill_equal
             and mine.attrs == theirs.attrs
@@ -819,37 +1223,73 @@ class GeoArray[A: SupportsArray]:
 
     def __repr__(self) -> str:
         head = f"{self.backend} {self.dtype} {self.shape}"
-        if is_tracer(self.data) or is_tracer(self.transform):
-            where = "traced"
+        if is_tracer(self.data) or is_tracer(self.transform) or self.batch_shape:
+            where = "traced" if not self.batch_shape else f"batch={self.batch_shape}"
         else:
             grid = self.grid
             where = f"res={grid.res}, bounds={grid.bounds}"
         keys = tuple(self.attrs)
         return (
             f"GeoArray({head}, crs={_crs_label(self.crs)}, {where}, "
-            f"fill_value={self.fill_value!r}, attrs={keys})"
+            f"fill_value={self.fill_value!r}, attrs={keys}, dims={self.dims})"
         )
 
 
-# -- JAX pytree ---------------------------------------------------------------
+def _restore(
+    data: Any,
+    transform: Any,
+    crs: Any,
+    fill_value: Any,
+    attrs: Any,
+    dims: tuple[str, ...],
+    coords: tuple[Coordinate, ...],
+) -> GeoArray:
+    """Unpickle through the constructor (``GeoArray.__reduce__``)."""
+    return GeoArray(data, transform, crs, fill_value, attrs, dims=dims, coords=coords)
 
 
-def _flatten(g: GeoArray) -> tuple[tuple[Any, Any], tuple[Any, Any, Any]]:
-    return (g.data, g.transform), (g.crs, g.fill_value, g.attrs)
+def build(
+    data: Any,
+    transform: Any,
+    crs: Any,
+    fill_value: Any,
+    attrs: FrozenAttrs,
+    dims: tuple[str, ...],
+    coords: tuple[Coordinate, ...],
+) -> GeoArray:
+    """A carrier from already-valid fields, without validation.
 
-
-def _unflatten(aux: tuple[Any, Any, Any], leaves: Any) -> GeoArray:
-    # Never validate: JAX unflattens with placeholder leaves (None, object(),
-    # ShapeDtypeStruct) while tracing, and a shape check would fail on them.
+    For pytree unflattening and the adapter's rewraps, which run under a
+    trace and on the hot path of every kernel call.
+    """
     g = object.__new__(GeoArray)
-    data, transform = leaves
-    crs, fill_value, attrs = aux
     object.__setattr__(g, "data", data)
     object.__setattr__(g, "transform", transform)
     object.__setattr__(g, "crs", crs)
     object.__setattr__(g, "fill_value", fill_value)
     object.__setattr__(g, "attrs", attrs)
+    object.__setattr__(g, "dims", dims)
+    object.__setattr__(g, "coords", coords)
     return g
+
+
+# -- JAX pytree ---------------------------------------------------------------
+
+
+def _flatten(g: GeoArray) -> tuple[tuple[Any, Any], tuple[Any, ...]]:
+    return (g.data, g.transform), (g.crs, g.fill_value, g.attrs, g.dims, g.coords)
+
+
+def _unflatten(aux: tuple[Any, ...], leaves: Any) -> GeoArray:
+    # Never validate: JAX unflattens with placeholder leaves (None, object(),
+    # ShapeDtypeStruct) while tracing, and a shape check would fail on them.
+    # A bare jax.vmap maps leaves but not the static dims: match them.
+    data, transform = leaves
+    crs, fill_value, attrs, dims, coords = aux
+    matched = vmapped_dims(dims, getattr(data, "shape", None))
+    if matched != dims:
+        coords = tuple(c for c in coords if c.dim in matched)
+    return build(data, transform, crs, fill_value, attrs, matched, coords)
 
 
 def _register_pytree() -> bool:

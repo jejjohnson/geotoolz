@@ -1270,9 +1270,10 @@ def test_mosaic_builds_frame_without_spatial_mosaic_and_handles_no_fill(
         )
         return left, right
 
+    pair = _pair(-9999)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        out = gz.geom.Mosaic(method="mean", resampling="nearest")(_pair(-9999))
+        out = gz.geom.Mosaic(method="mean", resampling="nearest")(pair)
     values = np.asarray(out)[0]
     assert out.shape == (1, 5, 6)
     assert affine_of(out) == Affine(1, 0, 10, 0, -1, 20)

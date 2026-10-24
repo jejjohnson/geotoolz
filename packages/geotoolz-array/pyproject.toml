@@ -27,6 +27,11 @@ dependencies = [
     # `Grid.affine` / `Grid.from_affine`: the Affine type rasterio and
     # georeader use, without importing either.
     "affine>=2.4",
+    # The named-array adapter registry (pipekit core, pure Python) and the
+    # dim-level functions geoarray re-exports (pipekit-array: pipekit only).
+    # Bump to the W1 releases (pipekit 0.2.0, pipekit-array 0.1.0) when cut.
+    "pipekit>=0.1.1",
+    "pipekit-array>=0.0.3",
 ]
 
 [project.optional-dependencies]
