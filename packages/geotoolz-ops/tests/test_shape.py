@@ -141,3 +141,22 @@ def test_single_band() -> None:
     assert single_band(np.zeros((1, 4, 4))).shape == (4, 4)
     with pytest.raises(ValueError, match="Otsu expects a single-band map"):
         single_band(np.zeros((2, 4, 4)), name="Otsu")
+
+
+def test_map_frames_keeps_the_time_coordinate() -> None:
+    """Codex #546: frames come back in order, so their time labels do too."""
+    from geoarray.coords import TimeAxis
+
+    from geoops import qa
+
+    stamps = TimeAxis(np.array(["2026-01-01", "2026-01-11"], dtype="datetime64[ns]"))
+    x = GeoArray(
+        np.ones((2, 1, 3, 3), dtype=np.float32),
+        (10.0, 0.0, 0.0, 0.0, -10.0, 30.0),
+        "EPSG:32631",
+        fill_value=np.nan,
+        dims="time band y x",
+        coords=(stamps,),
+    )
+    out = qa.MaskInvalid()(x)
+    assert out.coord("time") == stamps

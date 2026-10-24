@@ -1149,3 +1149,22 @@ def test_cache_round_trip_keeps_stored_dims_and_coords() -> None:
     payload["meta"].pop("coords")
     old = cache_module._decode_carrier(payload)
     assert old.dims == ("time", "band", "y", "x") and old.coords == ()
+
+
+def test_coordinate_bearing_geoarray_survives_the_disk_cache(tmp_path) -> None:
+    """Codex #546: the loader reads a GeoArray's coords from meta, not arrays."""
+    from geoarray.coords import SpectralAxis
+
+    g = GeoArray(
+        np.ones((2, 4, 4), dtype="float32"),
+        from_origin(0, 40, 10, 10),
+        "EPSG:32629",
+        dims=("band", "y", "x"),
+        coords=(SpectralAxis(names=("B3", "B4")),),
+    )
+    cache = PatchCache(tmp_path)
+    cache.put("f", "c", (0, 0), Patch(data=g, anchor=(0, 0), indices=None))
+    payload = cache.get("f", "c", (0, 0))
+    assert payload is not None  # not deleted as an "unusable" entry
+    got = cache.build_patch(payload, (0, 0), None).data
+    assert got.coords == g.coords
