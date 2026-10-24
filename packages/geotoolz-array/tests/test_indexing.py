@@ -237,3 +237,16 @@ def test_int_and_list_separated_by_a_slice_keep_dim_order() -> None:
     assert out.dims == ("time", "band", "y", "x")
     assert out.shape == (3, 2, 2, 2)
     np.testing.assert_array_equal(out.data, data[0][:, [0, 2]])
+
+
+def test_a_0d_integer_array_drops_its_dim() -> None:
+    """Codex #546: ``np.array(1)`` indexes like ``1``."""
+    g = GeoArray(
+        np.arange(2 * 2 * 2, dtype=float).reshape(2, 2, 2),
+        (20.0, 0.0, 0.0, 0.0, -20.0, 0.0),
+        32613,
+        dims="band y x",
+    )
+    out = g.isel(band=np.array(1))
+    assert out.dims == ("y", "x")
+    np.testing.assert_array_equal(out.data, g.data[1])
