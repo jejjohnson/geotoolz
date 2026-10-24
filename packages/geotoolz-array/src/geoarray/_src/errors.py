@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 
-__all__ = ["GeoArrayError", "GeoArrayTraceError", "GridMismatchError", "X64Error"]
+__all__ = [
+    "GeoArrayError",
+    "GeoArrayTraceError",
+    "GridMismatchError",
+    "LabelError",
+    "X64Error",
+]
 
 
 class GeoArrayError(Exception):
@@ -36,3 +42,17 @@ class GridMismatchError(GeoArrayError, ValueError):
     batch shape and (when concrete) an exactly equal transform. Resample
     one carrier onto the other's grid first (``geoops.functional``).
     """
+
+
+class LabelError(GeoArrayError, KeyError):
+    """A selection by label that a carrier cannot do.
+
+    `GeoArray.sel` looks up exact labels of a dim's coordinate (band names,
+    level values, time stamps). A dim without labels, a label that is not
+    there, or a range or nearest-neighbour lookup raises this; selection by
+    value lives in xarray (``g.to_xarray().sel(...)``).
+    """
+
+    def __str__(self) -> str:
+        # KeyError quotes its message; show it as written
+        return str(self.args[0]) if self.args else ""

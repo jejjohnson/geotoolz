@@ -26,7 +26,7 @@ from typing import Any
 import numpy as np
 from affine import Affine
 
-from geoarray._src.array import GeoArray, _normalize_fill
+from geoarray._src.array import GeoArray, _normalize_fill, infer_dims
 from geoarray._src.attrs import FrozenAttrs
 from geoarray._src.grid import Grid, PixelWindow, crs_string
 from geoarray._src.source import RasterSource
@@ -84,12 +84,15 @@ def from_georeader(gt: Any) -> GeoArray:
         raise TypeError(
             f"from_georeader takes a GeoTensor, got {type(gt).__name__}{hint}"
         )
+    values = np.asarray(gt.values)
     return GeoArray(
-        np.asarray(gt.values),
+        values,
         gt.transform,
         gt.crs,
         fill_value=gt.fill_value_default,
         attrs=FrozenAttrs(dict(gt.attrs or {})),
+        # georeader's layout is the 0.2 one: ("time", "band", "y", "x")[-ndim:]
+        dims=infer_dims(values.ndim, 0),
     )
 
 

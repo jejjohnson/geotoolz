@@ -23,7 +23,7 @@ person will find and reuse it.
 | `geotoolz-catalog` | `geocatalog` | Find, index, join, load and stage files (`GeoSlice` queries, GeoParquet) | geopandas / pyarrow; `[patch]` → geotoolz-patcher; `[cloud]` → geotoolz-cloud |
 | `geotoolz-cloud` | `geocloud` | Object storage: the one obstore client pool, file verbs, credentials, async COG reads | geotoolz-array, obstore, georeader (engine) |
 | `geotoolz-products` | `geoproducts` | Readers for EO products (GOES, Himawari, CarbonMapper, …), each a `geoarray.RasterSource` that reads `GeoArray`s | geotoolz-array, georeader (engine); `[goes]` / `[himawari]` → geotoolz-cloud; `[operators]` → geotoolz-ops |
-| `geotoolz-array` | `geoarray` | `GeoArray`, the NumPy/JAX carrier every package takes and returns; `Grid` / `PixelWindow` geometry; the `RasterSource` protocol lazy readers implement; the georeader bridge (`geoarray.interop.georeader`) | numpy, pyproj, affine; `[jax]`, `[georeader]`, `[vector]` |
+| `geotoolz-array` | `geoarray` | `GeoArray`, the NumPy/JAX carrier every package takes and returns; `Grid` / `PixelWindow` geometry; the `RasterSource` protocol lazy readers implement; the georeader bridge (`geoarray.interop.georeader`) | numpy, pyproj, affine, pipekit, pipekit-array; `[jax]`, `[georeader]`, `[vector]` |
 
 Dependencies point one way and every cross-package link is an optional extra
 (geoarray, the bottom of the workspace, is the one base dependency they share):

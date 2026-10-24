@@ -82,7 +82,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
 from affine import Affine
-from geoarray import FrozenAttrs, GeoArray, Grid, PixelWindow
+from geoarray import DIMS, FrozenAttrs, GeoArray, Grid, PixelWindow
 
 from geocloud._src.aio import _run_coroutine_safely
 from geocloud._src.extras import missing_extra
@@ -853,6 +853,7 @@ class CogSource:
                     self.domain.crs,
                     fill_value=fill,
                     attrs=attrs,
+                    dims=DIMS[-values.ndim :],
                 )
             )
         return results

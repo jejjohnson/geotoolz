@@ -34,7 +34,7 @@ import dataclasses
 import hashlib
 import math
 from collections.abc import Sequence
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, cast, runtime_checkable
 
 import numpy as np
 import pyproj
@@ -506,3 +506,45 @@ class PointAxis:
             raise ValueError(f"PointAxis size is non-negative, got {self.size}")
         object.__setattr__(self, "size", int(self.size))
         object.__setattr__(self, "crs", as_crs(self.crs))
+
+
+def _joined(parts: Sequence[Any], field: str) -> Any:
+    values = [getattr(p, field) for p in parts]
+    if any(v is None for v in values):
+        return None
+    return tuple(item for v in values for item in v)
+
+
+def concat_coords(parts: Sequence[Coordinate | None]) -> Coordinate | None:
+    """One coordinate for carriers joined along its dim, or ``None``.
+
+    Every part must have a coordinate of one type; fields some part lacks
+    (a wavelength list) are dropped. ``None`` when a part has none.
+
+    Raises:
+        ValueError: The parts are of different types, `VerticalAxis` parts
+            measure different things, or the joined names repeat.
+    """
+    if not parts or any(p is None for p in parts):
+        return None
+    kinds = {type(p) for p in parts}
+    if len(kinds) > 1:
+        names = sorted(k.__name__ for k in kinds)
+        raise ValueError(f"cannot join coordinates of different types: {names}")
+    first = parts[0]
+    if isinstance(first, SpectralAxis):
+        return SpectralAxis(
+            _joined(parts, "names"),
+            _joined(parts, "wavelength_nm"),
+            _joined(parts, "fwhm_nm"),
+        )
+    if isinstance(first, VariableAxis):
+        return VariableAxis(_joined(parts, "names"), _joined(parts, "units"))
+    if isinstance(first, VerticalAxis):
+        verticals = {cast(VerticalAxis, p).vertical for p in parts}
+        if len(verticals) > 1:
+            raise ValueError(f"cannot join levels of different verticals: {verticals}")
+        return VerticalAxis(_joined(parts, "values"), first.vertical)
+    if isinstance(first, TimeAxis):
+        return TimeAxis(np.concatenate([cast(TimeAxis, p).stamps for p in parts]))
+    return None

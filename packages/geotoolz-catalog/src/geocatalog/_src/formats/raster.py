@@ -26,7 +26,7 @@ import pandas as pd
 import pyproj
 import rasterio
 import shapely.geometry
-from geoarray import GeoArray
+from geoarray import DIMS, GeoArray
 from loguru import logger as log
 from rasterio.enums import Resampling
 from rasterio.merge import merge as rio_merge
@@ -685,6 +685,7 @@ def load_raster(
         transform,
         slice_.crs,
         fill_value=out_nodata if out_nodata is not None else 0,
+        dims=DIMS[-merged.ndim :],
     )
 
 

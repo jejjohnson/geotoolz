@@ -5,9 +5,19 @@ fill value and hashable attrs. It is a JAX pytree whose leaves are the data
 and a float64 transform, so ``jit`` reuses compiled code across scenes and
 ``grad`` reaches the georeferencing.
 
-- `GeoArray` — the carrier: dims ``("time", "band", "y", "x")[-ndim:]``,
-  `GeoArray.grid`, `GeoArray.to_jax` / `GeoArray.to_numpy`,
-  `GeoArray.with_data` to rewrap a result.
+- `GeoArray` — the carrier: stored dims ending in ``("y", "x")``
+  (``GeoArray(..., dims="band y x")``; read from the rank with a
+  ``DeprecationWarning`` when omitted), coordinates per dim
+  (`geoarray.coords`), `GeoArray.grid`, `GeoArray.sel` / `GeoArray.isel` by
+  name, `GeoArray.to_jax` / `GeoArray.to_numpy`, `GeoArray.with_data` to
+  rewrap a result, `GeoArray.from_coords`.
+- The dim-level functions, shared with every named carrier (they are
+  pipekit-array's: ``geoarray.reduce is pipekit_array.reduce``): `isel`,
+  `sel`, `transpose`, `reduce`, `argreduce`, `take_along`, `map_over`,
+  `concat`, `combine`. geoarray's `GeoArrayAdapter` is registered with
+  pipekit at import, so they, and pipekit-array's ``KernelOp``, run on
+  carriers; a result that consumed ``y`` or ``x`` is a
+  ``pipekit_array.DimArray`` (`to_dimarray`).
 - `Grid` — a pixel grid with no data: transform, CRS and ``(H, W)``;
   hashable, so it can be a warp target or static config.
 - `PixelWindow` — a rectangle of pixels (``col_off``, ``row_off``,
@@ -18,7 +28,8 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   `GeoArray.__getitem__` / `GeoArray.isel` (slices move the transform),
   `crop` (traced offsets), `pad`, `read_window` / `write_window`,
   `pixel_coords`, `GeoArray.valid_mask`, `GeoArray.map`, `combine`,
-  `stack` / `concatenate`, `footprint` (``[vector]``).
+  `stack` / `concat` (`concatenate`, by position), `footprint`
+  (``[vector]``).
 - `RasterSource` / `AsyncRasterSource` — what a lazy reader provides:
   its `Grid`, shape, dtype, fill and attrs, and reads that return a
   `GeoArray` (``read_window``, ``load``). A `GeoArray` is one too.
@@ -36,7 +47,7 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   ``source_from_georeader`` / ``source_to_georeader`` for its lazy readers
   (``[georeader]``).
 - Errors: `GeoArrayError` and its subclasses `X64Error`,
-  `GeoArrayTraceError` and `GridMismatchError`.
+  `GeoArrayTraceError`, `GridMismatchError` and `LabelError`.
 
 JAX is optional (``geotoolz-array[jax]``); without it, geoarray never
 imports JAX.
@@ -44,16 +55,29 @@ imports JAX.
 
 from __future__ import annotations
 
-from geoarray._src.array import DIMS, GeoArray
+from pipekit_array import (
+    argreduce,
+    combine,
+    concat,
+    isel,
+    map_over,
+    reduce,
+    sel,
+    take_along,
+    transpose,
+)
+
+from geoarray._src.adapter import GeoArrayAdapter, to_dimarray
+from geoarray._src.array import DIMS, SPATIAL_DIMS, GeoArray
 from geoarray._src.attrs import PER_BAND_KEYS, FrozenAttrs
 from geoarray._src.errors import (
     GeoArrayError,
     GeoArrayTraceError,
     GridMismatchError,
+    LabelError,
     X64Error,
 )
 from geoarray._src.geometry import (
-    combine,
     concatenate,
     crop,
     footprint,
@@ -73,29 +97,41 @@ __version__ = "0.2.1"  # x-release-please-version
 __all__ = [
     "DIMS",
     "PER_BAND_KEYS",
+    "SPATIAL_DIMS",
     "AsyncRasterSource",
     "FrozenAttrs",
     "GeoArray",
+    "GeoArrayAdapter",
     "GeoArrayError",
     "GeoArrayTraceError",
     "Grid",
     "GridMismatchError",
     "HostTransferWarning",
+    "LabelError",
     "PixelWindow",
     "RasterSource",
     "X64Error",
     "__version__",
+    "argreduce",
     "as_crs",
     "as_transform",
     "combine",
+    "concat",
     "concatenate",
     "crop",
     "footprint",
     "get_options",
+    "isel",
+    "map_over",
     "pad",
     "pixel_coords",
     "read_window",
+    "reduce",
+    "sel",
     "set_options",
     "stack",
+    "take_along",
+    "to_dimarray",
+    "transpose",
     "write_window",
 ]

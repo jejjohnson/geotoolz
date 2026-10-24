@@ -145,18 +145,19 @@ class TestNumpyInterop:
             run()
 
     def test_transfers_warn_only_when_asked(self, x64: ModuleType) -> None:
-        on_jax = _scene().to_jax()
+        on_numpy = _scene()
+        on_jax = on_numpy.to_jax()
         assert get_options()["warn_on_transfer"] is False
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             np.asarray(on_jax)
-            np.asarray(_scene())
+            np.asarray(on_numpy)
         with set_options(warn_on_transfer=True):
             with pytest.warns(HostTransferWarning, match="host"):
                 np.asarray(on_jax)
             with warnings.catch_warnings():
                 warnings.simplefilter("error")
-                np.asarray(_scene())  # NumPy data: no transfer, no warning
+                np.asarray(on_numpy)  # NumPy data: no transfer, no warning
         assert get_options()["warn_on_transfer"] is False
 
     def test_set_options_without_a_with_block(self) -> None:

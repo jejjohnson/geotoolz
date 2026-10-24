@@ -25,7 +25,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import numpy as np
-from geoarray import FrozenAttrs, GeoArray
+from geoarray import DIMS, FrozenAttrs, GeoArray
 
 from geoops._src.bands import (
     BAND_NAME_KEYS,
@@ -231,10 +231,13 @@ def wrap_like(
         # canonical fill of the output's meaning (False for a mask, 0 for
         # labels / counts), never a fill the data would read as a value.
         fill_value = fill_for(values.dtype, ref.fill_value)
-    return GeoArray(
+    # the input's dims while the rank holds; the 0.2 layout otherwise
+    # (geoops reads the band axis as -3 until its kernels take dim=, W3)
+    dims = ref.dims if values.ndim == ref.ndim else DIMS[-values.ndim :]
+    return ref.with_data(
         values,
-        transform,
-        ref.crs,
+        transform=transform,
         fill_value=fill_value,
         attrs=FrozenAttrs(new_attrs),
+        dims=dims,
     )
