@@ -31,7 +31,7 @@ from pipekit import Signature, get_adapter, register_adapter
 from pipekit_array import DimArray, DimArrayAdapter
 
 from geoarray._src.array import SPATIAL_DIMS, GeoArray, build, fill_fits
-from geoarray._src.attrs import drop_band_keys
+from geoarray._src.attrs import PER_BAND_KEYS, concat_bands, drop_band_keys
 from geoarray._src.backend import backend_of
 from geoarray._src.carriers import GeoPoints, GeoSwath, _as_int_leaf, _build
 from geoarray._src.errors import GridMismatchError
@@ -178,9 +178,12 @@ class GeoArrayAdapter:
         return concat_carriers(xs, dim)
 
     def map_over(self, x: GeoArray, fn: Callable[[Any], Any], dim: str) -> Any:
-        """``fn`` on each item along ``dim``, stacked along ``dim`` first.
+        """``fn`` on each item along ``dim``, stacked along ``dim``.
 
-        Each item is ``x`` without ``dim``: its own transform row when
+        ``dim`` comes first, after any batch dims the items keep, so the
+        transform's batch axes still lead the data. Per-band attrs follow
+        the items when ``dim`` is ``band``. Each item is ``x`` without
+        ``dim``: its own transform row when
         ``dim`` is a batch dim (patches, per-frame grids), its own stamp
         when ``dim`` is ``time``. On JAX this is one ``jax.vmap`` over the
         data and the matching leaves, so 64 patches with 64 transforms are
@@ -207,7 +210,9 @@ def _restack(x: GeoArray, items: list[Any], dim: str) -> Any:
     batched = dim in x.batch_dims
     if isinstance(first, GeoArray):
         xp = first.xp
-        data = xp.stack([item.data for item in items])
+        # after the items' batch dims, so transform rows still lead the data
+        position = 0 if batched else len(first.batch_dims)
+        data = xp.stack([item.data for item in items], axis=position)
         if batched:
             transform = xp.stack([xp.asarray(item.transform) for item in items])
         else:
@@ -216,15 +221,12 @@ def _restack(x: GeoArray, items: list[Any], dim: str) -> Any:
         coords = first.coords + tuple(
             c for c in x.coords if c.dim == dim and c.size == len(items)
         )
-        return build(
-            data,
-            transform,
-            first.crs,
-            first.fill_value,
-            first.attrs,
-            (dim, *first.dims),
-            coords,
-        )
+        attrs = first.attrs
+        if dim == "band":
+            # each item holds its band's entries (isel): join them back
+            attrs = concat_bands([(item.attrs, 1) for item in items])
+        dims = (*first.dims[:position], dim, *first.dims[position:])
+        return build(data, transform, first.crs, first.fill_value, attrs, dims, coords)
     adapter = get_adapter(first)
     if adapter is None:
         raise ValueError(
@@ -264,7 +266,9 @@ def _map_over_jax(x: GeoArray, fn: Callable[[Any], Any], dim: str) -> Any:
         for c in coords
         if (c is _STAMPS and not over_time) or (c is not _STAMPS and c.dim != dim)
     )
-    item_aux = (crs, fill, attrs, tuple(d for d in dims if d != dim), item_coords)
+    # under vmap every item shares one static attrs: no band entries per item
+    item_attrs = drop_band_keys(attrs) if dim == "band" else attrs
+    item_aux = (crs, fill, item_attrs, tuple(d for d in dims if d != dim), item_coords)
     captured: dict[str, Any] = {}
 
     def per_item(*item_leaves: Any) -> Any:
@@ -278,9 +282,23 @@ def _map_over_jax(x: GeoArray, fn: Callable[[Any], Any], dim: str) -> Any:
     if isinstance(template, GeoArray):
         _, (o_crs, o_fill, o_attrs, o_dims, o_coords) = _flatten(template)
         data, transform, *stamps = flat
+        if not batched:
+            # one grid for every item, as on NumPy: checked, traced or not
+            require_equal_leaves(
+                transform,
+                jax.numpy.broadcast_to(transform[0], transform.shape),
+                "map_over: fn returned items on different grids",
+            )
+            transform = transform[0]
+        position = 0 if batched else len(template.batch_dims)
+        data = jax.numpy.moveaxis(data, 0, position)
+        if dim == "band":
+            band_keys = {k: v for k, v in attrs.items() if k in PER_BAND_KEYS}
+            o_attrs = drop_band_keys(o_attrs).set(**band_keys)
+        out_dims = (*o_dims[:position], dim, *o_dims[position:])
         out = _unflatten(
-            (o_crs, o_fill, o_attrs, (dim, *o_dims), o_coords),
-            (data, transform if batched else transform[0], *(s[0] for s in stamps)),
+            (o_crs, o_fill, o_attrs, out_dims, o_coords),
+            (data, transform, *(s[0] for s in stamps)),
         )
         if own:
             out = build(
