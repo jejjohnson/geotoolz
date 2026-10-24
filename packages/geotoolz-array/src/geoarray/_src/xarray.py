@@ -228,7 +228,7 @@ def points_to_xarray(p: GeoPoints) -> Any:
     With a `VariableAxis`, each variable is a data variable (its unit in
     ``units``); otherwise one variable, ``data``. Positions are ``lon`` /
     ``lat`` for a geographic CRS and ``x`` / ``y`` otherwise; ``z``, the
-    per-sample ``time`` and ``valid`` are coordinates on ``obs``.
+    per-point ``time`` and ``valid`` are coordinates on ``obs``.
     """
     host = p.to_numpy()
     geographic = p.crs is not None and p.crs.is_geographic

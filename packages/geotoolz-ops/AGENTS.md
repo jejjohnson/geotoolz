@@ -4,6 +4,25 @@ Operator families on `geoarray.GeoArray`, composed with `pipekit`
 (`Operator`, `Sequential`, `Graph`). The root [`AGENTS.md`](../../AGENTS.md)
 applies too; this file adds what is specific to `geoops`.
 
+geoops is everything that computes. What re-indexes, joins, re-describes
+or reads at points is geoarray's ([its membership test](../geotoolz-array/AGENTS.md#the-membership-test)):
+
+```
+geoarray: reads the georeference, never computes a field
+  re-index     isel, sel, crop, read_window, write_window, pad
+  join         stack, concat, combine      one grid; your fn computes
+  re-describe  dims, coords, pixel_coords, valid_mask, footprint
+  read at      to_pixel, interp_at         points in, values out
+
+geoops: computes
+  new values   indices, radiometry, mask, normalize, …   same grid
+  new grid     reproject, resample, warp, mosaic, rasterize
+```
+
+The test: if the output holds only input values, fills and coordinates,
+or values read at points you gave it, it is geoarray. Otherwise it is
+geoops.
+
 ## Family layout
 
 Every operator family (`radiometry`, `indices`, `compositing`, `segment`, …)

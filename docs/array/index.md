@@ -13,11 +13,12 @@ georeferencing. JAX arrays cannot be subclassed at all.
 
 `GeoArray` *holds* its array instead, so one carrier works on NumPy and on
 JAX. It is a JAX pytree: the data and a float64 transform are leaves, which
-`jit`, `grad` and `vmap` trace, and the CRS, fill value and attrs are static.
+`jit`, `grad` and `vmap` trace, and the stored dims, coordinates, CRS, fill
+value and attrs are static.
 A new transform (another scene, another patch) reuses compiled code, and
 gradients reach the georeferencing.
 
-![A GeoArray: the data (..., H, W) and the (6,) float64 transform are pytree leaves, traced by jit, grad and vmap; the CRS, fill value and attrs are static and key the compile cache; g.grid derives the Grid (transform, CRS and (H, W) without pixels), and a PixelWindow is a rectangle of pixels on it](../assets/diagrams/geoarray-carrier.png)
+![A GeoArray: the data (..., H, W) and the (6,) float64 transform are pytree leaves, traced by jit, grad and vmap; the dims, coordinates, CRS, fill value and attrs are static and key the compile cache; g.grid derives the Grid (transform, CRS and (H, W) without pixels), and a PixelWindow is a rectangle of pixels on it](../assets/diagrams/geoarray-carrier.png)
 
 ## Install
 
@@ -26,14 +27,16 @@ pip install geotoolz-array              # NumPy carriers, Grid, PixelWindow
 pip install 'geotoolz-array[jax]'       # + JAX carriers and the pytree
 pip install 'geotoolz-array[vector]'    # + footprint as a shapely polygon
 pip install 'geotoolz-array[georeader]' # + GeoTensor <-> GeoArray
+pip install 'geotoolz-array[xarray]'    # + to_xarray / from_xarray (CF spatial_ref)
 ```
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
-| *(base)* | numpy, pyproj, affine | `GeoArray` on NumPy data, `Grid`, `PixelWindow`, `FrozenAttrs` |
+| *(base)* | numpy, pyproj, affine, pipekit, pipekit-array | `GeoArray`, `GeoSwath`, `GeoPoints` on NumPy data, `geoarray.coords`, `geoarray.types`, the dim-level functions, `Grid`, `PixelWindow`, `FrozenAttrs` |
 | `[jax]` | jax | JAX data, `GeoArray.to_jax`, `jit` / `grad` / `vmap` over carriers |
 | `[vector]` | shapely | `footprint` |
 | `[georeader]` | georeader-spaceml | `geoarray.interop.georeader` (`from_georeader`, `to_georeader`) |
+| `[xarray]` | xarray | `to_xarray` / `from_xarray`, `to_dataset`, `to_datatree`; readable types on `DataArray`s |
 
 A JAX carrier keeps its transform in float64, so it needs
 `jax.config.update("jax_enable_x64", True)`. The data keeps its own dtype.
@@ -48,6 +51,7 @@ import jax
 import numpy as np
 
 from geoarray import GeoArray, Grid
+from geoarray.coords import SpectralAxis
 
 jax.config.update("jax_enable_x64", True)
 
@@ -57,8 +61,10 @@ chip: GeoArray = GeoArray(
     (20.0, 0.0, 600000.0, 0.0, -20.0, 3550000.0),  # (a, b, c, d, e, f)
     "EPSG:32613",
     fill_value=np.nan,
-    attrs={"band_names": ["B11", "B12"]},
+    dims=("band", "y", "x"),
+    coords=(SpectralAxis(names=("B11", "B12"), wavelength_nm=(1610.0, 2190.0)),),
 )
+b12: GeoArray = chip.sel(band="B12")  # (H, W) float32: dims y x
 grid: Grid = chip.grid  # transform, CRS, (600, 600)
 grid.bounds  # (600000.0, 3538000.0, 612000.0, 3550000.0)
 
@@ -84,6 +90,7 @@ scene: GeoArray = GeoArray(
     (20.0, 0.0, 600000.0, 0.0, -20.0, 3550000.0),  # (a, b, c, d, e, f)
     "EPSG:32613",
     fill_value=np.nan,
+    dims=("band", "y", "x"),
 ).to_jax()
 
 sub: GeoArray = scene[..., 100:356, 200:456]  # (C, 256, 256): the origin moves
@@ -130,14 +137,20 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 
 | Name | Use it to… | Guide |
 |---|---|---|
-| `GeoArray` | carry data with its transform, CRS, fill value and attrs; `grid`, `with_data`, `to_jax`, `to_numpy` | [Reference](api.md#geoarray) |
+| `GeoArray` | carry data with its stored dims, coordinates, transform, CRS, fill value and attrs; `sel` / `isel` by name, `grid`, `with_data`, `to_jax`, `to_numpy`, `from_coords` | [Concepts](concepts.md) |
+| `GeoSwath`, `GeoPoints`, `pad_points` | carry swaths in sensor geometry (lat/lon leaves) and point sets (xy, z, time, valid) | [Tutorial](notebooks/swath_averaging_kernels.ipynb) |
+| `geoarray.coords` | say what a dim means: `SpectralAxis`, `VariableAxis`, `VerticalAxis`, `TimeAxis`, `PixelGrid`, … | [Reference](api/coords.md) |
+| `geoarray.types` | name common shapes (`GeoImage`, `GeoMapSeries`, `GeoTracks`, …) and check them with `check_dims` | [Reference](api/types.md) |
+| `isel`, `sel`, `reduce`, `map_over`, `concat`, `combine`, … | pipekit-array's dim-level functions, on every named carrier; a pipekit-array `KernelOp` runs on carriers too | [Concepts](concepts.md#one-set-of-dim-level-functions) |
+| `to_pixel`, `interp_at` | map coordinates to pixels; H(x), a grid read at points under `jit` / `grad` | [When to jit](how-to/when-to-jit.md) |
+| `to_xarray`, `from_xarray`, `to_dataset`, `to_datatree` | cross to xarray losslessly (`[xarray]`) | [Cross to xarray](how-to/xarray.md) |
 | `Grid` | describe a pixel grid without data: `bounds`, `res`, `shift`, `crop`, `from_bounds`, `isclose`, `get_config` | [Reference](api.md#grid) |
 | `PixelWindow` | name a rectangle of pixels, rasterio's `Window` without rasterio; `Grid.window` / `Grid.bounds_of` convert to and from map bounds | [Reference](api.md#pixelwindow) |
 | `g[...]`, `isel` | slice with the transform following; select bands with their per-band attrs | [Reference](api.md#geoarray) |
 | `map`, `shift_origin`, `squeeze`, `expand_dims` | change the data on the same grid, move the georeferencing, add or drop leading axes | [Reference](api.md#geoarray) |
 | `crop`, `read_window`, `write_window`, `pad` | cut, read past the edges, write and pad pixels; `crop` inside `jit` / `vmap` | [Reference](api.md#geometry) |
 | `valid_mask`, `pixel_coords`, `footprint` | find the pixels that hold data, their map coordinates, the outline (`[vector]`) | [Reference](api.md#geometry) |
-| `combine`, `stack`, `concatenate` | join carriers that share a grid | [Reference](api.md#joining-carriers) |
+| `stack`, `concatenate` | join carriers that share a grid (`stack(gs, "time")`; `concatenate` is `concat` by position) | [Reference](api.md#joining-carriers) |
 | `FrozenAttrs` | keep metadata hashable, so it can key a compiled function | [Reference](api.md#frozenattrs) |
 | `RasterSource`, `AsyncRasterSource` | describe a lazy reader: its grid, and reads that return a `GeoArray` (`read_window`, `load`); a `GeoArray` is one | [Reference](api.md#lazy-readers) |
 | `set_options`, `get_options`, `HostTransferWarning` | find the NumPy steps that copy JAX data to the host | [Reference](api.md#backends-and-interop) |
@@ -146,6 +159,12 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 
 ## Next steps
 
-- [API reference](api.md).
+- [Concepts](concepts.md): carriers, static or leaf, the shared functions,
+  readable types, moving from 0.2.
+- How-to: [When to jit](how-to/when-to-jit.md),
+  [Cross to xarray](how-to/xarray.md).
+- Tutorial: [Swaths and averaging kernels](notebooks/swath_averaging_kernels.ipynb).
+- [API reference](api.md), [`geoarray.coords`](api/coords.md),
+  [`geoarray.types`](api/types.md).
 - The design, its decisions and its roadmap: [geoarray: one NumPy/JAX
   carrier for geotoolz](https://github.com/jejjohnson/geostack/blob/main/docs/design/01_geoarray.md).

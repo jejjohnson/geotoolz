@@ -306,7 +306,7 @@ class TimeAxis:
             anything ``np.asarray(..., dtype="datetime64[ns]")`` takes.
 
     Hashes and compares by value. A moving platform (along-track altimetry,
-    Argo) has one time per sample instead: a ``time`` leaf on `GeoPoints`.
+    Argo) has one time per point instead: a ``time`` leaf on `GeoPoints`.
 
     On a carrier the stamps are a pytree leaf, as ``int64`` nanoseconds
     since the epoch: a new set of dates of the same length reuses the

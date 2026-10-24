@@ -5,7 +5,7 @@
 Six packages, installed separately: `geotoolz`, `geotoolz-catalog`, `geotoolz-products`, `geotoolz-patcher`, `geotoolz-cloud`, `geotoolz-array` (import names `geotoolz`, `geocatalog`, `geoproducts`, `geopatcher`, `geocloud`, `geoarray`). Every step takes and returns `geoarray.GeoArray` (a georeader `GeoTensor` is refused; convert it with `geoarray.interop.georeader.from_georeader`), and every lazy reader is a `geoarray.RasterSource`; every operator is a `pipekit.Operator`, so steps chain with `geoops.Sequential`. Before writing a helper, search the capability index — it lists every public name with a one-line summary, including pipekit's control-flow, caching, QC and parallel-map blocks. A step you add must keep two contracts.
 
 - **pipekit `Operator`:** implement `_apply`, with a keyword-only constructor that holds configuration only and an auto-derived JSON `get_config()`.
-- **`GeoArray`:** bands on axis -3; a GeoArray in returns a GeoArray on the same grid; per-band `attrs` (immutable) match the bands; `fill_value` is nodata.
+- **`GeoArray`:** stored dims ending in `y x` (`dims=("band", "y", "x")`; the geoops kernels still read bands on axis -3); a GeoArray in returns a GeoArray on the same grid; per-band `attrs` (immutable) match the bands; `fill_value` is nodata. `GeoSwath` and `GeoPoints` carry swaths and point sets; `geoarray.types` names the common shapes.
 
 Keep both with the public helpers in `geoops.carrier`, and test a new step with `geoops.testing.check_operator`. See "Concepts" below. Claude Code users can install the `geotoolz` plugin: `/plugin marketplace add jejjohnson/geotoolz`, then `/plugin install geotoolz@geotoolz`.
 

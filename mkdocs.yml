@@ -234,7 +234,16 @@ nav:
       - Reference: products/api.md
   - Array — geoarray:
       - Overview: array/index.md
-      - Reference: array/api.md
+      - Concepts: array/concepts.md
+      - How-to:
+          - When to jit: array/how-to/when-to-jit.md
+          - Cross to xarray: array/how-to/xarray.md
+      - Tutorials:
+          - Swaths and averaging kernels: array/notebooks/swath_averaging_kernels.ipynb
+      - Reference:
+          - geoarray: array/api.md
+          - geoarray.coords: array/api/coords.md
+          - geoarray.types: array/api/types.md
   - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack
   - Contributing: contributing.md
 

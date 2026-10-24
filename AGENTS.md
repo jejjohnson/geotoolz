@@ -30,6 +30,26 @@ Dependencies point one way and every cross-package link is an optional extra
 `geoops` never depends on `geoproducts`, the patcher never on `geoops`,
 and no package depends on `geotoolz-catalog`.
 
+### geoarray or geoops?
+
+Where geoarray stops and geoops starts:
+
+```
+geoarray: reads the georeference, never computes a field
+  re-index     isel, sel, crop, read_window, write_window, pad
+  join         stack, concat, combine      one grid; your fn computes
+  re-describe  dims, coords, pixel_coords, valid_mask, footprint
+  read at      to_pixel, interp_at         points in, values out
+
+geoops: computes
+  new values   indices, radiometry, mask, normalize, …   same grid
+  new grid     reproject, resample, warp, mosaic, rasterize
+```
+
+The test: if the output holds only input values, fills and coordinates,
+or values read at points you gave it, it is geoarray. Otherwise it is
+geoops.
+
 ## Reuse before you write
 
 Before writing a helper, an adapter or a reader, find out whether it exists:
