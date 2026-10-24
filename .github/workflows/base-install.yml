@@ -180,11 +180,12 @@ jobs:
 
           import geopatcher as gp
 
-          # The extras really are absent from this environment.
+          # The extras really are absent from this environment. pipekit core
+          # and pipekit-array are not: geoarray depends on them (pure Python).
           for module in (
               "xarray", "rioxarray", "xvec", "zarr", "dask", "jax",
-              "geocloud", "obstore", "async_tiff", "async_geotiff", "pipekit",
-              "pipekit_train",
+              "geocloud", "obstore", "async_tiff", "async_geotiff",
+              "pipekit_train", "pipekit_jax",
           ):
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 
@@ -265,8 +266,9 @@ jobs:
 
           import geoproducts
 
-          # The extras (and geotoolz itself) really are absent.
-          absent = ("geotoolz", "geopatcher", "obstore", "pipekit", "requests", "pydantic", "h5py")
+          # The extras (and geotoolz itself) really are absent; pipekit core and
+          # pipekit-array come with geoarray.
+          absent = ("geotoolz", "geopatcher", "obstore", "pipekit_train", "jax", "requests", "pydantic", "h5py")
           for module in absent:
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 

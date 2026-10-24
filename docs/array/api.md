@@ -41,7 +41,11 @@ Re-index or re-describe pixels without computing new values.
 
 Carriers on one grid: the same CRS, spatial shape and transform.
 
-::: geoarray.combine
+`geoarray.combine` and `geoarray.concat` are pipekit-array's functions,
+re-exported (`geoarray.combine is pipekit_array.combine`), and documented
+there; on carriers they check the grid and the fill value, and keep the
+first carrier's georeference.
+
 ::: geoarray.stack
 ::: geoarray.concatenate
 
