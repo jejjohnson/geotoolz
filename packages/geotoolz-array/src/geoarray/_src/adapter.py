@@ -27,11 +27,11 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
-from pipekit import Signature, register_adapter
+from pipekit import Signature, get_adapter, register_adapter
 from pipekit_array import DimArray, DimArrayAdapter
 
 from geoarray._src.array import SPATIAL_DIMS, GeoArray, build, fill_fits
-from geoarray._src.attrs import drop_band_keys
+from geoarray._src.attrs import PER_BAND_KEYS, concat_bands, drop_band_keys
 from geoarray._src.backend import backend_of
 from geoarray._src.carriers import GeoPoints, GeoSwath, _as_int_leaf, _build
 from geoarray._src.errors import GridMismatchError
@@ -176,6 +176,151 @@ class GeoArrayAdapter:
     def concat(self, xs: Sequence[GeoArray], dim: str) -> GeoArray:
         """``geoarray.concat``: coordinates and per-band attrs joined."""
         return concat_carriers(xs, dim)
+
+    def map_over(self, x: GeoArray, fn: Callable[[Any], Any], dim: str) -> Any:
+        """``fn`` on each item along ``dim``, stacked along ``dim``.
+
+        ``dim`` comes first, after any batch dims the items keep, so the
+        transform's batch axes still lead the data. Per-band attrs follow
+        the items when ``dim`` is ``band``. Each item is ``x`` without
+        ``dim``: its own transform row when
+        ``dim`` is a batch dim (patches, per-frame grids), its own stamp
+        when ``dim`` is ``time``. On JAX this is one ``jax.vmap`` over the
+        data and the matching leaves, so 64 patches with 64 transforms are
+        one trace (GA-G15); on NumPy, a loop.
+
+        Raises:
+            ValueError: ``dim`` is spatial or not a dim, or ``fn`` returns
+                something other than one named carrier.
+        """
+        if dim not in x.dims or dim in SPATIAL_DIMS:
+            raise ValueError(f"map_over: {dim!r} is not a non-spatial dim of {x.dims}")
+        if x.backend == "jax":
+            return _map_over_jax(x, fn, dim)
+        n = x.sizes[dim]
+        items = [fn(x.isel({dim: i})) for i in range(n)]
+        return _restack(x, items, dim)
+
+
+def _restack(x: GeoArray, items: list[Any], dim: str) -> Any:
+    """Per-item results of `map_over` (NumPy) stacked along ``dim``, first."""
+    first = items[0]
+    if not all(type(item) is type(first) for item in items):
+        raise ValueError("map_over: fn returned carriers of different types")
+    batched = dim in x.batch_dims
+    if isinstance(first, GeoArray):
+        xp = first.xp
+        # after the items' batch dims, so transform rows still lead the data
+        position = 0 if batched else len(first.batch_dims)
+        data = xp.stack([item.data for item in items], axis=position)
+        if batched:
+            transform = xp.stack([xp.asarray(item.transform) for item in items])
+        else:
+            _require_same_grid(list(items), "map_over")
+            transform = first.transform
+        coords = first.coords + tuple(
+            c for c in x.coords if c.dim == dim and c.size == len(items)
+        )
+        attrs = first.attrs
+        if dim == "band":
+            # each item holds its band's entries (isel): join them back
+            attrs = concat_bands([(item.attrs, 1) for item in items])
+        dims = (*first.dims[:position], dim, *first.dims[position:])
+        return build(data, transform, first.crs, first.fill_value, attrs, dims, coords)
+    adapter = get_adapter(first)
+    if adapter is None:
+        raise ValueError(
+            f"map_over: fn returns {type(first).__name__}, not a named carrier"
+        )
+    from pipekit_array import stack as stack_named
+
+    out = stack_named(items, dim)
+    labels = x.labels(dim)
+    if isinstance(out, DimArray) and labels is not None:
+        return DimArray(out.data, out.dims, {**out.labels, dim: labels})
+    return out
+
+
+def _map_over_jax(x: GeoArray, fn: Callable[[Any], Any], dim: str) -> Any:
+    """`map_over` as one ``jax.vmap`` over the data and the leaves along ``dim``.
+
+    The data is mapped along ``dim``; the transform too when ``dim`` is a
+    batch dim; the time stamps when ``dim`` is ``time`` (the item then has
+    no time dim, so they are dropped). Unmapped leaves come back broadcast,
+    so the result keeps their first row.
+    """
+    import jax
+
+    from geoarray._src.array import _STAMPS, _flatten, _unflatten
+
+    axis = x.dims.index(dim)
+    batched = dim in x.batch_dims
+    leaves, (crs, fill, attrs, dims, coords) = _flatten(x)
+    over_time = dim == "time"
+    if over_time:
+        leaves = leaves[:2]
+    in_axes = (axis, axis if batched else None, *(None,) * (len(leaves) - 2))
+    # the item drops dim's coordinate; over time that is the stamps' slot
+    item_coords = tuple(
+        c
+        for c in coords
+        if (c is _STAMPS and not over_time) or (c is not _STAMPS and c.dim != dim)
+    )
+    # under vmap every item shares one static attrs: no band entries per item
+    item_attrs = drop_band_keys(attrs) if dim == "band" else attrs
+    item_aux = (crs, fill, item_attrs, tuple(d for d in dims if d != dim), item_coords)
+    captured: dict[str, Any] = {}
+
+    def per_item(*item_leaves: Any) -> Any:
+        out = fn(_unflatten(item_aux, item_leaves))
+        captured["out"] = out
+        return jax.tree_util.tree_leaves(out)
+
+    flat = jax.vmap(per_item, in_axes=in_axes)(*leaves)
+    template = captured["out"]
+    own = tuple(c for c in x.coords if c.dim == dim)
+    if isinstance(template, GeoArray):
+        _, (o_crs, o_fill, o_attrs, o_dims, o_coords) = _flatten(template)
+        data, transform, *stamps = flat
+        if not batched:
+            # one grid for every item, as on NumPy: checked, traced or not
+            require_equal_leaves(
+                transform,
+                jax.numpy.broadcast_to(transform[0], transform.shape),
+                "map_over: fn returned items on different grids",
+            )
+            transform = transform[0]
+        position = 0 if batched else len(template.batch_dims)
+        data = jax.numpy.moveaxis(data, 0, position)
+        if dim == "band":
+            band_keys = {k: v for k, v in attrs.items() if k in PER_BAND_KEYS}
+            o_attrs = drop_band_keys(o_attrs).set(**band_keys)
+        out_dims = (*o_dims[:position], dim, *o_dims[position:])
+        out = _unflatten(
+            (o_crs, o_fill, o_attrs, out_dims, o_coords),
+            (data, transform, *(s[0] for s in stamps)),
+        )
+        if own:
+            out = build(
+                out.data,
+                out.transform,
+                out.crs,
+                out.fill_value,
+                out.attrs,
+                out.dims,
+                own + out.coords,
+            )
+        return out
+    if isinstance(template, DimArray):
+        (data,) = flat
+        labels = dict(template.labels)
+        if own and own[0].labels is not None:
+            labels[dim] = own[0].labels
+        return DimArray(data, (dim, *template.dims), labels)
+    raise ValueError(
+        f"map_over: fn returns {type(template).__name__}; on JAX it must return a "
+        "GeoArray or a DimArray"
+    )
 
 
 class _GeolocatedAdapter:

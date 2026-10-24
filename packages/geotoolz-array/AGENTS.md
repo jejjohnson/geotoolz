@@ -55,11 +55,19 @@ GB2, …) name the tests that enforce it.
 
 ## The membership test
 
-geoarray holds only operations that **re-index or re-describe pixels
-without computing new values**: the output contains only input values,
-fill values or coordinates. Slicing, crops, windows and pixel coordinates
-belong here; warping, resampling, CRS kernels and anything that
-interpolates belong in `geoops.functional`.
+geoarray holds operations that **read only the georeference**:
+
+```
+re-index      isel, crop, read_window, pad, the joins
+re-describe   coords, dims, pixel_coords, footprint
+read at       to_pixel, interp_at   (points in, values out)
+```
+
+Anything that **writes a new grid** (warp, resample, reproject, mosaic,
+CRS kernels) belongs in `geoops.geom`. `interp_at` blends neighbours, but
+its output lives on the points it was given, not on a new grid, so it is
+"read at", not resampling. The nouns `sample` (an ML batch item) and
+`member` (an ensemble draw) are kept for dim names, never function names.
 
 ## The pytree split
 
