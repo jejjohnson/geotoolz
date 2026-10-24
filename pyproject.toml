@@ -26,9 +26,9 @@ geotoolz-array = { workspace = true }
 # monorepo. Pull it from GitHub until the first PyPI release lands; the
 # published wheel metadata still carries the PyPI-flavoured `pipekit>=…`
 # requirement from each member's [project] table.
-pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", rev = "90dca72c3d58ff526a1646c0e9ae879c621d05f9" }  # W1 stack head (pipekit#115), until pipekit 0.2.0
-pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", rev = "90dca72c3d58ff526a1646c0e9ae879c621d05f9" }  # W1 stack head (pipekit#115), until pipekit-array 0.1.0
-pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", rev = "90dca72c3d58ff526a1646c0e9ae879c621d05f9" }  # same pipekit commit as above
+pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", rev = "a0e7c9c8c884c4c701add9fb5579dbcdc75b2578" }  # W1 stack head (pipekit#115), until pipekit 0.2.0
+pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", rev = "a0e7c9c8c884c4c701add9fb5579dbcdc75b2578" }  # W1 stack head (pipekit#115), until pipekit-array 0.1.0
+pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", rev = "a0e7c9c8c884c4c701add9fb5579dbcdc75b2578" }  # same pipekit commit as above
 
 [build-system]
 requires = ["hatchling"]
