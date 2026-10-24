@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.6.0...geotoolz-cloud-v0.7.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **array:** GeoArray's dims are stored. Construction without dims is deprecated and removed in 0.4.0; geoarray.stack without dim= is deprecated; geoarray.combine is pipekit_array.combine.
+
+### Features
+
+* **array:** store dims and coordinates on GeoArray and register its pipekit adapter ([#546](https://github.com/jejjohnson/geotoolz/issues/546)) ([8480596](https://github.com/jejjohnson/geotoolz/commit/84805969f6e633299ef0b447a10578f6af993628))
+* **array:** xarray converters with a CF spatial_ref and GeoTransform ([#551](https://github.com/jejjohnson/geotoolz/issues/551)) ([5a1ff0c](https://github.com/jejjohnson/geotoolz/commit/5a1ff0c708372856c88dd886956e214ed6f21fbf))
+
 ## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.5.0...geotoolz-cloud-v0.6.0) (2026-10-19)
 
 

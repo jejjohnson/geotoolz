@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.7.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.6.0...geotoolz-products-v0.7.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **array:** geotoolz-array 0.3.0 stores dims and coordinates. Building a GeoArray without dims=, per-band names in attrs, stack() and expand_dims() without a dim name, and GeoArray[np.ndarray] are deprecated and removed in 0.4.0.
+* **array:** GeoArray's dims are stored. Construction without dims is deprecated and removed in 0.4.0; geoarray.stack without dim= is deprecated; geoarray.combine is pipekit_array.combine.
+
+### Features
+
+* **array:** store dims and coordinates on GeoArray and register its pipekit adapter ([#546](https://github.com/jejjohnson/geotoolz/issues/546)) ([8480596](https://github.com/jejjohnson/geotoolz/commit/84805969f6e633299ef0b447a10578f6af993628))
+
+
+### Miscellaneous
+
+* **array:** read 0.2 band_names into a SpectralAxis, toward geotoolz-array 0.3.0 ([#552](https://github.com/jejjohnson/geotoolz/issues/552)) ([7b1a091](https://github.com/jejjohnson/geotoolz/commit/7b1a0919c6c646cdd660cc8801316255382a5992))
+
 ## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.5.0...geotoolz-products-v0.6.0) (2026-10-19)
 
 
