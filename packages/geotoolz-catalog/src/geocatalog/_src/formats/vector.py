@@ -467,4 +467,7 @@ def load_vector(
         )
         raster = burned[np.newaxis, ...]
 
-    return GeoArray(raster, transform, slice_.crs, fill_value=fill)  # (1, H, W) int64
+    # (1, H, W) int64: labels keep a singleton band axis
+    return GeoArray(
+        raster, transform, slice_.crs, fill_value=fill, dims=("band", "y", "x")
+    )

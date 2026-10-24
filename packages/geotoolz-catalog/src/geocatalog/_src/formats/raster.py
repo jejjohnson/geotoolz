@@ -26,7 +26,8 @@ import pandas as pd
 import pyproj
 import rasterio
 import shapely.geometry
-from geoarray import DIMS, GeoArray
+from geoarray import GeoArray
+from geoarray.coords import SpectralAxis, TimeAxis
 from loguru import logger as log
 from rasterio.enums import Resampling
 from rasterio.merge import merge as rio_merge
@@ -553,7 +554,10 @@ def load_raster(
         (its ``grid`` equals ``slice_.grid``). ``fill_value`` is the
         nodata value the mosaic actually used: ``nodata`` if supplied,
         else the first source nodata found, else 0 (what the mosaic
-        writes where no source covers a pixel).
+        writes where no source covers a pixel). Its dims are
+        ``("band", "y", "x")``; when every source names its bands (the
+        GeoTIFF band descriptions) the same way, those names are a
+        `SpectralAxis`, so ``scene.sel(band="B04")`` works.
 
     Example:
         The hits of a query, mosaicked onto the slice grid::
@@ -656,6 +660,7 @@ def load_raster(
             )
             warped.append(vrt)
             sources.append(vrt)
+        bands = _band_axis(handles, band_indexes)
         out_dtype = np.result_type(*(np.dtype(s.dtypes[0]) for s in sources))
         if nodata is not None:
             _check_nodata_fits(nodata, out_dtype)
@@ -685,8 +690,30 @@ def load_raster(
         transform,
         slice_.crs,
         fill_value=out_nodata if out_nodata is not None else 0,
-        dims=DIMS[-merged.ndim :],
+        dims=("band", "y", "x"),
+        coords=() if bands is None else (bands,),
     )
+
+
+def _band_axis(handles: list[Any], band_indexes: Sequence[int] | None) -> Any:
+    """A `SpectralAxis` from the files' band descriptions, when they name the bands.
+
+    Only when every source agrees and every selected band has a unique,
+    non-empty name; otherwise ``None`` (the bands stay positional).
+    """
+    names: tuple[str, ...] | None = None
+    for src in handles:
+        picked = (
+            src.descriptions
+            if band_indexes is None
+            else tuple(src.descriptions[i - 1] for i in band_indexes)
+        )
+        if names is not None and tuple(picked) != names:
+            return None
+        names = tuple(picked)
+    if not names or any(not n for n in names) or len(set(names)) != len(names):
+        return None
+    return SpectralAxis(names=names)
 
 
 @renamed_kwargs(concurrency="max_open_workers")
@@ -742,6 +769,23 @@ def _timeseries_days(
     return sorted({s.floor("D") for s in starts if s <= window.right})
 
 
+def _step_starts(
+    index: pd.IntervalIndex, window: pd.Interval, days: list[pd.Timestamp]
+) -> dict[pd.Timestamp, np.datetime64]:
+    """Each step's time: the earliest row start on that day, clipped to ``window``.
+
+    With one row per day this is the row's own time. Catalog times are naive
+    UTC, the form `TimeAxis` takes.
+    """
+    dated = [iv for iv in index if not is_time_invariant(iv)]
+    starts = [max(iv.left, window.left) for iv in (dated or list(index)[:1])]
+    out: dict[pd.Timestamp, np.datetime64] = {}
+    for day in days:
+        on_day = [s for s in starts if s.floor("D") == day and s <= window.right]
+        out[day] = pd.Timestamp(min(on_day) if on_day else day).to_datetime64()
+    return out
+
+
 def load_raster_timeseries(
     catalog: InMemoryGeoCatalog,
     slice_: GeoSlice,
@@ -786,7 +830,10 @@ def load_raster_timeseries(
     Returns:
         A `geoarray.GeoArray` of shape ``(T, bands, H, W)`` on the slice
         grid, where ``T`` is the number of distinct days with coverage;
-        its ``fill_value`` is the last day's.
+        its ``fill_value`` is the last day's. Its dims are
+        ``("time", "band", "y", "x")`` and its ``time`` coordinate holds
+        each step's start: the earliest matching row's time that day,
+        clipped to the slice (the row's own time when a day has one row).
 
     Raises:
         ValueError: If no catalog rows match the slice, or if every
@@ -804,6 +851,7 @@ def load_raster_timeseries(
         raise ValueError("load_raster_timeseries: no catalog rows match the slice")
 
     days = _timeseries_days(filtered.gdf.index, slice_.interval)
+    starts = _step_starts(filtered.gdf.index, slice_.interval, days)
 
     def load_day(day: pd.Timestamp) -> tuple[pd.Timestamp, GeoArray] | None:
         # Clip the day to the slice: a sub-day slice stays sub-day (#219).
@@ -858,8 +906,20 @@ def load_raster_timeseries(
     if not results:
         raise ValueError("load_raster_timeseries: no usable days in interval")
 
-    ordered = [scene for _, scene in sorted(results, key=lambda item: item[0])]
+    ordered = sorted(results, key=lambda item: item[0])
+    scenes = [scene for _, scene in ordered]
     # (T, bands, H, W); not `geoarray.stack`, which refuses days whose
     # mosaics declare different nodata values: the last day's is kept.
-    stacked = np.stack([np.asarray(scene) for scene in ordered], axis=0)
-    return ordered[-1].with_data(stacked)
+    stacked = np.stack([np.asarray(scene) for scene in scenes], axis=0)
+    times = TimeAxis(
+        np.array([starts[day] for day, _ in ordered], dtype="datetime64[ns]")
+    )
+    last = scenes[-1]
+    # a band axis labels every step only when every day names its bands
+    # the same way; otherwise the bands stay positional
+    agreed = all(scene.coords == last.coords for scene in scenes)
+    return last.with_data(
+        stacked,
+        dims=("time", *last.dims),
+        coords=(times, *(last.coords if agreed else ())),
+    )
