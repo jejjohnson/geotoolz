@@ -1,4 +1,4 @@
-"""to_pixel, sample and the adapter-level map_over (#522; GA-G15, GA-G16)."""
+"""to_pixel, interp_at and the adapter-level map_over (#522; GA-G15, GA-G16)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import pytest
 from pipekit_array import DimArray
 
 import geoarray
-from geoarray import GeoArray, GeoPoints, pad_points, sample, to_pixel
+from geoarray import GeoArray, GeoPoints, interp_at, pad_points, to_pixel
 from geoarray.coords import PixelGrid, SpectralAxis, TimeAxis, VariableAxis
 from geoarray.types import GeoTimeSeries, matches
 
@@ -130,7 +130,7 @@ def test_to_pixel_inverts_pixel_centres(transform: tuple[float, ...]) -> None:
     np.testing.assert_allclose(rc[:, 1], cols.ravel(), atol=1e-9)
 
 
-# -- sample ---------------------------------------------------------------------------
+# -- interp_at ------------------------------------------------------------------------
 
 
 def _ramp() -> GeoArray:
@@ -148,25 +148,25 @@ def _at(g: GeoArray, rc: list[tuple[float, float]], **kw: Any) -> GeoPoints:
 def test_bilinear_is_exact_on_a_ramp_and_at_the_edges() -> None:
     g = _ramp()
     pts = _at(g, [(0, 0), (2.5, 1.25), (5, 4), (5, 0.5), (0.3, 4)])
-    out = sample(g, pts)
+    out = interp_at(g, pts)
     np.testing.assert_allclose(out.data, [0.0, 26.25, 54.0, 50.5, 7.0], atol=1e-9)
     assert out.valid.all()
 
 
 def test_outside_gives_nan_and_invalid() -> None:
-    out = sample(_ramp(), _at(_ramp(), [(-3, 0), (2, 9), (1, 1)]))
+    out = interp_at(_ramp(), _at(_ramp(), [(-3, 0), (2, 9), (1, 1)]))
     assert np.isnan(out.data[:2]).all() and out.data[2] == 11.0
     assert out.valid.tolist() == [False, False, True]
 
 
 def test_nearest() -> None:
-    out = sample(_ramp(), _at(_ramp(), [(2.4, 1.6), (5.2, 3.9)]), method="nearest")
+    out = interp_at(_ramp(), _at(_ramp(), [(2.4, 1.6), (5.2, 3.9)]), method="nearest")
     assert out.data.tolist() == [22.0, 54.0]
 
 
 def test_padded_points_give_zero() -> None:
     pts = pad_points(_at(_ramp(), [(1, 1), (2, 2)]), 4)
-    out = sample(_ramp(), pts)
+    out = interp_at(_ramp(), pts)
     assert out.data.tolist() == [11.0, 22.0, 0.0, 0.0]
     assert out.valid.tolist() == [True, True, False, False]
 
@@ -184,7 +184,7 @@ def test_sampling_a_stack_at_stations_is_a_time_series() -> None:
         coords=(hours, met),
     )
     stations = _at(stack, [(1, 1), (4, 3)])
-    series = sample(stack, stations)
+    series = interp_at(stack, stations)
     assert series.dims == ("time", "variable", "obs")
     assert matches(series, GeoTimeSeries)
     np.testing.assert_allclose(series.data[:, :, 1], stack.data[:, :, 4, 3])
@@ -195,14 +195,14 @@ def test_each_sample_reads_its_own_frame() -> None:
         np.arange(3.0)[:, None, None] * np.ones((3, 6, 5)), T, CRS, dims="time y x"
     )
     pts = _at(frames, [(1, 1), (2, 2), (3, 3)])
-    out = sample(frames, pts, frame=np.array([2, 0, 1]))
+    out = interp_at(frames, pts, frame=np.array([2, 0, 1]))
     assert out.dims == ("obs",) and out.data.tolist() == [2.0, 0.0, 1.0]
 
 
 def test_sample_needs_one_crs() -> None:
     pts = GeoPoints(np.zeros(1), xy=np.zeros((1, 2)), dims="obs")
     with pytest.raises(ValueError, match="transform the points"):
-        sample(_ramp(), pts)
+        interp_at(_ramp(), pts)
 
 
 def test_ga_g16_cost_unchanged_by_padding(x64: ModuleType) -> None:
@@ -211,10 +211,10 @@ def test_ga_g16_cost_unchanged_by_padding(x64: ModuleType) -> None:
     jnp = x64.numpy
     truth = _ramp()
     obs_rc = [(0.5, 0.5), (2.2, 3.1), (4.9, 1.0), (3.0, 3.0)]
-    clean = sample(truth, _at(truth, obs_rc))
+    clean = interp_at(truth, _at(truth, obs_rc))
 
     def cost(ssh: GeoArray, obs: GeoPoints, sigma: float) -> Any:
-        predicted = sample(ssh, obs)
+        predicted = interp_at(ssh, obs)
         # d = y − H(x), zero on padded slots
         d = jnp.where(obs.valid, obs.data - predicted.data, 0.0)
         # J = ½ dᵀ R⁻¹ d, R = σ² I

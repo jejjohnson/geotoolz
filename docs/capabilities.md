@@ -1373,6 +1373,7 @@ current).
 | `crop` | function | The ``size`` pixels starting at ``offset``, with the matching transform. |
 | `footprint` | function | The outline of the carrier's grid as a shapely ``Polygon``. |
 | `get_options` | function | The current options, as a new dict. |
+| `interp_at` | function | H(x): ``grid`` read at the positions of ``points``. |
 | `isel` | function | Re-exported from `pipekit_array`. |
 | `map_over` | function | Re-exported from `pipekit_array`. |
 | `pad` | function | Add fill pixels around the spatial axes; the transform moves with them. |
@@ -1380,7 +1381,6 @@ current).
 | `pixel_coords` | function | Map coordinates of every pixel, ``(2, H, W)``: x then y. |
 | `read_window` | function | The pixels of ``window``, padding with fill where it leaves the array. |
 | `reduce` | function | Re-exported from `pipekit_array`. |
-| `sample` | function | H(x): ``grid`` read at the positions of ``points``. |
 | `sel` | function | Re-exported from `pipekit_array`. |
 | `set_options` | class | Set process-wide options, for good or within a ``with`` block. |
 | `stack` | function | Stack carriers on one grid along a new dim. |

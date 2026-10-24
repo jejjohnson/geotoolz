@@ -1,16 +1,16 @@
 """Map coordinates to pixels, and a grid sampled at points: H(x) (#522).
 
-`to_pixel` inverts the transform; `sample` reads a `GeoArray` at the
+`to_pixel` inverts the transform; `interp_at` reads a `GeoArray` at the
 positions of a `GeoPoints`, which is the observation operator H(x) of data
 assimilation and of training against in-situ data. Both are written once
 against the array namespace, so they run on NumPy and under ``jit`` /
 ``grad`` on JAX.
 
-``sample`` returns input values only with ``method="nearest"``; bilinear
+``interp_at`` returns input values only with ``method="nearest"``; bilinear
 weights blend four pixels, so strictly it computes new values (the
 membership test of geoarray). It lives here because it is the one
 interpolation every carrier-level cost needs, and it reads nothing but the
-georeference (``geoops.functional`` holds the general resamplers).
+georeference (``geoops.geom`` holds the general resamplers).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from geoarray._src.backend import namespace
 from geoarray._src.carriers import GeoPoints
 
 
-__all__ = ["sample", "to_pixel"]
+__all__ = ["interp_at", "to_pixel"]
 
 
 def to_pixel(transform: Any, xy: Any) -> Any:
@@ -60,7 +60,7 @@ def to_pixel(transform: Any, xy: Any) -> Any:
     return xp.stack([row, col], axis=-1)
 
 
-def sample(
+def interp_at(
     grid: GeoArray,
     points: GeoPoints,
     method: str = "bilinear",
@@ -81,7 +81,7 @@ def sample(
         grid: A carrier ``(..., y, x)``; its leading dims stay, before ``obs``.
         points: Where to read, in ``grid``'s CRS.
         method: ``"bilinear"`` or ``"nearest"``.
-        frame: Optional ``(obs,)`` integer index into ``along`` per sample:
+        frame: Optional ``(obs,)`` integer index into ``along`` per point:
             each observation reads its own frame of a series (tracks over a
             ``GeoMapSeries``); ``along`` is then dropped from the result.
         along: The dim ``frame`` indexes.
@@ -103,21 +103,23 @@ def sample(
         >>> g = GeoArray(np.arange(16.0).reshape(4, 4), t, None, dims="y x")
         >>> p = GeoPoints(np.zeros(2), xy=np.array([[0.5, 3.5], [9.0, 9.0]]),
         ...               dims="obs", crs=None)
-        >>> out = sample(g, p)
+        >>> out = interp_at(g, p)
         >>> out.data.tolist(), out.valid.tolist()
         ([0.0, nan], [True, False])
     """
     if grid.crs != points.crs:
         raise ValueError(
-            f"sample: the grid is in {grid.crs} and the points in {points.crs}; "
+            f"interp_at: the grid is in {grid.crs} and the points in {points.crs}; "
             "transform the points first"
         )
     if grid.batch_shape:
         raise ValueError(
-            "sample reads one grid; map a batched carrier with geoarray.map_over"
+            "interp_at reads one grid; map a batched carrier with geoarray.map_over"
         )
     if method not in ("bilinear", "nearest"):
-        raise ValueError(f"sample: method is 'bilinear' or 'nearest', got {method!r}")
+        raise ValueError(
+            f"interp_at: method is 'bilinear' or 'nearest', got {method!r}"
+        )
     xp = grid.xp
     xy = xp.asarray(points.xy)
     given = (
@@ -135,7 +137,7 @@ def sample(
     if frame is not None:
         if along not in grid.dims:
             raise ValueError(
-                f"sample: frame indexes {along!r}, not a dim of {grid.dims}"
+                f"interp_at: frame indexes {along!r}, not a dim of {grid.dims}"
             )
         data = xp.moveaxis(data, grid.dims.index(along), 0)
     if method == "nearest":
@@ -184,9 +186,9 @@ def sample(
 
 
 def _gather(data: Any, rows: Any, cols: Any, frame: Any, xp: Any) -> Any:
-    """``data[..., rows[k], cols[k]]`` for each sample k, as ``(..., obs)``."""
+    """``data[..., rows[k], cols[k]]`` for each point k, as ``(..., obs)``."""
     if frame is None:
         return data[..., rows, cols]
-    # data is (frame, ..., y, x): each sample reads its own frame
+    # data is (frame, ..., y, x): each point reads its own frame
     picked = data[xp.asarray(frame), ..., rows, cols]
     return xp.moveaxis(picked, 0, -1)

@@ -55,11 +55,19 @@ GB2, …) name the tests that enforce it.
 
 ## The membership test
 
-geoarray holds only operations that **re-index or re-describe pixels
-without computing new values**: the output contains only input values,
-fill values or coordinates. Slicing, crops, windows and pixel coordinates
-belong here; warping, resampling, CRS kernels and anything that
-interpolates belong in `geoops.functional`.
+geoarray holds operations that **read only the georeference**:
+
+```
+re-index      isel, crop, read_window, pad, the joins
+re-describe   coords, dims, pixel_coords, footprint
+read at       to_pixel, interp_at   (points in, values out)
+```
+
+Anything that **writes a new grid** (warp, resample, reproject, mosaic,
+CRS kernels) belongs in `geoops.geom`. `interp_at` blends neighbours, but
+its output lives on the points it was given, not on a new grid, so it is
+"read at", not resampling. The nouns `sample` (an ML batch item) and
+`member` (an ensemble draw) are kept for dim names, never function names.
 
 ## The pytree split
 
@@ -101,9 +109,12 @@ interpolates belong in `geoops.functional`.
   `(time, band, y, x)` into `(time, y, x)` raises, because 0.2 code (the
   geoops kernels, `axis=-3`) reads `(T, H, W)` as `(C, H, W)`. By name
   (`isel`, `sel`) the stored dims say what is left, so it is allowed.
-- **NumPy and JAX mix eagerly (design decision C1).** Mixed inputs promote
-  to JAX (`_promote` in `_src/geometry.py`); output stays where the
-  computation ran; `__array__` copies JAX data to the host eagerly and
+- **NumPy and JAX never mix silently (C1 is deprecated).** Mixed eager
+  inputs to the joins and `write_window` still promote to JAX in 0.3, with a
+  `DeprecationWarning` (`_promote` in `_src/geometry.py`); from 0.4 they
+  raise `pipekit_array.BackendError`, as `KernelOp` already does. Under a
+  trace a NumPy carrier is a constant of the traced function and joins
+  without a warning. `__array__` copies JAX data to the host eagerly and
   raises `GeoArrayTraceError` under a trace.
 - JAX is optional. Import it through `_src/backend.py` (`import_jax`,
   `is_jax_array`, `is_tracer`); a NumPy-only install never loads it.
