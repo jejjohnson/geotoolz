@@ -55,19 +55,29 @@ GB2, …) name the tests that enforce it.
 
 ## The membership test
 
-geoarray holds operations that **read only the georeference**:
-
 ```
-re-index      isel, crop, read_window, pad, the joins
-re-describe   coords, dims, pixel_coords, footprint
-read at       to_pixel, interp_at   (points in, values out)
+geoarray: reads the georeference, never computes a field
+  re-index     isel, sel, crop, read_window, write_window, pad
+  join         stack, concat, combine      one grid; your fn computes
+  re-describe  dims, coords, pixel_coords, valid_mask, footprint
+  read at      to_pixel, interp_at         points in, values out
+
+geoops: computes
+  new values   indices, radiometry, mask, normalize, …   same grid
+  new grid     reproject, resample, warp, mosaic, rasterize
 ```
 
-Anything that **writes a new grid** (warp, resample, reproject, mosaic,
-CRS kernels) belongs in `geoops.geom`. `interp_at` blends neighbours, but
-its output lives on the points it was given, not on a new grid, so it is
-"read at", not resampling. The nouns `sample` (an ML batch item) and
-`member` (an ensemble draw) are kept for dim names, never function names.
+The test: if the output holds only input values, fills and coordinates,
+or values read at points you gave it, it is geoarray. Otherwise it is
+geoops.
+
+Mosaic, CRS maths and reflective padding write new values, so they are
+`geoops.geom`. `interp_at` blends neighbours, but its output lives on the
+points it was given, not on a new grid, so it is "read at", not
+resampling. `combine` aligns carriers and runs *your* function on their
+data: geoarray computes nothing itself. The nouns `sample` (an ML batch
+item) and `member` (an ensemble draw) are kept for dim names, never
+function names.
 
 ## The pytree split
 

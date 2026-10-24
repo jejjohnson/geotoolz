@@ -158,20 +158,29 @@ and names the fix: `geoarray.map_over(x, first_band, "time")`.
 
 ## The membership test
 
-geoarray holds the operations that read only the georeference. They come
-in three families:
+geoarray and geoops split the work in one place:
 
 ```
-re-index      isel, crop, read_window, pad, the joins
-re-describe   coords, dims, pixel_coords, footprint
-read at       to_pixel, interp_at   (points in, values out)
+geoarray: reads the georeference, never computes a field
+  re-index     isel, sel, crop, read_window, write_window, pad
+  join         stack, concat, combine      one grid; your fn computes
+  re-describe  dims, coords, pixel_coords, valid_mask, footprint
+  read at      to_pixel, interp_at         points in, values out
+
+geoops: computes
+  new values   indices, radiometry, mask, normalize, …   same grid
+  new grid     reproject, resample, warp, mosaic, rasterize
 ```
 
-Anything that **writes a new grid** (warp, resample, reproject, mosaic) is
-`geoops.geom`. `interp_at`, the observation operator H(x), blends
-neighbouring pixels, but its output lives on the points it was given, not
-on a new grid: it reads the field at those points, which is why every
-carrier-level cost can use it with geoarray alone.
+The test: if the output holds only input values, fills and coordinates,
+or values read at points you gave it, it is geoarray. Otherwise it is
+geoops.
+
+`interp_at`, the observation operator H(x), blends neighbouring pixels,
+but its output lives on the points it was given, not on a new grid: it
+reads the field at those points, which is why every carrier-level cost can
+use it with geoarray alone. `combine` aligns carriers on one grid and runs
+your function on their data; geoarray computes nothing of its own.
 
 `sample` and `member` are dim names, not functions: a `sample` is one
 item of an ML batch, a `member` one draw of an ensemble, and `obs` one
