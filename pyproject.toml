@@ -142,3 +142,13 @@ name = "geotoolz never imports plumax or radtrax"
 type = "forbidden"
 source_modules = ["geoops", "geopatcher", "geocatalog", "geocloud", "geoproducts", "geoarray"]
 forbidden_modules = ["plumax", "radtrax"]
+
+# The I/O packages are pre- and post-processing and never use JAX or coordax
+# themselves (#528, gate G4). Direct imports only: they reach geoarray, which
+# registers its pytrees when JAX is installed.
+[[tool.importlinter.contracts]]
+name = "catalog, cloud and products never import JAX or coordax"
+type = "forbidden"
+source_modules = ["geocatalog", "geocloud", "geoproducts"]
+forbidden_modules = ["jax", "jaxlib", "coordax"]
+allow_indirect_imports = true

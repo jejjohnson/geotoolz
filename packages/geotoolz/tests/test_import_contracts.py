@@ -37,22 +37,36 @@ def test_the_contracts_hold() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("module", ["plumax", "radtrax"])
-def test_a_lazy_import_of_a_geomodels_package_breaks_the_contract(
-    tmp_path: Path, module: str
+GEOMODELS = "geotoolz never imports plumax or radtrax"
+NO_JAX = "catalog, cloud and products never import JAX or coordax"
+
+
+@pytest.mark.parametrize(
+    ("name", "module"),
+    [
+        (GEOMODELS, "plumax"),
+        (GEOMODELS, "radtrax"),
+        (NO_JAX, "jax"),
+        (NO_JAX, "coordax"),
+    ],
+)
+def test_a_lazy_import_breaks_the_contract(
+    tmp_path: Path, name: str, module: str
 ) -> None:
     """The root contract, pointed at a package that imports ``module`` in a function."""
-    contract = _contract("geotoolz never imports plumax or radtrax")
+    contract = _contract(name)
     package = tmp_path / "fakegeo"
     package.mkdir()
     (package / "__init__.py").write_text(f"def later():\n    import {module}\n")
     forbidden = ", ".join(f'"{m}"' for m in contract["forbidden_modules"])
+    indirect = str(contract.get("allow_indirect_imports", False)).lower()
     (tmp_path / ".importlinter.toml").write_text(
         '[tool.importlinter]\nroot_packages = ["fakegeo"]\n'
         "include_external_packages = true\n\n"
         "[[tool.importlinter.contracts]]\n"
         f'name = "{contract["name"]}"\ntype = "{contract["type"]}"\n'
         f'source_modules = ["fakegeo"]\nforbidden_modules = [{forbidden}]\n'
+        f"allow_indirect_imports = {indirect}\n"
     )
     result = _lint("--config", ".importlinter.toml", cwd=tmp_path, env_path=tmp_path)
     assert result.returncode != 0

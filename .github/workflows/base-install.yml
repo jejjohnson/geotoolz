@@ -112,6 +112,8 @@ jobs:
           for module in (
               "fsspec", "duckdb", "xarray", "zarr", "pystac", "pystac_client",
               "planetary_computer", "earthaccess", "ee", "geopatcher", "geocloud",
+              # gate G4 (#528): the I/O packages never need JAX
+              "jax", "coordax",
           ):
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 
@@ -134,6 +136,28 @@ jobs:
               out = Path(tmp) / "catalog.parquet"
               geocatalog.storage.to_geoparquet(cat, out)
               assert len(geocatalog.open_catalog(out)) == 1
+
+              # One load on the base install: a GeoArray without JAX (G4).
+              import sys
+
+              import pandas as pd
+
+              from geoarray import GeoArray
+              from geocatalog import GeoSlice
+              from geocatalog.load import load_raster
+
+              aoi = GeoSlice(
+                  bounds=(500000, 4000000, 500080, 4000080),
+                  interval=pd.Interval(
+                      pd.Timestamp("2024-06-01"), pd.Timestamp("2024-06-30"),
+                      closed="both",
+                  ),
+                  resolution=(10.0, 10.0),
+                  crs="EPSG:32629",
+              )
+              scene = load_raster(cat, aoi)
+              assert isinstance(scene, GeoArray) and scene.shape == (1, 8, 8)
+              assert not {"jax", "coordax"} & set(sys.modules), "JAX was loaded"
 
               # Extra-backed features fail only on use, naming the extra.
               try:
@@ -268,7 +292,7 @@ jobs:
 
           # The extras (and geotoolz itself) really are absent; pipekit core and
           # pipekit-array come with geoarray.
-          absent = ("geotoolz", "geopatcher", "obstore", "pipekit_train", "jax", "requests", "pydantic", "h5py")
+          absent = ("geotoolz", "geopatcher", "obstore", "pipekit_train", "jax", "coordax", "requests", "pydantic", "h5py")
           for module in absent:
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 
@@ -402,7 +426,7 @@ jobs:
           from geoarray import GeoArray, Grid
 
           # GC3: none of jax, rasterio, georeader or xarray is installed.
-          for module in ("jax", "georeader", "rasterio", "xarray", "shapely", "geoops"):
+          for module in ("jax", "coordax", "georeader", "rasterio", "xarray", "shapely", "geoops"):
               assert importlib.util.find_spec(module) is None, f"{module} installed"
           assert "jax" not in sys.modules
 
