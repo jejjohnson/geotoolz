@@ -71,3 +71,18 @@ def test_a_lazy_import_breaks_the_contract(
     result = _lint("--config", ".importlinter.toml", cwd=tmp_path, env_path=tmp_path)
     assert result.returncode != 0
     assert f"fakegeo -> {module}" in result.stdout
+
+
+def test_io_packages_do_not_load_jax_even_when_installed() -> None:
+    """Gate G4 (#528), the runtime half: importing them never loads JAX."""
+    pytest.importorskip("jax")
+    code = (
+        "import sys\n"
+        "import geocatalog, geocloud, geoproducts\n"
+        "loaded = {'jax', 'jaxlib', 'coordax'} & set(sys.modules)\n"
+        "assert not loaded, f'loaded {sorted(loaded)}'\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr

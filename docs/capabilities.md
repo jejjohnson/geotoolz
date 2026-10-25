@@ -1512,6 +1512,7 @@ upstream, not here.
 | `juxt` | function | Return a callable that applies each operator to its input and tuples the results. |
 | `loads` | function | Decode an operator from its JSON state record. |
 | `loads_sandboxed` | function | Like `loads`, but reject any class, at any depth, not in the allowlist. |
+| `on_import` | function | Call ``callback(module)`` once ``name`` is imported, without importing it. |
 | `pipe` | function | Apply ``operators`` left-to-right to ``value``. |
 | `pipeline_hash` | function | Content hash of a pipeline's whole configuration, and optional weights. |
 | `register` | function | Register ``cls`` as loadable via `loads_sandboxed`. |

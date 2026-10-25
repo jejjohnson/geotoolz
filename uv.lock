@@ -1375,8 +1375,8 @@ requires-dist = [
     { name = "georeader-spaceml", marker = "extra == 'georeader'", specifier = ">=2.1" },
     { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.30" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&tag=pipekit-v0.1.2" },
-    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.0.4" },
+    { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&tag=pipekit-v0.1.3" },
+    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.0.5" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "shapely", marker = "extra == 'vector'", specifier = ">=2.0" },
     { name = "typing-extensions", marker = "extra == 'georeader'", specifier = ">=4.0" },
@@ -1807,7 +1807,7 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.1" },
-    { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&tag=pipekit-v0.1.2" },
+    { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&tag=pipekit-v0.1.3" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "rasterio", specifier = ">=1.3" },
     { name = "scikit-image", specifier = ">=0.25" },
@@ -1940,8 +1940,8 @@ requires-dist = [
     { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.23" },
     { name = "jax", marker = "extra == 'patch-full'", specifier = ">=0.4.23" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "pipekit", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&tag=pipekit-v0.1.2" },
-    { name = "pipekit-train", extras = ["equinox"], marker = "extra == 'train'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&rev=969175ccdff18d08dee8888201fc4bb4227d25a1" },
+    { name = "pipekit", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&tag=pipekit-v0.1.3" },
+    { name = "pipekit-train", extras = ["equinox"], marker = "extra == 'train'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&rev=416e97414e04f41fe55c007bd317e0ffc51ac7a7" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "rasterio", specifier = ">=1.3" },
     { name = "rioxarray", marker = "extra == 'patch-full'", specifier = ">=0.15" },
@@ -4000,13 +4000,13 @@ wheels = [
 
 [[package]]
 name = "pipekit"
-version = "0.1.2"
-source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&tag=pipekit-array-v0.0.4#969175ccdff18d08dee8888201fc4bb4227d25a1" }
+version = "0.1.3"
+source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=416e97414e04f41fe55c007bd317e0ffc51ac7a7#416e97414e04f41fe55c007bd317e0ffc51ac7a7" }
 
 [[package]]
 name = "pipekit-array"
-version = "0.0.4"
-source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.0.4#969175ccdff18d08dee8888201fc4bb4227d25a1" }
+version = "0.0.5"
+source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.0.5#416e97414e04f41fe55c007bd317e0ffc51ac7a7" }
 dependencies = [
     { name = "pipekit" },
 ]
@@ -4014,7 +4014,7 @@ dependencies = [
 [[package]]
 name = "pipekit-train"
 version = "0.1.2"
-source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&rev=969175ccdff18d08dee8888201fc4bb4227d25a1#969175ccdff18d08dee8888201fc4bb4227d25a1" }
+source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&rev=416e97414e04f41fe55c007bd317e0ffc51ac7a7#416e97414e04f41fe55c007bd317e0ffc51ac7a7" }
 dependencies = [
     { name = "pipekit" },
 ]

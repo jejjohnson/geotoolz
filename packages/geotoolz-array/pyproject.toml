@@ -30,9 +30,10 @@ dependencies = [
     # The named-array adapter registry (pipekit core, pure Python) and the
     # dim-level functions geoarray re-exports (pipekit-array: pipekit only).
     # The W1 releases: the adapter registry, DimArray, the dim functions and
-    # KernelOp that geoarray registers with and re-exports.
-    "pipekit>=0.1.2",
-    "pipekit-array>=0.0.4",
+    # KernelOp that geoarray registers with and re-exports; pipekit 0.1.3
+    # adds `on_import`, which registers the pytrees once JAX is imported.
+    "pipekit>=0.1.3",
+    "pipekit-array>=0.0.5",
 ]
 
 [project.optional-dependencies]

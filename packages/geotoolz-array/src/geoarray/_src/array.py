@@ -29,6 +29,7 @@ from typing import Any, cast
 
 import numpy as np
 import pyproj
+from pipekit import on_import
 from pipekit_array.dimarray import vmapped_dims
 
 from geoarray._src.attrs import FrozenAttrs, drop_band_keys, select_bands
@@ -1500,12 +1501,8 @@ def _unflatten(aux: tuple[Any, ...], leaves: Any) -> GeoArray:
     return build(data, transform, crs, fill_value, attrs, matched, coords)
 
 
-def _register_pytree() -> bool:
-    """Register `GeoArray` with JAX when JAX is installed; never fail without it."""
-    try:
-        jax = import_jax()
-    except ImportError:  # pragma: no cover - exercised by the base-install job
-        return False
+def _register_pytree(jax: Any) -> None:
+    """Register `GeoArray` with JAX (`pipekit.on_import` runs it once JAX loads)."""
     from jax.tree_util import GetAttrKey
 
     def flatten_with_keys(g: GeoArray) -> tuple[Any, Any]:
@@ -1519,7 +1516,8 @@ def _register_pytree() -> bool:
     jax.tree_util.register_pytree_with_keys(
         GeoArray, flatten_with_keys, _unflatten, flatten_func=_flatten
     )
-    return True
 
 
-PYTREE_REGISTERED = _register_pytree()
+# never import JAX here: the I/O packages import geoarray and never need it
+# (gate G4, geotoolz#528); the pytree is registered when JAX is imported
+on_import("jax", _register_pytree)

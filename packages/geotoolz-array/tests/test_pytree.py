@@ -238,3 +238,27 @@ def test_to_jax_moves_stamps_of_a_carrier_built_on_jax(x64: ModuleType) -> None:
     assert g.backend == "jax"
     moved = g.to_jax()
     assert type(moved.coord("time").stamps).__module__.startswith("jax")
+
+
+def test_importing_geoarray_does_not_import_jax_and_jax_registers_later() -> None:
+    """The pytrees are registered when JAX is imported (pipekit.on_import, #528)."""
+    import subprocess
+    import sys
+
+    code = (
+        "import sys, numpy as np, geoarray\n"
+        "assert 'jax' not in sys.modules, 'geoarray imported jax'\n"
+        "import jax\n"
+        "jax.config.update('jax_enable_x64', True)\n"
+        "t = (20.0, 0.0, 0.0, 0.0, -20.0, 0.0)\n"
+        "g = geoarray.GeoArray(np.zeros((2, 3, 3)), t, 32613, dims='band y x')\n"
+        "lat, lon = np.meshgrid(np.arange(3.0), np.arange(3.0), indexing='ij')\n"
+        "s = geoarray.GeoSwath(np.zeros((3, 3)), lat, lon, dims='row col')\n"
+        "p = geoarray.GeoPoints(np.zeros(2), xy=np.zeros((2, 2)), dims='obs')\n"
+        "for c in (g, s, p):\n"
+        "    assert len(jax.tree_util.tree_leaves(c)) >= 2, type(c).__name__\n"
+        "print(jax.jit(lambda c: c)(g.to_jax()).dims)\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "('band', 'y', 'x')"
