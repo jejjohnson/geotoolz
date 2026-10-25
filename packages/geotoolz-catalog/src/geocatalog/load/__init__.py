@@ -9,8 +9,8 @@ CRS):
 - `load_raster_timeseries` — one ``(T, C, H, W)`` `geoarray.GeoArray`,
   a time step per day in the slice's interval.
 - `load_xarray` — an xarray Dataset (``[xarray-raster]`` extra; lazy).
-- `load_vector` — the features rasterised into a ``(1, H, W)`` int64
-  label `geoarray.GeoArray` (lazy).
+- `load_vector` — the features rasterised into an ``(H, W)`` int64 label
+  map (a `GeoMap`, dims ``y x``) (lazy).
 
 Every `GeoArray` a loader returns is on ``slice_.grid`` and declares its
 nodata in ``fill_value``.

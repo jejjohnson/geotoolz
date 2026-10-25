@@ -358,12 +358,12 @@ def load_vector(
     Args:
         catalog: A vector-backend catalog.
         slice_: Window to rasterise into. The result is on
-            ``slice_.grid``: ``(1, *slice_.shape)``, with the slice's
-            transform and CRS.
+            ``slice_.grid``: ``slice_.shape``, with the slice's transform
+            and CRS.
         task: Which ML target shape to produce:
 
-            - ``"semantic_segmentation"``: one channel of class IDs
-              read from ``label_field``. With ``label_field=None`` each
+            - ``"semantic_segmentation"``: a map of class IDs read from
+              ``label_field``. With ``label_field=None`` each
               feature burns as ``burn_value`` (default 1).
             - ``"instance_segmentation"``: one integer per feature
               (1..N) — distinct values for distinct objects.
@@ -382,15 +382,16 @@ def load_vector(
             disables retry/backoff.
 
     Returns:
-        A `geoarray.GeoArray` of shape ``(1, H, W)`` with ``dtype=int64``
-        on the slice grid (its ``grid`` equals ``slice_.grid``), with
-        ``fill_value=fill``.
+        A `GeoMap`: a `geoarray.GeoArray` of shape ``(H, W)``, dims
+        ``("y", "x")``, ``dtype=int64``, on the slice grid (its ``grid``
+        equals ``slice_.grid``), with ``fill_value=fill``. One layer of
+        labels is a map, not an image, so there is no band axis.
 
     Example:
         Class labels aligned with the imagery of the same slice::
 
             labels = load_vector(catalog, slice_, label_field="class_id")
-            labels.shape, labels.grid == slice_.grid  # (1, H, W), True
+            labels.shape, labels.grid == slice_.grid  # (H, W), True
 
     Raises:
         TypeError: If the catalog's backend tag is not ``"vector"``.
@@ -456,7 +457,7 @@ def load_vector(
             features.append((row.geometry, value))
 
     if not features:
-        raster = np.full((1, height, width), fill, dtype=np.int64)
+        raster = np.full((height, width), fill, dtype=np.int64)
     else:
         burned = rasterize(
             features,
@@ -465,9 +466,7 @@ def load_vector(
             fill=fill,
             dtype=np.int64,
         )
-        raster = burned[np.newaxis, ...]
+        raster = burned
 
-    # (1, H, W) int64: labels keep a singleton band axis
-    return GeoArray(
-        raster, transform, slice_.crs, fill_value=fill, dims=("band", "y", "x")
-    )
+    # (H, W) int64: one layer of labels is a map (GeoMap), no band axis
+    return GeoArray(raster, transform, slice_.crs, fill_value=fill, dims=("y", "x"))
