@@ -823,6 +823,139 @@ with a value the chip would read as data:
 
 ---
 
+## ADR-013 — A batch of patches is one `GeoArray` with a `patch` batch dim
+
+> Replaces `BatchedPatch` as what `batch_split` yields (#529); `stitch`
+> reads it back in #530. Design: [geostack's geoarray design](https://github.com/jejjohnson/geostack/blob/main/docs/design/geoarray.md)
+> (stage 5 of the running example, gate GA-G15).
+
+**Status.** Proposed (#529).
+
+**Context.** `batch_split` yields `BatchedPatch`: the patch payloads
+stacked on a leading axis, next to Python lists of per-patch anchors,
+indices, weights and carrier templates. Three things are wrong with it.
+
+1. It moves data to JAX behind the caller's back (`jnp = np` when JAX is
+   missing, `jnp.stack` when it is present), the silent promotion
+   geotoolz-array 0.3 deprecates (GA-C1).
+2. Its metadata is static pytree data compared by identity, so a jitted
+   function taking a whole batch retraces for every batch. The docstring
+   says to pass `batch.data` instead, which drops the georeference.
+3. It is `geoarray.map_over` built by hand. geotoolz-array 0.3 has the
+   real thing: a carrier whose leading dims are batch dims, with one
+   transform row per item, mapped in one `jax.vmap`.
+
+The batch geoarray already knows how to carry:
+
+```text
+batch: GeoArray                       (patch, band, y, x)
+  data       (patch, band, y, x)      leaf: NumPy, or JAX after to_jax()
+  transform  (patch, 6)               leaf: one row per patch → batch dim
+  dims, coords, crs, fill, attrs      static: equal for every full batch
+        │
+        │ geoarray.map_over(batch, model, "patch")
+        ▼
+one trace for every full batch, whatever the patches' positions (GA-G15)
+```
+
+What it cannot carry is the per-patch validity of a padded final batch,
+and that is where the options differ.
+
+**Decision.**
+
+1. **The batch is a `GeoArray` with `patch` as its batch dim.**
+   - `data` is `(patch, *patch_dims)` and `transform` is `(patch, 6)`.
+   - Every other field is static and equal across full batches: the
+     patch dims, the field's coordinates sliced like each patch (band
+     names), the CRS, the fill and the attrs.
+   - Every patch of one batch must have the same shape (as today).
+2. **The padding mask is a leaf next to the batch, not inside it.**
+   - `batch_split` yields `PatchBatch(patches: GeoArray, valid: ndarray)`,
+     a `NamedTuple`: JAX treats it as a pytree, and jitting a step on it
+     does not retrace when the mask changes.
+   - `valid` is `(patch,)` bool, True for real patches.
+3. **Padding rows copy the last real patch**, its data and its transform
+   row, with `valid=False`.
+   - Their values and transforms are finite, so a masked loss and its
+     gradient are finite (the same rule as `pad_points`, GA-G16).
+   - Their statistics look like real data, which matters to
+     normalisation layers that see the whole batch.
+   - Today's padding is zeros.
+4. **NumPy in, NumPy out.**
+   - The batch is NumPy whatever is installed; the caller crosses to JAX
+     once, with `batch.patches.to_jax()`.
+   - The `jnp = np` fallback goes.
+   - The `[jax]` extra depends on `geotoolz-array[jax]`, not bare `jax`.
+5. **The dim is named `patch`, not `sample`.**
+   - Each item carries its own place on the ground (its transform row);
+     `patch` says that.
+   - `sample` stays the name of an item of an ML dataset, which may batch
+     patches from several scenes (pipekit-train's level, GA-B3).
+6. **Raster fields batch; the others keep `BatchedPatch` for one release.**
+   - `GeoArray` patches (every raster field) and `DataArray` patches that
+     read as a grid (`geoarray.from_xarray`) give a `PatchBatch`.
+   - Patches of any other carrier (plain arrays, non-grid DataArrays)
+     raise `TypeError` naming the deprecated `BatchedPatch` path, which
+     stays one release behind a `DeprecationWarning` and is removed in
+     geotoolz-patcher 0.14.
+7. **Same call, new yield type.**
+   - `batch_split(patcher, field, *, batch_size, pad_last=True)` keeps
+     its signature and yields `PatchBatch`.
+   - `unbatch` accepts a `PatchBatch` (and, for that release, a
+     `BatchedPatch`), placing patches by their transform rows.
+   - The anchors, indices and weights lists are not carried. `stitch`
+     (#530) recomputes each patch's offset from its transform row against
+     the target grid, and the window weights from the patcher's window
+     axis.
+   - Breaking, with a `BREAKING CHANGE:` footer.
+
+```python
+for batch, valid in batch_split(patcher, field, batch_size=64):  # PatchBatch
+    patches = batch.to_jax()                         # (64, 4, 256, 256), once
+    scores = geoarray.map_over(patches, model, "patch")  # one trace per shape
+    loss = masked_mean(scores.data, valid)           # padding rows ignored
+```
+
+**Alternatives considered.**
+
+- *Validity as a coordinate on the `patch` dim.* Coordinates are static,
+  so the padded final batch would compile a second program: the
+  recompile `pad_last` exists to avoid. A coordinate whose values are
+  leaves, as `TimeAxis` stamps are, would work, but it is a new kind of
+  geoarray coordinate for one boolean. Revisit if more per-patch values
+  (patch ids, scene ids) need to travel through `map_over`.
+- *Mark padding with the fill value* (`valid_mask()` derives it). This
+  conflates padding with real nodata, needs a fill (`None` by default),
+  and is per pixel where the question is per patch.
+- *A new carrier type (`GeoPatches` as a class).* A second carrier to keep
+  in step with `GeoArray` (pytree, adapter, xarray, readable types) for
+  one extra leaf. `GeoPatches` stays what geostack's design names it: a
+  readable type, `GeoArray["patch band y x"]`.
+- *Name the dim `sample`.* Matches ML vocabulary, but loses the "one
+  place on the ground per item" meaning, and collides with the nouns
+  GA-B3 keeps for datasets and ensembles.
+- *A new function (`split_batches`) and deprecate `batch_split`.* Not
+  breaking, but two names for one job for a release, and the repo renames
+  outright. The yield type changes, not the call.
+- *Keep zero padding.* Finite too, but out of distribution for anything
+  that normalises over the batch.
+
+**Consequences.**
+
+- *Code to change.* Code that reads `batch.data`, `batch.anchors`,
+  `batch.indices` or `batch.weights` changes. `batch.patches.data`,
+  `batch.valid` and the transform rows replace them, and `unbatch` /
+  `stitch` place patches from the transforms.
+- *One program.* A jitted step on a `PatchBatch` compiles once per patch
+  shape, and the georeference reaches the model.
+- *x64.* Moving the batch to JAX needs `jax_enable_x64` (transforms are
+  float64), as for every carrier; today's batches had float32 data and no
+  transform.
+- *Fields that can't batch.* `MatchedField` and temporal patchers keep
+  their own carriers; batching them is out of scope here.
+
+---
+
 ## How to add a decision
 
 1. Open a PR with the proposed addition. The PR description argues the
