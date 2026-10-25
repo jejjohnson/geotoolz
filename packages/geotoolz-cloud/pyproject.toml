@@ -27,7 +27,7 @@ dependencies = [
     # `write_cog` takes one (or any `geoarray.RasterSource`). The
     # [georeader] extra brings the adapter (`from_georeader` /
     # `to_georeader`) used at the engine boundary below.
-    "geotoolz-array[georeader]>=0.1.1",
+    "geotoolz-array[georeader]>=0.3.0",
     # The internal engine only, never in the public API: `georeader.read`
     # (window maths and reprojection, which the async COG reader mirrors);
     # >=2.1 for the numpy-subclass GeoTensor.

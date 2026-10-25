@@ -25,7 +25,7 @@ dependencies = [
     # return a `geoarray.GeoArray`. The [georeader] extra brings the adapter
     # (`from_georeader` / `source_to_georeader` / `source_from_georeader`)
     # used at the engine boundary below.
-    "geotoolz-array[georeader]>=0.1.1",
+    "geotoolz-array[georeader]>=0.3.0",
     # The internal engine only, never in the public API: `georeader.read`
     # (map-coordinate windows, reprojection in `stack`), `RasterioReader`
     # (Carbon Mapper GeoTIFFs) and `georeader.rasterize`; >=2.1 for the
