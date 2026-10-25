@@ -23,6 +23,7 @@ from typing import Any, ClassVar, cast
 
 import numpy as np
 import pyproj
+from pipekit import on_import
 from pipekit_array.dimarray import vmapped_dims
 
 from geoarray._src.array import (
@@ -850,11 +851,8 @@ def pad_points(points: GeoPoints, n: int) -> GeoPoints:
     )
 
 
-def _register_pytrees() -> bool:
-    try:
-        jax = import_jax()
-    except ImportError:  # pragma: no cover - the base-install job
-        return False
+def _register_pytrees(jax: Any) -> None:
+    """Register `GeoSwath` and `GeoPoints` with JAX (run by `pipekit.on_import`)."""
     from jax.tree_util import GetAttrKey
 
     def swath_keys(s: GeoSwath) -> tuple[Any, Any]:
@@ -877,7 +875,6 @@ def _register_pytrees() -> bool:
     jax.tree_util.register_pytree_with_keys(
         GeoPoints, points_keys, _points_unflatten, flatten_func=_points_flatten
     )
-    return True
 
 
-PYTREES_REGISTERED = _register_pytrees()
+on_import("jax", _register_pytrees)  # never import JAX here (see array.py)

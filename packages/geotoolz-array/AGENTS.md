@@ -128,7 +128,9 @@ function names.
   raises `GeoArrayTraceError` under a trace.
 - JAX is optional. Import it through `_src/backend.py` (`import_jax`,
   `is_jax_array`, `is_tracer`); a NumPy-only install never loads it.
-  The pytree is registered at import whenever JAX is installed.
+  Importing geoarray never imports JAX, even when it is installed (gate
+  G4, #528): the pytrees are registered by `pipekit.on_import("jax", …)`
+  the moment anything imports JAX. Never add an import-time `import jax`.
 - Transforms are (a, b, c, d, e, f), the `affine.Affine` / rasterio order,
   never GDAL's (c, a, b, f, d, e).
 - georeader is LGPL-3.0 and geotoolz is MIT: write geoarray from the

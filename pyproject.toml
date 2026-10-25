@@ -27,10 +27,11 @@ geotoolz-array = { workspace = true }
 # project), so it comes from GitHub at a release tag; the published wheel
 # metadata still carries the PyPI-flavoured `pipekit>=…` requirement from
 # each member's [project] table.
-pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", tag = "pipekit-v0.1.2" }
-pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", tag = "pipekit-array-v0.0.4" }
-# pipekit-train has no release since the W1 stack: the same commit as the tags above
-pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", rev = "969175ccdff18d08dee8888201fc4bb4227d25a1" }
+# pipekit#117 (on_import, lazy DimArray registration) until its release: then
+# back to the release tags
+pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", rev = "8faf653e02ed800d4695bfbbf321b4b39c29cbe6" }
+pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", rev = "8faf653e02ed800d4695bfbbf321b4b39c29cbe6" }
+pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", rev = "8faf653e02ed800d4695bfbbf321b4b39c29cbe6" }
 
 [build-system]
 requires = ["hatchling"]
