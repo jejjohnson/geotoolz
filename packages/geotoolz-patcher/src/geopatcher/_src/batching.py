@@ -23,6 +23,7 @@ from typing import Any, NamedTuple
 import numpy as np
 from geoarray import DIMS, GeoArray, GeoArrayError, isel
 
+from geopatcher._src.carrier import raster_grid
 from geopatcher._src.patch import Patch
 
 
@@ -143,8 +144,8 @@ def unbatch(
         patcher: The patcher that split the field; needed for a
             `PatchBatch` (its geometry must be
             `spatial.geometry.Rectangular`).
-        domain: The field's domain (``field.domain``); needed for a
-            `PatchBatch`.
+        domain: The field's domain (``field.domain``, or its bare
+            `geoarray.Grid`); needed for a `PatchBatch`.
 
     Returns:
         One `Patch` per valid entry, in batch order, with NumPy data. A row
@@ -155,8 +156,9 @@ def unbatch(
     Raises:
         TypeError: A `PatchBatch` without ``patcher`` and ``domain``.
         ValueError: The patcher's geometry is not
-            `spatial.geometry.Rectangular`, or a transform row is not on
-            the domain's pixel grid.
+            `spatial.geometry.Rectangular`, the patches were clipped by
+            ``boundary="shrink"``, ``domain`` is not a raster domain, or a
+            transform row is not on the domain's pixel grid.
 
     Example:
         >>> place = dict(patcher=patcher, domain=field.domain)
@@ -277,7 +279,22 @@ def _unbatch(
             "unbatch places a PatchBatch with a Rectangular geometry, got "
             f"{type(geometry).__name__}"
         )
-    to_pixel = ~domain.grid.affine
+    size = tuple(int(n) for n in geometry.size[-2:])
+    if tuple(batch.patches.shape[-2:]) != size:
+        # a chip clipped by boundary="shrink": its anchor and window weights
+        # cannot be recovered from the transform row alone
+        raise ValueError(
+            f"unbatch places full {size} patches, got {batch.patches.shape[-2:]} "
+            "ones: patches clipped by boundary='shrink' cannot be placed from "
+            "their transforms; use boundary='pad', 'reflect' or 'drop'"
+        )
+    grid = raster_grid(domain)
+    if grid is None:
+        raise ValueError(
+            "unbatch places a PatchBatch on a raster domain (a geoarray.Grid or an "
+            f"object with a .grid), got {type(domain).__name__}"
+        )
+    to_pixel = ~grid.affine
     weights = _safe_base_weights(patcher.window, geometry)
     patches = []
     for i in np.flatnonzero(np.asarray(batch.valid, dtype=bool)):

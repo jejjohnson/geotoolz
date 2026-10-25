@@ -195,6 +195,31 @@ def test_unbatch_rejects_a_domain_the_patches_are_not_on(field: RasterField) -> 
         unbatch(batch, patcher=patcher, domain=shifted)
 
 
+def test_unbatch_places_patches_on_a_bare_grid(field: RasterField) -> None:
+    """A bare `geoarray.Grid` is a raster domain (review on #567)."""
+    patcher = _patcher("pad", size=8, step=4)
+    grid = field.domain.grid
+    patches = [
+        p
+        for b in batch_split(patcher, field, batch_size=7)
+        for p in unbatch(b, patcher=patcher, domain=grid)
+    ]
+    assert [p.indices for p in patches] == [p.indices for p in patcher.split(field)]
+    np.testing.assert_allclose(
+        patcher.merge(patches, grid), np.asarray(field.reader), rtol=1e-6
+    )
+
+
+def test_unbatch_rejects_patches_clipped_by_shrink() -> None:
+    """A shrunk edge chip cannot be placed from its transform (review on #567)."""
+    field = _scene(20)  # 8-px patches → 4-px edge chips
+    patcher = _patcher("shrink")
+    *_, edge = batch_split(patcher, field, batch_size=1)
+    assert edge.patches.shape[-2:] == (4, 4)
+    with pytest.raises(ValueError, match="boundary='shrink'"):
+        unbatch(edge, patcher=patcher, domain=field.domain)
+
+
 def test_batch_split_rejects_mixed_shapes_with_clear_error() -> None:
     """#196: shrunk edge chips fail with a message, not numpy's stack error."""
     field = _scene(20)  # 8-px patches → 4-px edge chips
