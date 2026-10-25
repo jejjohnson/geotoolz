@@ -88,6 +88,32 @@ def test_padded_final_batch_copies_the_last_real_patch(field: RasterField) -> No
         np.testing.assert_array_equal(patches.data[i], patches.data[0])
 
 
+def test_padded_edge_chips_batch_with_interior_ones() -> None:
+    """A float field with no fill: pad edge chips declare NaN (review on #567)."""
+    data = np.random.default_rng(1).random((20, 20))
+    field = RasterField(GeoArray(data, UTM, "EPSG:32630", dims="y x"))
+    patcher = _patcher("pad")  # 3 x 3 patches, the edge ones padded
+
+    ((patches, valid),) = batch_split(patcher, field, batch_size=9)
+
+    assert valid.all() and np.isnan(patches.fill_value)
+    np.testing.assert_array_equal(patches.data[0], data[:8, :8])
+
+
+def test_patches_with_different_fills_are_rejected() -> None:
+    class TwoFills(RasterField):
+        def select(self, window):  # type: ignore[no-untyped-def]
+            chip = super().select(window)
+            fill = -1.0 if window.col_off else -2.0
+            return GeoArray(
+                chip.data, chip.transform, chip.crs, fill_value=fill, dims=chip.dims
+            )
+
+    field = TwoFills(GeoArray(np.zeros((16, 16)), UTM, "EPSG:32630", dims="y x"))
+    with pytest.raises(ValueError, match="one fill"):
+        next(batch_split(_patcher(), field, batch_size=4))
+
+
 def test_pad_last_false_yields_a_short_final_batch(field: RasterField) -> None:
     *_, (patches, valid) = batch_split(_patcher(), field, batch_size=5, pad_last=False)
     assert patches.shape[0] == 1 and valid.tolist() == [True]

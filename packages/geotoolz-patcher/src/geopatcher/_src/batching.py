@@ -96,7 +96,9 @@ def batch_split(
     Raises:
         ValueError: ``batch_size`` is not positive; the patches of one
             batch differ in shape (``boundary="shrink"`` edge chips) or in
-            CRS, fill, coordinates or attrs.
+            CRS, fill, coordinates or attrs (a float field's ``None`` fill
+            and the NaN its ``boundary="pad"`` edge chips declare count as
+            one: the batch's fill is NaN).
         TypeError: A patch is not a raster carrier (a plain array, a
             ``DataArray`` with no grid): use the deprecated
             `BatchedPatch.split` for those, until geotoolz-patcher 0.14.
@@ -183,10 +185,11 @@ def _patch_batch(patches: list[Patch], batch_size: int, *, pad: bool) -> PatchBa
     _check_shapes(patches)
     items = [_as_geoarray(p.data) for p in patches]
     first = items[0]
+    fill = _batch_fill(items)
     for item in items[1:]:
         if not _same_static(item, first):
             raise ValueError(
-                "batch_split needs patches with one CRS, fill, dims, coordinates "
+                "batch_split needs patches with one CRS, dims, coordinates "
                 f"and attrs; got {_describe(first)} and {_describe(item)}"
             )
     data = [np.asarray(item.data) for item in items]
@@ -202,7 +205,7 @@ def _patch_batch(patches: list[Patch], batch_size: int, *, pad: bool) -> PatchBa
         np.stack(data),
         np.stack(transforms),
         first.crs,
-        fill_value=first.fill_value,
+        fill_value=fill,
         attrs=first.attrs,
         dims=(PATCH, *first.dims),
         coords=first.coords,
@@ -246,13 +249,34 @@ def _not_a_raster(data: Any) -> TypeError:
     )
 
 
-def _same_static(a: GeoArray, b: GeoArray) -> bool:
-    same_fill = a.fill_value == b.fill_value or (
-        _is_nan(a.fill_value) and _is_nan(b.fill_value)
+def _batch_fill(items: list[GeoArray]) -> Any:
+    """The fill every patch of a batch shares.
+
+    ``boundary="pad"`` declares NaN on the edge chips of a float field with
+    no fill, while interior chips keep ``None``: one field, so the batch
+    takes NaN. Any other difference is a real mismatch.
+    """
+    fills = [item.fill_value for item in items]
+    first = fills[0]
+    if all(_same_fill(f, first) for f in fills):
+        return first
+    floating = np.issubdtype(items[0].dtype, np.floating)
+    if floating and all(f is None or _is_nan(f) for f in fills):
+        return np.nan
+    raise ValueError(
+        f"batch_split needs patches with one fill, got {sorted(set(map(repr, fills)))}"
     )
+
+
+def _same_fill(a: Any, b: Any) -> bool:
+    return (_is_nan(a) and _is_nan(b)) or (
+        a is None if b is None else (a is not None and bool(a == b))
+    )
+
+
+def _same_static(a: GeoArray, b: GeoArray) -> bool:
     return (
-        same_fill
-        and a.dims == b.dims
+        a.dims == b.dims
         and a.coords == b.coords
         and a.crs == b.crs
         and a.attrs == b.attrs
