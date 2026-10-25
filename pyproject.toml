@@ -29,9 +29,9 @@ geotoolz-array = { workspace = true }
 # each member's [project] table.
 # pipekit#117 (on_import, lazy DimArray registration) until its release: then
 # back to the release tags
-pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", rev = "8faf653e02ed800d4695bfbbf321b4b39c29cbe6" }
-pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", rev = "8faf653e02ed800d4695bfbbf321b4b39c29cbe6" }
-pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", rev = "8faf653e02ed800d4695bfbbf321b4b39c29cbe6" }
+pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", rev = "b92b66f2d4fe38bed205e3a8c712fdb0a5a90ec0" }
+pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", rev = "b92b66f2d4fe38bed205e3a8c712fdb0a5a90ec0" }
+pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", rev = "b92b66f2d4fe38bed205e3a8c712fdb0a5a90ec0" }
 
 [build-system]
 requires = ["hatchling"]
