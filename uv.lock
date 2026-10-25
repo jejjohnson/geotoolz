@@ -1866,13 +1866,13 @@ grid = [
     { name = "xarray" },
 ]
 jax = [
-    { name = "jax" },
+    { name = "geotoolz-array", extra = ["jax"] },
 ]
 patch-full = [
     { name = "dask" },
     { name = "geopandas" },
+    { name = "geotoolz-array", extra = ["jax"] },
     { name = "geotoolz-cloud", extra = ["cog"] },
-    { name = "jax" },
     { name = "rioxarray" },
     { name = "shapely" },
     { name = "xarray" },
@@ -1935,10 +1935,10 @@ requires-dist = [
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=0.14" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz-array", extras = ["georeader"], editable = "packages/geotoolz-array" },
+    { name = "geotoolz-array", extras = ["jax"], marker = "extra == 'jax'", editable = "packages/geotoolz-array" },
+    { name = "geotoolz-array", extras = ["jax"], marker = "extra == 'patch-full'", editable = "packages/geotoolz-array" },
     { name = "geotoolz-cloud", extras = ["cog"], marker = "extra == 'cog'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-cloud", extras = ["cog"], marker = "extra == 'patch-full'", editable = "packages/geotoolz-cloud" },
-    { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.23" },
-    { name = "jax", marker = "extra == 'patch-full'", specifier = ">=0.4.23" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pipekit", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&tag=pipekit-v0.1.3" },
     { name = "pipekit-train", extras = ["equinox"], marker = "extra == 'train'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&rev=416e97414e04f41fe55c007bd317e0ffc51ac7a7" },

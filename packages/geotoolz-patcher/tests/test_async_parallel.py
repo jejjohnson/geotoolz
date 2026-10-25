@@ -11,7 +11,7 @@ import pytest
 from _helpers import ArrayField
 
 from geopatcher import SpatialPatcher, TemporalPatcher, spatial, temporal
-from geopatcher.run import batch_split, unbatch
+from geopatcher.run import BatchedPatch, unbatch
 
 
 class AsyncArrayField(ArrayField):
@@ -130,7 +130,9 @@ def test_temporal_asplit_matches_split() -> None:
 def test_batch_split_pads_last_batch_and_unbatches(
     field: ArrayField, patcher: SpatialPatcher
 ) -> None:
-    batches = list(batch_split(patcher, field, batch_size=3))
+    # plain-array patches go through the deprecated 0.12 batch (ADR-013)
+    with pytest.deprecated_call():
+        batches = list(BatchedPatch.split(patcher, field, batch_size=3))
     assert [batch.data.shape[0] for batch in batches] == [3, 3]
     np.testing.assert_array_equal(batches[-1].valid, [True, False, False])
 
