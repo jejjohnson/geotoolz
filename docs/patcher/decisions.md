@@ -829,7 +829,9 @@ with a value the chip would read as data:
 > reads it back in #530. Design: [geostack's geoarray design](https://github.com/jejjohnson/geostack/blob/main/docs/design/geoarray.md)
 > (stage 5 of the running example, gate GA-G15).
 
-**Status.** Proposed (#529).
+**Status.** Accepted; implemented in #529. `unbatch` takes the
+`patcher=` and `domain=` the transform rows are placed against (anchor and
+indices from a `Rectangular` geometry, weights from the window axis).
 
 **Context.** `batch_split` yields `BatchedPatch`: the patch payloads
 stacked on a leading axis, next to Python lists of per-patch anchors,

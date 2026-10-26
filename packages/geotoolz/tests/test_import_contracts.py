@@ -74,11 +74,16 @@ def test_a_lazy_import_breaks_the_contract(
 
 
 def test_io_packages_do_not_load_jax_even_when_installed() -> None:
-    """Gate G4 (#528), the runtime half: importing them never loads JAX."""
+    """Gate G4 (#528), the runtime half: importing them never loads JAX.
+
+    geopatcher too (#529): its batches are NumPy until ``to_jax()``; only
+    the `[train]` integration imports JAX, when it runs.
+    """
     pytest.importorskip("jax")
     code = (
         "import sys\n"
         "import geocatalog, geocloud, geoproducts\n"
+        "import geopatcher, geopatcher.run, geopatcher.fields\n"
         "loaded = {'jax', 'jaxlib', 'coordax'} & set(sys.modules)\n"
         "assert not loaded, f'loaded {sorted(loaded)}'\n"
     )

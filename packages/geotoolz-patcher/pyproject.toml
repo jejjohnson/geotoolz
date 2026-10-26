@@ -66,7 +66,8 @@ point = ["xvec>=0.4"]
 xarray-raster = ["rioxarray>=0.15", "xarray>=2024.1"]
 streaming = ["zarr>=3.0"]
 dask = ["dask[bag]>=2024.8.3", "xarray>=2024.1"]
-jax = ["jax>=0.4.23"]
+# JAX carriers for `batch_split` batches (`PatchBatch.patches.to_jax()`).
+jax = ["geotoolz-array[jax]>=0.3.0"]
 # Cloud-Optimized GeoTIFF field (`geopatcher.fields.CogField`) on the
 # geotoolz-cloud COG engine (obstore pool + async-geotiff, batched range
 # fetches).
@@ -79,7 +80,7 @@ patch-full = [
     "rioxarray>=0.15",
     "zarr>=3.0",
     "dask[bag]>=2024.8.3",
-    "jax>=0.4.23",
+    "geotoolz-array[jax]>=0.3.0",
     "geotoolz-cloud[cog]>=0.6",
 ]
 # Operator-graph bridge: pull in `pipekit` and the ~125-LOC wrappers in

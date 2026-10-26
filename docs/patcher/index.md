@@ -36,7 +36,7 @@ pip install 'geotoolz-patcher[patch-full]'         # every Field adapter and run
 | `[xarray-raster]` | rioxarray, xarray | `geopatcher.fields.RioXarrayField` |
 | `[streaming]` | zarr ≥ 3 | `spatial.aggregation.OverlapAdd(streaming=True)` |
 | `[dask]` | dask[bag], xarray | `geopatcher.fields.DaskField`, `geopatcher.run.to_delayed` |
-| `[jax]` | jax | `geopatcher.run.batch_split` |
+| `[jax]` | geotoolz-array[jax] | JAX batches: `PatchBatch.patches.to_jax()` after `geopatcher.run.batch_split` |
 | `[cog]` | geotoolz-cloud[cog] | `geopatcher.fields.CogField` |
 | `[patch-full]` | all of the above | everything except `[pipekit]` |
 | `[pipekit]` | pipekit | `geopatcher.integrations.pipekit` (`GridSampler`, `ApplyToChips`, `MergePatches`) |

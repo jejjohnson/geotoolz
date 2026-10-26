@@ -227,12 +227,21 @@ def test_every_extra_dependency_is_used() -> None:
 
 
 def test_no_extra_repeats_a_base_dependency() -> None:
-    base = _base()
-    repeated = {
-        extra: sorted(dists & base)
-        for extra, dists in _extras().items()
-        if dists & base
+    # An extra may name a base dependency to add *its* extras
+    # (`geotoolz-array[jax]`); naming it with nothing new repeats it.
+    base = {
+        _normalize(req.name): req.extras
+        for req in map(Requirement, _project()["dependencies"])
     }
+    repeated = {
+        extra: sorted(
+            name
+            for req in map(Requirement, reqs)
+            if (name := _normalize(req.name)) in base and req.extras <= base[name]
+        )
+        for extra, reqs in _project()["optional-dependencies"].items()
+    }
+    repeated = {extra: names for extra, names in repeated.items() if names}
     assert not repeated, f"extras re-list base dependencies: {repeated}"
 
 

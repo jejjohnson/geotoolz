@@ -114,7 +114,7 @@ named for the task:
 | `geopatcher.temporal` | the same four axes along time, plus `stencils` (`TimeStencil`, …) |
 | `geopatcher.fields` | `XarrayField`, `RioXarrayField`, `DaskField`, `GeoPandasField`, `XvecField`, `CogField`, … and the domain types |
 | `geopatcher.matched` | patching co-registered sources together (`MatchedField`, `Matched*Patcher`) |
-| `geopatcher.run` | `parallel_map`, `prefetch_iterable`, Dask (`to_delayed`) and JAX (`batch_split`) bridges, `PatchCache`, `IndexedPatchView` |
+| `geopatcher.run` | `parallel_map`, `prefetch_iterable`, Dask (`to_delayed`) bridges, `batch_split` (a batch as one `GeoArray` with a `patch` dim), `PatchCache`, `IndexedPatchView` |
 | `geopatcher.observe` | `PatcherHook`, `PatchJournal`, `PatchErrorRecord`, strict mode |
 | `geopatcher.config` | `axis_envelope` / `from_config` round-trips |
 
