@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.8.0...geotoolz-catalog-v0.9.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **catalog:** load_vector returns (H, W) with dims (y, x); code that indexed [0] or expected a band axis drops it (add one with g.expand_dims(band) where an image is needed).
+
+### Features
+
+* **catalog:** load_vector returns a 2-D label map (GeoMap, dims y x) ([#565](https://github.com/jejjohnson/geotoolz/issues/565)) ([33d0a1e](https://github.com/jejjohnson/geotoolz/commit/33d0a1e77849221492525b3a2c4312354a0d8576))
+* **catalog:** loaders name their dims; band descriptions and row times become coordinates ([#560](https://github.com/jejjohnson/geotoolz/issues/560)) ([d713a77](https://github.com/jejjohnson/geotoolz/commit/d713a7746f42789946ef88a8ecee9acff37d576f))
+
 ## [0.8.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-catalog-v0.7.0...geotoolz-catalog-v0.8.0) (2026-10-24)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.3.0...geotoolz-array-v0.3.1) (2026-10-26)
+
+
+### Features
+
+* **array:** importing geoarray never imports JAX; pytrees register when JAX loads ([#566](https://github.com/jejjohnson/geotoolz/issues/566)) ([c370115](https://github.com/jejjohnson/geotoolz/commit/c370115c44debe3c846e796c92899192e258c843))
+
 ## [0.3.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.2.1...geotoolz-array-v0.3.0) (2026-10-24)
 
 
