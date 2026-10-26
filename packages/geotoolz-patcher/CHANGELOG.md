@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.14.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.13.0...geotoolz-patcher-v0.14.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **patcher:** batch_split yields PatchBatch instead of BatchedPatch. Read batch.patches.data, batch.valid and the transform rows instead of batch.data / anchors / indices / weights, and pass patcher= and domain= to unbatch. DataArray patches come back from unbatch as GeoArray. Plain array patches need the deprecated BatchedPatch.split.
+
+### Features
+
+* **patcher:** batch_split yields a PatchBatch, one GeoArray with a patch dim ([#567](https://github.com/jejjohnson/geotoolz/issues/567)) ([7ede14d](https://github.com/jejjohnson/geotoolz/commit/7ede14df13ea8539dddd6494f885be09d9e540f4))
+
 ## [0.13.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.12.0...geotoolz-patcher-v0.13.0) (2026-10-24)
 
 
