@@ -59,7 +59,7 @@ from geoops._src.geo import (
     require_projected_crs,
 )
 from geoops._src.optional import import_optional, optional_name
-from geoops._src.shape import over_frames
+from geoops._src.shape import band_dim, dim_axis, over_frames
 from geoops._src.valid import (
     carried_fill,
     invalid_values,
@@ -106,7 +106,10 @@ class Composite(SelectBands):
         bands: Sequence of band references. Each entry is either an
             integer position or a string name resolved against the
             carrier's ``attrs``.
-        axis: Band axis. Default ``-3`` (``(C, H, W)`` convention).
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> import geoops as gz
@@ -116,7 +119,9 @@ class Composite(SelectBands):
         >>> rgb = gz.viz.Composite(bands=[3, 2, 1])(s2_geotensor)
     """
 
-    def __init__(self, *, bands: Sequence[BandRef], axis: int = -3) -> None:
+    def __init__(
+        self, *, bands: Sequence[BandRef], dim: str = "band", axis: int | None = None
+    ) -> None:
         super().__init__(bands=list(bands), axis=axis)
 
 
@@ -132,7 +137,10 @@ class TrueColor(Composite):
         red: Red-band reference (int index or string name).
         green: Green-band reference.
         blue: Blue-band reference.
-        axis: Band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> import geoops as gz
@@ -147,7 +155,13 @@ class TrueColor(Composite):
     """
 
     def __init__(
-        self, *, red: BandRef, green: BandRef, blue: BandRef, axis: int = -3
+        self,
+        *,
+        red: BandRef,
+        green: BandRef,
+        blue: BandRef,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         super().__init__(bands=[red, green, blue], axis=axis)
         self.red = red
@@ -159,7 +173,7 @@ class TrueColor(Composite):
             "red": self.red,
             "green": self.green,
             "blue": self.blue,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -174,7 +188,10 @@ class FalseColor(Composite):
         nir: Near-infrared band reference (rendered as red).
         red: Red band reference (rendered as green).
         green: Green band reference (rendered as blue).
-        axis: Band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> import geoops as gz
@@ -183,7 +200,13 @@ class FalseColor(Composite):
     """
 
     def __init__(
-        self, *, nir: BandRef, red: BandRef, green: BandRef, axis: int = -3
+        self,
+        *,
+        nir: BandRef,
+        red: BandRef,
+        green: BandRef,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         super().__init__(bands=[nir, red, green], axis=axis)
         self.nir = nir
@@ -195,7 +218,7 @@ class FalseColor(Composite):
             "nir": self.nir,
             "red": self.red,
             "green": self.green,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -209,7 +232,10 @@ class SWIRComposite(Composite):
         swir2: SWIR2 band reference (rendered as red).
         nir: NIR band reference (rendered as green).
         red: Red band reference (rendered as blue).
-        axis: Band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> import geoops as gz
@@ -218,7 +244,13 @@ class SWIRComposite(Composite):
     """
 
     def __init__(
-        self, *, swir2: BandRef, nir: BandRef, red: BandRef, axis: int = -3
+        self,
+        *,
+        swir2: BandRef,
+        nir: BandRef,
+        red: BandRef,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         super().__init__(bands=[swir2, nir, red], axis=axis)
         self.swir2 = swir2
@@ -230,7 +262,7 @@ class SWIRComposite(Composite):
             "swir2": self.swir2,
             "nir": self.nir,
             "red": self.red,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -359,7 +391,10 @@ class RGBRecipe(Operator):
             Set above ``vmax`` to invert a channel. Default ``0.0``.
         vmax: Value mapped to 1. Default ``1.0``.
         gamma: Display gamma (``> 0``), one or per channel. Default ``1.0``.
-        axis: Band axis of the input. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Raises:
         ValueError: A ``vmin`` equals its ``vmax``, a gamma is not
@@ -384,7 +419,8 @@ class RGBRecipe(Operator):
         vmin: float | Sequence[float] = 0.0,
         vmax: float | Sequence[float] = 1.0,
         gamma: float | Sequence[float] = 1.0,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.red = red
         self.green = green
@@ -392,7 +428,7 @@ class RGBRecipe(Operator):
         self.vmin = _per_channel(vmin, "vmin")
         self.vmax = _per_channel(vmax, "vmax")
         self.gamma = _per_channel(gamma, "gamma")
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "RGBRecipe")
         if any(lo == hi for lo, hi in zip(self.vmin, self.vmax, strict=True)):
             raise ValueError(
                 f"vmin and vmax must differ per channel; got {self.vmin}, {self.vmax}."
@@ -402,24 +438,25 @@ class RGBRecipe(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="RGBRecipe")
         arr = np.asarray(gt)
         work = np.where(invalid_values(gt), np.nan, arr.astype(np.float32))
         names = band_names(gt) or []
         bands = {
-            name: np.take(work, idx, axis=self.axis)
+            name: np.take(work, idx, axis=axis)
             for idx, name in enumerate(names)
             if name is not None
         }
         channels = np.stack(
             [
-                self._channel(ref, work, names, bands)
+                self._channel(ref, work, names, bands, axis)
                 for ref in (self.red, self.green, self.blue)
             ]
         )
         out = rgb_recipe(channels, vmin=self.vmin, vmax=self.vmax, gamma=self.gamma)
         return wrap_like(
             gt,
-            np.moveaxis(out, 0, self.axis) if arr.ndim > 2 else out,
+            np.moveaxis(out, 0, axis) if arr.ndim > 2 else out,
             fill_value=np.nan,
             attrs={"band_names": ("red", "green", "blue")},
         )
@@ -430,9 +467,10 @@ class RGBRecipe(Operator):
         work: np.ndarray,
         names: list[str | None],
         bands: Mapping[str, np.ndarray],
+        axis: int,
     ) -> np.ndarray:
         if isinstance(ref, int | np.integer):
-            return np.take(work, int(ref), axis=self.axis)
+            return np.take(work, int(ref), axis=axis)
         if ref in bands:
             return bands[ref]
         if not bands:
@@ -450,7 +488,7 @@ class RGBRecipe(Operator):
             "vmin": list(self.vmin),
             "vmax": list(self.vmax),
             "gamma": list(self.gamma),
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 

@@ -276,6 +276,19 @@ def time_stack_of(scene: Any) -> Any:
     return wrap_like(scene, np.stack([values, second]))
 
 
+def time_series_of(scene: GeoArray) -> GeoArray:
+    """A 2-frame single-band ``("time", "y", "x")`` series of a 2-D scene.
+
+    Float scenes are rescaled per pixel (a fixed seed) so the frames
+    differ; integer scenes repeat. No band dim is added (#531).
+    """
+    values = np.asarray(scene)
+    second = values.copy()
+    if values.dtype.kind == "f":
+        second = values * np.random.default_rng(1).uniform(0.8, 1.2, values.shape)
+    return scene.with_data(np.stack([values, second]), dims=("time", *scene.dims))
+
+
 def frames(stack: Any) -> list[Any]:
     """The ``(C, H, W)`` frames of a 4-D stack (GeoArrays keep their grid).
 

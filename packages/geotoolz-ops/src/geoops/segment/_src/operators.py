@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from geoarray import GeoArray as GeoArrayType
 
 from geoops._src.optional import optional_name
+from geoops._src.shape import band_dim, dim_axis
 
 
 if TYPE_CHECKING:
@@ -98,9 +99,10 @@ class SLIC(Operator):
         compactness: Balance between color and spatial proximity; higher
             values yield more compact (squarer) segments.
         sigma: Width of the Gaussian pre-smoothing kernel, in pixels.
-        axis: Position of the band (channel) axis (``0`` for channel-first
-            cubes, ``None`` for 2-D single-band input). Ignored for 2-D
-            input, which is always treated as single-band.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         start_label: First label assigned to a superpixel.
 
     Called as ``op(image, mask=None)``. The optional ``mask`` is an
@@ -116,13 +118,14 @@ class SLIC(Operator):
         n_segments: int = 100,
         compactness: float = 10.0,
         sigma: float = 0.0,
-        axis: int | None = 0,
+        dim: str | None = "band",
         start_label: int = 1,
+        axis: int | None = None,
     ) -> None:
         self.n_segments = n_segments
         self.compactness = compactness
         self.sigma = sigma
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "SLIC", legacy=(0, -3))
         self.start_label = start_label
 
     @over_frames
@@ -144,7 +147,7 @@ class SLIC(Operator):
         if mask is not None:
             valid &= mask
         # A 2-D image has no channel axis; skimage raises if one is given.
-        channel_axis = None if image.ndim == 2 else self.axis
+        channel_axis = None if image.ndim == 2 else dim_axis(gt, self.dim, name="SLIC")
         labels = slic(
             image,
             n_segments=self.n_segments,
@@ -173,8 +176,10 @@ class Felzenszwalb(Operator):
         sigma: Width of the Gaussian pre-smoothing kernel, in pixels.
         min_area_px: Minimum segment area in pixels, enforced by
             postprocessing (skimage's ``min_size``).
-        axis: Position of the band (channel) axis (``0`` for channel-first
-            cubes, ``None`` for 2-D single-band input).
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Called as ``op(image, mask=None)``. The optional ``mask`` is an
     ``(H, W)`` (or ``(1, H, W)``) boolean carrier on the image's pixel grid
@@ -189,12 +194,13 @@ class Felzenszwalb(Operator):
         scale: float = 1.0,
         sigma: float = 0.8,
         min_area_px: int = 20,
-        axis: int | None = 0,
+        dim: str | None = "band",
+        axis: int | None = None,
     ) -> None:
         self.scale = scale
         self.sigma = sigma
         self.min_area_px = min_area_px
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "Felzenszwalb", legacy=(0, -3))
 
     @over_frames
     def _apply(
@@ -219,7 +225,7 @@ class Felzenszwalb(Operator):
             scale=self.scale,
             sigma=self.sigma,
             min_size=self.min_area_px,
-            channel_axis=self.axis,
+            channel_axis=dim_axis(gt, self.dim, name="Felzenszwalb"),
         )
         # skimage numbers segments from 0, which collides with the
         # invalid-pixel label; shift so valid segments start at 1.
@@ -244,8 +250,10 @@ class Quickshift(Operator):
         ratio: Balance (0-1) between color-space and image-space
             proximity.
         sigma: Width of the Gaussian pre-smoothing kernel, in pixels.
-        axis: Position of the band (channel) axis (``0`` for channel-first
-            cubes, ``None`` for 2-D single-band input).
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         convert2lab: Convert the image to LAB space first. Defaults to
             ``False`` (unlike skimage) so non-RGB / multispectral /
             single-band inputs work out of the box.
@@ -264,14 +272,15 @@ class Quickshift(Operator):
         max_dist: float = 10.0,
         ratio: float = 1.0,
         sigma: float = 0.0,
-        axis: int | None = 0,
+        dim: str | None = "band",
         convert2lab: bool = False,
+        axis: int | None = None,
     ) -> None:
         self.kernel_size = kernel_size
         self.max_dist = max_dist
         self.ratio = ratio
         self.sigma = sigma
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "Quickshift", legacy=(0, -3))
         # Default to False so non-RGB / multispectral / single-band inputs
         # work out of the box. skimage's quickshift defaults convert2lab=True,
         # which raises on any input that is not exactly 3-channel RGB.
@@ -301,7 +310,7 @@ class Quickshift(Operator):
             max_dist=self.max_dist,
             ratio=self.ratio,
             sigma=self.sigma,
-            channel_axis=self.axis,
+            channel_axis=dim_axis(gt, self.dim, name="Quickshift"),
             convert2lab=self.convert2lab,
         )
         # skimage numbers segments from 0, which collides with the

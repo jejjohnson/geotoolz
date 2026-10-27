@@ -38,6 +38,7 @@ from typing import Any
 import numpy as np
 import pytest
 from _helpers import all_operator_classes, fill_pixel_mask
+from geoarray import GeoArray
 from pipekit import Input, Operator
 
 from geoops._src.contract import (
@@ -50,6 +51,7 @@ from geoops._src.contract import (
     frames,
     geoarrays,
     same,
+    time_series_of,
     time_stack_of,
 )
 
@@ -584,7 +586,7 @@ RETIRED_PARAMS: dict[str, str] = {
     "patch_size": "window",
     "min_area": "min_area_px",
     "min_size": "min_area_px",
-    "channel_axis": "axis",
+    "channel_axis": "dim",
     "wavelengths_nm": "wavelengths",
 }
 
@@ -603,9 +605,10 @@ def test_constructor_vocabulary(cls: type) -> None:
     """Constructors use the package-wide parameter spellings.
 
     No retired alias (``fill``, ``random_state``, ``window_size`` ...), no
-    ``*_idx`` band-index twin, no ``kernel_size`` window, and ``axis`` is
-    only ever an integer band position (reductions use ``reduce_axes``,
-    orientations ``direction``).
+    ``*_idx`` band-index twin, no ``kernel_size`` window, and the band dim
+    is ``dim=`` (a name, #531): ``axis`` survives only as the deprecated
+    ``axis: int | None = None`` next to a ``dim`` (reductions use
+    ``reduce_axes``, orientations ``direction``).
     """
     key = _key(cls)
     params = inspect.signature(cls.__init__).parameters
@@ -617,11 +620,12 @@ def test_constructor_vocabulary(cls: type) -> None:
         )
         assert not name.endswith("_idx"), f"{key}: {name!r} -- use one BandRef name"
         assert name != "kernel_size", f"{key}: 'kernel_size' -> 'window'"
-        if name == "axis" and param.default is not inspect.Parameter.empty:
-            default = param.default
-            assert default is None or isinstance(default, int), (
-                f"{key}: axis={default!r} -- 'axis' is a band position; use "
-                "'reduce_axes' for reductions and 'direction' for orientations"
+        if name == "axis":
+            assert "dim" in params and param.default is None, (
+                f"{key}: 'axis' is retired: take the band dim by name, "
+                "dim: str = 'band' (axis= stays only as a deprecated None "
+                "default next to dim); reductions use 'reduce_axes', "
+                "orientations 'direction'"
             )
 
 
@@ -1688,6 +1692,61 @@ def _assert_matches_frames(key: str, out: Any, expected: list[Any]) -> None:
 
 
 @pytest.mark.parametrize("cls", _time_stack_params())
+def test_single_band_time_series_contract(cls: type) -> None:
+    """A ``("time", "y", "x")`` series runs per frame, without a dummy band (#531).
+
+    Time stacks are found by the ``time`` dim's name, not by rank: each
+    buildable single-input operator that runs on a 2-D toy scene, given a
+    two-frame series of it, returns the per-frame results restacked along
+    time with no band dim added, or rejects the series with an error naming
+    itself.
+    """
+    from geoops.io._src.operators import SinkOperator
+
+    op = _build_seeded(cls)
+    if (
+        isinstance(op, SinkOperator)
+        or not _single_carrier_in(op)
+        or _takes_sequence(op)
+    ):
+        pytest.skip("sink, sequence or not a single-input operator")
+    key = _key(cls)
+    ran = False
+    for scene in _attributed_inputs():
+        if not isinstance(scene, GeoArray) or scene.ndim != 2:
+            continue
+        try:
+            _call(_build_seeded(cls), scene)
+        except Exception:
+            continue
+        ran = True
+        series = time_series_of(scene)
+        try:
+            out = _call(_build_seeded(cls), series)
+        except Exception as exc:
+            assert_clear_rank_error(cls.__name__, exc)
+            continue
+        if key in STACK_AS_FEATURES:
+            assert np.shape(out)[-2:] == np.shape(series)[-2:]
+            continue
+        per_frame = [_call(_build_seeded(cls), f) for f in frames(series)]
+        if key in TIME_INVARIANT or not all(_is_frame_carrier(e) for e in per_frame):
+            continue
+        if all(isinstance(e, GeoArray) and e.ndim == 2 for e in per_frame):
+            assert isinstance(out, GeoArray), type(out)
+            assert out.dims == ("time", *per_frame[0].dims), out.dims
+        want = np.stack([np.asarray(e) for e in per_frame])
+        assert np.shape(out) == want.shape, (np.shape(out), want.shape)
+        if key in STOCHASTIC_PER_PIXEL or key in POOLED_STATISTICS:
+            continue
+        np.testing.assert_allclose(
+            np.asarray(out, dtype=np.float64), want.astype(np.float64), equal_nan=True
+        )
+    if not ran:
+        pytest.skip("no 2-D toy input is valid for this operator")
+
+
+@pytest.mark.parametrize("cls", _time_stack_params())
 def test_time_stack_contract(cls: type) -> None:
     """Every operator handles a ``(T, C, H, W)`` stack correctly or says no (#147).
 
@@ -1746,3 +1805,34 @@ def test_time_stack_contract(cls: type) -> None:
         _assert_matches_frames(key, out, per_frame)
     if not ran:
         pytest.skip("no toy input is valid for this operator")
+
+
+def test_axis_is_deprecated_and_serialises_as_dim() -> None:
+    """``axis=-3`` still builds an operator for one release, as ``dim="band"``."""
+    from geoops.indices import NDVI
+
+    with pytest.warns(DeprecationWarning, match=r"NDVI\(axis=...\) is deprecated"):
+        op = NDVI(axis=-3)
+    assert op.get_config()["dim"] == "band"
+    assert "axis" not in op.get_config()
+    rebuilt = Operator.from_state(op.state)
+    assert rebuilt.get_config() == op.get_config()
+
+
+def test_no_operator_reads_a_stored_band_axis() -> None:
+    """Operators hold ``self.dim``; the band position is read from the carrier."""
+    import pathlib
+
+    import geoops
+
+    root = pathlib.Path(geoops.__file__).parent
+    found = [
+        f"{path.relative_to(root)}:{node.lineno}"
+        for path in sorted(root.rglob("*.py"))
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Attribute)
+        and node.attr == "axis"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+    ]
+    assert not found, found

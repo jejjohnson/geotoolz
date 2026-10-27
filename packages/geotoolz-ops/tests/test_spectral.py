@@ -207,21 +207,21 @@ def test_stack_and_split_bands() -> None:
 
 def test_spectral_get_config_serialization() -> None:
     ops_and_configs = [
-        (spectral.SelectBands(bands=[0]), {"bands": [0], "axis": -3}),
-        (spectral.ReorderBands(order=[0]), {"order": [0], "axis": -3}),
-        (spectral.StackBands(), {"axis": -3}),
-        (spectral.SplitBands(), {"names": None, "axis": -3}),
+        (spectral.SelectBands(bands=[0]), {"bands": [0], "dim": "band"}),
+        (spectral.ReorderBands(order=[0]), {"order": [0], "dim": "band"}),
+        (spectral.StackBands(), {"dim": "band"}),
+        (spectral.SplitBands(), {"names": None, "dim": "band"}),
         (
             spectral.BandMath(expression="B0"),
-            {"expression": "B0", "band_names": None, "axis": -3},
+            {"expression": "B0", "band_names": None, "dim": "band"},
         ),
         (
             spectral.BandRatio(numerator=0, denominator=1),
-            {"numerator": 0, "denominator": 1, "eps": 1e-10, "axis": -3},
+            {"numerator": 0, "denominator": 1, "eps": 1e-10, "dim": "band"},
         ),
         (
             spectral.ContinuumRemoval(wavelengths=[1.0, 2.0, 3.0]),
-            {"method": "convex_hull", "wavelengths": [1.0, 2.0, 3.0], "axis": -3},
+            {"method": "convex_hull", "wavelengths": [1.0, 2.0, 3.0], "dim": "band"},
         ),
         (
             spectral.SpectralBinning(target_wavelengths=[1.0], width=1.0),
@@ -230,12 +230,12 @@ def test_spectral_get_config_serialization() -> None:
                 "width": 1.0,
                 "method": "mean",
                 "source_wavelengths": None,
-                "axis": -3,
+                "dim": "band",
             },
         ),
         (
             spectral.SpectralSmoothing(),
-            {"method": "savgol", "window": 7, "polyorder": 2, "axis": -3},
+            {"method": "savgol", "window": 7, "polyorder": 2, "dim": "band"},
         ),
     ]
 
@@ -322,15 +322,12 @@ def test_geoarray_metadata_propagates_through_spectral_ops() -> None:
         np.testing.assert_equal(out.fill_value, fill)
 
 
-def test_split_bands_rejects_out_of_range_axis() -> None:
-    """SplitBands must validate axis bounds rather than silently wrapping."""
+def test_split_bands_names_a_missing_dim() -> None:
+    """SplitBands reads the dim from the carrier and names the dims it has."""
     gt = _toy_geoarray(np.ones((4, 2, 2), dtype=np.float32))
 
-    with pytest.raises(ValueError, match="out of range"):
-        spectral.SplitBands(axis=-4)(gt)
-
-    with pytest.raises(ValueError, match="out of range"):
-        spectral.SplitBands(axis=3)(gt)
+    with pytest.raises(ValueError, match=r"no 'time' dim; its dims are"):
+        spectral.SplitBands(dim="time")(gt)
 
 
 def test_spectral_binning_weighted_mean_rejects_nonpositive_width() -> None:

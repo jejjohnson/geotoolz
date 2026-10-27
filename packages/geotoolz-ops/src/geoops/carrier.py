@@ -27,7 +27,9 @@ Bands:
     (the canonical Sentinel-2 L2A band order).
 
 Shape:
-    `band_axis`, `require_ndim`, `map_frames` / `over_frames` (run a
+    `band_axis`, `band_dim` / `dim_axis` (an operator's ``dim=``, and
+    where that dim sits in a carrier), `require_ndim`, `map_frames` /
+    `over_frames` (run a
     per-scene function on each frame of a ``(T, C, H, W)`` stack),
     `keep_band_axis` (a band-collapsing result keeps its time axis) and
     `single_band` (pick one band as a 2-D plane).
@@ -123,6 +125,8 @@ from geoops._src.samples import (
 )
 from geoops._src.shape import (
     band_axis,
+    band_dim,
+    dim_axis,
     keep_band_axis,
     map_frames,
     over_frames,
@@ -149,10 +153,12 @@ __all__ = [
     "as_float",
     "as_tuple",
     "band_axis",
+    "band_dim",
     "band_names",
     "callable_name",
     "carried_fill",
     "cube_to_samples",
+    "dim_axis",
     "fit_once",
     "grid_matches",
     "import_optional",

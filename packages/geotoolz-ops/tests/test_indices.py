@@ -683,7 +683,7 @@ except ImportError:  # pragma: no cover - exercised via the [hydra] extra
         NBR(nir=7, swir2=11),
         SAVI(nir=7, red=3, L=0.3),
         EVI(nir=7, red=3, blue=1, G=2.5, C1=6.0, C2=7.5, L=1.0),
-        NormalizedDifference(a=4, b=2, axis=0, eps=1e-9),
+        NormalizedDifference(a=4, b=2, dim="band", eps=1e-9),
         EVI2(nir=7, red=3),
         ARVI(blue=1, red=3, nir=7, gamma=1.0),
         GCI(green=2, nir=7),
@@ -722,7 +722,7 @@ def test_append_index_get_config_is_jsonable() -> None:
     its inner Operator, not the raw instance."""
     import json
 
-    op = AppendIndex(index_op=NDVI(nir=7, red=3), axis=0)
+    op = AppendIndex(index_op=NDVI(nir=7, red=3), dim="band")
     cfg = op.get_config()
     # Round-trips through JSON without choking on raw Operator instances.
     encoded = json.dumps(cfg)
@@ -731,15 +731,15 @@ def test_append_index_get_config_is_jsonable() -> None:
         "index_op": {
             "class": "NDVI",
             "module": "geoops.indices._src.operators",
-            "config": {"nir": 7, "red": 3, "axis": -3, "eps": 1e-10},
+            "config": {"nir": 7, "red": 3, "dim": "band", "eps": 1e-10},
         },
-        "axis": 0,
+        "dim": "band",
     }
     # Manual reconstruction from the nested config works.
     inner_cls_name = decoded["index_op"]["class"]
     assert inner_cls_name == "NDVI"
     restored = AppendIndex(
-        index_op=NDVI(**decoded["index_op"]["config"]), axis=decoded["axis"]
+        index_op=NDVI(**decoded["index_op"]["config"]), dim=decoded["dim"]
     )
     assert restored.get_config() == cfg
 

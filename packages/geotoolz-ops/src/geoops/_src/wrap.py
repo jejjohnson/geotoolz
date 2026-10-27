@@ -123,8 +123,11 @@ def adopt_attrs(
     engine call such as ``read_reproject``, a geoarray ``read_window`` /
     ``pad``, ...): keeps ``result``'s grid (``transform``, ``crs``,
     ``fill_value``) and pixel values (no copy) and derives its attrs from
-    ``ref`` following the same rules as :func:`wrap_like`. A georeader
-    ``GeoTensor`` result is converted with ``from_georeader`` first.
+    ``ref`` following the same rules as :func:`wrap_like`. When the
+    non-spatial shape is unchanged, the result also keeps ``ref``'s dim
+    names and non-spatial coordinates (a ``("time", "y", "x")`` series
+    stays one). A georeader ``GeoTensor`` result is converted with
+    ``from_georeader`` first.
 
     Args:
         ref: The operator's input carrier.
@@ -148,6 +151,19 @@ def adopt_attrs(
         out_bands=out_bands,
         band_names=band_names,
     )
+    if (
+        isinstance(ref, GeoArray)
+        and result.ndim == ref.ndim
+        and result.shape[:-2] == ref.shape[:-2]
+        and result.dims != ref.dims
+    ):
+        # the engine reads the leading dims from the rank; ours have names
+        spatial = set(ref.dims[-2:])
+        return result.replace(
+            attrs=FrozenAttrs(new_attrs),
+            dims=ref.dims,
+            coords=tuple(c for c in ref.coords if c.dim not in spatial),
+        )
     return result.replace(attrs=FrozenAttrs(new_attrs))
 
 

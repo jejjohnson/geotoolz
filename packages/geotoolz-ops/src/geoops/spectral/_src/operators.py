@@ -63,7 +63,7 @@ from geoops._src.bands import (
 )
 from geoops._src.config import jsonable
 from geoops._src.geo import grid_matches, reject_geotensor
-from geoops._src.shape import keep_band_axis
+from geoops._src.shape import band_dim, dim_axis, keep_band_axis
 from geoops._src.valid import carried_fill, wrap_filled
 from geoops._src.wrap import wrap_like
 from geoops.spectral._src.array import (
@@ -107,7 +107,10 @@ class SelectBands(Operator):
         bands: Bands to keep, in output order. Items are either
             integer positions along ``axis`` or band names resolved
             against ``gt.attrs``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops import spectral
@@ -116,15 +119,18 @@ class SelectBands(Operator):
         >>> out = rgb(reflectance_geoarray)
     """
 
-    def __init__(self, *, bands: list[BandRef], axis: int = -3) -> None:
+    def __init__(
+        self, *, bands: list[BandRef], dim: str = "band", axis: int | None = None
+    ) -> None:
         self.bands = bands
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "SelectBands")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="SelectBands")
         arr = np.asarray(gt)
         indexes = resolve_bands(gt, self.bands)
         attrs = _attrs(gt)
-        band_axis_len = arr.shape[self.axis]
+        band_axis_len = arr.shape[axis]
         wavelengths = attrs.get("wavelengths")
         if wavelengths is not None:
             wavelengths_arr = np.asarray(wavelengths, dtype=float)
@@ -132,19 +138,19 @@ class SelectBands(Operator):
                 raise ValueError(
                     "gt.attrs['wavelengths'] length "
                     f"({wavelengths_arr.size}) does not match the band axis "
-                    f"length ({band_axis_len}) at axis {self.axis}"
+                    f"length ({band_axis_len}) at axis {axis}"
                 )
-        out = select_bands(arr, indexes, axis=self.axis)
+        out = select_bands(arr, indexes, axis=axis)
         return wrap_like(
             gt,
             out,
             attrs=take_band_attrs(attrs, indexes, n_bands=band_axis_len),
             # the coordinate follows the pixels, or sel(band="red") gives NIR
-            coords=take_band_coords(gt, indexes, axis=self.axis),
+            coords=take_band_coords(gt, indexes, axis=axis),
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"bands": jsonable(list(self.bands)), "axis": self.axis}
+        return {"bands": jsonable(list(self.bands)), "dim": self.dim}
 
 
 class ReorderBands(SelectBands):
@@ -156,7 +162,10 @@ class ReorderBands(SelectBands):
 
     Args:
         order: New band ordering. Items are integer positions or names.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops import spectral
@@ -165,12 +174,14 @@ class ReorderBands(SelectBands):
         >>> rgbn = reorder(bgrn_geoarray)
     """
 
-    def __init__(self, *, order: list[BandRef], axis: int = -3) -> None:
+    def __init__(
+        self, *, order: list[BandRef], dim: str = "band", axis: int | None = None
+    ) -> None:
         super().__init__(bands=order, axis=axis)
         self.order = order
 
     def get_config(self) -> dict[str, Any]:
-        return {"order": jsonable(list(self.order)), "axis": self.axis}
+        return {"order": jsonable(list(self.order)), "dim": self.dim}
 
 
 def _same_fill(a: Any, b: Any) -> bool:
@@ -198,8 +209,10 @@ class StackBands(Operator):
     arrays raises because their georeferencing cannot agree.
 
     Args:
-        axis: Position of the band axis. Default ``-3``. 2-D inputs are
-            promoted to 3-D by inserting a unit dimension at ``axis``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Raises:
         TypeError: If given a single array instead of a sequence.
@@ -212,8 +225,8 @@ class StackBands(Operator):
         >>> stacked = stack([gt_b4, gt_b8])  # (2, H, W)
     """
 
-    def __init__(self, *, axis: int = -3) -> None:
-        self.axis = axis
+    def __init__(self, *, dim: str = "band", axis: int | None = None) -> None:
+        self.dim = band_dim(dim, axis, "StackBands")
 
     def _apply(self, tensors: list[GeoArray | np.ndarray]) -> GeoArray | np.ndarray:
         if isinstance(tensors, np.ndarray | GeoArray):
@@ -226,6 +239,7 @@ class StackBands(Operator):
         for gt in tensors:
             reject_geotensor(gt, "StackBands")
         first = tensors[0]
+        axis = dim_axis(first, self.dim, name="StackBands")
         georeferenced = isinstance(first, GeoArray)
         first_fill = getattr(first, "fill_value", None)
         for idx, gt in enumerate(tensors[1:], start=1):
@@ -247,15 +261,15 @@ class StackBands(Operator):
                     f"{idx} has {fill!r}, input 0 has {first_fill!r}"
                 )
         arrays = [
-            np.expand_dims(arr, axis=self.axis) if arr.ndim == 2 else arr
+            np.expand_dims(arr, axis=axis) if arr.ndim == 2 else arr
             for arr in (np.asarray(gt) for gt in tensors)
         ]
-        out = np.concatenate(arrays, axis=self.axis)
+        out = np.concatenate(arrays, axis=axis)
         attrs = strip_band_attrs(_attrs(first))
         attrs.update(
             concat_band_attrs(
                 [_attrs(gt) for gt in tensors],
-                [arr.shape[self.axis] for arr in arrays],
+                [arr.shape[axis] for arr in arrays],
             )
         )
         return wrap_like(first, out, attrs=attrs)
@@ -271,7 +285,10 @@ class SplitBands(Operator):
         names: Optional override for band names. If omitted, names are
             read from ``gt.attrs`` (``band_names``, then ``descriptions``,
             then ``bands``).
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops import spectral
@@ -279,16 +296,23 @@ class SplitBands(Operator):
         >>> red, green, blue = bands
     """
 
-    def __init__(self, *, names: list[str] | None = None, axis: int = -3) -> None:
+    def __init__(
+        self,
+        *,
+        names: list[str] | None = None,
+        dim: str = "band",
+        axis: int | None = None,
+    ) -> None:
         self.names = names
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "SplitBands")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> list[GeoArray | np.ndarray]:
+        band_pos = dim_axis(gt, self.dim, name="SplitBands")
         arr = np.asarray(gt)
-        axis = self.axis + arr.ndim if self.axis < 0 else self.axis
+        axis = band_pos + arr.ndim if band_pos < 0 else band_pos
         if not 0 <= axis < arr.ndim:
             raise ValueError(
-                f"SplitBands axis {self.axis} is out of range for a "
+                f"SplitBands axis {band_pos} is out of range for a "
                 f"{arr.ndim}-D tensor (valid axes: "
                 f"{-arr.ndim} to {arr.ndim - 1})"
             )
@@ -330,7 +354,10 @@ class BandMath(Operator):
             ``"(B8 - B4) / (B8 + B4 + 1e-6)"``.
         band_names: Override for the names used in ``expression``.
             Default ``None`` (read from the carrier's ``attrs``).
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops import spectral
@@ -344,19 +371,21 @@ class BandMath(Operator):
         *,
         expression: str,
         band_names: list[str] | None = None,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.expression = expression
         self.band_names = band_names
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "BandMath")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="BandMath")
         arr = np.asarray(gt)
         names = _names_or_attrs(gt, self.band_names) or _default_band_names(
-            arr.shape[self.axis]
+            arr.shape[axis]
         )
         variables = {
-            name: np.take(arr, idx, axis=self.axis)
+            name: np.take(arr, idx, axis=axis)
             for idx, name in enumerate(names)
             if name is not None
         }
@@ -384,7 +413,10 @@ class BandRatio(Operator):
         denominator: Index or name of the denominator band.
         eps: Denominator stabiliser. Default ``1e-10`` (the package-wide
             value, as in :func:`geoops.indices.iron_oxide`).
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops import spectral
@@ -399,19 +431,20 @@ class BandRatio(Operator):
         numerator: BandRef,
         denominator: BandRef,
         eps: float = 1e-10,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.numerator = numerator
         self.denominator = denominator
         self.eps = eps
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "BandRatio")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = band_ratio(
             np.asarray(gt),
             resolve_band(gt, self.numerator),
             resolve_band(gt, self.denominator),
-            axis=self.axis,
+            axis=dim_axis(gt, self.dim, name="BandRatio"),
             eps=self.eps,
         )
         return wrap_filled(
@@ -426,7 +459,7 @@ class BandRatio(Operator):
             "numerator": jsonable(self.numerator),
             "denominator": jsonable(self.denominator),
             "eps": self.eps,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -451,7 +484,10 @@ class ContinuumRemoval(Operator):
             ``"convex_hull"``.
         wavelengths: Source wavelengths in strictly increasing order.
             Default ``None`` (read from ``gt.attrs["wavelengths"]``).
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops import spectral
@@ -465,17 +501,18 @@ class ContinuumRemoval(Operator):
         *,
         method: str = "convex_hull",
         wavelengths: np.ndarray | list[float] | None = None,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.method = method
         self.wavelengths = wavelengths
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "ContinuumRemoval")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = continuum_removal(
             np.asarray(gt),
             resolve_wavelengths(gt, self.wavelengths),
-            axis=self.axis,
+            axis=dim_axis(gt, self.dim, name="ContinuumRemoval"),
             method=self.method,
         )
         return wrap_filled(gt, out, fill_value=np.nan)
@@ -486,7 +523,7 @@ class ContinuumRemoval(Operator):
             "wavelengths": None
             if self.wavelengths is None
             else jsonable(np.asarray(self.wavelengths, dtype=float)),
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -532,13 +569,14 @@ class SpectralBinning(Operator):
         width: float | np.ndarray | list[float],
         method: str = "mean",
         source_wavelengths: np.ndarray | list[float] | None = None,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.target_wavelengths = target_wavelengths
         self.width = width
         self.method = method
         self.source_wavelengths = source_wavelengths
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "SpectralBinning")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         target_wavelengths = np.asarray(self.target_wavelengths, dtype=float)
@@ -547,7 +585,7 @@ class SpectralBinning(Operator):
             resolve_wavelengths(gt, self.source_wavelengths, name="source_wavelengths"),
             target_wavelengths,
             self.width,
-            axis=self.axis,
+            axis=dim_axis(gt, self.dim, name="SpectralBinning"),
             method=self.method,
         )
         # Band axis is reshaped; band_names from the source no longer
@@ -573,7 +611,7 @@ class SpectralBinning(Operator):
                 if self.source_wavelengths is None
                 else jsonable(np.asarray(self.source_wavelengths, dtype=float))
             ),
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -590,7 +628,10 @@ class SpectralSmoothing(Operator):
             ``"savgol"``. Default ``7``.
         polyorder: Polynomial order for Savitzky-Golay (ignored by the
             other methods). Default ``2``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops import spectral
@@ -607,17 +648,18 @@ class SpectralSmoothing(Operator):
         method: str = "savgol",
         window: int = 7,
         polyorder: int = 2,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.method = method
         self.window = window
         self.polyorder = polyorder
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "SpectralSmoothing")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = spectral_smoothing(
             np.asarray(gt),
-            axis=self.axis,
+            axis=dim_axis(gt, self.dim, name="SpectralSmoothing"),
             method=self.method,
             window=self.window,
             polyorder=self.polyorder,

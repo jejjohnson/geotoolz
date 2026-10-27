@@ -89,6 +89,7 @@ if TYPE_CHECKING:
     from geoarray import GeoArray
 
 from geoops._src.optional import optional_name
+from geoops._src.shape import band_dim, dim_axis
 
 
 if TYPE_CHECKING:
@@ -146,8 +147,10 @@ class DNToRadiance(Operator):
         offset: Intercept. Default ``0.0``.
         scale: DN scale divisor, applied before the gain. Scalar or
             per-band sequence. Default ``1.0``.
-        axis: Position of the band axis when ``gain`` / ``offset`` /
-            ``scale`` are per-band sequences. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> import numpy as np
@@ -166,19 +169,21 @@ class DNToRadiance(Operator):
         gain: float | np.ndarray | list,
         offset: float | np.ndarray | list = 0.0,
         scale: float | np.ndarray | list = 1.0,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.gain = gain
         self.offset = offset
         self.scale = scale
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "DNToRadiance")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="DNToRadiance")
         arr = np.asarray(gt)
-        n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
-        gain = _broadcast_to_band_axis(self.gain, n_bands, self.axis, arr.ndim)
-        offset = _broadcast_to_band_axis(self.offset, n_bands, self.axis, arr.ndim)
-        scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
+        n_bands = arr.shape[axis] if arr.ndim > 2 else 1
+        gain = _broadcast_to_band_axis(self.gain, n_bands, axis, arr.ndim)
+        offset = _broadcast_to_band_axis(self.offset, n_bands, axis, arr.ndim)
+        scale = _broadcast_to_band_axis(self.scale, n_bands, axis, arr.ndim)
         out = dn_to_radiance(arr, gain, offset, scale)
         return _rewrap_carried(gt, out)
 
@@ -187,7 +192,7 @@ class DNToRadiance(Operator):
             "gain": jsonable(np.asarray(self.gain, dtype=float)),
             "offset": jsonable(np.asarray(self.offset, dtype=float)),
             "scale": jsonable(np.asarray(self.scale, dtype=float)),
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -208,8 +213,10 @@ class RadianceToDN(Operator):
         offset: Intercept used by the forward decode. Default ``0.0``.
         scale: DN scale divisor used by the forward decode.
             Default ``1.0``.
-        axis: Position of the band axis for per-band coefficients.
-            Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> import numpy as np
@@ -227,19 +234,21 @@ class RadianceToDN(Operator):
         gain: float | np.ndarray | list,
         offset: float | np.ndarray | list = 0.0,
         scale: float | np.ndarray | list = 1.0,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.gain = gain
         self.offset = offset
         self.scale = scale
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "RadianceToDN")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="RadianceToDN")
         arr = np.asarray(gt)
-        n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
-        gain = _broadcast_to_band_axis(self.gain, n_bands, self.axis, arr.ndim)
-        offset = _broadcast_to_band_axis(self.offset, n_bands, self.axis, arr.ndim)
-        scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
+        n_bands = arr.shape[axis] if arr.ndim > 2 else 1
+        gain = _broadcast_to_band_axis(self.gain, n_bands, axis, arr.ndim)
+        offset = _broadcast_to_band_axis(self.offset, n_bands, axis, arr.ndim)
+        scale = _broadcast_to_band_axis(self.scale, n_bands, axis, arr.ndim)
         out = radiance_to_dn(arr, gain, offset, scale)
         return _rewrap_carried(gt, out)
 
@@ -248,7 +257,7 @@ class RadianceToDN(Operator):
             "gain": jsonable(np.asarray(self.gain, dtype=float)),
             "offset": jsonable(np.asarray(self.offset, dtype=float)),
             "scale": jsonable(np.asarray(self.scale, dtype=float)),
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -274,7 +283,10 @@ class DNToReflectance(Operator):
         scale: Quantification slope (reflectance per DN unit). Scalar
             or per-band 1-D sequence.
         offset: Reflectance-units intercept. Default ``0.0``.
-        axis: Band axis when ``scale`` / ``offset`` are per-band. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops.radiometry import DNToReflectance
@@ -297,17 +309,19 @@ class DNToReflectance(Operator):
         *,
         scale: float | np.ndarray | list,
         offset: float | np.ndarray | list = 0.0,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.scale = scale
         self.offset = offset
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "DNToReflectance")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="DNToReflectance")
         arr = np.asarray(gt)
-        n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
-        scale = _broadcast_to_band_axis(self.scale, n_bands, self.axis, arr.ndim)
-        offset = _broadcast_to_band_axis(self.offset, n_bands, self.axis, arr.ndim)
+        n_bands = arr.shape[axis] if arr.ndim > 2 else 1
+        scale = _broadcast_to_band_axis(self.scale, n_bands, axis, arr.ndim)
+        offset = _broadcast_to_band_axis(self.offset, n_bands, axis, arr.ndim)
         out = dn_to_reflectance(arr, scale, offset)
         return _rewrap_carried(gt, out)
 
@@ -315,7 +329,7 @@ class DNToReflectance(Operator):
         return {
             "scale": jsonable(np.asarray(self.scale, dtype=float)),
             "offset": jsonable(np.asarray(self.offset, dtype=float)),
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -1012,8 +1026,10 @@ class BTFromRadiance(Operator):
             sequence (in radiance units, matching ``L``).
         K2: Per-band Planck constant ``K2``. Scalar or per-band 1-D
             sequence (Kelvin).
-        axis: Position of the band axis for per-band ``K1``/``K2``.
-            Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops.radiometry import BTFromRadiance
@@ -1034,17 +1050,19 @@ class BTFromRadiance(Operator):
         *,
         K1: float | np.ndarray | list,
         K2: float | np.ndarray | list,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.K1 = K1
         self.K2 = K2
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "BTFromRadiance")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="BTFromRadiance")
         arr = np.asarray(gt)
-        n_bands = arr.shape[self.axis] if arr.ndim > 2 else 1
-        k1 = _broadcast_to_band_axis(self.K1, n_bands, self.axis, arr.ndim)
-        k2 = _broadcast_to_band_axis(self.K2, n_bands, self.axis, arr.ndim)
+        n_bands = arr.shape[axis] if arr.ndim > 2 else 1
+        k1 = _broadcast_to_band_axis(self.K1, n_bands, axis, arr.ndim)
+        k2 = _broadcast_to_band_axis(self.K2, n_bands, axis, arr.ndim)
         # NaN out nodata before the log so we don't pollute valid pixels
         # with -inf / 0; the output fill is written back afterwards.
         work = np.where(invalid_values(gt), np.nan, arr.astype(float, copy=False))
@@ -1055,7 +1073,7 @@ class BTFromRadiance(Operator):
         return {
             "K1": jsonable(np.asarray(self.K1, dtype=float)),
             "K2": jsonable(np.asarray(self.K2, dtype=float)),
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 

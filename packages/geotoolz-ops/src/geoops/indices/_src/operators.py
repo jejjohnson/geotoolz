@@ -46,7 +46,7 @@ from geoops._src.bands import (
 )
 from geoops._src.config import nested_config
 from geoops._src.geo import grid_matches
-from geoops._src.shape import keep_band_axis
+from geoops._src.shape import band_dim, dim_axis, keep_band_axis
 from geoops._src.valid import (
     carried_fill,
     carrier_fill_value,
@@ -132,7 +132,10 @@ class NormalizedDifference(Operator):
     Args:
         a: Index or name of the "high" band (numerator-positive term).
         b: Index or name of the "low" band.
-        axis: Position of the band axis in the carrier. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``, the package-wide
             value (see :mod:`geoops.indices._src.array`).
 
@@ -150,23 +153,25 @@ class NormalizedDifference(Operator):
         *,
         a: BandRef,
         b: BandRef,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.a = a
         self.b = b
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "NormalizedDifference")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="NormalizedDifference")
         out = normalized_difference(
             np.asarray(gt),
             _resolve_band(gt, self.a),
             _resolve_band(gt, self.b),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.a, self.b))
+        return _wrap_index(gt, out, axis=axis, bands=(self.a, self.b))
 
 
 class NDVI(Operator):
@@ -194,7 +199,10 @@ class NDVI(Operator):
     Args:
         nir: NIR band: an integer position or a band name. Default ``3``.
         red: Red band: an integer position or a band name. Default ``2``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -216,23 +224,25 @@ class NDVI(Operator):
         *,
         red: BandRef = 2,
         nir: BandRef = 3,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.nir = nir
         self.red = red
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "NDVI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="NDVI")
         out = ndvi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
             _resolve_band(gt, self.red),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.nir, self.red))
+        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red))
 
 
 class NDWI(Operator):
@@ -255,7 +265,10 @@ class NDWI(Operator):
     Args:
         green: Green band: an integer position or a band name. Default ``1``.
         nir: NIR band: an integer position or a band name. Default ``3``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser.
 
     Examples:
@@ -270,23 +283,25 @@ class NDWI(Operator):
         *,
         green: BandRef = 1,
         nir: BandRef = 3,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.green = green
         self.nir = nir
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "NDWI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="NDWI")
         out = ndwi_mcfeeters(
             np.asarray(gt),
             _resolve_band(gt, self.green),
             _resolve_band(gt, self.nir),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.green, self.nir))
+        return _wrap_index(gt, out, axis=axis, bands=(self.green, self.nir))
 
 
 class NDBI(Operator):
@@ -308,7 +323,10 @@ class NDBI(Operator):
     Args:
         swir: SWIR-1 band: an integer position or a band name. Default ``5``.
         nir: NIR band: an integer position or a band name. Default ``3``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser.
 
     Examples:
@@ -329,23 +347,25 @@ class NDBI(Operator):
         *,
         swir: BandRef = 5,
         nir: BandRef = 3,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.swir = swir
         self.nir = nir
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "NDBI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="NDBI")
         out = ndbi(
             np.asarray(gt),
             _resolve_band(gt, self.swir),
             _resolve_band(gt, self.nir),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.swir, self.nir))
+        return _wrap_index(gt, out, axis=axis, bands=(self.swir, self.nir))
 
 
 class NBR(Operator):
@@ -368,7 +388,10 @@ class NBR(Operator):
     Args:
         nir: NIR band: an integer position or a band name. Default ``3``.
         swir2: SWIR-2 band: an integer position or a band name. Default ``6``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser.
 
     Examples:
@@ -388,23 +411,25 @@ class NBR(Operator):
         *,
         nir: BandRef = 3,
         swir2: BandRef = 6,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.nir = nir
         self.swir2 = swir2
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "NBR")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="NBR")
         out = nbr(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
             _resolve_band(gt, self.swir2),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.nir, self.swir2))
+        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.swir2))
 
 
 class SAVI(Operator):
@@ -431,7 +456,10 @@ class SAVI(Operator):
         nir: NIR band: an integer position or a band name. Default ``3``.
         red: Red band: an integer position or a band name. Default ``2``.
         L: Soil-adjustment factor in ``[0, 1]``. Default ``0.5``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops.indices import SAVI
@@ -449,25 +477,27 @@ class SAVI(Operator):
         red: BandRef = 2,
         nir: BandRef = 3,
         L: float = 0.5,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.nir = nir
         self.red = red
         self.L = L
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "SAVI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="SAVI")
         out = savi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
             _resolve_band(gt, self.red),
             L=self.L,
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.nir, self.red))
+        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red))
 
 
 class EVI(Operator):
@@ -498,7 +528,10 @@ class EVI(Operator):
         C1: Red aerosol-resistance coefficient. Default ``6``.
         C2: Blue aerosol-resistance coefficient. Default ``7.5``.
         L: Canopy-background correction. Default ``1``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops.indices import EVI
@@ -520,8 +553,9 @@ class EVI(Operator):
         C1: float = 6.0,
         C2: float = 7.5,
         L: float = 1.0,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.nir = nir
         self.red = red
@@ -530,10 +564,11 @@ class EVI(Operator):
         self.C1 = C1
         self.C2 = C2
         self.L = L
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "EVI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="EVI")
         out = evi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
@@ -543,12 +578,10 @@ class EVI(Operator):
             C1=self.C1,
             C2=self.C2,
             L=self.L,
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(
-            gt, out, axis=self.axis, bands=(self.nir, self.red, self.blue)
-        )
+        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red, self.blue))
 
 
 class EVI2(Operator):
@@ -573,7 +606,10 @@ class EVI2(Operator):
     Args:
         red: Red band: an integer position or a band name. Default ``2``.
         nir: NIR band: an integer position or a band name. Default ``3``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -592,23 +628,25 @@ class EVI2(Operator):
         *,
         red: BandRef = 2,
         nir: BandRef = 3,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.red = red
         self.nir = nir
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "EVI2")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="EVI2")
         out = evi2(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
             _resolve_band(gt, self.red),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.nir, self.red))
+        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red))
 
 
 class ARVI(Operator):
@@ -635,7 +673,10 @@ class ARVI(Operator):
         red: Red band: an integer position or a band name. Default ``2``.
         nir: NIR band: an integer position or a band name. Default ``3``.
         gamma: Aerosol-correction strength. Default ``1.0``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -657,29 +698,29 @@ class ARVI(Operator):
         red: BandRef = 2,
         nir: BandRef = 3,
         gamma: float = 1.0,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.blue = blue
         self.red = red
         self.nir = nir
         self.gamma = gamma
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "ARVI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="ARVI")
         out = arvi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
             _resolve_band(gt, self.red),
             _resolve_band(gt, self.blue),
             gamma=self.gamma,
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(
-            gt, out, axis=self.axis, bands=(self.nir, self.red, self.blue)
-        )
+        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red, self.blue))
 
 
 class GCI(Operator):
@@ -701,7 +742,10 @@ class GCI(Operator):
     Args:
         green: Green band: an integer position or a band name. Default ``1``.
         nir: NIR band: an integer position or a band name. Default ``3``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -721,23 +765,25 @@ class GCI(Operator):
         *,
         green: BandRef = 1,
         nir: BandRef = 3,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.green = green
         self.nir = nir
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "GCI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="GCI")
         out = gci(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
             _resolve_band(gt, self.green),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.nir, self.green))
+        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.green))
 
 
 class kNDVI(Operator):
@@ -759,7 +805,10 @@ class kNDVI(Operator):
     Args:
         red: Red band: an integer position or a band name. Default ``2``.
         nir: NIR band: an integer position or a band name. Default ``3``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -778,23 +827,25 @@ class kNDVI(Operator):
         *,
         red: BandRef = 2,
         nir: BandRef = 3,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.red = red
         self.nir = nir
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "kNDVI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="kNDVI")
         out = kndvi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
             _resolve_band(gt, self.red),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.nir, self.red))
+        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red))
 
 
 class MNDWI(Operator):
@@ -821,7 +872,10 @@ class MNDWI(Operator):
     Args:
         green: Green band: an integer position or a band name. Default ``1``.
         swir: SWIR-1 band: an integer position or a band name. Default ``5``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -841,23 +895,25 @@ class MNDWI(Operator):
         *,
         green: BandRef = 1,
         swir: BandRef = 5,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.green = green
         self.swir = swir
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "MNDWI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="MNDWI")
         out = mndwi(
             np.asarray(gt),
             _resolve_band(gt, self.green),
             _resolve_band(gt, self.swir),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.green, self.swir))
+        return _wrap_index(gt, out, axis=axis, bands=(self.green, self.swir))
 
 
 class NDMI(Operator):
@@ -881,7 +937,10 @@ class NDMI(Operator):
     Args:
         nir: NIR band: an integer position or a band name. Default ``3``.
         swir1: SWIR-1 band: an integer position or a band name. Default ``5``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -900,23 +959,25 @@ class NDMI(Operator):
         *,
         nir: BandRef = 3,
         swir1: BandRef = 5,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.nir = nir
         self.swir1 = swir1
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "NDMI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="NDMI")
         out = ndmi(
             np.asarray(gt),
             _resolve_band(gt, self.nir),
             _resolve_band(gt, self.swir1),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.nir, self.swir1))
+        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.swir1))
 
 
 class NDSI(Operator):
@@ -941,7 +1002,10 @@ class NDSI(Operator):
     Args:
         green: Green band: an integer position or a band name. Default ``1``.
         swir: SWIR-1 band: an integer position or a band name. Default ``5``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -961,23 +1025,25 @@ class NDSI(Operator):
         *,
         green: BandRef = 1,
         swir: BandRef = 5,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.green = green
         self.swir = swir
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "NDSI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="NDSI")
         out = ndsi(
             np.asarray(gt),
             _resolve_band(gt, self.green),
             _resolve_band(gt, self.swir),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.green, self.swir))
+        return _wrap_index(gt, out, axis=axis, bands=(self.green, self.swir))
 
 
 class NBR2(Operator):
@@ -1000,7 +1066,10 @@ class NBR2(Operator):
     Args:
         swir1: SWIR-1 band: an integer position or a band name. Default ``5``.
         swir2: SWIR-2 band: an integer position or a band name. Default ``6``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1014,23 +1083,25 @@ class NBR2(Operator):
         *,
         swir1: BandRef = 5,
         swir2: BandRef = 6,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.swir1 = swir1
         self.swir2 = swir2
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "NBR2")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="NBR2")
         out = nbr2(
             np.asarray(gt),
             _resolve_band(gt, self.swir1),
             _resolve_band(gt, self.swir2),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.swir1, self.swir2))
+        return _wrap_index(gt, out, axis=axis, bands=(self.swir1, self.swir2))
 
 
 class BAIS2(Operator):
@@ -1067,7 +1138,10 @@ class BAIS2(Operator):
         red_edge2: second red-edge band: an integer position or a band name. Default ``5``.
         nir: narrow-NIR band: an integer position or a band name. Default ``7``.
         swir2: SWIR-2 band: an integer position or a band name. Default ``9``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1088,18 +1162,20 @@ class BAIS2(Operator):
         red_edge2: BandRef = 5,
         nir: BandRef = 7,
         swir2: BandRef = 9,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.red = red
         self.red_edge1 = red_edge1
         self.red_edge2 = red_edge2
         self.nir = nir
         self.swir2 = swir2
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "BAIS2")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="BAIS2")
         out = bais2(
             np.asarray(gt),
             _resolve_band(gt, self.red),
@@ -1107,13 +1183,13 @@ class BAIS2(Operator):
             _resolve_band(gt, self.red_edge2),
             _resolve_band(gt, self.nir),
             _resolve_band(gt, self.swir2),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
         return _wrap_index(
             gt,
             out,
-            axis=self.axis,
+            axis=axis,
             bands=(
                 self.red,
                 self.red_edge1,
@@ -1197,7 +1273,10 @@ class BSI(Operator):
         red: Red band: an integer position or a band name. Default ``2``.
         nir: NIR band: an integer position or a band name. Default ``3``.
         swir: SWIR-1 band: an integer position or a band name. Default ``5``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1219,30 +1298,32 @@ class BSI(Operator):
         red: BandRef = 2,
         nir: BandRef = 3,
         swir: BandRef = 5,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.blue = blue
         self.red = red
         self.nir = nir
         self.swir = swir
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "BSI")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="BSI")
         out = bsi(
             np.asarray(gt),
             _resolve_band(gt, self.blue),
             _resolve_band(gt, self.red),
             _resolve_band(gt, self.nir),
             _resolve_band(gt, self.swir),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
         return _wrap_index(
             gt,
             out,
-            axis=self.axis,
+            axis=axis,
             bands=(self.blue, self.red, self.nir, self.swir),
         )
 
@@ -1267,7 +1348,10 @@ class IronOxide(Operator):
     Args:
         red: Red band: an integer position or a band name. Default ``2``.
         blue: Blue band: an integer position or a band name. Default ``0``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1286,23 +1370,25 @@ class IronOxide(Operator):
         *,
         red: BandRef = 2,
         blue: BandRef = 0,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.red = red
         self.blue = blue
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "IronOxide")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="IronOxide")
         out = iron_oxide(
             np.asarray(gt),
             _resolve_band(gt, self.red),
             _resolve_band(gt, self.blue),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.red, self.blue))
+        return _wrap_index(gt, out, axis=axis, bands=(self.red, self.blue))
 
 
 class ClayMinerals(Operator):
@@ -1326,7 +1412,10 @@ class ClayMinerals(Operator):
     Args:
         swir1: SWIR-1 band: an integer position or a band name. Default ``5``.
         swir2: SWIR-2 band: an integer position or a band name. Default ``6``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Denominator stabiliser. Default ``1e-10``.
 
     Examples:
@@ -1347,23 +1436,25 @@ class ClayMinerals(Operator):
         *,
         swir1: BandRef = 5,
         swir2: BandRef = 6,
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.swir1 = swir1
         self.swir2 = swir2
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "ClayMinerals")
         self.eps = eps
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="ClayMinerals")
         out = clay_minerals(
             np.asarray(gt),
             _resolve_band(gt, self.swir1),
             _resolve_band(gt, self.swir2),
-            axis=self.axis,
+            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.swir1, self.swir2))
+        return _wrap_index(gt, out, axis=axis, bands=(self.swir1, self.swir2))
 
 
 class CIRI(Operator):
@@ -1390,7 +1481,10 @@ class CIRI(Operator):
 
     Args:
         cirrus: cirrus band: an integer position or a band name. Default ``9``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops.indices import CIRI
@@ -1402,14 +1496,16 @@ class CIRI(Operator):
         self,
         *,
         cirrus: BandRef = 9,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.cirrus = cirrus
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "CIRI")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        out = ciri(np.asarray(gt), _resolve_band(gt, self.cirrus), axis=self.axis)
-        return _wrap_index(gt, out, axis=self.axis, bands=(self.cirrus,))
+        axis = dim_axis(gt, self.dim, name="CIRI")
+        out = ciri(np.asarray(gt), _resolve_band(gt, self.cirrus), axis=axis)
+        return _wrap_index(gt, out, axis=axis, bands=(self.cirrus,))
 
 
 class AppendIndex(Operator):
@@ -1430,8 +1526,10 @@ class AppendIndex(Operator):
     Args:
         index_op: An index operator (e.g. ``NDVI()``, ``EVI()``). Must
             return a `GeoArray` whose band-axis is collapsed.
-        axis: Position of the band axis. Default ``-3``. Must match the
-            ``axis`` configured on ``index_op``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops.indices import AppendIndex, NDVI
@@ -1439,11 +1537,14 @@ class AppendIndex(Operator):
         >>> stacked = bands_plus_ndvi(reflectance_geoarray)  # (C+1, H, W)
     """
 
-    def __init__(self, *, index_op: Operator, axis: int = -3) -> None:
+    def __init__(
+        self, *, index_op: Operator, dim: str = "band", axis: int | None = None
+    ) -> None:
         self.index_op = index_op
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "AppendIndex")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="AppendIndex")
         index = self.index_op(gt)
         index_arr = np.asarray(index)
         # Expand back to (..., 1, ..., H, W) along the configured axis so
@@ -1453,16 +1554,16 @@ class AppendIndex(Operator):
         index_3d = (
             index_arr
             if index_arr.ndim == arr.ndim
-            else np.expand_dims(index_arr, axis=self.axis)
+            else np.expand_dims(index_arr, axis=axis)
         )
-        stacked = np.concatenate([arr, index_3d], axis=self.axis)
+        stacked = np.concatenate([arr, index_3d], axis=axis)
         # Band-name lists gain the index operator's name; per-band values
         # with no meaning for an index (wavelengths) are dropped.
         src_attrs = getattr(gt, "attrs", None)
         attrs = strip_band_attrs(src_attrs)
         name = type(self.index_op).__name__
         for key in BAND_NAME_KEYS:
-            names = per_band_values(src_attrs, key, arr.shape[self.axis])
+            names = per_band_values(src_attrs, key, arr.shape[axis])
             if names is not None:
                 attrs[key] = [*names, name]
         # The stacked bands keep the input's values, so the fill follows
@@ -1475,4 +1576,4 @@ class AppendIndex(Operator):
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"index_op": nested_config(self.index_op), "axis": self.axis}
+        return {"index_op": nested_config(self.index_op), "dim": self.dim}

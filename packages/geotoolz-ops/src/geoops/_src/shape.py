@@ -7,6 +7,9 @@ trailing two and the band axis, when there is one, is always ``-3``
 helpers here are the one implementation of that convention:
 
 * :func:`band_axis` / :data:`BAND_AXIS` -- where the bands live;
+* :func:`band_dim` / :func:`dim_axis` -- an operator's ``dim=`` (and the
+  deprecated ``axis=``), and the position of that dim in a carrier, read
+  from its stored dims;
 * :func:`require_ndim` -- an early, operator-named rank check for
   operators that do not support every rank;
 * :func:`keep_band_axis` -- keeps the time axis of a band-collapsing
@@ -23,6 +26,7 @@ helpers here are the one implementation of that convention:
 from __future__ import annotations
 
 import functools
+import warnings
 from collections.abc import Callable, Iterable
 from typing import Any, Final
 
@@ -33,7 +37,10 @@ from jaxtyping import Shaped
 
 __all__ = [
     "BAND_AXIS",
+    "DIMS",
     "band_axis",
+    "band_dim",
+    "dim_axis",
     "gather_inputs",
     "keep_band_axis",
     "map_frames",
@@ -47,6 +54,9 @@ __all__ = [
 BAND_AXIS: Final = -3
 
 _LAYOUTS: Final = {2: "(H, W)", 3: "(C, H, W)", 4: "(T, C, H, W)"}
+
+#: The 0.2 layout a plain array is read in: ``DIMS[-ndim:]``.
+DIMS: Final = ("time", "band", "y", "x")
 
 
 def band_axis(arr: Any) -> int:
@@ -76,6 +86,92 @@ def band_axis(arr: Any) -> int:
             f"a {ndim}-D array has no band axis; expected (C, H, W) or (T, C, H, W)"
         )
     return BAND_AXIS
+
+
+def band_dim(
+    dim: str | None,
+    axis: int | None,
+    name: str,
+    *,
+    legacy: tuple[int, ...] = (BAND_AXIS,),
+) -> str | None:
+    """The dim an operator works over, from ``dim=`` or the deprecated ``axis=``.
+
+    ``axis=`` keeps working for one release: a band position in ``legacy``
+    (``-3``, or ``0`` for the per-frame skimage wrappers) maps to
+    ``"band"`` with a `DeprecationWarning`.
+
+    Args:
+        dim: The ``dim=`` argument.
+        axis: The deprecated ``axis=`` argument (``None`` when not given).
+        name: Operator name for the messages.
+        legacy: The old band positions that map to ``"band"``.
+
+    Returns:
+        The dim name, or ``None`` when the operator allows "no band dim".
+
+    Raises:
+        ValueError: ``axis`` is not one of the ``legacy`` band positions, or
+            both ``axis`` and a non-default ``dim`` are given.
+
+    Examples:
+        >>> band_dim("band", None, "NDVI")
+        'band'
+    """
+    if axis is None:
+        return dim
+    warnings.warn(
+        f"{name}(axis=...) is deprecated: pass dim='band' (the band dim's name). "
+        "axis= is removed in the next minor release.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    if dim != "band":
+        raise ValueError(f"{name}: pass dim= or the deprecated axis=, not both")
+    if axis not in legacy:
+        raise ValueError(
+            f"{name}: axis={axis} is not the band axis; pass dim= with the name "
+            "of the dim to work over"
+        )
+    return "band"
+
+
+def dim_axis(x: Any, dim: str, *, name: str) -> int:
+    """The (negative) position of ``dim`` in ``x``.
+
+    A `GeoArray` answers from its stored dims; a plain array is read in the
+    0.2 layout, ``DIMS[-ndim:]``. A 2-D input without a band dim (a
+    single-band map) answers ``-3``, the 0.2 band position, as before.
+
+    Args:
+        x: The carrier, or a plain array.
+        dim: The dim name.
+        name: Operator name for the message.
+
+    Returns:
+        The axis, counted from the end (``-3`` for the band dim of a
+        ``("band", "y", "x")`` carrier), so it also holds for a frame of a
+        stack.
+
+    Raises:
+        ValueError: No ``dim`` in ``x`` (other than the band dim of a 2-D
+            map); the message lists its dims.
+
+    Examples:
+        >>> dim_axis(np.zeros((2, 3, 4, 4)), "band", name="NDVI")
+        -3
+    """
+    ndim = int(np.ndim(x))
+    dims = x.dims if isinstance(x, GeoArray) else DIMS[-ndim:]
+    if dim in dims:
+        return dims.index(dim) - len(dims)
+    if dim == "band" and ndim < 3:
+        # a single-band map: the 0.2 band position, which callers that
+        # accept a 2-D input never index with
+        return BAND_AXIS
+    if isinstance(x, GeoArray):
+        raise ValueError(f"{name}: the carrier has no {dim!r} dim; its dims are {dims}")
+    raise ValueError(f"{name}: a {np.ndim(x)}-D array has no {dim!r} dim ({dims})")
 
 
 def _describe_ranks(allowed: tuple[int, ...]) -> str:
@@ -147,9 +243,16 @@ def keep_band_axis(out: Any, ref: Any) -> Any:
     return out
 
 
+def _is_time_stack(x: Any) -> bool:
+    """A time series: a `GeoArray` led by a ``time`` dim, or a 4-D plain array."""
+    if isinstance(x, GeoArray):
+        return x.ndim >= 3 and x.dims[0] == "time"
+    return np.ndim(x) == 4
+
+
 def _frame(x: Any, t: int) -> Any:
-    if isinstance(x, GeoArray) and x.dims == ("time", "band", "y", "x"):
-        return x[t]
+    if isinstance(x, GeoArray):
+        return x.isel(time=t)
     return np.asarray(x)[t]
 
 
@@ -158,15 +261,18 @@ def map_frames(fn: Callable[[Any], Any], x: Any, *, name: str) -> Any:
 
     For operators whose semantics are per scene (a segmentation, a QA
     decode, a colour composite): the result is exactly the per-frame
-    results restacked along a new leading time axis. A 2-D per-frame
-    result gains a singleton band axis (``(T, 1, H, W)``, see
-    :func:`keep_band_axis`).
+    results restacked along a new leading time axis. A time series is a
+    `GeoArray` whose first dim is named ``time`` (``("time", "band", "y",
+    "x")`` or a single-band ``("time", "y", "x")``), or a 4-D plain array.
+    On a stack with bands, a 2-D per-frame result gains a singleton band
+    axis (``(T, 1, H, W)``, see :func:`keep_band_axis`); a single-band
+    series stays ``("time", "y", "x")``.
 
     Args:
         fn: Function of one ``(C, H, W)`` frame returning an ``(H, W)`` or
             ``(C', H', W')`` carrier (GeoArray or ndarray).
-        x: The input. Only a 4-D input is split; anything else is passed to
-            ``fn`` unchanged.
+        x: The input. Only a time series is split; anything else is passed
+            to ``fn`` unchanged.
         name: Operator name for error messages.
 
     Returns:
@@ -178,7 +284,7 @@ def map_frames(fn: Callable[[Any], Any], x: Any, *, name: str) -> Any:
         ValueError: If a per-frame result is not a 2-D / 3-D array, or the
             frames' results differ in shape or grid.
     """
-    if np.ndim(x) != 4:
+    if not _is_time_stack(x):
         return fn(x)
     outs = [fn(_frame(x, t)) for t in range(np.shape(x)[0])]
     arrays = []
@@ -207,7 +313,14 @@ def map_frames(fn: Callable[[Any], Any], x: Any, *, name: str) -> Any:
     stacked = np.stack(arrays)
     if not isinstance(first, GeoArray):
         return stacked
-    frame_dims = first.dims if first.ndim == 3 else ("band", *first.dims)
+    # a 2-D result keeps a singleton band axis on a stack that has bands
+    # (#147); a single-band ("time", "y", "x") series stays one
+    has_bands = not isinstance(x, GeoArray) or "band" in x.dims
+    if first.ndim == 2 and not has_bands:
+        stacked = stacked[:, 0]
+    frame_dims = (
+        first.dims if first.ndim == 3 or not has_bands else ("band", *first.dims)
+    )
     # each frame lost the time coordinate; the frames are in order, so the
     # input's comes back with the restacked time dim
     time = tuple(c for c in getattr(x, "coords", ()) if c.dim == "time")
@@ -220,12 +333,13 @@ def map_frames(fn: Callable[[Any], Any], x: Any, *, name: str) -> Any:
 
 
 def over_frames(apply: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorate an operator's ``_apply`` to run per frame on 4-D input.
+    """Decorate an operator's ``_apply`` to run per frame on a time series.
 
-    ``@over_frames`` on ``def _apply(self, x, ...)`` routes a
-    ``(T, C, H, W)`` input through :func:`map_frames` (each frame handled
-    by the undecorated ``_apply``, named after the operator class in
-    errors); 2-D and 3-D inputs are unaffected. The wrapper keeps the
+    ``@over_frames`` on ``def _apply(self, x, ...)`` routes a time series
+    (a carrier led by a ``time`` dim, or a 4-D plain array) through
+    :func:`map_frames` (each frame handled by the undecorated ``_apply``,
+    named after the operator class in errors); other inputs are
+    unaffected. The wrapper keeps the
     wrapped signature, so pipekit's input introspection is unchanged.
 
     Args:
