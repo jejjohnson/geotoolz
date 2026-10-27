@@ -1264,7 +1264,7 @@ dependencies = [
     { name = "geotoolz-array" },
     { name = "geotoolz-catalog" },
     { name = "geotoolz-cloud" },
-    { name = "geotoolz-ops" },
+    { name = "geotoolz-ops", extra = ["morph", "raster", "sensors", "vector"] },
     { name = "geotoolz-patcher" },
     { name = "geotoolz-products" },
 ]
@@ -1311,13 +1311,13 @@ requires-dist = [
     { name = "geotoolz-array", editable = "packages/geotoolz-array" },
     { name = "geotoolz-catalog", editable = "packages/geotoolz-catalog" },
     { name = "geotoolz-cloud", editable = "packages/geotoolz-cloud" },
-    { name = "geotoolz-ops", editable = "packages/geotoolz-ops" },
     { name = "geotoolz-ops", extras = ["hdf4"], marker = "extra == 'hdf4'", editable = "packages/geotoolz-ops" },
     { name = "geotoolz-ops", extras = ["hdf5"], marker = "extra == 'hdf5'", editable = "packages/geotoolz-ops" },
     { name = "geotoolz-ops", extras = ["hydra"], marker = "extra == 'hydra'", editable = "packages/geotoolz-ops" },
     { name = "geotoolz-ops", extras = ["learn"], marker = "extra == 'learn'", editable = "packages/geotoolz-ops" },
     { name = "geotoolz-ops", extras = ["netcdf"], marker = "extra == 'netcdf'", editable = "packages/geotoolz-ops" },
     { name = "geotoolz-ops", extras = ["patch"], marker = "extra == 'patch'", editable = "packages/geotoolz-ops" },
+    { name = "geotoolz-ops", extras = ["raster", "vector", "morph", "sensors"], editable = "packages/geotoolz-ops" },
     { name = "geotoolz-ops", extras = ["vector-cube"], marker = "extra == 'vector-cube'", editable = "packages/geotoolz-ops" },
     { name = "geotoolz-ops", extras = ["viz"], marker = "extra == 'viz'", editable = "packages/geotoolz-ops" },
     { name = "geotoolz-ops", extras = ["zarr"], marker = "extra == 'zarr'", editable = "packages/geotoolz-ops" },
@@ -1717,22 +1717,33 @@ source = { editable = "packages/geotoolz-ops" }
 dependencies = [
     { name = "affine" },
     { name = "einx" },
-    { name = "geopandas" },
-    { name = "georeader-spaceml" },
-    { name = "geotoolz-array", extra = ["georeader"] },
+    { name = "geotoolz-array" },
     { name = "jaxtyping" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pipekit" },
     { name = "pyproj" },
-    { name = "rasterio" },
-    { name = "scikit-image" },
     { name = "scipy" },
-    { name = "shapely" },
-    { name = "typing-extensions" },
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "geopandas" },
+    { name = "georeader-spaceml" },
+    { name = "geotoolz-array", extra = ["georeader"] },
+    { name = "geotoolz-cloud", extra = ["hdf4", "hdf5", "netcdf"] },
+    { name = "geotoolz-patcher", extra = ["pipekit"] },
+    { name = "hydra-zen" },
+    { name = "joblib" },
+    { name = "matplotlib" },
+    { name = "rasterio" },
+    { name = "scikit-image" },
+    { name = "scikit-learn" },
+    { name = "shapely" },
+    { name = "typing-extensions" },
+    { name = "xvec" },
+    { name = "zarr" },
+]
 cloud = [
     { name = "geotoolz-cloud" },
 ]
@@ -1749,11 +1760,26 @@ learn = [
     { name = "joblib" },
     { name = "scikit-learn" },
 ]
+morph = [
+    { name = "scikit-image" },
+]
 netcdf = [
     { name = "geotoolz-cloud", extra = ["netcdf"] },
 ]
 patch = [
     { name = "geotoolz-patcher", extra = ["pipekit"] },
+]
+raster = [
+    { name = "rasterio" },
+]
+sensors = [
+    { name = "georeader-spaceml" },
+    { name = "geotoolz-array", extra = ["georeader"] },
+    { name = "typing-extensions" },
+]
+vector = [
+    { name = "geopandas" },
+    { name = "shapely" },
 ]
 vector-cube = [
     { name = "xvec" },
@@ -1793,13 +1819,15 @@ typecheck = [
 requires-dist = [
     { name = "affine", specifier = ">=2.4" },
     { name = "einx", specifier = ">=0.4" },
-    { name = "geopandas", specifier = ">=0.14" },
-    { name = "georeader-spaceml", specifier = ">=2.1" },
-    { name = "geotoolz-array", extras = ["georeader"], editable = "packages/geotoolz-array" },
+    { name = "geopandas", marker = "extra == 'vector'", specifier = ">=0.14" },
+    { name = "georeader-spaceml", marker = "extra == 'sensors'", specifier = ">=2.1" },
+    { name = "geotoolz-array", editable = "packages/geotoolz-array" },
+    { name = "geotoolz-array", extras = ["georeader"], marker = "extra == 'sensors'", editable = "packages/geotoolz-array" },
     { name = "geotoolz-cloud", marker = "extra == 'cloud'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-cloud", extras = ["hdf4"], marker = "extra == 'hdf4'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-cloud", extras = ["hdf5"], marker = "extra == 'hdf5'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-cloud", extras = ["netcdf"], marker = "extra == 'netcdf'", editable = "packages/geotoolz-cloud" },
+    { name = "geotoolz-ops", extras = ["raster", "vector", "morph", "sensors", "viz", "learn", "hydra", "patch", "vector-cube", "cloud", "hdf5", "hdf4", "netcdf", "zarr"], marker = "extra == 'all'", editable = "packages/geotoolz-ops" },
     { name = "geotoolz-patcher", extras = ["pipekit"], marker = "extra == 'patch'", editable = "packages/geotoolz-patcher" },
     { name = "hydra-zen", marker = "extra == 'hydra'", specifier = ">=0.14" },
     { name = "jaxtyping", specifier = ">=0.2.36" },
@@ -1809,16 +1837,16 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.1" },
     { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=6152d18f7770ec71cdb0e4dcc63df8edafe00f53" },
     { name = "pyproj", specifier = ">=3.6" },
-    { name = "rasterio", specifier = ">=1.3" },
-    { name = "scikit-image", specifier = ">=0.25" },
+    { name = "rasterio", marker = "extra == 'raster'", specifier = ">=1.3" },
+    { name = "scikit-image", marker = "extra == 'morph'", specifier = ">=0.25" },
     { name = "scikit-learn", marker = "extra == 'learn'", specifier = ">=1.4" },
     { name = "scipy", specifier = ">=1.11" },
-    { name = "shapely", specifier = ">=2.0" },
-    { name = "typing-extensions", specifier = ">=4.0" },
+    { name = "shapely", marker = "extra == 'vector'", specifier = ">=2.0" },
+    { name = "typing-extensions", marker = "extra == 'sensors'", specifier = ">=4.0" },
     { name = "xvec", marker = "extra == 'vector-cube'", specifier = ">=0.4" },
     { name = "zarr", marker = "extra == 'zarr'", specifier = ">=3" },
 ]
-provides-extras = ["viz", "learn", "hydra", "patch", "vector-cube", "cloud", "hdf5", "hdf4", "netcdf", "zarr"]
+provides-extras = ["raster", "vector", "morph", "sensors", "viz", "learn", "hydra", "patch", "vector-cube", "cloud", "hdf5", "hdf4", "netcdf", "zarr", "all"]
 
 [package.metadata.requires-dev]
 dev = [

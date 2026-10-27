@@ -10,25 +10,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import geopandas as gpd
 import numpy as np
 import pandas as pd
 from pipekit import Operator
-from skimage.feature import (
-    blob_dog,
-    blob_doh,
-    blob_log,
-    corner_harris,
-    corner_peaks,
-    hog,
-    peak_local_max,
-)
-from skimage.transform import (
-    hough_circle,
-    hough_circle_peaks,
-    hough_line,
-    hough_line_peaks,
-)
 
 from geoops._src.config import as_tuple
 from geoops._src.geo import pixel_xy, reject_geotensor, require_geoarray
@@ -44,6 +28,12 @@ from geoops.feature._src.array import (
 if TYPE_CHECKING:
     from geoarray import GeoArray
 
+from geoops._src.optional import import_optional, optional_name
+
+
+if TYPE_CHECKING:
+    import geopandas as gpd
+
 
 def _points(
     gt: GeoArray,
@@ -51,6 +41,7 @@ def _points(
     cols: np.ndarray,
     data: dict[str, Any] | None = None,
 ) -> gpd.GeoDataFrame:
+    gpd = import_optional("geopandas", "vector", feature="geoops.feature")
     frame = pd.DataFrame({"row": rows, "col": cols, **(data or {})})
     xs, ys = pixel_xy(gt.transform, rows, cols)
     geometry = gpd.points_from_xy(xs, ys)
@@ -93,6 +84,15 @@ class PeakLocalMax(Operator):
         self.exclude_border = exclude_border
 
     def _apply(self, gt: GeoArray) -> gpd.GeoDataFrame:
+        gpd = import_optional(
+            "geopandas", "vector", feature="geoops.feature.PeakLocalMax"
+        )
+        peak_local_max = optional_name(
+            "skimage.feature",
+            "peak_local_max",
+            "morph",
+            feature="geoops.feature.PeakLocalMax",
+        )
         require_geoarray(gt, "PeakLocalMax")
         image = single_band(np.asarray(gt, dtype=float), name="PeakLocalMax")
         coords = peak_local_max(
@@ -113,7 +113,8 @@ class PeakLocalMax(Operator):
 class _BlobBase(Operator):
     """Common base for ``skimage.feature.blob_*`` wrappers.
 
-    Subclasses set ``_func`` to the underlying skimage callable and
+    Subclasses set ``_func`` to the name of the ``skimage.feature`` detector
+    (imported when the operator runs: ``[morph]``) and
     override :meth:`_extra_kwargs` / :meth:`_radius_from_sigma` to track
     each detector's actual signature and radius convention.
 
@@ -134,7 +135,7 @@ class _BlobBase(Operator):
 
     _terminal: ClassVar[bool] = True
 
-    _func: Any
+    _func: ClassVar[str]
 
     def __init__(
         self,
@@ -156,9 +157,13 @@ class _BlobBase(Operator):
         return sigma * np.sqrt(2.0)
 
     def _apply(self, gt: GeoArray) -> gpd.GeoDataFrame:
+        gpd = import_optional("geopandas", "vector", feature="geoops.feature")
         name = type(self).__name__
         require_geoarray(gt, name)
-        blobs = self._func(
+        detect = optional_name(
+            "skimage.feature", self._func, "morph", feature=f"geoops.feature.{name}"
+        )
+        blobs = detect(
             single_band(np.asarray(gt, dtype=float), name=name),
             min_sigma=self.min_sigma,
             max_sigma=self.max_sigma,
@@ -190,7 +195,7 @@ class BlobLoG(_BlobBase):
             ``max_sigma``.
     """
 
-    _func = staticmethod(blob_log)
+    _func = "blob_log"
 
     def __init__(
         self,
@@ -220,7 +225,7 @@ class BlobDOG(_BlobBase):
         sigma_ratio: Ratio between the sigmas of successive Gaussians.
     """
 
-    _func = staticmethod(blob_dog)
+    _func = "blob_dog"
 
     def __init__(
         self,
@@ -255,7 +260,7 @@ class BlobDoH(_BlobBase):
             ``max_sigma``.
     """
 
-    _func = staticmethod(blob_doh)
+    _func = "blob_doh"
 
     def __init__(
         self,
@@ -356,6 +361,21 @@ class CornerHarris(Operator):
         self.threshold_rel = threshold_rel
 
     def _apply(self, gt: GeoArray) -> gpd.GeoDataFrame:
+        corner_harris = optional_name(
+            "skimage.feature",
+            "corner_harris",
+            "morph",
+            feature="geoops.feature.CornerHarris",
+        )
+        corner_peaks = optional_name(
+            "skimage.feature",
+            "corner_peaks",
+            "morph",
+            feature="geoops.feature.CornerHarris",
+        )
+        gpd = import_optional(
+            "geopandas", "vector", feature="geoops.feature.CornerHarris"
+        )
         require_geoarray(gt, "CornerHarris")
         response = corner_harris(
             single_band(np.asarray(gt, dtype=float), name="CornerHarris")
@@ -401,6 +421,12 @@ class HOG(Operator):
         self.cells_per_block = as_tuple(cells_per_block)
 
     def _apply(self, gt: GeoArray | np.ndarray) -> np.ndarray:
+        hog = optional_name(
+            "skimage.feature",
+            "hog",
+            "morph",
+            feature="geoops.feature.HOG",
+        )
         return hog(
             single_band(np.asarray(gt, dtype=float), name="HOG"),
             orientations=self.orientations,
@@ -500,6 +526,18 @@ class HoughLines(Operator):
         self.num_peaks = num_peaks
 
     def _apply(self, gt: GeoArray | np.ndarray) -> pd.DataFrame:
+        hough_line = optional_name(
+            "skimage.transform",
+            "hough_line",
+            "morph",
+            feature="geoops.feature.HoughLines",
+        )
+        hough_line_peaks = optional_name(
+            "skimage.transform",
+            "hough_line_peaks",
+            "morph",
+            feature="geoops.feature.HoughLines",
+        )
         reject_geotensor(gt, type(self).__name__)
         hspace, angles, distances = hough_line(
             single_band(np.asarray(gt), name="HoughLines")
@@ -538,6 +576,18 @@ class HoughCircles(Operator):
         self.total_num_peaks = total_num_peaks
 
     def _apply(self, gt: GeoArray) -> gpd.GeoDataFrame:
+        hough_circle = optional_name(
+            "skimage.transform",
+            "hough_circle",
+            "morph",
+            feature="geoops.feature.HoughCircles",
+        )
+        hough_circle_peaks = optional_name(
+            "skimage.transform",
+            "hough_circle_peaks",
+            "morph",
+            feature="geoops.feature.HoughCircles",
+        )
         require_geoarray(gt, "HoughCircles")
         hspaces = hough_circle(
             single_band(np.asarray(gt), name="HoughCircles"), self.radii

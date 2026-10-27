@@ -31,14 +31,22 @@ Until the first PyPI release, install from a clone (see the
 
 ```bash
 pip install geotoolz                 # every operator family
+pip install geotoolz-ops             # the slim base: kernels on NumPy, SciPy, pandas
+pip install 'geotoolz-ops[raster,vector,morph,sensors]'   # what geotoolz installs
 pip install 'geotoolz-ops[patch]'        # + tile → operate → stitch with geopatcher
 ```
 
-Backends that only a few operators use are extras. Those operators import
-without them and raise an `ImportError` naming the extra when called.
+The base install costs NumPy, SciPy, pandas, pyproj and affine: indices,
+radiometry arithmetic, masks and normalisation run on it. GDAL, the vector
+stack, scikit-image and georeader are extras. Operators that need an extra
+import without it and raise an `ImportError` naming the extra when called.
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
+| `raster` | `rasterio` | `io` file reads and writes, `geom` windows and resampling, `patch_ops` windows |
+| `vector` | `geopandas`, `shapely` | vector outputs and inputs: `feature` detections, `mask` polygons, `measure` contours, `plume` geometry |
+| `morph` | `scikit-image` | `segment`, `feature`, `measure`, connected components and skeletons, `normalize.CLAHE`, `geom` registration, the resampling behind `geom.Resize` / `Resample` |
+| `sensors` | `georeader` (which brings `rasterio`, `geopandas`, `shapely`) | the engine behind `geom.Reproject` / `ReprojectLike` / `Mosaic` / `Vectorize` / `Resize` / `Resample` (which also need `morph`), `viz.AnnotatePolygons`, `io.LoadFromEE`, `io` reads, `mask` rasterising, `radiometry` solar geometry |
 | `viz` | `matplotlib` | `viz.ApplyColormap` (named matplotlib colormaps) |
 | `learn` | `scikit-learn`, `joblib` | `learn.SklearnOp` / `Pixelwise*` imputer NaN strategies and `save_state` / `load_state` / `state_path=`; `plume` DBSCAN clump counting |
 | `zarr` | `zarr>=3` | `io.WriteZarr` |
@@ -49,6 +57,7 @@ without them and raise an `ImportError` naming the extra when called.
 | `vector-cube` | `xvec` (+ `xarray`) | `geom.coregister.RasterToPoints` / `PointsToRaster`, bilinear point sampling |
 | `hydra` | `hydra-zen` | YAML `builds()` / `instantiate()` round-trips |
 | `patch` | `geotoolz-patcher[pipekit]` | `geoops.patch_ops` (tile → map → stitch, label-aware samplers) |
+| `all` | every extra above | everything |
 
 ## Quickstart
 

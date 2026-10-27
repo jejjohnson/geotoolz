@@ -34,17 +34,13 @@ declare ``fill_value=NaN``, and label images use ``0`` (see
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
-import geopandas as gpd
 import numpy as np
 import pandas as pd
 from geoarray import GeoArray
-from georeader import vectorize
 from pipekit import Operator
 from pyproj import CRS, Transformer
-from shapely.geometry import LineString
-from shapely.ops import unary_union
 
 from geoops.carrier import (
     SENTINEL2_L2A_BANDS,
@@ -57,6 +53,7 @@ from geoops.carrier import (
     invalid_values,
     keep_band_axis,
     mask_invalid_to_nan,
+    optional_name,
     over_frames,
     reject_config_summary,
     reject_geotensor,
@@ -83,6 +80,10 @@ from geoops.plume._src.array import (
     squeeze_single_band,
     wind_advection_cone,
 )
+
+
+if TYPE_CHECKING:
+    import geopandas as gpd
 
 
 def _band_position(carrier: GeoArray | np.ndarray, band: BandRef, axis: int) -> int:
@@ -393,6 +394,21 @@ class PlumeFootprint(Operator):
     def _apply(
         self, gt: GeoArray, enhancement: GeoArray | np.ndarray | None = None
     ) -> gpd.GeoDataFrame:
+        gpd = import_optional(
+            "geopandas", "vector", feature="geoops.plume.PlumeFootprint"
+        )
+        unary_union = optional_name(
+            "shapely.ops",
+            "unary_union",
+            "vector",
+            feature="geoops.plume.PlumeFootprint",
+        )
+        vectorize = optional_name(
+            "georeader",
+            "vectorize",
+            "sensors",
+            feature="geoops.plume.PlumeFootprint",
+        )
         require_ndim(gt, (2, 3), "PlumeFootprint")
         require_geoarray(gt, "PlumeFootprint")
         require_projected_crs(gt, "PlumeFootprint")
@@ -822,6 +838,15 @@ class CrossSectionalFlux(Operator):
     def _apply(
         self, gt: GeoArray, plume_mask: GeoArray | np.ndarray
     ) -> gpd.GeoDataFrame:
+        LineString = optional_name(
+            "shapely.geometry",
+            "LineString",
+            "vector",
+            feature="geoops.plume.CrossSectionalFlux",
+        )
+        gpd = import_optional(
+            "geopandas", "vector", feature="geoops.plume.CrossSectionalFlux"
+        )
         require_ndim(gt, (2, 3), "CrossSectionalFlux")
         require_geoarray(gt, "CrossSectionalFlux")
         require_projected_crs(gt, "CrossSectionalFlux")

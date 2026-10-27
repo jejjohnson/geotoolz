@@ -32,15 +32,19 @@ jobs:
           import importlib.util
           import pkgutil
 
+          import sys
+
           import numpy as np
           from geoarray import GeoArray
-          from geoarray.interop.georeader import to_georeader
-          from rasterio.transform import from_origin
 
           import geoops as gz
 
-          # The extras really are absent from this environment.
-          for module in ("matplotlib", "sklearn", "joblib", "zarr", "xvec", "hydra_zen"):
+          # The extras really are absent from this environment, the slim
+          # base's (#538) included: no GDAL, vector stack, skimage or georeader.
+          for module in (
+              "matplotlib", "sklearn", "joblib", "zarr", "xvec", "hydra_zen",
+              "rasterio", "geopandas", "shapely", "skimage", "georeader",
+          ):
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 
           # Every module imports on a base install (patch_ops is the
@@ -51,18 +55,12 @@ jobs:
 
           values = np.arange(32, dtype="float32").reshape(2, 4, 4) + 1.0
           gt = GeoArray(
-              values, from_origin(0, 40, 10, 10), "EPSG:32629", fill_value=-9999.0,
+              values, (10.0, 0.0, 0.0, 0.0, -10.0, 40.0), "EPSG:32629",
+              fill_value=-9999.0, dims="band y x",
           )
           out = gz.NormalizedDifference(a=1, b=0)(gt)
           assert isinstance(out, GeoArray) and out.shape == (4, 4), out.shape
-
-          # A georeader GeoTensor is refused, naming the converter.
-          try:
-              gz.NormalizedDifference(a=1, b=0)(to_georeader(gt))
-          except TypeError as exc:
-              assert "from_georeader" in str(exc), exc
-          else:
-              raise AssertionError("a GeoTensor was accepted")
+          assert "rasterio" not in sys.modules
 
           # Extra-backed operators construct fine and fail only on use,
           # naming the extra to install.
@@ -73,6 +71,12 @@ jobs:
               assert "geotoolz-ops[viz]" in str(exc), exc
           else:
               raise AssertionError("ApplyColormap ran without matplotlib")
+          try:
+              gz.geom.Reproject(dst_crs="EPSG:4326")(gt)
+          except ImportError as exc:
+              assert "geotoolz-ops[sensors]" in str(exc), exc
+          else:
+              raise AssertionError("Reproject ran without georeader")
           print("geotoolz-ops base install OK")
           EOF
 

@@ -28,14 +28,6 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 import pandas as pd
-from georeader.reflectance import (
-    integrated_irradiance,
-    load_thuillier_irradiance,
-    radiance_to_reflectance,
-    reflectance_to_radiance,
-    srf,
-    transform_to_srf,
-)
 from pipekit import Operator
 
 from geoops._src.bands import resolve_wavelengths, strip_band_attrs
@@ -95,6 +87,12 @@ def _parse_datetime(value: datetime | str) -> datetime:
 
 if TYPE_CHECKING:
     from geoarray import GeoArray
+
+from geoops._src.optional import optional_name
+
+
+if TYPE_CHECKING:
+    pass
 
 
 class ToFloat32(Operator):
@@ -390,6 +388,12 @@ class RadianceToReflectance(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        radiance_to_reflectance = optional_name(
+            "georeader.reflectance",
+            "radiance_to_reflectance",
+            "sensors",
+            feature="geoops.radiometry.RadianceToReflectance",
+        )
         obs_factor = observation_date_correction_factor(
             self.acquisition_date,
             sza_deg=self.sza_deg,
@@ -489,6 +493,12 @@ class ReflectanceToRadiance(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        reflectance_to_radiance = optional_name(
+            "georeader.reflectance",
+            "reflectance_to_radiance",
+            "sensors",
+            feature="geoops.radiometry.ReflectanceToRadiance",
+        )
         obs_factor = observation_date_correction_factor(
             self.acquisition_date,
             sza_deg=self.sza_deg,
@@ -699,6 +709,18 @@ class IntegratedIrradiance(Operator):
         self.epsilon_srf = epsilon_srf
 
     def _apply(self, _input: Any | None = None) -> np.ndarray:
+        integrated_irradiance = optional_name(
+            "georeader.reflectance",
+            "integrated_irradiance",
+            "sensors",
+            feature="geoops.radiometry.IntegratedIrradiance",
+        )
+        load_thuillier_irradiance = optional_name(
+            "georeader.reflectance",
+            "load_thuillier_irradiance",
+            "sensors",
+            feature="geoops.radiometry.IntegratedIrradiance",
+        )
         reject_geotensor(_input, type(self).__name__)
         solar_irradiance = (
             load_thuillier_irradiance()
@@ -885,6 +907,18 @@ class ApplySRF(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        srf = optional_name(
+            "georeader.reflectance",
+            "srf",
+            "sensors",
+            feature="geoops.radiometry.ApplySRF",
+        )
+        transform_to_srf = optional_name(
+            "georeader.reflectance",
+            "transform_to_srf",
+            "sensors",
+            feature="geoops.radiometry.ApplySRF",
+        )
         n_bands = np.shape(gt)[0] if np.ndim(gt) == 3 else None
         if n_bands is None:
             raise ValueError(

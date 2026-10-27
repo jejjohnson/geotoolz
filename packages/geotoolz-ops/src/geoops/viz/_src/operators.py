@@ -58,7 +58,7 @@ from geoops._src.geo import (
     require_geoarray,
     require_projected_crs,
 )
-from geoops._src.optional import import_optional
+from geoops._src.optional import import_optional, optional_name
 from geoops._src.shape import over_frames
 from geoops._src.valid import (
     carried_fill,
@@ -804,8 +804,14 @@ class AnnotatePolygons(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArray) -> GeoArray:
-        import geopandas as gpd
-        from georeader.rasterize import rasterize_geopandas_like
+        feature = "geoops.viz.AnnotatePolygons"
+        gpd = import_optional("geopandas", "vector", feature=feature)
+        rasterize_geopandas_like = optional_name(
+            "georeader.rasterize",
+            "rasterize_geopandas_like",
+            "sensors",
+            feature=feature,
+        )
 
         require_geoarray(gt, "AnnotatePolygons")
         rgba = ensure_rgba(np.asarray(gt), name="AnnotatePolygons")
@@ -885,7 +891,12 @@ class AnnotatePoints(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArray) -> GeoArray:
-        from rasterio.transform import rowcol
+        rowcol = optional_name(
+            "rasterio.transform",
+            "rowcol",
+            "raster",
+            feature="geoops.viz.AnnotatePoints",
+        )
 
         require_geoarray(gt, "AnnotatePoints")
         rgba = ensure_rgba(np.asarray(gt), name="AnnotatePoints")

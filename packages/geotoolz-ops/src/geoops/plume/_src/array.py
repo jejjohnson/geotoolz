@@ -15,15 +15,18 @@ referenced per-function:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from jaxtyping import Bool, Float, Num, Shaped
-from shapely.geometry import MultiPoint
 
-from geoops.carrier import pixel_xy, single_band
+from geoops.carrier import optional_name, pixel_xy, single_band
 from geoops.measure import Connectivity, label_components, skeleton_length
 from geoops.segment import ThresholdMode, threshold_mask
+
+
+if TYPE_CHECKING:
+    pass
 
 
 ColumnUnit = Literal["ppm_m", "mol_m2", "kg_m2"]
@@ -294,6 +297,12 @@ def plume_length(
             proxy would badly under-estimate ``L`` (and over-estimate
             ``Q``) there, so use ``"max_axis"`` or ``"convex_hull"``.
     """
+    MultiPoint = optional_name(
+        "shapely.geometry",
+        "MultiPoint",
+        "vector",
+        feature="geoops.plume",
+    )
     active = np.asarray(mask, dtype=bool)
     if not active.any():
         return 0.0

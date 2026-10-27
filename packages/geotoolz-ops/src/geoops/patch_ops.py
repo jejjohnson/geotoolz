@@ -36,15 +36,19 @@ from __future__ import annotations
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from geoarray import GeoArray
 from pipekit import Operator
-from rasterio.windows import Window
 
 from geoops._src.blending import triangular_weights
 from geoops._src.geo import reject_geotensor
+from geoops._src.optional import optional_name
+
+
+if TYPE_CHECKING:
+    pass
 
 
 try:
@@ -181,6 +185,12 @@ def _draw_anchors(
 def _extract_patches(
     scene: Any, anchors: list[tuple[int, int]], size: tuple[int, int]
 ) -> list[Patch]:
+    Window = optional_name(
+        "rasterio.windows",
+        "Window",
+        "raster",
+        feature="geoops.patch_ops",
+    )
     ph, pw = size
     h, w = np.shape(scene)[-2:]
     out: list[Patch] = []

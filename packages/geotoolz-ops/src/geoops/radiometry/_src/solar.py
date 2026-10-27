@@ -23,13 +23,15 @@ References:
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import numpy as np
-from georeader.reflectance import (
-    compute_sza as _compute_sza,
-    earth_sun_distance_correction_factor as _earth_sun_distance_correction_factor,
-    observation_date_correction_factor as _observation_date_correction_factor,
-)
+
+from geoops._src.optional import optional_name
+
+
+if TYPE_CHECKING:
+    pass
 
 
 def earth_sun_distance_correction_factor(acquisition_date: datetime) -> float:
@@ -53,6 +55,12 @@ def earth_sun_distance_correction_factor(acquisition_date: datetime) -> float:
     Returns:
         Earth–Sun distance in AU (~0.983 to ~1.017).
     """
+    _earth_sun_distance_correction_factor = optional_name(
+        "georeader.reflectance",
+        "earth_sun_distance_correction_factor",
+        "sensors",
+        feature="geoops.radiometry",
+    )
     return float(_earth_sun_distance_correction_factor(acquisition_date))
 
 
@@ -79,6 +87,12 @@ def compute_sza(
     Returns:
         Solar zenith angle in degrees, in ``[0, 180]``.
     """
+    _compute_sza = optional_name(
+        "georeader.reflectance",
+        "compute_sza",
+        "sensors",
+        feature="geoops.radiometry",
+    )
     return float(_compute_sza(center_coords, acquisition_date, crs_coords=crs_coords))
 
 
@@ -120,6 +134,12 @@ def observation_date_correction_factor(
         The π·d²/cos(θ_z) factor as a float, or ``None`` if neither
         ``sza_deg`` nor ``center_coords`` was given.
     """
+    _observation_date_correction_factor = optional_name(
+        "georeader.reflectance",
+        "observation_date_correction_factor",
+        "sensors",
+        feature="geoops.radiometry",
+    )
     if sza_deg is not None:
         d = earth_sun_distance_correction_factor(acquisition_date)
         return float(np.pi * (d**2) / np.cos(np.deg2rad(sza_deg)))
