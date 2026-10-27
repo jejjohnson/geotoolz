@@ -18,6 +18,7 @@ import pytest
 from geoarray import GeoArray
 
 from geopatcher import RasterField, SpatialPatcher, spatial
+from geopatcher._src.batching import expand_batches
 from geopatcher.run import BatchedPatch, PatchBatch, batch_split, unbatch
 
 
@@ -124,6 +125,60 @@ def test_amerge_takes_an_async_stream_of_batches(field: RasterField) -> None:
     merged = asyncio.run(patcher.amerge(stream(), field.domain))
 
     np.testing.assert_allclose(merged, np.asarray(field.reader), rtol=1e-6)
+
+
+def _failing_stream(patcher: SpatialPatcher, field: RasterField):
+    """One good patch, then one the aggregation rejects (wrong-sized data)."""
+    good = next(iter(patcher.split(field)))
+    bad = good.with_data(good.data[..., :3, :3])
+    return good, bad
+
+
+def test_amerge_closes_the_producer_when_the_aggregation_fails(
+    field: RasterField,
+) -> None:
+    """Review on #570: the expansion forwards amerge's aclose to the producer."""
+    patcher = _patcher("hann")
+    good, bad = _failing_stream(patcher, field)
+    closed = []
+
+    async def stream():
+        try:
+            yield good
+            yield bad
+            yield good
+        finally:
+            closed.append(True)
+
+    async def run() -> None:
+        producer = stream()
+        with pytest.raises(ValueError):
+            await patcher.amerge(producer, field.domain)
+        assert closed == [True]  # before amerge returned, producer still held
+
+    asyncio.run(run())
+
+
+def test_merge_closes_a_generator_input_when_it_stops_early(
+    field: RasterField,
+) -> None:
+    patcher = _patcher("hann")
+    good, bad = _failing_stream(patcher, field)
+    closed = []
+
+    def stream():
+        try:
+            yield good
+            yield bad
+            yield good
+        finally:
+            closed.append(True)
+
+    producer = stream()  # held by the caller, so only close() can end it
+    expanded = expand_batches(producer, patcher, field.domain)
+    assert next(iter(expanded)) is good
+    expanded.close()  # what a merge that stops early does to its input
+    assert closed == [True]
 
 
 @pytest.mark.parametrize(

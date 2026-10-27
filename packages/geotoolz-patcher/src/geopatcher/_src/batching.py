@@ -385,22 +385,39 @@ def aexpand_batches(
 
 
 def _expanded(patches: Iterable[Any], patcher: Any, domain: Any) -> Iterator[Any]:
-    for item in patches:
-        if _is_batch(item):
-            yield from unbatch(_as_patch_batch(item), patcher=patcher, domain=domain)
-        else:
-            yield item
+    # closing this generator (a merge that stops early) closes the producer
+    iterator = iter(patches)
+    try:
+        for item in iterator:
+            if _is_batch(item):
+                batch = _as_patch_batch(item)
+                yield from unbatch(batch, patcher=patcher, domain=domain)
+            else:
+                yield item
+    finally:
+        close = getattr(iterator, "close", None)
+        if close is not None:
+            close()
 
 
 async def _aexpanded(
     patches: AsyncIterable[Any], patcher: Any, domain: Any
 ) -> AsyncIterator[Any]:
-    async for item in patches:
-        if _is_batch(item):
-            for patch in unbatch(_as_patch_batch(item), patcher=patcher, domain=domain):
-                yield patch
-        else:
-            yield item
+    # amerge closes its input when the aggregation fails: forward that to
+    # the producer, so its cleanup runs before amerge returns
+    iterator = aiter(patches)
+    try:
+        async for item in iterator:
+            if _is_batch(item):
+                batch = _as_patch_batch(item)
+                for patch in unbatch(batch, patcher=patcher, domain=domain):
+                    yield patch
+            else:
+                yield item
+    finally:
+        aclose = getattr(iterator, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 def _is_batch(item: Any) -> bool:
