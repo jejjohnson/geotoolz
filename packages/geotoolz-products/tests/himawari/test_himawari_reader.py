@@ -247,3 +247,20 @@ def test_each_segment_uses_its_own_calibration(hsd) -> None:
     offset = IR_CALIBRATION["offset"]
     assert radiance[49, 50] == pytest.approx(3000 * IR_CALIBRATION["gain"] + offset)
     assert radiance[50, 50] == pytest.approx(3000 * -0.002 + offset)
+
+
+def test_reads_name_the_band_with_its_wavelength(full_disk) -> None:
+    """#527: a read's band axis is the AHI band and its centre wavelength."""
+    import warnings
+
+    from geoarray.coords import SpectralAxis
+
+    reader = himawari.Reader(full_disk(segments=2), calibration="counts")
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", "GeoArray dims read from", DeprecationWarning)
+        out = reader.load()
+
+    axis = out.coord("band")
+    assert out.dims == ("band", "y", "x")
+    assert isinstance(axis, SpectralAxis) and axis.names == reader.bands
+    assert axis.wavelength_nm is not None and len(axis.wavelength_nm) == 1

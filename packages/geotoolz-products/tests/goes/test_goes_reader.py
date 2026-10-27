@@ -288,3 +288,20 @@ def test_reads_an_object_store_uri_with_ranged_reads(abi_file) -> None:
         assert remote.path is None and remote.channel == local.channel
     finally:
         unmount("s3://goes-test")
+
+
+def test_reads_name_the_channel_with_its_wavelength(abi_file) -> None:
+    """#527: a read's band axis is the channel and its centre wavelength."""
+    import warnings
+
+    from geoarray.coords import SpectralAxis
+
+    reader = goes.Reader(abi_file())
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", "GeoArray dims read from", DeprecationWarning)
+        out = reader.load()
+
+    axis = out.coord("band")
+    assert out.dims == ("band", "y", "x")
+    assert isinstance(axis, SpectralAxis) and axis.names == reader.bands
+    assert axis.wavelength_nm is not None and len(axis.wavelength_nm) == 1

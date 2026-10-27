@@ -27,7 +27,7 @@ geoproducts/<sensor>/
 | `goes` | `l1b.py` (`Reader`, `QualityReader`), `l2.py` (`L2Reader`) | `aws.py` | `base.py` (ABI grid mapping), `metadata.py` |
 | `himawari` | `reader.py` (`Reader`), `l2.py` (`L2Reader`) | `aws.py` | `hsd.py` (the HSD decoder) |
 | `carbonmapper` | `image.py`, `rasters.py`, `sources_raster.py` | `api_queries.py`, `download.py` | — |
-| `toy_sensor` | `reader.py` | — | — |
+| `toy_sensor` | `reader.py` (`Reader`), `swath.py` (`SwathReader`, a `GeoSwath`) | — | — |
 
 ## Write the reader
 

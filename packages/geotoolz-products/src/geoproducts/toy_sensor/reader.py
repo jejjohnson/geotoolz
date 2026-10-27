@@ -19,6 +19,11 @@ __all__ = ["Reader"]
 _DEFAULT_NUM_BANDS = 4
 
 
+def _wavelengths(bands: tuple[str, ...]) -> tuple[float, ...]:
+    table = {row["name"]: float(row["wavelength_nm"]) for row in constants.BANDS}
+    return tuple(table[band] for band in bands)
+
+
 class Reader(ProductReader):
     """Toy reference reader implementing the sensor-reader contract.
 
@@ -108,6 +113,10 @@ class Reader(ProductReader):
     @property
     def _fill_value(self) -> float | int | bool:
         return self._reader_fill
+
+    def _band_attrs(self) -> dict[str, Any]:
+        # centre wavelengths (nm) from the band table, in band order
+        return {"wavelengths": _wavelengths(self._bands)}
 
     @property
     def _track(self) -> Track:

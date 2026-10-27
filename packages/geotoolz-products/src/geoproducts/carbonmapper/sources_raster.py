@@ -32,7 +32,7 @@ import geopandas as gpd
 import numpy as np
 import rasterio
 import rasterio.windows
-from geoarray import DIMS, GeoArray, Grid, RasterSource
+from geoarray import GeoArray, Grid, RasterSource
 from geoarray.interop.georeader import from_georeader, source_to_georeader
 from georeader import read
 from georeader.rasterize import rasterize_from_geopandas, rasterize_geopandas_like
@@ -145,7 +145,7 @@ def rasterize_sources(
             transform,
             crs_obj,
             fill_value=0,
-            dims=DIMS[-len(shape) :],
+            dims=("y", "x"),
         )
 
     if buffer_m > 0:
@@ -206,7 +206,7 @@ def rasterize_sources_like(
             grid.transform,
             grid.crs,
             fill_value=0,
-            dims=DIMS[-2:],
+            dims=("y", "x"),
         )
 
     if buffer_m > 0:

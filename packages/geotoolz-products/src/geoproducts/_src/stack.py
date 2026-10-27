@@ -14,7 +14,8 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from geoarray import DIMS, FrozenAttrs, GeoArray, RasterSource
+from geoarray import FrozenAttrs, GeoArray, RasterSource
+from geoarray.coords import SpectralAxis
 from rasterio.enums import Resampling
 
 from geoproducts._src.carrier import require_source
@@ -108,7 +109,7 @@ def stack(
             source_to_georeader(reader), ref_engine, resampling=Resampling[method]
         )
         parts.append(from_georeader(warped))
-    return _concatenate(ref, parts, [r.attrs for r in readers])
+    return _concatenate(ref, parts, [r.attrs for r in readers], list(readers))
 
 
 def _auto_resampling(reader: RasterSource, ref_res: float) -> str:
@@ -119,10 +120,13 @@ def _auto_resampling(reader: RasterSource, ref_res: float) -> str:
 
 
 def _concatenate(
-    ref: GeoArray, parts: list[GeoArray], part_attrs: list[Any]
+    ref: GeoArray,
+    parts: list[GeoArray],
+    part_attrs: list[Any],
+    sources: list[Any] | None = None,
 ) -> GeoArray:
-    """Concatenate ``parts`` along bands; per-band attrs come from the readers
-    (georeader's warp drops ``attrs``)."""
+    """Concatenate ``parts`` along bands; band names and per-band attrs come
+    from the readers (georeader's warp drops ``attrs`` and coordinates)."""
     keys = {(np.dtype(p.dtype), _fill_key(p.fill_value)) for p in parts}
     integer = len(keys) == 1 and np.issubdtype(next(iter(keys))[0], np.integer)
     arrays = [np.asarray(p) if integer else _nan_filled(p) for p in parts]
@@ -136,6 +140,7 @@ def _concatenate(
             values.extend(per_band)
         else:
             attrs[key] = tuple(values)
+    axis = _band_axis(parts, sources or [])
     return GeoArray(
         np.concatenate(arrays, axis=0),
         ref.transform,
@@ -143,8 +148,38 @@ def _concatenate(
         fill_value=parts[0].fill_value if integer else np.nan,
         # the readers' attrs, carried: the 0.2 per-band keys stay as they are
         attrs=FrozenAttrs(attrs),
-        dims=DIMS[-arrays[0].ndim :],
+        # the readers' dims (band first): parts join along band
+        dims=parts[0].dims,
+        coords=() if axis is None else (axis,),
     )
+
+
+def _band_axis(parts: list[GeoArray], sources: list[Any]) -> SpectralAxis | None:
+    """The readers' `SpectralAxis` entries joined, when every reader has one.
+
+    A `ProductReader` or a `GeoArray` names its bands in ``coords``; the
+    joined axis keeps wavelengths only when every reader declares them.
+    Without one per reader (a bare `RasterSource`), the stack falls back to
+    the 0.2 ``band_names`` attrs, which geoarray reads into an axis itself.
+    """
+    if len(sources) != len(parts):
+        return None
+    axes = []
+    for source, part in zip(sources, parts, strict=True):
+        found = [
+            c for c in getattr(source, "coords", ()) if isinstance(c, SpectralAxis)
+        ]
+        if len(found) != 1 or found[0].size != np.asarray(part).shape[0]:
+            return None
+        axes.append(found[0])
+    names = tuple(name for axis in axes for name in axis.names)
+    if len(set(names)) != len(names):
+        return None  # repeated names (one channel stacked twice): no valid axis
+    if all(axis.wavelength_nm is not None for axis in axes):
+        return SpectralAxis(
+            names, tuple(w for a in axes for w in a.wavelength_nm or ())
+        )
+    return SpectralAxis(names)
 
 
 def _nan_filled(part: GeoArray) -> np.ndarray:

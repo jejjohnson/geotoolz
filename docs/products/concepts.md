@@ -13,13 +13,16 @@ decodes only the window you ask for.
 | Part | What it gives you |
 |---|---|
 | `grid` (`crs`, `transform`, `res`, `bounds`), `shape`, `dtype` | the grid, known at construction (`grid` is a hashable `geoarray.Grid`) |
-| `bands`, `fill_value`, `attrs` | band names (also `attrs["band_names"]`, carried by every read) and the nodata value |
+| `bands`, `dims`, `coords`, `fill_value`, `attrs` | band names; the reads' dims (`("band", "y", "x")`) and their `SpectralAxis` (band names and centre wavelengths, so `read.coord("band").names == reader.bands`); the nodata value; the 0.2 `attrs["band_names"]`, kept for one release |
 | `read_window(PixelWindow)`, `load()` | a `GeoArray`; with `boundless=True` (the default) windows past the grid are padded with the fill |
 | `read_from_bounds`, `read_from_center_coords` | a `GeoArray` for map coordinates (in any CRS, `crs_bounds=`), windows placed exactly as georeader places them |
 | `track` | `"A"` for a clean affine grid; `"B"` for irregular per-pixel geolocation |
 
-Every reader shipped today is Track A: GOES and Himawari recover the
-geostationary fixed grid, Carbon Mapper rasters are GeoTIFFs. Because a
+Every product reader shipped today is Track A: GOES and Himawari recover
+the geostationary fixed grid, Carbon Mapper rasters are GeoTIFFs. The
+Track B shape, sensor geometry with a latitude / longitude per pixel, is
+`toy_sensor.SwathReader`, whose reads are a `geoarray.GeoSwath`
+(`("band", "row", "col")`). Because a
 reader is a `RasterSource`, the patcher and geotoolz's `io` operators
 accept it as it is, and a loaded `GeoArray` is a `RasterSource` too. A
 georeader `GeoTensor` / `GeoData` is refused with a `TypeError` naming

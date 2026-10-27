@@ -10,9 +10,11 @@ The reader base class and `stack`. The contract is in
 
 ## `geoproducts.toy_sensor`
 
-The in-memory reference reader.
+The in-memory reference readers: `Reader` on an affine grid, and
+`SwathReader`, the same bands in sensor geometry (a `geoarray.GeoSwath`).
 
 ::: geoproducts.toy_sensor.Reader
+::: geoproducts.toy_sensor.SwathReader
 ::: geoproducts.toy_sensor.NDVI
 
 ## `geoproducts.goes`
