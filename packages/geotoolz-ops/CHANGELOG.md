@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.14.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.13.0...geotoolz-ops-v0.14.0) (2026-10-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ops:** code that installs geotoolz-ops directly and uses reprojection, file I/O, vector outputs, scikit-image operators or georeader-backed operators must add the matching extra (`pip install 'geotoolz-ops[raster,vector,morph,sensors]'` restores the old set). `pip install geotoolz` is unaffected.
+
+### Features
+
+* **ops:** slim base install with raster, vector, morph and sensors extras ([#577](https://github.com/jejjohnson/geotoolz/issues/577)) ([72456af](https://github.com/jejjohnson/geotoolz/commit/72456af981a168ba6d4e8f61e3fa5dec0b87a68f))
+
 ## [0.13.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.12.0...geotoolz-ops-v0.13.0) (2026-10-24)
 
 

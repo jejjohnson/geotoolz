@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.14.1...geotoolz-patcher-v0.14.2) (2026-10-27)
+
+
+### Features
+
+* **array,patcher:** stack_items for carriers; batch_split on pipekit_array.batch ([#576](https://github.com/jejjohnson/geotoolz/issues/576)) ([46202fe](https://github.com/jejjohnson/geotoolz/commit/46202fec72f4da11a263e7eb936f8d899a41cce6))
+
 ## [0.14.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.14.0...geotoolz-patcher-v0.14.1) (2026-10-27)
 
 
