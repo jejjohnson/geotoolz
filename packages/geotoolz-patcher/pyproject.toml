@@ -50,6 +50,10 @@ dependencies = [
     # obstore COG reader's GeoKey decoding. A base dependency, so no extra
     # repeats it.
     "pyproj>=3.6",
+    # `run.batch_split` groups, pads and masks with `pipekit_array.batch`
+    # (imported when it runs); geotoolz-array already depends on it, so this
+    # declares the import rather than adding an install.
+    "pipekit-array>=0.0.6",
 ]
 
 [project.optional-dependencies]
