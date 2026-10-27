@@ -162,9 +162,12 @@ def _concatenate(
     out = geoarray.concat(normalized, "band")
     # geoarray's per-band keys exclude `units` (a carrier's units are
     # usually one string); the readers declare one per band, so join them
+    # (concat keeps the first part's, so drop it unless every part has them)
     units = [g.attrs.get("units") for g in normalized]
     if all(isinstance(u, tuple) for u in units):
-        out = out.with_attrs(units=tuple(item for u in units for item in u))
+        return out.with_attrs(units=tuple(item for u in units for item in u))
+    if "units" in out.attrs:
+        return out.with_data(out.data, attrs=out.attrs.drop("units"))
     return out
 
 
