@@ -34,6 +34,7 @@ import numpy as np
 from geoarray import DIMS, GeoArray
 
 from geopatcher._src._serialize import patcher_config
+from geopatcher._src.batching import aexpand_batches, expand_batches
 from geopatcher._src.carrier import (
     as_pixel_window,
     holds_fill,
@@ -259,7 +260,16 @@ class _SpatialPatcherBase:
         array for streaming `spatial.aggregation.OverlapAdd`. Use `merge_to_field` (or
         `merge_to_xarray`) to get a georeferenced carrier back. A ``streaming_safe =
         False`` aggregation warns (or raises under `set_strict`) at the caller's line.
+
+        ``patches`` may hold batches as well as patches: a `geopatcher.run.PatchBatch`
+        (or a model's output for one, ``PatchBatch(scores, batch.valid)``), or a
+        `GeoArray` with a ``patch`` batch dim, one or a stream of them. Each row is
+        placed from its transform against ``domain``'s grid, with this patcher's
+        geometry and window weights (`geopatcher.run.unbatch`); padding rows are
+        dropped. A row whose pixel size or rotation differs from the grid's
+        raises ``ValueError`` naming it.
         """
+        patches = expand_batches(patches, self, domain)
         return _merge_with_hooks(self.aggregation, patches, domain, hooks, stacklevel=2)
 
     async def amerge(
@@ -273,7 +283,9 @@ class _SpatialPatcherBase:
         An async stream is not materialised: the aggregation runs in a
         worker thread and pulls one patch at a time from the event loop,
         so a streaming-safe aggregation holds one patch, not the stream.
+        Batches are accepted as in `merge`.
         """
+        patches = aexpand_batches(patches, self, domain)
         return await _amerge_with_hooks(
             self.aggregation, patches, domain, hooks, stacklevel=2
         )
@@ -541,6 +553,7 @@ class SpatialPatcher(_SpatialPatcherBase):
                 arr = patcher.merge(patcher.split(field), field.domain)
         """
         with_data = _require_with_data(field, "merge_to_field")
+        patches = expand_batches(patches, self, field.domain)
         merged = _merge_with_hooks(
             self.aggregation, patches, field.domain, hooks, stacklevel=2
         )
@@ -602,6 +615,7 @@ class SpatialPatcher(_SpatialPatcherBase):
                 `with_data` has no `.da` attribute.
         """
         with_data = _require_with_data(field, "merge_to_xarray")
+        patches = expand_batches(patches, self, field.domain)
         merged = _merge_with_hooks(
             self.aggregation, patches, field.domain, hooks, stacklevel=2
         )

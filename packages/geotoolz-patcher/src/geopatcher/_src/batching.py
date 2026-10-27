@@ -16,7 +16,7 @@ through the deprecated `BatchedPatch.split`.
 from __future__ import annotations
 
 import warnings
-from collections.abc import Iterator
+from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
@@ -160,7 +160,8 @@ def unbatch(
         ValueError: The patcher's geometry is not
             `spatial.geometry.Rectangular`, the patches were clipped by
             ``boundary="shrink"``, ``domain`` is not a raster domain, or a
-            transform row is not on the domain's pixel grid.
+            transform row is not on the domain's pixel grid (another pixel
+            size or rotation, naming the patch, or an origin between pixels).
 
     Example:
         >>> place = dict(patcher=patcher, domain=field.domain)
@@ -318,6 +319,7 @@ def _unbatch(
             "unbatch places a PatchBatch on a raster domain (a geoarray.Grid or an "
             f"object with a .grid), got {type(domain).__name__}"
         )
+    _check_resolution(batch.patches, grid)
     to_pixel = ~grid.affine
     weights = _safe_base_weights(patcher.window, geometry)
     patches = []
@@ -339,6 +341,78 @@ def _unbatch(
             )
         )
     return patches
+
+
+def _check_resolution(patches: GeoArray, grid: Any) -> None:
+    """Every transform row has the target grid's pixel size and rotation."""
+    rows = np.asarray(patches.transform, dtype=np.float64)[:, [0, 1, 3, 4]]
+    target = np.asarray(grid.transform, dtype=np.float64)[[0, 1, 3, 4]]
+    scale = float(np.abs(target).max())
+    bad = ~np.isclose(rows, target, rtol=1e-9, atol=1e-12 * scale).all(axis=1)
+    if bad.any():
+        p = int(np.flatnonzero(bad)[0])
+        raise ValueError(
+            f"patch {p} of the batch has pixel size / rotation (a, b, d, e) = "
+            f"{tuple(rows[p].tolist())}, but the target grid has "
+            f"{tuple(target.tolist())}: patches are placed on the grid they "
+            "were split from, never resampled"
+        )
+
+
+def expand_batches(patches: Any, patcher: Any, domain: Any) -> Iterable[Any]:
+    """``patches`` with every batch unpacked into `Patch` objects, lazily.
+
+    A batch is a `PatchBatch` or a `GeoArray` whose batch dim is ``patch``
+    (every row real); `SpatialPatcher.merge` and its variants accept either
+    in place of patches, one or a stream of them, mixed with `Patch`
+    objects. A sequence with no batch in it is returned as it is, so the
+    merge hooks still see its length.
+    """
+    if _is_batch(patches):
+        patches = [patches]
+    elif isinstance(patches, Sequence) and not any(_is_batch(p) for p in patches):
+        return patches
+    return _expanded(patches, patcher, domain)
+
+
+def aexpand_batches(
+    patches: AsyncIterable[Any] | Iterable[Any], patcher: Any, domain: Any
+) -> AsyncIterable[Any] | Iterable[Any]:
+    """`expand_batches` for a sync or an async stream (`SpatialPatcher.amerge`)."""
+    if not isinstance(patches, AsyncIterable):
+        return expand_batches(patches, patcher, domain)
+    return _aexpanded(patches, patcher, domain)
+
+
+def _expanded(patches: Iterable[Any], patcher: Any, domain: Any) -> Iterator[Any]:
+    for item in patches:
+        if _is_batch(item):
+            yield from unbatch(_as_patch_batch(item), patcher=patcher, domain=domain)
+        else:
+            yield item
+
+
+async def _aexpanded(
+    patches: AsyncIterable[Any], patcher: Any, domain: Any
+) -> AsyncIterator[Any]:
+    async for item in patches:
+        if _is_batch(item):
+            for patch in unbatch(_as_patch_batch(item), patcher=patcher, domain=domain):
+                yield patch
+        else:
+            yield item
+
+
+def _is_batch(item: Any) -> bool:
+    if isinstance(item, PatchBatch):
+        return True
+    return isinstance(item, GeoArray) and item.batch_dims == (PATCH,)
+
+
+def _as_patch_batch(item: Any) -> PatchBatch:
+    if isinstance(item, PatchBatch):
+        return item
+    return PatchBatch(item, np.ones(item.batch_shape[0], dtype=bool))
 
 
 def _pixel_offset(to_pixel: Any, item: GeoArray) -> tuple[int, int]:

@@ -24,13 +24,21 @@ from geopatcher.run import PatchCache, parallel_map
 dim (one transform row per patch) and a `(patch,)` mask of the real ones
 (ADR-013). The batch is NumPy; move it to JAX once with
 `batch.patches.to_jax()` (`[jax]`), map a model over it with
-`geoarray.map_over`, and `unbatch` the output back into patches that
-`patcher.merge` places from their transform rows.
+`geoarray.map_over`, and hand the scored batches straight to
+`patcher.merge` (or `merge_to_field`), which places each row from its
+transform with the patcher's window weights and drops the padding.
+`unbatch` does the placement alone, for code that wants `Patch` objects.
 
 ```python
-for patches, valid in batch_split(patcher, field, batch_size=64):
-    scores = geoarray.map_over(patches.to_jax(), model, "patch")  # (64, y, x)
+scored = [
+    PatchBatch(geoarray.map_over(patches.to_jax(), model, "patch").to_numpy(), valid)
+    for patches, valid in batch_split(patcher, field, batch_size=64)
+]
+mosaic = patcher.merge_to_field(scored, field)  # GeoArray on the field's grid
 ```
+
+A row whose pixel size or rotation differs from the target grid's raises
+`ValueError` naming it: merging never resamples.
 
 ::: geopatcher.run.PatchBatch
 ::: geopatcher.run.batch_split
