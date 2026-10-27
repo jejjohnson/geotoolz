@@ -1375,8 +1375,8 @@ requires-dist = [
     { name = "georeader-spaceml", marker = "extra == 'georeader'", specifier = ">=2.1" },
     { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.30" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=6152d18f7770ec71cdb0e4dcc63df8edafe00f53" },
-    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.0.6" },
+    { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=14548da5ed054ffe1792d61ffce8fca95bc9f240" },
+    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&rev=14548da5ed054ffe1792d61ffce8fca95bc9f240" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "shapely", marker = "extra == 'vector'", specifier = ">=2.0" },
     { name = "typing-extensions", marker = "extra == 'georeader'", specifier = ">=4.0" },
@@ -1835,7 +1835,7 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.1" },
-    { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=6152d18f7770ec71cdb0e4dcc63df8edafe00f53" },
+    { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=14548da5ed054ffe1792d61ffce8fca95bc9f240" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "rasterio", marker = "extra == 'raster'", specifier = ">=1.3" },
     { name = "scikit-image", marker = "extra == 'morph'", specifier = ">=0.25" },
@@ -1969,9 +1969,9 @@ requires-dist = [
     { name = "geotoolz-cloud", extras = ["cog"], marker = "extra == 'cog'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-cloud", extras = ["cog"], marker = "extra == 'patch-full'", editable = "packages/geotoolz-cloud" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "pipekit", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=6152d18f7770ec71cdb0e4dcc63df8edafe00f53" },
-    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.0.6" },
-    { name = "pipekit-train", extras = ["equinox"], marker = "extra == 'train'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&tag=pipekit-train-v0.1.3" },
+    { name = "pipekit", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=14548da5ed054ffe1792d61ffce8fca95bc9f240" },
+    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&rev=14548da5ed054ffe1792d61ffce8fca95bc9f240" },
+    { name = "pipekit-train", extras = ["equinox"], marker = "extra == 'train'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&rev=14548da5ed054ffe1792d61ffce8fca95bc9f240" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "rasterio", specifier = ">=1.3" },
     { name = "rioxarray", marker = "extra == 'patch-full'", specifier = ">=0.15" },
@@ -4031,12 +4031,12 @@ wheels = [
 [[package]]
 name = "pipekit"
 version = "0.1.3"
-source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&tag=pipekit-train-v0.1.3#6152d18f7770ec71cdb0e4dcc63df8edafe00f53" }
+source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=14548da5ed054ffe1792d61ffce8fca95bc9f240#14548da5ed054ffe1792d61ffce8fca95bc9f240" }
 
 [[package]]
 name = "pipekit-array"
 version = "0.0.6"
-source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.0.6#6152d18f7770ec71cdb0e4dcc63df8edafe00f53" }
+source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&rev=14548da5ed054ffe1792d61ffce8fca95bc9f240#14548da5ed054ffe1792d61ffce8fca95bc9f240" }
 dependencies = [
     { name = "pipekit" },
 ]
@@ -4044,7 +4044,7 @@ dependencies = [
 [[package]]
 name = "pipekit-train"
 version = "0.1.3"
-source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&tag=pipekit-train-v0.1.3#6152d18f7770ec71cdb0e4dcc63df8edafe00f53" }
+source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&rev=14548da5ed054ffe1792d61ffce8fca95bc9f240#14548da5ed054ffe1792d61ffce8fca95bc9f240" }
 dependencies = [
     { name = "pipekit" },
 ]

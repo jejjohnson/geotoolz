@@ -16,7 +16,7 @@ the per-frame label maps (or boundary images) stacked as
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import einx
 import numpy as np
@@ -110,6 +110,8 @@ class SLIC(Operator):
     ``SLIC()(Input("image"), Input("mask"))``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -182,6 +184,8 @@ class Felzenszwalb(Operator):
     positionally to wire it as a graph input,
     ``Felzenszwalb()(Input("image"), Input("mask"))``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -256,6 +260,8 @@ class Quickshift(Operator):
     positionally to wire it as a graph input,
     ``Quickshift()(Input("image"), Input("mask"))``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -335,6 +341,8 @@ class Watershed(Operator):
         watershed_line: Separate basins with a zero-labelled line.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -399,6 +407,8 @@ class ChanVese(Operator):
         max_num_iter: Maximum number of iterations.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -454,6 +464,8 @@ class RandomWalker(Operator):
         mode: Linear-system solver mode (see skimage docs).
         tol: Solver convergence tolerance.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -528,6 +540,8 @@ class Threshold(Operator):
         >>> above = gz.segment.Threshold(threshold=0.5)(probability)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, threshold: ThresholdMode = "otsu", nbins: int = 256) -> None:
         if isinstance(threshold, str) and not (
             threshold == "otsu" or threshold.startswith("percentile:")
@@ -557,6 +571,8 @@ class ExpandLabels(Operator):
         distance: Euclidean distance (in pixels) by which each labelled
             region is grown into the background.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, distance: float = 1.0) -> None:
         self.distance = distance
@@ -609,6 +625,8 @@ class MergeNearbyInstances(Operator):
     map and returns an ``int32`` label map in the same carrier kind, with
     ``fill_value=0``; nodata input pixels are ``0``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -682,6 +700,8 @@ class MaskNMS(Operator):
     ``fill_value=0``; pixels that are nodata in any plane are ``0``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -736,6 +756,8 @@ class MarkBoundaries(Operator):
         mode: Boundary style — ``"thick"``, ``"inner"``, ``"outer"`` or
             ``"subpixel"``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,

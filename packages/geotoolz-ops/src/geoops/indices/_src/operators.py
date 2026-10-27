@@ -32,7 +32,7 @@ nodata and rewraps the result.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from pipekit import Operator
@@ -145,6 +145,8 @@ class NormalizedDifference(Operator):
         >>> ndvi = NormalizedDifference(a="B8", b="B4")(reflectance_geoarray)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -211,6 +213,8 @@ class NDVI(Operator):
         >>> ndvi_map = pipe(dn_geoarray)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -264,6 +268,8 @@ class NDWI(Operator):
         >>> ndwi_map = water_idx(reflectance_geoarray)
         >>> water_mask = np.asarray(ndwi_map) > 0  # rough surface-water mask
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -324,6 +330,8 @@ class NDBI(Operator):
         ... )
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -382,6 +390,8 @@ class NBR(Operator):
         ... )
         >>> # Key & Benson thresholds: > 0.66 high severity, 0.27-0.44 low.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -442,6 +452,8 @@ class SAVI(Operator):
         >>> # Sparse drylands -> larger L:
         >>> dryland_savi = SAVI(nir=7, red=3, L=1.0)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -509,6 +521,8 @@ class EVI(Operator):
         >>> # EVI assumes surface reflectance (BOA). Apply atmospheric
         >>> # correction first for cross-scene comparability.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -587,6 +601,8 @@ class EVI2(Operator):
         blue band." *Remote Sensing of Environment*, 112(10), 3833–3845.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -649,6 +665,8 @@ class ARVI(Operator):
         vegetation index (ARVI) for EOS-MODIS." *IEEE Trans. Geosci.
         Remote Sens.*, 30(2), 261–270.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -716,6 +734,8 @@ class GCI(Operator):
         *Geophys. Res. Lett.*, 30(5).
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -772,6 +792,8 @@ class kNDVI(Operator):
         et al. (2021). "A unified vegetation index for quantifying the
         terrestrial biosphere." *Science Advances*, 7(9), eabc7447.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -836,6 +858,8 @@ class MNDWI(Operator):
         3025–3033.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -894,6 +918,8 @@ class NDMI(Operator):
         for remote sensing of vegetation liquid water from space."
         *Remote Sensing of Environment*, 58(3), 257–266.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -956,6 +982,8 @@ class NDSI(Operator):
         *Remote Sensing of Environment*, 54(2), 127–140.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -1008,6 +1036,8 @@ class NBR2(Operator):
         >>> nbr2_op = NBR2(swir1=10, swir2=11)  # S2 B11, B12
         >>> v = nbr2_op(reflectance_geoarray)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -1079,6 +1109,8 @@ class BAIS2(Operator):
         Filipponi, F. (2018). "BAIS2: Burned Area Index for
         Sentinel-2." *Proceedings*, 2(7), 364.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -1160,6 +1192,8 @@ class dNBR(Operator):
         General Technical Report RMRS-GTR-164-CD.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def _apply(
         self, pre: GeoArray | np.ndarray, post: GeoArray | np.ndarray
     ) -> GeoArray | np.ndarray:
@@ -1211,6 +1245,8 @@ class BSI(Operator):
         forest cover density mapping." *Tropical Ecology*, 43(1),
         39–47.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -1281,6 +1317,8 @@ class IronOxide(Operator):
         exploration." *Ore Geology Reviews*, 14(3-4), 157–183.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -1342,6 +1380,8 @@ class ClayMinerals(Operator):
         121–134.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -1398,6 +1438,8 @@ class CIRI(Operator):
         >>> cirrus_score = ciri_op(reflectance_geoarray)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -1438,6 +1480,8 @@ class AppendIndex(Operator):
         >>> bands_plus_ndvi = AppendIndex(index_op=NDVI(nir=3, red=2))
         >>> stacked = bands_plus_ndvi(reflectance_geoarray)  # (C+1, H, W)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, index_op: Operator, axis: int = -3) -> None:
         self.index_op = index_op

@@ -137,6 +137,11 @@ hard rules. The long form, with examples, is
   table, a number, `None`) sets `_terminal = True`, so `Sequential` accepts
   it only as the last step. A fan-out that returns a list of carriers is
   the documented exception.
+- **Declare where it runs.** Set `backends = ("numpy",)`, or
+  `("numpy", "jax")` when `_apply` runs on JAX carriers and under
+  `jax.jit`. pipekit then refuses a carrier on another backend before
+  `_apply` runs; never convert silently. The table is
+  `docs/operators/api/backends.md` (`make capabilities`).
 - **Learned state uses fit / transform.** `fit(x) -> self` writes
   trailing-underscore attributes (`mean_`), and `transform` is read-only.
   `_apply` never overwrites constructor attributes. Use
@@ -229,7 +234,10 @@ class automatically and checks:
 - consistent per-band `attrs` and fills that match the dtype;
 - `(T, C, H, W)` stacks;
 - a georeader `GeoTensor` refused, as the first carrier and as the
-  second (gate GD1).
+  second (gate GD1);
+- `backends` declared and kept: a NumPy-only operator refuses a JAX
+  carrier with `pipekit.BackendError`, and one that lists `"jax"` matches
+  its NumPy result and traces once under `jax.jit` (#532).
 
 A new operator is covered as soon as it exists. If it can't be built with no
 arguments, add it to `CTOR_KWARGS` (or `RUNTIME_CTOR_KWARGS` when it needs

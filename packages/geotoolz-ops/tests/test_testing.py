@@ -28,6 +28,8 @@ def _scene(dtype: Any = np.float32, fill: Any = 0) -> GeoArray:
 class ZScore(Operator):
     """The `geoops.carrier` docstring example: keeps both contracts."""
 
+    backends = ("numpy",)
+
     def __init__(self, *, mean: float, std: float) -> None:
         self.mean = mean
         self.std = std

@@ -118,6 +118,7 @@ nav:
       - Reference:
           - Core: operators/api/core.md
           - Carrier & contract checks: operators/api/carrier.md
+          - Backends: operators/api/backends.md
           - Augment: operators/api/augment.md
           - Compositing: operators/api/compositing.md
           - Einx: operators/api/einx.md

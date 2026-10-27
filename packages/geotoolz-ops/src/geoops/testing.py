@@ -6,7 +6,7 @@ the pipekit `Operator` contract (keyword-only constructor, JSON config that
 round-trips, graph mode) and the `GeoArray` carrier contract (same carrier
 out, consistent per-band ``attrs``, a fill that suits the output, the input
 left untouched, ``(T, C, H, W)`` stacks handled or rejected, a georeader
-``GeoTensor`` refused). Use it in the
+``GeoTensor`` refused, ``backends`` declared and kept). Use it in the
 tests of an operator you write on top of the stack.
 
 Example:
@@ -82,4 +82,5 @@ def check_operator(op: Any, sample: Any, *others: Any, gap_filler: bool = False)
     if not others and np.ndim(sample) in (2, 3):
         contract.assert_time_stack(op, sample)
     contract.assert_rejects_geotensor(op, sample, *others)
+    contract.assert_backends(op, sample, *others)
     return out

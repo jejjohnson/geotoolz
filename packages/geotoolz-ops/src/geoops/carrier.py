@@ -71,6 +71,8 @@ Example:
 
 
         class ZScore(Operator):
+            backends = ("numpy",)  # refuses JAX carriers (pipekit's check)
+
             def __init__(self, *, mean: float, std: float) -> None:
                 self.mean = mean
                 self.std = std

@@ -30,9 +30,9 @@ geotoolz-array = { workspace = true }
 # All three come from one repo, so uv needs them at one commit: the
 # pipekit-array-v0.0.6 / pipekit-train-v0.1.3 release (pipekit core is
 # unchanged since pipekit-v0.1.3 and has no tag of its own there).
-pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", rev = "6152d18f7770ec71cdb0e4dcc63df8edafe00f53" }
-pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", tag = "pipekit-array-v0.0.6" }
-pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", tag = "pipekit-train-v0.1.3" }
+pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", rev = "14548da5ed054ffe1792d61ffce8fca95bc9f240" }
+pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", rev = "14548da5ed054ffe1792d61ffce8fca95bc9f240" }
+pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", rev = "14548da5ed054ffe1792d61ffce8fca95bc9f240" }
 
 [build-system]
 requires = ["hatchling"]

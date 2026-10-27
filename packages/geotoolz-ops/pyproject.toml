@@ -41,8 +41,9 @@ dependencies = [
     # The Operator / Sequential / Graph composition layer lives in pipekit
     # (formerly geoops.core). Every per-domain operator subclasses
     # `pipekit.Operator`. The workspace root's [tool.uv.sources] pins the
-    # dev-time git source.
-    "pipekit>=0.0.2",
+    # dev-time git source. 0.1.4 adds `Operator.backends`, which every
+    # geoops operator declares and pipekit enforces (#532).
+    "pipekit>=0.1.4",
     # Universal tensor-notation layer: the `geoops.einx` operator
     # family AND the internal linear algebra of the Tier-A primitives
     # (matched_filter covariance/scoring, restore PCA, SRF fill

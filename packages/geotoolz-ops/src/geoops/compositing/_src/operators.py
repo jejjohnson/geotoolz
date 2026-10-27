@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from geoarray import GeoArray
@@ -240,6 +240,8 @@ class MedianComposite(Operator):
             (last step only) in a ``Sequential``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self, *, nan_policy: NanPolicy = "ignore", return_count: bool = False
     ) -> None:
@@ -298,6 +300,8 @@ class MaxNDVIComposite(Operator):
             (last step only) in a ``Sequential``.
         eps: Stabiliser added to the NDVI denominator.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -404,6 +408,8 @@ class CloudFreeComposite(Operator):
     Raises:
         ValueError: If ``min_valid`` is below 1.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -531,6 +537,8 @@ class BAPComposite(Operator):
         applications and science. Canadian Journal of Remote Sensing
         40(3), 192-212.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -676,6 +684,8 @@ class MinCloudComposite(Operator):
             The output is then a tuple, so the operator is terminal
             (last step only) in a ``Sequential``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, return_count: bool = False) -> None:
         self.return_count = return_count
@@ -852,6 +862,8 @@ class StackMatched(Operator):
         pixels as they are.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -949,6 +961,8 @@ class BlendMatched(Operator):
             Length must equal the number of input tensors at call time.
         nan_policy: ``"ignore"`` (default) or ``"propagate"``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,

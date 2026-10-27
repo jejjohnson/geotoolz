@@ -297,6 +297,8 @@ class Reproject(Operator):
         >>> geographic = reproj(utm_scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -371,6 +373,8 @@ class ReprojectLike(Operator):
         ...     like=scene, resampling="nearest"
         ... )(coarse_mask)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -453,6 +457,8 @@ class PhaseAlign(Operator):
             tuple instead; the operator is then terminal (last step
             only) in a ``Sequential``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -568,6 +574,8 @@ class OpticalFlowTVL1(Operator):
             3-D inputs.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, band: int = 0) -> None:
         self.band = band
 
@@ -649,6 +657,8 @@ class Resize(Operator):
         >>> tile = gz.geom.Resize(shape=(256, 256))(scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -704,6 +714,8 @@ class Resample(Operator):
         >>> # Downsample a 10 m raster to 30 m.
         >>> coarse = gz.geom.Resample(resolution=(30.0, 30.0))(fine_10m)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -774,6 +786,8 @@ class PadTo(Operator):
         >>> # Pad to a multiple of 256 before tiling.
         >>> snug = gz.geom.PadTo(shape=(2048, 2048), fill_value=0)(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
 
     def __init__(
         self,
@@ -855,6 +869,8 @@ class CropTo(Operator):
         >>> chip = gz.geom.CropTo(shape=(512, 512))(scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
     def __init__(self, *, shape: tuple[int, int], anchor: str = "center") -> None:
         self.shape = shape
         self.anchor = anchor
@@ -907,6 +923,8 @@ class CropToBounds(Operator):
         ... )
         >>> patch = aoi(global_scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -974,6 +992,8 @@ class Tile(Operator):
         >>> # 512x512 tiles with 64-pixel overlap.
         >>> tiles = gz.geom.Tile(size=(512, 512), stride=(448, 448))(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -1132,6 +1152,8 @@ class Stitch(Operator):
         ...     predictions
         ... )
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -1449,6 +1471,8 @@ class BowtieCorrection(Operator):
         ... )
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -1647,6 +1671,8 @@ class AntimeridianSplit(Operator):
         tolerance_deg: Absolute longitude jump threshold in degrees.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, crs: str = "EPSG:4326", tolerance_deg: float = 90.0) -> None:
         self.crs = crs
         self._parsed_crs = CRS.from_user_input(crs)
@@ -1708,6 +1734,8 @@ class GeostationaryParallaxCorrect(Operator):
         earth_radius_m: Earth radius (spherical model).
         method: ``"nearest"`` or ``"bilinear"``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -1801,6 +1829,8 @@ class SegmentStitch(Operator):
             ``NaN``; a ``NaN`` argument is stored as ``None`` so the config
             stays strict JSON.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self, *, direction: str = "scan", fill_value: float | None = None
@@ -1904,6 +1934,8 @@ class Mosaic(Operator):
         >>> composite = gz.geom.Mosaic(method="median")(s2_scene_list)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _REDUCERS: ClassVar[dict[str, Any]] = {
         "first": _nan_first,
         "mean": np.nanmean,
@@ -2004,6 +2036,8 @@ class Georeference(Operator):
         >>> ortho = gz.geom.Georeference(glt=glt)(prediction_swath)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(self, *, glt: GeoArray, valid_glt: np.ndarray | None = None) -> None:
@@ -2079,6 +2113,8 @@ class Rasterize(Operator):
         >>> aoi_mask = gz.geom.Rasterize(geometries=[box(*aoi_bounds)])(scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
@@ -2144,6 +2180,8 @@ class RasterizeLike(Operator):
         ... )
         >>> labels = burner()
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -2215,6 +2253,8 @@ class Vectorize(Operator):
         >>> import geoops as gz
         >>> polys = gz.geom.Vectorize(min_area_px=100.0)(water_mask)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 

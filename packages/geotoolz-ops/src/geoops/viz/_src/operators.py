@@ -266,6 +266,8 @@ class StretchToUint8(Operator):
         >>> rgb_uint8 = pipe(s2_geotensor)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -315,6 +317,8 @@ class GammaCorrect(Operator):
         ...     | gz.viz.GammaCorrect(gamma=1.2)
         ... )
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, gamma: float = 1.0, inplace_norm: bool = True) -> None:
         self.gamma = gamma
@@ -374,6 +378,8 @@ class RGBRecipe(Operator):
         ... )
         >>> rgb = dcp(abi_stack)  # (3, H, W) float32 in [0, 1]
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -494,6 +500,8 @@ class ApplyColormap(Operator):
         >>> rgba = gz.viz.ApplyColormap(name="cmocean.thermal")(sst_gt)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -557,6 +565,8 @@ class ApplyDiscreteColormap(Operator):
         >>> rgba = gz.viz.ApplyDiscreteColormap(mapping=cmap)(lulc_gt)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self, *, mapping: Mapping[int, Color] | Sequence[Sequence[Any]]
     ) -> None:
@@ -607,6 +617,8 @@ class Hillshade(Operator):
         >>> import geoops as gz
         >>> shade = gz.viz.Hillshade(azimuth_deg=315, altitude_deg=45)(dem_gt)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -677,6 +689,8 @@ class ShadedRelief(Operator):
         >>> shaded = gz.viz.ShadedRelief(colormap="terrain")(dem_gt)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -730,6 +744,8 @@ class Overlay(Operator):
         >>> # Overlay a cloud mask at 50 % opacity.
         >>> blended = gz.viz.Overlay(alpha=0.5)(rgb_uint8, cloud_rgba)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, alpha: float = 0.6, mode: str = "alpha") -> None:
         self.alpha = alpha
@@ -788,6 +804,8 @@ class AnnotatePolygons(Operator):
         >>> field = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
         >>> annotated = gz.viz.AnnotatePolygons(geometries=[field])(rgb_gt)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -875,6 +893,8 @@ class AnnotatePoints(Operator):
         ...     points=np.array([[12.5, 41.9]]), radius=4
         ... )(rgb_gt)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
 

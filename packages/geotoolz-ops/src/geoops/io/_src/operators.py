@@ -113,6 +113,8 @@ class SourceOperator(Operator):
     ``Input``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
 
 class SinkOperator(Operator):
     """Terminal operator that consumes a `GeoArray` and writes it.
@@ -122,6 +124,8 @@ class SinkOperator(Operator):
     step (anywhere else they would break the GeoArray → next op
     contract by returning ``None``).
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 
