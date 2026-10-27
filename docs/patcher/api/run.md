@@ -40,6 +40,10 @@ mosaic = patcher.merge_to_field(scored, field)  # GeoArray on the field's grid
 A row whose pixel size or rotation differs from the target grid's raises
 `ValueError` naming it: merging never resamples.
 
+The grouping, padding and mask are pipekit-array's `batch` (a `PatchBatch`
+has the shape of its `Padded`, `(value, valid)`), with
+`geoarray.stack_items` stacking each patch's transform as a row.
+
 ::: geopatcher.run.PatchBatch
 ::: geopatcher.run.batch_split
 ::: geopatcher.run.unbatch

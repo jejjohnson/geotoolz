@@ -27,10 +27,12 @@ geotoolz-array = { workspace = true }
 # project), so it comes from GitHub at a release tag; the published wheel
 # metadata still carries the PyPI-flavoured `pipekit>=…` requirement from
 # each member's [project] table.
-pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", tag = "pipekit-v0.1.3" }
-pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", tag = "pipekit-array-v0.0.5" }
-# pipekit-train has no release since the W1 stack: the same commit as the tags above
-pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", rev = "416e97414e04f41fe55c007bd317e0ffc51ac7a7" }
+# All three come from one repo, so uv needs them at one commit: the
+# pipekit-array-v0.0.6 / pipekit-train-v0.1.3 release (pipekit core is
+# unchanged since pipekit-v0.1.3 and has no tag of its own there).
+pipekit = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit", rev = "6152d18f7770ec71cdb0e4dcc63df8edafe00f53" }
+pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", tag = "pipekit-array-v0.0.6" }
+pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", tag = "pipekit-train-v0.1.3" }
 
 [build-system]
 requires = ["hatchling"]

@@ -80,6 +80,7 @@ from pipekit_array import (
     map_over,
     reduce,
     sel,
+    stack_items,
     take_along,
     transpose,
 )
@@ -172,6 +173,7 @@ __all__ = [
     "sel",
     "set_options",
     "stack",
+    "stack_items",
     "take_along",
     "to_dimarray",
     "to_pixel",

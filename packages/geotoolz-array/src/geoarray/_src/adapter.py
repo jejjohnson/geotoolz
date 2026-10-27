@@ -43,6 +43,7 @@ from geoarray._src.geometry import (
     concat_carriers,
     require_equal_leaves,
     stack,
+    stack_items_carriers,
 )
 from geoarray._src.types import Kind, register_kind_reader, register_lazy_kind_reader
 
@@ -177,6 +178,10 @@ class GeoArrayAdapter:
     def concat(self, xs: Sequence[GeoArray], dim: str) -> GeoArray:
         """``geoarray.concat``: coordinates and per-band attrs joined."""
         return concat_carriers(xs, dim)
+
+    def stack_items(self, xs: Sequence[GeoArray], dim: str) -> GeoArray:
+        """Items on their own grids along a new batch dim (transform rows)."""
+        return stack_items_carriers(xs, dim)
 
     def map_over(self, x: GeoArray, fn: Callable[[Any], Any], dim: str) -> Any:
         """``fn`` on each item along ``dim``, stacked along ``dim``.
