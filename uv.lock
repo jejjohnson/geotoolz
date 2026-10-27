@@ -1258,7 +1258,7 @@ wheels = [
 
 [[package]]
 name = "geotoolz"
-version = "0.13.0"
+version = "0.14.0"
 source = { editable = "packages/geotoolz" }
 dependencies = [
     { name = "geotoolz-array" },
@@ -1332,7 +1332,7 @@ dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "geotoolz-array"
-version = "0.3.1"
+version = "0.3.2"
 source = { editable = "packages/geotoolz-array" }
 dependencies = [
     { name = "affine" },
@@ -1712,7 +1712,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-ops"
-version = "0.13.0"
+version = "0.14.0"
 source = { editable = "packages/geotoolz-ops" }
 dependencies = [
     { name = "affine" },
@@ -1870,7 +1870,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-patcher"
-version = "0.14.1"
+version = "0.14.2"
 source = { editable = "packages/geotoolz-patcher" }
 dependencies = [
     { name = "georeader-spaceml" },

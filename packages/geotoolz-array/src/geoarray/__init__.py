@@ -117,7 +117,7 @@ from geoarray._src.sampling import interp_at, to_pixel
 from geoarray._src.source import AsyncRasterSource, RasterSource
 
 
-__version__ = "0.3.1"  # x-release-please-version
+__version__ = "0.3.2"  # x-release-please-version
 
 #: names that live in the [xarray] extra, loaded on first use
 _XARRAY_NAMES = ("from_dataset", "from_datatree", "to_dataset", "to_datatree")
