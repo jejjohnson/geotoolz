@@ -84,7 +84,7 @@ if TYPE_CHECKING:
     import geopandas as gpd
     from shapely.geometry.base import BaseGeometry
 
-from geoops._src.optional import optional_name, optional_root
+from geoops._src.optional import import_optional, optional_name, optional_root
 
 
 if TYPE_CHECKING:
@@ -174,8 +174,12 @@ def _resize_to_shape(
     """
     height, width = gt.shape[-2:]
     out_h, out_w = int(shape[0]), int(shape[1])
+    feature = "geoops.geom.Resize / Resample"
+    engine = to_engine(gt, feature)
+    # georeader's resize is skimage.transform.resize underneath.
+    import_optional("skimage.transform", "morph", feature=feature)
     resized = from_engine(
-        to_engine(gt).resize(
+        engine.resize(
             output_shape=(out_h, out_w),
             anti_aliasing=anti_aliasing,
             interpolation=interpolation,

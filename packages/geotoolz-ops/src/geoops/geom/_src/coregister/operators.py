@@ -22,6 +22,7 @@ import numpy as np
 from pipekit import Operator
 
 from geoops._src.geo import affine_of, require_geoarray
+from geoops._src.optional import import_optional, optional_name
 from geoops._src.shape import require_ndim
 from geoops._src.wrap import wrap_like
 from geoops.geom._src.coregister.array import (
@@ -706,8 +707,11 @@ class VectorToRasterAgg(Operator):
             )
         require_geoarray(like, "VectorToRasterAgg", arg="like")
         _require_axis_aligned(like, "VectorToRasterAgg")
-        import geopandas as gpd
-        from rasterio.features import rasterize as rio_rasterize
+        feature = "geoops.geom.coregister.VectorToRasterAgg"
+        gpd = import_optional("geopandas", "vector", feature=feature)
+        rio_rasterize = optional_name(
+            "rasterio.features", "rasterize", "raster", feature=feature
+        )
 
         if not isinstance(vector, gpd.GeoDataFrame):
             raise TypeError(

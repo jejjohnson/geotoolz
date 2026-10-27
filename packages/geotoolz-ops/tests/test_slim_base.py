@@ -98,25 +98,50 @@ print(loaded)
     assert result.stdout.strip() == "[]"
 
 
-# One operator per extra whose run imports that extra first.
-CALLS = {
-    "raster": "gz.io.ReadWindow(src='scene.tif', window=(0, 0, 4, 4))()",
-    "vector": "gz.feature.PeakLocalMax()(band)",
-    "morph": "gz.segment.SLIC()(scene)",
-    "sensors": "gz.geom.Reproject(dst_crs='EPSG:4326')(scene)",
-}
+# Operators whose run needs an extra, the packages blocked, and the extra named.
+CASES = [
+    (
+        "raster",
+        HEAVY["raster"],
+        "gz.io.ReadWindow(src='scene.tif', window=(0, 0, 4, 4))()",
+    ),
+    ("vector", HEAVY["vector"], "gz.feature.PeakLocalMax()(band)"),
+    ("morph", HEAVY["morph"], "gz.segment.SLIC()(scene)"),
+    ("sensors", HEAVY["sensors"], "gz.geom.Reproject(dst_crs='EPSG:4326')(scene)"),
+    # #577 review: engine-backed resampling names the engine's extra, and
+    # skimage behind georeader's resize names `morph`.
+    ("sensors", HEAVY["sensors"], "gz.geom.Resize(shape=(8, 8))(scene)"),
+    ("morph", HEAVY["morph"], "gz.geom.Resize(shape=(8, 8))(scene)"),
+    # #577 review: the function-level imports of viz and coregister.
+    ("raster", HEAVY["raster"], "gz.viz.AnnotatePoints(points=[[0.0, 0.0]])(scene)"),
+    ("sensors", HEAVY["sensors"], "gz.viz.AnnotatePolygons(geometries=None)(scene)"),
+    (
+        "vector",
+        ("geopandas",),
+        "gz.geom.coregister.VectorToRasterAgg(agg='count')(None, band)",
+    ),
+    (
+        "raster",
+        HEAVY["raster"],
+        "gz.geom.coregister.VectorToRasterAgg(agg='count')(None, band)",
+    ),
+]
 
 
-@pytest.mark.parametrize("extra", sorted(HEAVY))
-def test_an_operator_names_the_extra_it_is_missing(extra: str) -> None:
+@pytest.mark.parametrize(
+    ("extra", "blocked", "call"), CASES, ids=[f"{c[0]}-{c[2][3:30]}" for c in CASES]
+)
+def test_an_operator_names_the_extra_it_is_missing(
+    extra: str, blocked: tuple[str, ...], call: str
+) -> None:
     result = _run(
-        _BLOCK.format(blocked=list(HEAVY[extra]))
+        _BLOCK.format(blocked=list(blocked))
         + _SCENE
         + f"""
 import geoops as gz
 
 try:
-    {CALLS[extra]}
+    {call}
 except ImportError as exc:
     print(exc)
 else:

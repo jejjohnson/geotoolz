@@ -45,8 +45,8 @@ import without it and raise an `ImportError` naming the extra when called.
 |---|---|---|
 | `raster` | `rasterio` | `io` file reads and writes, `geom` windows and resampling, `patch_ops` windows |
 | `vector` | `geopandas`, `shapely` | vector outputs and inputs: `feature` detections, `mask` polygons, `measure` contours, `plume` geometry |
-| `morph` | `scikit-image` | `segment`, `feature`, `measure`, connected components and skeletons, `normalize.CLAHE`, `geom` registration and resizing |
-| `sensors` | `georeader` (which brings `rasterio`, `geopandas`, `shapely`) | the engine behind `geom.Reproject` / `ReprojectLike` / `Mosaic` / `Vectorize`, `io` reads, `mask` rasterising, `radiometry` solar geometry |
+| `morph` | `scikit-image` | `segment`, `feature`, `measure`, connected components and skeletons, `normalize.CLAHE`, `geom` registration, the resampling behind `geom.Resize` / `Resample` |
+| `sensors` | `georeader` (which brings `rasterio`, `geopandas`, `shapely`) | the engine behind `geom.Reproject` / `ReprojectLike` / `Mosaic` / `Vectorize` / `Resize` / `Resample` (which also need `morph`), `viz.AnnotatePolygons`, `io.LoadFromEE`, `io` reads, `mask` rasterising, `radiometry` solar geometry |
 | `viz` | `matplotlib` | `viz.ApplyColormap` (named matplotlib colormaps) |
 | `learn` | `scikit-learn`, `joblib` | `learn.SklearnOp` / `Pixelwise*` imputer NaN strategies and `save_state` / `load_state` / `state_path=`; `plume` DBSCAN clump counting |
 | `zarr` | `zarr>=3` | `io.WriteZarr` |

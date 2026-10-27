@@ -1416,12 +1416,17 @@ class LoadFromEE(SourceOperator):
         )
         try:
             import ee
-            from affine import Affine
-            from georeader.readers.ee_image import export_image
         except ImportError as exc:
             raise GeoToolzIOError(
-                "LoadFromEE requires georeader's Earth Engine dependencies."
+                "LoadFromEE requires the Earth Engine API: pip install earthengine-api."
             ) from exc
+        export_image = optional_name(
+            "georeader.readers.ee_image",
+            "export_image",
+            "sensors",
+            feature="geoops.io.LoadFromEE",
+        )
+        from affine import Affine
 
         xmin, ymax = self.bounds[0], self.bounds[3]
         transform: Affine = Affine(self.scale, 0.0, xmin, 0.0, -self.scale, ymax)
