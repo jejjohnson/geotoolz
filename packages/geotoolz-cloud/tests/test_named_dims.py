@@ -238,3 +238,46 @@ def test_read_reproject_keeps_the_band_names(tmp_path: Path) -> None:
 
     assert out.dims == ("band", "y", "x")
     assert out.coord("band") == SpectralAxis(("red", "nir"))
+
+
+def test_read_netcdf_never_repeats_a_dim_name(tmp_path: Path) -> None:
+    """Review on #572: ("depth", "level", y, x) both vertical keep their names."""
+    from geocloud.hdf import read_netcdf
+
+    path = _cf_file(
+        tmp_path / "two_vertical.nc",
+        {
+            "depth": (2, {"units": "m", "positive": "down"}),
+            "level": (3, {"units": "1", "axis": "Z"}),
+            "y": (4, {}),
+            "x": (5, {}),
+        },
+    )
+
+    g = read_netcdf(path, "v")
+
+    assert g.dims == ("depth", "level", "y", "x")
+    assert g.coord("level").values == (0.5, 1.5, 2.5)  # its own name: still read
+
+
+def test_read_netcdf_finds_coordinates_in_a_parent_group(tmp_path: Path) -> None:
+    netcdf4 = pytest.importorskip("netCDF4")
+    from geocloud.hdf import read_netcdf
+
+    path = tmp_path / "grouped.nc"
+    with netcdf4.Dataset(path, "w") as ds:
+        for name, size in (("depth", 2), ("y", 3), ("x", 4)):
+            ds.createDimension(name, size)
+        depth = ds.createVariable("depth", "f8", ("depth",))
+        depth[:] = [10.0, 20.0]
+        depth.positive = "down"
+        depth.units = "m"
+        child = ds.createGroup("ocean")
+        v = child.createVariable("v", "f4", ("depth", "y", "x"))
+        v[:] = np.ones((2, 3, 4), dtype="f4")
+        v.setncattr("GeoTransform", "0 1 0 3 0 -1")
+
+    g = read_netcdf(path, "v", group="ocean")
+
+    assert g.dims == ("level", "y", "x")
+    assert g.coord("level").values == (10.0, 20.0)
