@@ -144,10 +144,22 @@ def _resolve_nodata(
     return None
 
 
+def _band_labels(data: Any) -> tuple[str, ...] | None:
+    """The leading dim's labels (a `SpectralAxis`'s names), if it has any."""
+    if not isinstance(data, GeoArray) or len(data.dims) != 3:
+        return None
+    coord = data.coord(data.dims[0])
+    labels = getattr(coord, "labels", None) if coord is not None else None
+    return None if labels is None else tuple(str(label) for label in labels)
+
+
 def _resolve_descriptions(
-    descriptions: Sequence[str] | None, attrs: Mapping[str, Any], count: int
+    descriptions: Sequence[str] | None,
+    labels: Sequence[str] | None,
+    attrs: Mapping[str, Any],
+    count: int,
 ) -> list[str] | None:
-    """Explicit band descriptions, else ``band_names`` / ``descriptions`` attrs."""
+    """Explicit descriptions, else the band labels, else the 0.2 attrs keys."""
     if descriptions is not None:
         names = [str(name) for name in descriptions]
         if len(names) != count:
@@ -155,6 +167,8 @@ def _resolve_descriptions(
                 f"write_cog: {len(names)} descriptions for {count} band(s)."
             )
         return names
+    if labels is not None and len(labels) == count:
+        return list(labels)
     for key in ("band_names", "descriptions"):
         names = attrs.get(key)
         if (
@@ -291,8 +305,9 @@ def write_cog(
     docstring for the steps.
 
     Args:
-        data: A `geoarray.GeoArray` of shape ``(H, W)`` or ``(C, H, W)``,
-            or any lazy `geoarray.RasterSource` (``grid``, ``shape``,
+        data: A `geoarray.GeoArray` with dims ``y x`` or ``<dim> y x``
+            (``band``, ``level``, …; the leading dim becomes the bands, never
+            ``time``), or any lazy `geoarray.RasterSource` (``grid``, ``shape``,
             ``dtype``, ``fill_value``, ``attrs``, ``read_window``), which
             is staged strip by strip without loading it whole. It must
             carry a CRS.
@@ -318,9 +333,9 @@ def write_cog(
             ``fill_value`` when the dtype can hold it (never for a
             boolean mask, written as ``uint8`` 0 / 1); ``None`` writes
             none. An explicit value must fit the dtype.
-        descriptions: Band descriptions; ``None`` takes the data's
-            ``band_names`` (or ``descriptions``) attribute when it has one
-            entry per band.
+        descriptions: Band descriptions; ``None`` takes the leading dim's
+            labels (a `SpectralAxis`'s names, which `CogSource` reads back),
+            else the 0.2 ``band_names`` / ``descriptions`` attrs.
         tags: Dataset metadata tags (values written as strings).
         creation_options: Extra GDAL ``COG`` driver options, passed as is
             (``{"NUM_THREADS": "4", "STATISTICS": "YES"}``); they win over
@@ -338,7 +353,8 @@ def write_cog(
         TypeError: ``data`` is not a GeoArray or RasterSource — a georeader
             ``GeoTensor`` / reader is refused with the
             ``geoarray.interop.georeader`` function that converts it.
-        ValueError: The data is not 2-D / 3-D or has no CRS, an option is
+        ValueError: The data is not 2-D / 3-D, has a ``time`` dim, or has no
+            CRS, an option is
             unknown, ``blocksize`` is not a power of two, or ``nodata`` /
             ``descriptions`` do not fit the data.
         FileExistsError: ``overwrite=False`` and ``dest`` exists.
@@ -381,6 +397,12 @@ def write_cog(
             f"got {type(data).__name__}"
         )
     count, height, width = _bands_hw(data.shape)
+    if isinstance(data, GeoArray) and "time" in data.dims:
+        # (time, y, x) would otherwise be written as bands
+        raise ValueError(
+            f"write_cog: a COG holds one scene, got dims {data.dims}; write each "
+            "time step to its own COG (geoarray.isel(data, time=i))."
+        )
     grid = data.grid
     if grid.crs is None:
         raise ValueError(
@@ -402,7 +424,9 @@ def write_cog(
     if np.dtype(source_dtype) == np.bool_:
         fill = None  # a mask's False is data, not nodata
     written_nodata = _resolve_nodata(nodata, fill, dtype)
-    names = _resolve_descriptions(descriptions, data.attrs or {}, count)
+    names = _resolve_descriptions(
+        descriptions, _band_labels(data), data.attrs or {}, count
+    )
 
     local = local_path(dest)
     if not overwrite and exists(dest, storage_options=storage_options):

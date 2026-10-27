@@ -34,6 +34,7 @@ from typing import IO, Any, cast
 import numpy as np
 from affine import Affine
 from geoarray import DIMS, GeoArray
+from geoarray.coords import TimeAxis, Vertical, VerticalAxis
 
 from geocloud._src.extras import missing_extra
 from geocloud._src.store import Location, local_path
@@ -500,6 +501,8 @@ def _geoarray(
     fill_value: Any = 0,
     attrs: dict[str, Any] | None = None,
     transform: Affine | None = None,
+    dims: tuple[str, ...] | None = None,
+    coords: tuple[Any, ...] = (),
 ) -> GeoArray:
     values = np.asarray(values)
     return GeoArray(
@@ -508,8 +511,158 @@ def _geoarray(
         crs,
         fill_value=_representable_fill(fill_value, values.dtype),
         attrs=attrs or {},
-        dims=DIMS[-values.ndim :],
+        # HDF datasets carry no dim names: the 0.2 layout, explicitly
+        dims=DIMS[-values.ndim :] if dims is None else dims,
+        coords=coords,
     )
+
+
+_TIME_NAMES = ("time", "t")
+_VERTICAL_NAMES = (
+    "depth",
+    "deptht",
+    "lev",
+    "level",
+    "plev",
+    "pressure",
+    "height",
+    "altitude",
+    "z",
+)
+_PRESSURE_UNITS = ("pa", "hpa", "kpa", "mbar", "millibar", "bar", "atm")
+
+
+def _cf_dims(holder: Any, var: Any, indexes: list[int] | None) -> tuple[Any, ...]:
+    """A NetCDF variable's dims and coordinates, named the geoarray way.
+
+    The last two dims are ``y x``. A leading dim whose CF coordinate
+    variable (or name) marks it as time becomes ``time`` with a `TimeAxis`;
+    one marked vertical (``axis="Z"``, ``positive``, a vertical
+    ``standard_name``, pressure units, or a name like ``depth`` / ``lev`` /
+    ``plev``) becomes ``level`` with a `VerticalAxis`. Any other dim keeps
+    its NetCDF name. ``indexes`` (1-based, on the first dim) select the
+    first dim's coordinate values too.
+
+    Returns:
+        ``(dims, coords)``.
+    """
+    names = [str(name) for name in var.dimensions]
+    lead = names[:-2]
+    found = [_netcdf_lookup(holder, name) for name in lead]
+    attrs = [_plain(dict(v.__dict__)) if v is not None else {} for v in found]
+    kinds = [_cf_kind(name, a) for name, a in zip(lead, attrs, strict=True)]
+    dims = _unique_dims(lead, kinds)
+    coords: list[Any] = []
+    for position, (name, coord_var, attr, kind, dim) in enumerate(
+        zip(lead, found, attrs, kinds, dims, strict=True)
+    ):
+        named = (kind, dim) in (("time", "time"), ("vertical", "level"))
+        if not named or coord_var is None or len(coord_var.dimensions) != 1:
+            continue  # kept its NetCDF name, or no 1-D coordinate to read
+        values = np.asarray(coord_var[:])
+        if position == 0 and indexes is not None:
+            values = values[[index - 1 for index in indexes]]
+        if dim == "level":
+            values_list = tuple(float(v) for v in values.tolist())
+            coords.append(VerticalAxis(values_list, _vertical(name, attr)))
+        else:  # time
+            stamps = _cf_times(values, attr)
+            if stamps is not None:
+                coords.append(TimeAxis(stamps))
+    return (*dims, "y", "x"), tuple(coords)
+
+
+def _unique_dims(lead: list[str], kinds: list[str]) -> list[str]:
+    """Leading dims named ``time`` / ``level`` by kind, without a repeat.
+
+    A dim keeps its NetCDF name when renaming it would repeat another dim's
+    name (two vertical dims, ``("depth", "level", y, x)``), or clash with
+    ``y`` / ``x``; renaming stops once the names are unique.
+
+    Example:
+        >>> _unique_dims(["depth", "level"], ["vertical", "vertical"])
+        ['depth', 'level']
+        >>> _unique_dims(["time", "depth"], ["time", "vertical"])
+        ['time', 'level']
+    """
+    dims = [
+        {"time": "time", "vertical": "level"}.get(k, n)
+        for n, k in zip(lead, kinds, strict=True)
+    ]
+    while True:
+        taken = [*dims, "y", "x"]
+        clash = [i for i, d in enumerate(dims) if d != lead[i] and taken.count(d) > 1]
+        if not clash:
+            break
+        for i in clash:
+            dims[i] = lead[i]
+    if len(set(dims)) != len(dims) or {"y", "x"} & set(dims):
+        return list(lead)  # the NetCDF names themselves repeat or clash: leave them
+    return dims
+
+
+def _cf_kind(name: str, attrs: Mapping[str, Any]) -> str:
+    axis = str(attrs.get("axis", "")).upper()
+    standard = str(attrs.get("standard_name", "")).lower()
+    units = str(attrs.get("units", "")).lower()
+    lower = name.lower()
+    if axis == "T" or standard == "time" or lower in _TIME_NAMES:
+        return "time"
+    vertical_standard = standard in ("depth", "height", "altitude", "air_pressure")
+    if (
+        axis == "Z"
+        or "positive" in attrs
+        or vertical_standard
+        or units in _PRESSURE_UNITS
+        or lower in _VERTICAL_NAMES
+    ):
+        return "vertical"
+    return "other"
+
+
+def _vertical(name: str, attrs: Mapping[str, Any]) -> Vertical:
+    """What a CF vertical coordinate measures (`geoarray.coords.Vertical`)."""
+    standard = str(attrs.get("standard_name", "")).lower()
+    units = str(attrs.get("units", "1"))
+    lower = name.lower()
+    if (
+        units.lower() in _PRESSURE_UNITS
+        or standard == "air_pressure"
+        or lower in ("plev", "pressure")
+    ):
+        kind = "pressure"
+    elif standard == "depth" or lower.startswith("depth"):
+        kind = "depth"
+    elif standard in ("height", "altitude") or lower in ("height", "altitude", "z"):
+        kind = "height"
+    else:
+        kind = "level"
+    positive = str(attrs.get("positive", "")).lower()
+    if positive not in ("up", "down"):
+        positive = "down" if kind in ("depth", "pressure") else "up"
+    return Vertical(kind=kind, units=units, positive=positive)
+
+
+def _cf_times(values: np.ndarray, attrs: Mapping[str, Any]) -> Any | None:
+    """CF ``units: "<unit> since <date>"`` times as ``datetime64``, or ``None``."""
+    units = attrs.get("units")
+    if values.dtype.kind == "M":
+        return values
+    if not isinstance(units, str) or " since " not in units:
+        return None
+    try:
+        import netCDF4  # the [netcdf] extra, already open in read_netcdf
+
+        dates = netCDF4.num2date(
+            values,
+            units,
+            calendar=str(attrs.get("calendar", "standard")),
+            only_use_cftime_datetimes=False,
+            only_use_python_datetimes=True,
+        )
+    except Exception:  # a non-standard calendar, or unparsable units
+        return None
+    return np.asarray([np.datetime64(d, "ns") for d in np.ravel(np.asarray(dates))])
 
 
 def _representable_fill(fill: Any, dtype: np.dtype) -> Any:
@@ -909,6 +1062,11 @@ def read_netcdf(
     Returns:
         The variable ``(..., H, W)``, its attributes under ``attrs["attrs"]``;
         a declared fill its dtype cannot hold becomes ``fill_value=None``.
+        Dims are named from the variable's CF dims: the last two are
+        ``y x``, a time dim is ``time`` (with a `TimeAxis` for CF ``since``
+        units), a vertical one is ``level`` (with a `VerticalAxis`: CF
+        ``depth`` is ``Vertical(kind="depth", positive="down")``), and any
+        other keeps its NetCDF name.
 
     Raises:
         ImportError: netCDF4 is missing (the ``[netcdf]`` extra).
@@ -934,10 +1092,13 @@ def read_netcdf(
                 fill_value = np.asarray(values.fill_value).item()
             values = values.filled(fill_value)
         crs, mapping = _netcdf_crs(holder, var, use_cf_grid_mapping)
+        dims, coords = _cf_dims(holder, var, indexes)
         return _geoarray(
             values,
             crs=crs,
             fill_value=fill_value,
             attrs={"attrs": attrs},
             transform=_netcdf_transform(holder, var, mapping, crs),
+            dims=dims,
+            coords=coords,
         )
