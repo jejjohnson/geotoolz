@@ -484,7 +484,7 @@ async def read_reproject(
     chunk = await _load_footprint(
         reader, window_utils.window_polygon(window_out, dst_transform), dst_crs
     )
-    return from_georeader(
+    warped = from_georeader(
         _read.read_reproject(
             to_georeader(chunk),
             dst_crs=dst_crs,
@@ -495,6 +495,10 @@ async def read_reproject(
             dst_nodata=dst_nodata,
         )
     )
+    # georeader keeps the bands but not their names: carry the chunk's over
+    if warped.shape[:-2] == chunk.shape[:-2]:
+        return warped.with_data(warped.data, dims=chunk.dims, coords=chunk.coords)
+    return warped
 
 
 async def read_reproject_like(

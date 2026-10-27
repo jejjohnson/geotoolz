@@ -79,10 +79,12 @@ import math
 import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
+from xml.etree import ElementTree
 
 import numpy as np
 from affine import Affine
-from geoarray import DIMS, FrozenAttrs, GeoArray, Grid, PixelWindow
+from geoarray import FrozenAttrs, GeoArray, Grid, PixelWindow
+from geoarray.coords import SpectralAxis
 
 from geocloud._src.aio import _run_coroutine_safely
 from geocloud._src.extras import missing_extra
@@ -161,7 +163,9 @@ class CogDomain:
     ``transform`` is an ``affine.Affine``; ``grid`` is the same georeferencing
     as a hashable `geoarray.Grid`. ``nodata`` is the parsed ``GDAL_NODATA``
     tag (cast to the pixel dtype's kind), or ``None`` when the COG declares
-    none; ``fill_value`` is what reads fill with.
+    none; ``fill_value`` is what reads fill with. ``band_names`` are the
+    bands' GDAL descriptions (``GDAL_METADATA``) when every band has a
+    distinct one, else ``None``; reads carry them as a `SpectralAxis`.
 
     Example:
         >>> from affine import Affine
@@ -179,6 +183,7 @@ class CogDomain:
     bounds: tuple[float, float, float, float]
     res: tuple[float, float]
     nodata: float | int | None = None
+    band_names: tuple[str, ...] | None = None
 
     @property
     def fill_value(self) -> float | int:
@@ -289,14 +294,52 @@ def _build_domain(level: Any, geotiff: Any, *, url: str) -> CogDomain:
     else:
         res = (math.hypot(a, d), math.hypot(b, e))
 
+    count = int(level.count)
     return CogDomain(
         crs=_crs_or_none(level, url=url),
         transform=transform,
-        shape=(int(level.count), height, width),
+        shape=(count, height, width),
         bounds=(min(xs), min(ys), max(xs), max(ys)),
         res=res,
         nodata=nodata,
+        # descriptions live on IFD 0; overviews share the bands
+        band_names=_band_names(getattr(geotiff.ifd, "gdal_metadata", None), count),
     )
+
+
+def _band_names(gdal_metadata: Any, count: int) -> tuple[str, ...] | None:
+    """Band descriptions from a ``GDAL_METADATA`` tag, when all are distinct.
+
+    GDAL writes ``<Item name="DESCRIPTION" sample="i" role="description">``
+    per described band. Partial, duplicate or unparsable descriptions give
+    ``None`` (a `SpectralAxis` needs one unique name per band).
+
+    Example:
+        >>> xml = (
+        ...     '<GDALMetadata><Item name="DESCRIPTION" sample="0" '
+        ...     'role="description">red</Item></GDALMetadata>'
+        ... )
+        >>> _band_names(xml, 1)
+        ('red',)
+    """
+    if not gdal_metadata:
+        return None
+    try:
+        root = ElementTree.fromstring(str(gdal_metadata))
+    except ElementTree.ParseError:
+        return None
+    names: dict[int, str] = {}
+    for item in root.iter("Item"):
+        if item.get("role") != "description" or item.get("sample") is None:
+            continue
+        try:
+            names[int(item.get("sample", ""))] = (item.text or "").strip()
+        except ValueError:
+            return None
+    ordered = tuple(names.get(i, "") for i in range(count))
+    if "" in ordered or len(set(ordered)) != count:
+        return None
+    return ordered
 
 
 def _parse_nodata(raw: Any, dtype: np.dtype, *, url: str) -> float | int | None:
@@ -825,6 +868,8 @@ class CogSource:
         dtype = np.dtype(self.dtype)
         fill = self.fill_value
         attrs = self.attrs
+        names = self.domain.band_names
+        coords = () if names is None else (SpectralAxis(names),)
 
         results: list[GeoArray] = []
         for window, (tx_min, ty_min, tx_max, ty_max) in zip(
@@ -853,7 +898,8 @@ class CogSource:
                     self.domain.crs,
                     fill_value=fill,
                     attrs=attrs,
-                    dims=DIMS[-values.ndim :],
+                    dims=("band", "y", "x"),
+                    coords=coords,
                 )
             )
         return results
