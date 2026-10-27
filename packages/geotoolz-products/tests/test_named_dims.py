@@ -184,3 +184,35 @@ def test_band_values_reads_one_number_per_band_in_band_order() -> None:
     )
     with pytest.raises(KeyError):
         band_values(constants.BANDS, ("swir",), "wavelength_nm")
+
+
+def test_stack_drops_units_unless_every_reader_has_them() -> None:
+    """Review on #573: one reader with per-band units, one without."""
+    with_units = GeoArray(
+        np.ones((1, 3, 4), np.float32),
+        TRANSFORM,
+        4326,
+        fill_value=np.nan,
+        attrs={"units": ("K",)},
+        dims="band y x",
+        coords=(SpectralAxis(("C13",)),),
+    )
+    toy = toy_sensor.Reader(
+        "t", data=np.zeros((4, 3, 4), np.float32), transform=TRANSFORM
+    )
+
+    out = stack([with_units, toy], resampling="nearest")
+
+    assert out.count == 5 and "units" not in out.attrs
+
+
+def test_a_swath_window_past_the_edge_is_clipped_and_one_outside_raises() -> None:
+    lat, lon = _lat_lon(3, 5)
+    reader = toy_sensor.SwathReader("g", data=np.ones((4, 3, 5)), lat=lat, lon=lon)
+
+    edge = reader.read_window(PixelWindow(col_off=3, row_off=-1, width=4, height=2))
+
+    assert edge.data.shape == (4, 1, 2)
+    np.testing.assert_array_equal(edge.lat, lat[0:1, 3:5])
+    with pytest.raises(ValueError, match="misses"):
+        reader.read_window(PixelWindow(col_off=9, row_off=0, width=2, height=2))

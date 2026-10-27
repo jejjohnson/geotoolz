@@ -116,12 +116,11 @@ class SwathReader:
             ValueError: ``window`` misses the granule.
         """
         rows, cols = self._data.shape[1:]
-        r0, c0 = max(window.row_off, 0), max(window.col_off, 0)
-        r1 = min(window.row_off + window.height, rows)
-        c1 = min(window.col_off + window.width, cols)
-        if r0 >= r1 or c0 >= c1:
+        whole = PixelWindow(col_off=0, row_off=0, width=cols, height=rows)
+        inside = window.intersection(whole)
+        if inside is None:
             raise ValueError(f"window {window} misses the granule {(rows, cols)}")
-        return self._swath(slice(r0, r1), slice(c0, c1))
+        return self._swath(*inside.to_slices())
 
     def _swath(self, rows: slice, cols: slice) -> GeoSwath:
         return GeoSwath(
