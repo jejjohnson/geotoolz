@@ -1836,3 +1836,106 @@ def test_no_operator_reads_a_stored_band_axis() -> None:
         and node.value.id == "self"
     ]
     assert not found, found
+
+
+def _dim_params() -> list[Any]:
+    return [
+        pytest.param(c, id=_key(c))
+        for c in _CLASSES
+        if "dim" in inspect.signature(c.__init__).parameters
+    ]
+
+
+@pytest.mark.parametrize("cls", _dim_params())
+def test_a_renamed_band_dim_gives_the_same_result(cls: type) -> None:
+    """``dim=`` follows the name: a ``wavelength`` dim works like ``band``.
+
+    Each operator taking ``dim``, built with ``dim="wavelength"`` and given a
+    scene whose band dim is named ``wavelength``, returns the values it
+    returns with the defaults on the ``band``-named scene (#531 review).
+    """
+    key = _key(cls)
+    for scene in _attributed_inputs():
+        if not isinstance(scene, GeoArray) or "band" not in scene.dims:
+            continue
+        try:
+            want = _call(_build_seeded(cls), scene)
+        except Exception:
+            continue
+        renamed = scene.replace(
+            dims=tuple("wavelength" if d == "band" else d for d in scene.dims),
+            coords=tuple(c for c in scene.coords if c.dim != "band"),
+        )
+        op = _build_seeded(cls)
+        op.dim = "wavelength"
+        for nested in vars(op).values():  # a wrapped operator follows suit
+            if isinstance(nested, Operator) and hasattr(nested, "dim"):
+                nested.dim = "wavelength"
+        got = _call(op, renamed)
+        if key in STOCHASTIC_PER_PIXEL:
+            assert np.shape(got) == np.shape(want)
+            return
+        if not geoarrays(want) and not isinstance(want, np.ndarray):
+            return  # a background statistic object: running is the check
+        for g, w in zip(
+            geoarrays(got) or [got], geoarrays(want) or [want], strict=True
+        ):
+            np.testing.assert_allclose(
+                np.asarray(g, dtype=np.float64),
+                np.asarray(w, dtype=np.float64),
+                equal_nan=True,
+                err_msg=key,
+            )
+        return
+    pytest.skip("no toy input with a band dim is valid for this operator")
+
+
+def test_subclasses_forward_dim() -> None:
+    """``dim=`` reaches the base class of the band-selection subclasses."""
+    from geoops.spectral import ReorderBands
+    from geoops.viz import Composite, FalseColor, SWIRComposite, TrueColor
+
+    for op in (
+        ReorderBands(order=[0], dim="wavelength"),
+        Composite(bands=[0, 1, 2], dim="wavelength"),
+        TrueColor(red=2, green=1, blue=0, dim="wavelength"),
+        FalseColor(nir=3, red=2, green=1, dim="wavelength"),
+        SWIRComposite(swir2=3, nir=2, red=1, dim="wavelength"),
+    ):
+        assert op.dim == "wavelength", type(op).__name__
+        assert op.get_config()["dim"] == "wavelength", type(op).__name__
+
+
+def test_segment_wrappers_take_dim_none_on_a_single_band() -> None:
+    """``dim=None`` is skimage's no-channel mode on a 2-D input."""
+    from _helpers import toy_geoarray
+
+    from geoops.segment import SLIC, Felzenszwalb, Quickshift
+
+    band = toy_geoarray(np.random.default_rng(0).random((16, 16)))
+    ops = (
+        Felzenszwalb(dim=None),
+        Quickshift(dim=None, convert2lab=False),  # Lab needs three channels
+        SLIC(dim=None),
+    )
+    for op in ops:
+        out = op(band)
+        assert np.shape(out) == (16, 16), type(op).__name__
+
+
+@pytest.mark.parametrize("fit_on_call", [False, True])
+def test_matched_filter_fits_on_a_renamed_band_dim(fit_on_call: bool) -> None:
+    """The background is estimated on the axis resolved from the carrier."""
+    from geoops.matched_filter import MatchedFilter
+
+    scene = _attributed_inputs()[1]  # 13 bands
+    renamed = scene.replace(
+        dims=("wavelength", "y", "x"),
+        coords=tuple(c for c in scene.coords if c.dim != "band"),
+    )
+    target = np.linspace(0.1, 1.0, scene.shape[0])
+    want = MatchedFilter(target=target, fit_on_call=fit_on_call)(scene)
+    got = MatchedFilter(target=target, fit_on_call=fit_on_call, dim="wavelength")(
+        renamed
+    )
+    np.testing.assert_allclose(np.asarray(got), np.asarray(want), equal_nan=True)

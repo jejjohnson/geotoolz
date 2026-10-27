@@ -177,7 +177,7 @@ class ReorderBands(SelectBands):
     def __init__(
         self, *, order: list[BandRef], dim: str = "band", axis: int | None = None
     ) -> None:
-        super().__init__(bands=order, axis=axis)
+        super().__init__(bands=order, dim=dim, axis=axis)
         self.order = order
 
     def get_config(self) -> dict[str, Any]:

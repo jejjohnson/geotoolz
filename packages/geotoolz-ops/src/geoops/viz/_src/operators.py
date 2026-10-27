@@ -122,7 +122,7 @@ class Composite(SelectBands):
     def __init__(
         self, *, bands: Sequence[BandRef], dim: str = "band", axis: int | None = None
     ) -> None:
-        super().__init__(bands=list(bands), axis=axis)
+        super().__init__(bands=list(bands), dim=dim, axis=axis)
 
 
 class TrueColor(Composite):
@@ -163,7 +163,7 @@ class TrueColor(Composite):
         dim: str = "band",
         axis: int | None = None,
     ) -> None:
-        super().__init__(bands=[red, green, blue], axis=axis)
+        super().__init__(bands=[red, green, blue], dim=dim, axis=axis)
         self.red = red
         self.green = green
         self.blue = blue
@@ -208,7 +208,7 @@ class FalseColor(Composite):
         dim: str = "band",
         axis: int | None = None,
     ) -> None:
-        super().__init__(bands=[nir, red, green], axis=axis)
+        super().__init__(bands=[nir, red, green], dim=dim, axis=axis)
         self.nir = nir
         self.red = red
         self.green = green
@@ -252,7 +252,7 @@ class SWIRComposite(Composite):
         dim: str = "band",
         axis: int | None = None,
     ) -> None:
-        super().__init__(bands=[swir2, nir, red], axis=axis)
+        super().__init__(bands=[swir2, nir, red], dim=dim, axis=axis)
         self.swir2 = swir2
         self.nir = nir
         self.red = red

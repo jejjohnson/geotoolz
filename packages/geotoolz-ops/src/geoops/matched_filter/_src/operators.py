@@ -166,14 +166,14 @@ class MatchedFilter(Operator):
         self.cov_op_: NumpyLinearOperator | np.ndarray | None = None
 
     def _estimate(
-        self, cube: np.ndarray, *, keep_supplied: bool
+        self, cube: np.ndarray, *, axis: int, keep_supplied: bool
     ) -> tuple[np.ndarray, NumpyLinearOperator | np.ndarray]:
         """Background ``(mean, cov_op)`` of ``cube``.
 
-        ``keep_supplied`` keeps the constructor's ``mean`` / ``cov_op``
-        and only estimates the missing ones.
+        ``axis`` is the band position, resolved from the carrier before its
+        names were dropped. ``keep_supplied`` keeps the constructor's
+        ``mean`` / ``cov_op`` and only estimates the missing ones.
         """
-        axis = dim_axis(cube, self.dim, name="MatchedFilter")
         mean = self.mean if keep_supplied else None
         cov_op = self.cov_op if keep_supplied else None
         if mean is None:
@@ -195,10 +195,9 @@ class MatchedFilter(Operator):
         Returns:
             This operator, for chaining.
         """
-        cube, _ = _mask_invalid(
-            gt, dim_axis(gt, self.dim, name="MatchedFilter"), type(self).__name__
-        )
-        mean, cov_op = self._estimate(cube, keep_supplied=True)
+        axis = dim_axis(gt, self.dim, name="MatchedFilter")
+        cube, _ = _mask_invalid(gt, axis, type(self).__name__)
+        mean, cov_op = self._estimate(cube, axis=axis, keep_supplied=True)
         self.cov_op_ = cov_op
         self.mean_ = mean  # published last: the fit-once check reads ``mean_``
         return self
@@ -246,10 +245,9 @@ class MatchedFilter(Operator):
         if self.fit_on_call:
             # Per-scene background: estimated locally, never stored, so
             # concurrent calls share no mutable state.
-            masked = _mask_invalid(
-                gt, dim_axis(gt, self.dim, name="MatchedFilter"), type(self).__name__
-            )
-            mean, cov_op = self._estimate(masked[0], keep_supplied=False)
+            axis = dim_axis(gt, self.dim, name="MatchedFilter")
+            masked = _mask_invalid(gt, axis, type(self).__name__)
+            mean, cov_op = self._estimate(masked[0], axis=axis, keep_supplied=False)
             return self._score(gt, mean, cov_op, masked)
         if self.mean is None or self.cov_op is None:
             fit_once(self, gt, lambda: self.mean_ is not None)

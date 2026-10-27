@@ -147,7 +147,11 @@ class SLIC(Operator):
         if mask is not None:
             valid &= mask
         # A 2-D image has no channel axis; skimage raises if one is given.
-        channel_axis = None if image.ndim == 2 else dim_axis(gt, self.dim, name="SLIC")
+        channel_axis = (
+            None
+            if image.ndim == 2 or self.dim is None
+            else dim_axis(gt, self.dim, name="SLIC")
+        )
         labels = slic(
             image,
             n_segments=self.n_segments,
@@ -225,7 +229,11 @@ class Felzenszwalb(Operator):
             scale=self.scale,
             sigma=self.sigma,
             min_size=self.min_area_px,
-            channel_axis=dim_axis(gt, self.dim, name="Felzenszwalb"),
+            channel_axis=(
+                None
+                if self.dim is None
+                else dim_axis(gt, self.dim, name="Felzenszwalb")
+            ),
         )
         # skimage numbers segments from 0, which collides with the
         # invalid-pixel label; shift so valid segments start at 1.
@@ -304,13 +312,19 @@ class Quickshift(Operator):
         mask = _as_mask(mask, gt.shape[-2:], name="Quickshift mask")
         if mask is not None:
             valid &= mask
+        if self.dim is None:
+            # skimage's quickshift has no channel-free mode: a single-band
+            # image gets a trailing channel of one
+            image, channel_axis = image[..., np.newaxis], -1
+        else:
+            channel_axis = dim_axis(gt, self.dim, name="Quickshift")
         labels = quickshift(
             image,
             kernel_size=self.kernel_size,
             max_dist=self.max_dist,
             ratio=self.ratio,
             sigma=self.sigma,
-            channel_axis=dim_axis(gt, self.dim, name="Quickshift"),
+            channel_axis=channel_axis,
             convert2lab=self.convert2lab,
         )
         # skimage numbers segments from 0, which collides with the
