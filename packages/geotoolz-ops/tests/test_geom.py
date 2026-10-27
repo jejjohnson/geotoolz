@@ -1248,12 +1248,12 @@ def test_mosaic_builds_frame_without_spatial_mosaic_and_handles_no_fill(
 ) -> None:
     import warnings
 
-    from geoops.geom._src import operators as geom_operators
-
     def _fail(*args, **kwargs):
         raise AssertionError("reducer methods must not run spatial_mosaic")
 
-    monkeypatch.setattr(geom_operators.mosaic, "spatial_mosaic", _fail)
+    import georeader.mosaic  # the module the operator imports when it runs
+
+    monkeypatch.setattr(georeader.mosaic, "spatial_mosaic", _fail)
 
     def _pair(fill):
         left = GeoArray(

@@ -22,16 +22,6 @@ import einx
 import numpy as np
 from jaxtyping import Bool
 from pipekit import Operator
-from skimage.segmentation import (
-    chan_vese,
-    expand_labels,
-    felzenszwalb,
-    mark_boundaries,
-    quickshift,
-    random_walker,
-    slic,
-    watershed,
-)
 
 from geoops._src.config import as_tuple, mapping_from_pairs, mapping_to_pairs
 from geoops._src.geo import require_grid_match
@@ -55,6 +45,12 @@ from geoops.segment._src.array import (
 
 if TYPE_CHECKING:
     from geoarray import GeoArray as GeoArrayType
+
+from geoops._src.optional import optional_name
+
+
+if TYPE_CHECKING:
+    pass
 
 
 def _as_mask(
@@ -135,6 +131,12 @@ class SLIC(Operator):
         gt: GeoArrayType | np.ndarray,
         mask: GeoArrayType | np.ndarray | None = None,
     ) -> GeoArrayType | np.ndarray:
+        slic = optional_name(
+            "skimage.segmentation",
+            "slic",
+            "morph",
+            feature="geoops.segment.SLIC",
+        )
         _check_input_grid(gt, mask, "SLIC", "mask")
         valid = valid_pixels(gt)
         image = fill_invalid(np.asarray(gt), valid)
@@ -200,6 +202,12 @@ class Felzenszwalb(Operator):
         gt: GeoArrayType | np.ndarray,
         mask: GeoArrayType | np.ndarray | None = None,
     ) -> GeoArrayType | np.ndarray:
+        felzenszwalb = optional_name(
+            "skimage.segmentation",
+            "felzenszwalb",
+            "morph",
+            feature="geoops.segment.Felzenszwalb",
+        )
         _check_input_grid(gt, mask, "Felzenszwalb", "mask")
         valid = valid_pixels(gt)
         image = fill_invalid(np.asarray(gt), valid)
@@ -275,6 +283,12 @@ class Quickshift(Operator):
         gt: GeoArrayType | np.ndarray,
         mask: GeoArrayType | np.ndarray | None = None,
     ) -> GeoArrayType | np.ndarray:
+        quickshift = optional_name(
+            "skimage.segmentation",
+            "quickshift",
+            "morph",
+            feature="geoops.segment.Quickshift",
+        )
         _check_input_grid(gt, mask, "Quickshift", "mask")
         valid = valid_pixels(gt)
         image = fill_invalid(np.asarray(gt), valid)
@@ -340,6 +354,12 @@ class Watershed(Operator):
         markers: GeoArrayType | np.ndarray | None = None,
         mask: GeoArrayType | np.ndarray | None = None,
     ) -> GeoArrayType | np.ndarray:
+        watershed = optional_name(
+            "skimage.segmentation",
+            "watershed",
+            "morph",
+            feature="geoops.segment.Watershed",
+        )
         _check_input_grid(gt, markers, "Watershed", "markers")
         _check_input_grid(gt, mask, "Watershed", "mask")
         valid = valid_pixels(gt)
@@ -396,6 +416,12 @@ class ChanVese(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArrayType | np.ndarray) -> GeoArrayType | np.ndarray:
+        chan_vese = optional_name(
+            "skimage.segmentation",
+            "chan_vese",
+            "morph",
+            feature="geoops.segment.ChanVese",
+        )
         valid = valid_pixels(gt)
         labels = chan_vese(
             single_band(fill_invalid(np.asarray(gt), valid), name="ChanVese"),
@@ -444,6 +470,12 @@ class RandomWalker(Operator):
     def _apply(
         self, gt: GeoArrayType | np.ndarray, markers: GeoArrayType | np.ndarray
     ) -> GeoArrayType | np.ndarray:
+        random_walker = optional_name(
+            "skimage.segmentation",
+            "random_walker",
+            "morph",
+            feature="geoops.segment.RandomWalker",
+        )
         _check_input_grid(gt, markers, "RandomWalker", "markers")
         valid = valid_pixels(gt)
         seeds = single_band(markers, name="RandomWalker markers").astype(
@@ -531,6 +563,12 @@ class ExpandLabels(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArrayType | np.ndarray) -> GeoArrayType | np.ndarray:
+        expand_labels = optional_name(
+            "skimage.segmentation",
+            "expand_labels",
+            "morph",
+            feature="geoops.segment.ExpandLabels",
+        )
         labels = expand_labels(
             single_band(np.asarray(gt), name="ExpandLabels").astype(
                 np.int32, copy=False
@@ -712,6 +750,12 @@ class MarkBoundaries(Operator):
     def _apply(
         self, gt: GeoArrayType | np.ndarray, label_img: GeoArrayType | np.ndarray
     ) -> GeoArrayType | np.ndarray:
+        mark_boundaries = optional_name(
+            "skimage.segmentation",
+            "mark_boundaries",
+            "morph",
+            feature="geoops.segment.MarkBoundaries",
+        )
         _check_input_grid(gt, label_img, "MarkBoundaries", "label_img")
         image = np.asarray(gt)
         if image.ndim == 3:

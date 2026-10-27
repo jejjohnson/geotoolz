@@ -58,7 +58,8 @@ Config:
 
 Optional dependencies:
     `import_optional` imports an extra's module inside the function that
-    needs it, with an error naming the extra.
+    needs it, with an error naming the extra; `optional_name` is the
+    ``from a import b`` form and `optional_root` the ``import a.b`` one.
 
 Example:
     An operator that keeps the carrier contract::
@@ -113,7 +114,7 @@ from geoops._src.geo import (
     require_grid_match,
     require_projected_crs,
 )
-from geoops._src.optional import import_optional
+from geoops._src.optional import import_optional, optional_name, optional_root
 from geoops._src.samples import (
     SampleLayout,
     cube_to_samples,
@@ -163,6 +164,8 @@ __all__ = [
     "mapping_to_pairs",
     "mask_invalid_to_nan",
     "nested_config",
+    "optional_name",
+    "optional_root",
     "over_frames",
     "pixel_xy",
     "reject_config_summary",

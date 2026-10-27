@@ -22,14 +22,8 @@ classifiers = [
     "Development Status :: 2 - Pre-Alpha",
 ]
 dependencies = [
-    # The carrier every operator takes and returns (`geoarray.GeoArray`);
-    # `[georeader]` for the engine boundary (`geoops._src.engine`).
-    "geotoolz-array[georeader]>=0.3.0",
-    # georeader is the engine behind a few operators (reprojection,
-    # mosaics, rasterize / vectorize, windowed reads, solar geometry),
-    # called only through `geoops._src.engine`; operators never take or
-    # return its GeoTensor.
-    "georeader-spaceml>=2.1",
+    # The carrier every operator takes and returns (`geoarray.GeoArray`).
+    "geotoolz-array>=0.3.0",
     "numpy>=1.26",
     # Shape/dtype annotations on the Tier-A numpy primitives (the
     # `Float[np.ndarray, "c h w"]` aliases). Annotation-only usage — no
@@ -38,35 +32,16 @@ dependencies = [
     # Signal windows + numerical primitives used across the radiometry,
     # restore, augment, mask, spectral, and plume operator families.
     "scipy>=1.11",
-    # `georeader.geotensor` imports `Self` from typing_extensions without
-    # declaring it as a dep (upstream packaging bug in >=2.1). Pin it
-    # here so a slim install (without optional extras that would
-    # otherwise drag it in transitively) still works.
-    "typing-extensions>=4.0",
-    # rasterio (windows, transforms, CRS, resampling enums, features) and
-    # affine are imported at module top level by `io`, `geom`, `augment`
-    # and `patch_ops`; declared directly rather than relying on
-    # georeader-spaceml pulling them in transitively.
-    "rasterio>=1.3",
+    # Transforms and CRS on carriers: `geom` grid maths, `plume` geometry.
     "affine>=2.4",
-    # pandas: `_src.labels` / `measure` / `feature` / `plume` region tables
-    # and `radiometry` per-band fitted stats. pyproj: `geom` reprojection and
-    # `plume` CRS-aware advection geometry. geopandas: vector inputs in
-    # `feature`, `mask`, `measure` and `plume`. shapely: footprint algebra
-    # and rasterisation in `geom`, `io`, `mask`, `measure` (`io` needs
-    # shapely only, not geopandas).
-    "pandas>=2.1",
     "pyproj>=3.6",
-    "geopandas>=0.14",
-    "shapely>=2.0",
-    # skimage: `_src.labels` (connected components / skeletons), `feature`
-    # and `geom` (Resize / Resample) import it at module top level.
-    "scikit-image>=0.25",
+    # pandas: `_src.labels` / `measure` / `feature` / `plume` region tables
+    # and `radiometry` per-band fitted stats (not only vector code).
+    "pandas>=2.1",
     # The Operator / Sequential / Graph composition layer lives in pipekit
     # (formerly geoops.core). Every per-domain operator subclasses
-    # `pipekit.Operator`; the dependency is now load-bearing rather than
-    # optional. The workspace root's [tool.uv.sources] pins the dev-time
-    # git source.
+    # `pipekit.Operator`. The workspace root's [tool.uv.sources] pins the
+    # dev-time git source.
     "pipekit>=0.0.2",
     # Universal tensor-notation layer: the `geoops.einx` operator
     # family AND the internal linear algebra of the Tier-A primitives
@@ -76,11 +51,31 @@ dependencies = [
     "einx>=0.4",
 ]
 
-# Every third-party module imported at module top level by anything
-# `import geoops` loads must be listed above;
-# tests/test_packaging.py enforces this. Everything below is imported
-# lazily, at call time, and raises an ImportError naming its extra.
 [project.optional-dependencies]
+# The slim base (#538): GDAL, the vector stack, scikit-image and georeader
+# sit behind extras, imported when an operator that needs them runs, so
+# `import geoops` costs NumPy, SciPy, pandas, pyproj and affine.
+# Rasterio: `geom` reprojection / resampling / windows, `io` file reads
+# and writes, `patch_ops` windows.
+raster = ["rasterio>=1.3"]
+# Polygons and points as tables: `feature`, `mask`, `measure`, `plume`
+# (geopandas); footprint algebra and rasterising in `geom`, `io`, `mask`,
+# `measure`, `plume` (shapely).
+vector = ["geopandas>=0.14", "shapely>=2.0"]
+# scikit-image: `_src.labels` (connected components, skeletons), `feature`,
+# `measure`, `segment`, `normalize.CLAHE`, `geom` (Resize / Resample,
+# registration).
+morph = ["scikit-image>=0.25"]
+# georeader: the engine behind `geom` reprojection / mosaics, `io` reads,
+# `mask` rasterize, `plume` vectorize and `radiometry` solar geometry
+# (through `geoops._src.engine`); and the carrier's georeader bridge.
+# typing-extensions: `georeader.geotensor` imports `Self` from it without
+# declaring it (upstream packaging bug in >=2.1).
+sensors = [
+    "geotoolz-array[georeader]>=0.3.0",
+    "georeader-spaceml>=2.1",
+    "typing-extensions>=4.0",
+]
 # `viz.ApplyColormap` resolves named matplotlib colormaps; the rest of
 # `viz` needs no extra.
 viz = ["matplotlib>=3.10.8"]
@@ -121,6 +116,10 @@ netcdf = ["geotoolz-cloud[netcdf]>=0.6"]
 # Zarr sink (`io.WriteZarr`); targets the zarr-python 3 API
 # (`Group.create_array`).
 zarr = ["zarr>=3"]
+# Every extra above.
+all = [
+    "geotoolz-ops[raster,vector,morph,sensors,viz,learn,hydra,patch,vector-cube,cloud,hdf5,hdf4,netcdf,zarr]",
+]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"

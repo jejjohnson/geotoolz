@@ -40,19 +40,12 @@ import tempfile
 from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
-import shapely.wkt
 from geoarray import GeoArray, RasterSource
 from geoarray.interop.georeader import source_from_georeader
-from georeader import read, save
-from georeader.rasterio_reader import RasterioReader
 from pipekit import Operator
-from rasterio.errors import RasterioIOError
-from rasterio.io import DatasetReaderBase
-from rasterio.windows import Window
-from shapely.geometry import MultiPolygon, Polygon, box
 
 from geoops._src.config import (
     as_tuple,
@@ -62,10 +55,18 @@ from geoops._src.config import (
 )
 from geoops._src.engine import from_engine, to_engine
 from geoops._src.geo import reject_georeader, require_geoarray
+from geoops._src.optional import optional_name, optional_root
 from geoops.io._src.errors import GeoToolzIOError
 
 
-Source = str | PathLike[str] | DatasetReaderBase | RasterSource | GeoArray
+if TYPE_CHECKING:
+    # annotations only: rasterio is the [raster] extra, shapely [vector]
+    from rasterio.io import DatasetReaderBase
+    from rasterio.windows import Window
+    from shapely.geometry import MultiPolygon, Polygon
+
+    Source = str | PathLike[str] | DatasetReaderBase | RasterSource | GeoArray
+
 Bounds = tuple[float, float, float, float]
 Resolution = float | tuple[float, float]
 
@@ -130,6 +131,12 @@ def _window_config(window: Window) -> tuple[float, float, float, float]:
 
 
 def _coerce_window(window: Window | tuple[float, float, float, float]) -> Window:
+    Window = optional_name(
+        "rasterio.windows",
+        "Window",
+        "raster",
+        feature="geoops.io",
+    )
     if isinstance(window, Window):
         return window
     col_off, row_off, width, height = window
@@ -156,6 +163,18 @@ def _coerce_source(
         GeoToolzIOError: ``indexes`` is given for a source that cannot
             select bands.
     """
+    DatasetReaderBase = optional_name(
+        "rasterio.io",
+        "DatasetReaderBase",
+        "raster",
+        feature="geoops.io",
+    )
+    RasterioReader = optional_name(
+        "georeader.rasterio_reader",
+        "RasterioReader",
+        "sensors",
+        feature="geoops.io",
+    )
     reject_georeader(src, op_name)
     if isinstance(src, str | PathLike):
         return source_from_georeader(RasterioReader(str(src), indexes=indexes))
@@ -262,6 +281,15 @@ class ReadWindow(SourceOperator):
         self.boundless = boundless
 
     def _apply(self) -> GeoArray:
+        RasterioIOError = optional_name(
+            "rasterio.errors",
+            "RasterioIOError",
+            "raster",
+            feature="geoops.io.ReadWindow",
+        )
+        read = optional_name(
+            "georeader", "read", "sensors", feature="geoops.io.ReadWindow"
+        )
         try:
             data = to_engine(_coerce_source(self.src, self.indexes, "ReadWindow"))
             out = read.read_from_window(data, self.window, boundless=self.boundless)
@@ -326,6 +354,15 @@ class ReadBounds(SourceOperator):
         self.boundless = boundless
 
     def _apply(self) -> GeoArray:
+        RasterioIOError = optional_name(
+            "rasterio.errors",
+            "RasterioIOError",
+            "raster",
+            feature="geoops.io.ReadBounds",
+        )
+        read = optional_name(
+            "georeader", "read", "sensors", feature="geoops.io.ReadBounds"
+        )
         try:
             data = to_engine(_coerce_source(self.src, self.indexes, "ReadBounds"))
             out = read.read_from_bounds(
@@ -402,6 +439,15 @@ class ReadCenterCoords(SourceOperator):
         self.boundless = boundless
 
     def _apply(self) -> GeoArray:
+        RasterioIOError = optional_name(
+            "rasterio.errors",
+            "RasterioIOError",
+            "raster",
+            feature="geoops.io.ReadCenterCoords",
+        )
+        read = optional_name(
+            "georeader", "read", "sensors", feature="geoops.io.ReadCenterCoords"
+        )
         try:
             source = _coerce_source(self.src, self.indexes, "ReadCenterCoords")
             out = read.read_from_center_coords(
@@ -481,6 +527,15 @@ class ReadTile(SourceOperator):
         self.resolution = as_tuple(resolution)
 
     def _apply(self) -> GeoArray:
+        RasterioIOError = optional_name(
+            "rasterio.errors",
+            "RasterioIOError",
+            "raster",
+            feature="geoops.io.ReadTile",
+        )
+        read = optional_name(
+            "georeader", "read", "sensors", feature="geoops.io.ReadTile"
+        )
         z, x, y = self.tile
         try:
             data = to_engine(_coerce_source(self.src, self.indexes, "ReadTile"))
@@ -555,6 +610,9 @@ class ReadPolygon(SourceOperator):
         indexes: list[int] | None = None,
         boundless: bool = True,
     ) -> None:
+        shapely = optional_root(
+            "shapely.wkt", "vector", feature="geoops.io.ReadPolygon"
+        )
         self.src = src
         self.polygon = (
             shapely.wkt.loads(polygon) if isinstance(polygon, str) else polygon
@@ -564,6 +622,15 @@ class ReadPolygon(SourceOperator):
         self.boundless = boundless
 
     def _apply(self) -> GeoArray:
+        RasterioIOError = optional_name(
+            "rasterio.errors",
+            "RasterioIOError",
+            "raster",
+            feature="geoops.io.ReadPolygon",
+        )
+        read = optional_name(
+            "georeader", "read", "sensors", feature="geoops.io.ReadPolygon"
+        )
         try:
             data = to_engine(_coerce_source(self.src, self.indexes, "ReadPolygon"))
             out = read.read_from_polygon(
@@ -638,6 +705,15 @@ class ReadReprojectLike(SourceOperator):
         self.resolution = as_tuple(resolution)
 
     def _apply(self) -> GeoArray:
+        RasterioIOError = optional_name(
+            "rasterio.errors",
+            "RasterioIOError",
+            "raster",
+            feature="geoops.io.ReadReprojectLike",
+        )
+        read = optional_name(
+            "georeader", "read", "sensors", feature="geoops.io.ReadReprojectLike"
+        )
         try:
             like = to_engine(_coerce_source(self.like, None, "ReadReprojectLike"))
         except (FileNotFoundError, OSError, RasterioIOError) as exc:
@@ -717,6 +793,15 @@ class ReadToCRS(SourceOperator):
         self.indexes = indexes
 
     def _apply(self) -> GeoArray:
+        RasterioIOError = optional_name(
+            "rasterio.errors",
+            "RasterioIOError",
+            "raster",
+            feature="geoops.io.ReadToCRS",
+        )
+        read = optional_name(
+            "georeader", "read", "sensors", feature="geoops.io.ReadToCRS"
+        )
         try:
             data = to_engine(_coerce_source(self.src, self.indexes, "ReadToCRS"))
             if self.bounds is None:
@@ -922,6 +1007,12 @@ class WriteCOG(SinkOperator):
         self.creation_options = mapping_from_pairs(creation_options)
 
     def _apply(self, gt: GeoArray) -> None:
+        RasterioIOError = optional_name(
+            "rasterio.errors",
+            "RasterioIOError",
+            "raster",
+            feature="geoops.io.WriteCOG",
+        )
         require_geoarray(gt, "WriteCOG")
         if len(gt.shape) not in (2, 3):
             raise GeoToolzIOError(
@@ -1019,6 +1110,12 @@ class WriteGeoTIFF(SinkOperator):
         self.tags = mapping_from_pairs(tags)
 
     def _apply(self, gt: GeoArray) -> None:
+        RasterioIOError = optional_name(
+            "rasterio.errors",
+            "RasterioIOError",
+            "raster",
+            feature="geoops.io.WriteGeoTIFF",
+        )
         require_geoarray(gt, "WriteGeoTIFF")
         if len(gt.shape) not in (2, 3):
             raise GeoToolzIOError(
@@ -1052,6 +1149,9 @@ class WriteGeoTIFF(SinkOperator):
         return None
 
     def _save(self, gt: GeoArray, path: str) -> None:
+        save = optional_name(
+            "georeader", "save", "sensors", feature="geoops.io.WriteGeoTIFF"
+        )
         save.save_tiled_geotiff(
             to_engine(gt),
             path,
@@ -1215,6 +1315,18 @@ class LoadFromSTAC(SourceOperator):
         self.resolution = as_tuple(resolution)
 
     def _apply(self) -> GeoArray:
+        RasterioIOError = optional_name(
+            "rasterio.errors",
+            "RasterioIOError",
+            "raster",
+            feature="geoops.io.LoadFromSTAC",
+        )
+        RasterioReader = optional_name(
+            "georeader.rasterio_reader",
+            "RasterioReader",
+            "sensors",
+            feature="geoops.io.LoadFromSTAC",
+        )
         try:
             href = self.item.assets[self.asset_key].href
         except KeyError as exc:
@@ -1296,6 +1408,12 @@ class LoadFromEE(SourceOperator):
         self.bands = bands
 
     def _apply(self) -> GeoArray:
+        box = optional_name(
+            "shapely.geometry",
+            "box",
+            "vector",
+            feature="geoops.io.LoadFromEE",
+        )
         try:
             import ee
             from affine import Affine

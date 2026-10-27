@@ -10,7 +10,9 @@ operator fails — with an ``ImportError`` that names the extra to add.
 from __future__ import annotations
 
 import importlib
+import sys
 from types import ModuleType
+from typing import Any
 
 
 def import_optional(module: str, extra: str, *, feature: str) -> ModuleType:
@@ -36,3 +38,31 @@ def import_optional(module: str, extra: str, *, feature: str) -> ModuleType:
             f"which is not installed. Install it with "
             f"`pip install 'geotoolz-ops[{extra}]'`."
         ) from exc
+
+
+def optional_root(module: str, extra: str, *, feature: str) -> ModuleType:
+    """``import a.b`` lazily: import ``module`` and return its top package ``a``.
+
+    Example:
+        >>> optional_root("json.decoder", "base", feature="doc").__name__
+        'json'
+    """
+    import_optional(module, extra, feature=feature)
+    return sys.modules[module.split(".")[0]]
+
+
+def optional_name(module: str, name: str, extra: str, *, feature: str) -> Any:
+    """``from module import name`` lazily, with the extra's install hint.
+
+    ``name`` may be an attribute of ``module`` or one of its submodules
+    (``from georeader import read``).
+
+    Example:
+        >>> optional_name("json", "decoder", "base", feature="doc").__name__
+        'json.decoder'
+    """
+    parent = import_optional(module, extra, feature=feature)
+    try:
+        return getattr(parent, name)
+    except AttributeError:
+        return import_optional(f"{module}.{name}", extra, feature=feature)

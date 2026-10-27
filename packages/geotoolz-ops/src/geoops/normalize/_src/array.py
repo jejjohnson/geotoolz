@@ -7,11 +7,17 @@ adaptive histogram equalization step.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 from jaxtyping import Float, Shaped
-from skimage.exposure import equalize_adapthist
 
+from geoops._src.optional import optional_name
 from geoops._src.shape import BAND_AXIS
+
+
+if TYPE_CHECKING:
+    pass
 
 
 def stat_axes(
@@ -319,6 +325,12 @@ def _clahe_slice(
     clip_limit: float,
     nbins: int,
 ) -> np.ndarray:
+    equalize_adapthist = optional_name(
+        "skimage.exposure",
+        "equalize_adapthist",
+        "morph",
+        feature="geoops.normalize",
+    )
     out = np.array(values, dtype=float, copy=True)
     valid = np.isfinite(values)
     if not np.any(valid):

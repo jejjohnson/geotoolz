@@ -9,15 +9,17 @@ directly and only add the pixel → CRS point conversion.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import einx
 import numpy as np
 from jaxtyping import Bool, Float, Num
-from skimage.feature import (
-    canny,
-    multiscale_basic_features,
-    structure_tensor,
-    structure_tensor_eigenvalues,
-)
+
+from geoops._src.optional import optional_name
+
+
+if TYPE_CHECKING:
+    pass
 
 
 def canny_edges(
@@ -50,6 +52,12 @@ def canny_edges(
         >>> bool(canny_edges(image)[:, 7:9].any())
         True
     """
+    canny = optional_name(
+        "skimage.feature",
+        "canny",
+        "morph",
+        feature="geoops.feature",
+    )
     arr = np.asarray(image)
     if arr.dtype in (np.int64, np.uint64):
         arr = arr.astype(np.float64)
@@ -77,6 +85,18 @@ def structure_tensor_eigvals(
         >>> structure_tensor_eigvals(np.random.rand(8, 8)).shape
         (2, 8, 8)
     """
+    structure_tensor = optional_name(
+        "skimage.feature",
+        "structure_tensor",
+        "morph",
+        feature="geoops.feature",
+    )
+    structure_tensor_eigenvalues = optional_name(
+        "skimage.feature",
+        "structure_tensor_eigenvalues",
+        "morph",
+        feature="geoops.feature",
+    )
     tensor = structure_tensor(np.asarray(image, dtype=float), sigma=sigma)
     return np.asarray(structure_tensor_eigenvalues(tensor))
 
@@ -108,6 +128,12 @@ def multiscale_features(
         ...                     texture=False, sigma_max=2.0).shape[1:]
         (8, 8)
     """
+    multiscale_basic_features = optional_name(
+        "skimage.feature",
+        "multiscale_basic_features",
+        "morph",
+        feature="geoops.feature",
+    )
     features = multiscale_basic_features(
         np.asarray(image, dtype=float),
         intensity=intensity,

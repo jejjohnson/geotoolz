@@ -27,28 +27,11 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import geoarray
 import numpy as np
-import rasterio.windows
 from affine import Affine
 from geoarray import DIMS, FrozenAttrs, GeoArray
-from georeader import (
-    griddata,
-    mosaic,
-    rasterize,
-    read,
-    slices,
-    vectorize,
-    window_utils,
-)
 from pipekit import Operator
 from pyproj import CRS
-from rasterio.warp import transform_bounds
 from scipy.ndimage import shift as ndi_shift
-from shapely.ops import unary_union
-from skimage.registration import (
-    optical_flow_ilk,
-    optical_flow_tvl1,
-    phase_cross_correlation,
-)
 
 from geoops._src.bands import band_count
 from geoops._src.blending import normalize_overlap_add, overlap_add
@@ -100,6 +83,12 @@ _SEGMENT_META = "__geotoolz_segment_meta__"
 if TYPE_CHECKING:
     import geopandas as gpd
     from shapely.geometry.base import BaseGeometry
+
+from geoops._src.optional import optional_name, optional_root
+
+
+if TYPE_CHECKING:
+    import rasterio.windows
 
 
 def _registration_band(values: np.ndarray, band: int, name: str) -> np.ndarray:
@@ -216,6 +205,19 @@ def _mosaic_frame(gts: Sequence[GeoArray]) -> tuple[Affine, rasterio.windows.Win
     input) without warping any data. Returns the frame transform and the
     ``(0, 0, W, H)`` output window.
     """
+    rasterio = optional_root("rasterio.windows", "raster", feature="geoops.geom")
+    transform_bounds = optional_name(
+        "rasterio.warp",
+        "transform_bounds",
+        "raster",
+        feature="geoops.geom",
+    )
+    window_utils = optional_name(
+        "georeader",
+        "window_utils",
+        "sensors",
+        feature="geoops.geom",
+    )
     first = gts[0]
     first_transform = affine_of(first)
     first_crs = CRS.from_user_input(first.crs)
@@ -303,6 +305,9 @@ class Reproject(Operator):
         self.resampling = resampling
 
     def _apply(self, gt: GeoArray) -> GeoArray:
+        read = optional_name(
+            "georeader", "read", "sensors", feature="geoops.geom.Reproject"
+        )
         require_geoarray(gt, "Reproject")
         resampling = resolve_resampling(self.resampling)
         engine_gt = to_engine(gt)
@@ -370,6 +375,9 @@ class ReprojectLike(Operator):
         self.resampling = resampling
 
     def _apply(self, gt: GeoArray) -> GeoArray:
+        read = optional_name(
+            "georeader", "read", "sensors", feature="geoops.geom.ReprojectLike"
+        )
         name = type(self).__name__
         require_geoarray(gt, name)
         reject_georeader(self.like, f"{name} (like)")
@@ -461,6 +469,12 @@ class PhaseAlign(Operator):
     def _apply(
         self, gt: GeoArray | np.ndarray, reference: GeoArray | np.ndarray
     ) -> GeoArray | np.ndarray | tuple[float, float, float]:
+        phase_cross_correlation = optional_name(
+            "skimage.registration",
+            "phase_cross_correlation",
+            "morph",
+            feature="geoops.geom.PhaseAlign",
+        )
         require_grid_match(gt, reference, "PhaseAlign", names=("moving", "reference"))
         arr = np.asarray(gt)
         mov_band = _mean_imputed(
@@ -556,6 +570,12 @@ class OpticalFlowTVL1(Operator):
     def _apply(
         self, gt: GeoArray | np.ndarray, reference: GeoArray | np.ndarray
     ) -> GeoArray | np.ndarray:
+        optical_flow_tvl1 = optional_name(
+            "skimage.registration",
+            "optical_flow_tvl1",
+            "morph",
+            feature="geoops.geom.OpticalFlowTVL1",
+        )
         name = type(self).__name__
         require_grid_match(gt, reference, name, names=("moving", "reference"))
         flow = np.asarray(
@@ -579,6 +599,12 @@ class OpticalFlowILK(OpticalFlowTVL1):
     def _apply(
         self, gt: GeoArray | np.ndarray, reference: GeoArray | np.ndarray
     ) -> GeoArray | np.ndarray:
+        optical_flow_ilk = optional_name(
+            "skimage.registration",
+            "optical_flow_ilk",
+            "morph",
+            feature="geoops.geom.OpticalFlowILK",
+        )
         name = type(self).__name__
         require_grid_match(gt, reference, name, names=("moving", "reference"))
         flow = np.asarray(
@@ -888,6 +914,12 @@ class CropToBounds(Operator):
         self.crs = crs
 
     def _apply(self, gt: GeoArray) -> GeoArray:
+        rasterio = optional_root(
+            "rasterio.windows", "raster", feature="geoops.geom.CropToBounds"
+        )
+        read = optional_name(
+            "georeader", "read", "sensors", feature="geoops.geom.CropToBounds"
+        )
         require_geoarray(gt, "CropToBounds")
         cropped = read.read_from_bounds(
             to_engine(gt), tuple(self.bounds), crs_bounds=self.crs, boundless=False
@@ -951,6 +983,15 @@ class Tile(Operator):
         self.include_incomplete = include_incomplete
 
     def _apply(self, gt: GeoArray | np.ndarray) -> list[GeoArray] | list[np.ndarray]:
+        rasterio = optional_root(
+            "rasterio.windows", "raster", feature="geoops.geom.Tile"
+        )
+        slices = optional_name(
+            "georeader",
+            "slices",
+            "sensors",
+            feature="geoops.geom.Tile",
+        )
         overlap: tuple[int, int] | None = None
         if self.stride is not None:
             overlap = (self.size[0] - self.stride[0], self.size[1] - self.stride[1])
@@ -1873,6 +1914,15 @@ class Mosaic(Operator):
         self.resampling = resampling
 
     def _apply(self, gts: list[GeoArray]) -> GeoArray:
+        mosaic = optional_name(
+            "georeader",
+            "mosaic",
+            "sensors",
+            feature="geoops.geom.Mosaic",
+        )
+        read = optional_name(
+            "georeader", "read", "sensors", feature="geoops.geom.Mosaic"
+        )
         _require_carrier_list(gts, "Mosaic", "rasters")
         for gt in gts:
             require_geoarray(gt, "Mosaic")
@@ -1957,6 +2007,12 @@ class Georeference(Operator):
         self.valid_glt = valid_glt
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray:
+        griddata = optional_name(
+            "georeader",
+            "griddata",
+            "sensors",
+            feature="geoops.geom.Georeference",
+        )
         reject_geotensor(gt, "Georeference")
         reject_georeader(self.glt, "Georeference (glt)")
         reject_geotensor(self.valid_glt, "Georeference (valid_glt)")
@@ -2168,6 +2224,12 @@ class Vectorize(Operator):
         self.simplify_tolerance = simplify_tolerance
 
     def _apply(self, gt: GeoArray) -> list[BaseGeometry]:
+        vectorize = optional_name(
+            "georeader",
+            "vectorize",
+            "sensors",
+            feature="geoops.geom.Vectorize",
+        )
         require_geoarray(gt, "Vectorize")
         # ``get_polygons`` asserts a 2-D mask; squeeze the canonical
         # ``(1, H, W)`` band axis and pass the transform explicitly.
@@ -2197,6 +2259,18 @@ def _rasterize_like(
     """
     # A unit burn is ``uint8``, which cannot hold a NaN / negative /
     # fractional / >255 background; widen to ``float32`` for those.
+    rasterize = optional_name(
+        "georeader",
+        "rasterize",
+        "sensors",
+        feature="geoops.geom",
+    )
+    unary_union = optional_name(
+        "shapely.ops",
+        "unary_union",
+        "vector",
+        feature="geoops.geom",
+    )
     fill_value = float(fill)
     fits_uint8 = fill_value.is_integer() and 0 <= fill_value <= 255
     unit_dtype = np.uint8 if fits_uint8 else np.float32
