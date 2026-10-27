@@ -13,8 +13,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+import geoarray
 import numpy as np
-from geoarray import DIMS, FrozenAttrs, GeoArray, RasterSource
+from geoarray import FrozenAttrs, GeoArray, RasterSource
+from geoarray.coords import SpectralAxis
 from rasterio.enums import Resampling
 
 from geoproducts._src.carrier import require_source
@@ -108,7 +110,7 @@ def stack(
             source_to_georeader(reader), ref_engine, resampling=Resampling[method]
         )
         parts.append(from_georeader(warped))
-    return _concatenate(ref, parts, [r.attrs for r in readers])
+    return _concatenate(ref, parts, [r.attrs for r in readers], list(readers))
 
 
 def _auto_resampling(reader: RasterSource, ref_res: float) -> str:
@@ -119,32 +121,60 @@ def _auto_resampling(reader: RasterSource, ref_res: float) -> str:
 
 
 def _concatenate(
-    ref: GeoArray, parts: list[GeoArray], part_attrs: list[Any]
+    ref: GeoArray,
+    parts: list[GeoArray],
+    part_attrs: list[Any],
+    sources: list[Any] | None = None,
 ) -> GeoArray:
-    """Concatenate ``parts`` along bands; per-band attrs come from the readers
-    (georeader's warp drops ``attrs``)."""
+    """Concatenate ``parts`` along bands with `geoarray.concat`.
+
+    georeader's warp drops ``attrs`` and coordinates, so each part is first
+    rebuilt on the reference grid with its reader's band axis (``coords``)
+    and per-band attrs; `geoarray.concat` then joins both, so names,
+    wavelengths and FWHM survive whenever every reader declares them.
+    """
     keys = {(np.dtype(p.dtype), _fill_key(p.fill_value)) for p in parts}
     integer = len(keys) == 1 and np.issubdtype(next(iter(keys))[0], np.integer)
-    arrays = [np.asarray(p) if integer else _nan_filled(p) for p in parts]
-    attrs: dict[str, Any] = {}
-    for key in ("band_names", "units", "wavelengths"):
-        values: list[Any] = []
-        for part, part_attr in zip(parts, part_attrs, strict=True):
-            per_band = part_attr.get(key)
-            if per_band is None or len(per_band) != np.asarray(part).shape[0]:
-                break
-            values.extend(per_band)
-        else:
-            attrs[key] = tuple(values)
-    return GeoArray(
-        np.concatenate(arrays, axis=0),
-        ref.transform,
-        ref.crs,
-        fill_value=parts[0].fill_value if integer else np.nan,
-        # the readers' attrs, carried: the 0.2 per-band keys stay as they are
-        attrs=FrozenAttrs(attrs),
-        dims=DIMS[-arrays[0].ndim :],
-    )
+    fill = parts[0].fill_value if integer else np.nan
+    sources = sources if sources is not None and len(sources) == len(parts) else []
+    normalized = []
+    for i, (part, part_attr) in enumerate(zip(parts, part_attrs, strict=True)):
+        values = np.asarray(part) if integer else _nan_filled(part)
+        count = values.shape[0]
+        normalized.append(
+            GeoArray(
+                values,
+                ref.transform,
+                ref.crs,
+                fill_value=fill,
+                # the readers' 0.2 per-band keys, where they fit this part
+                attrs=FrozenAttrs(
+                    {
+                        key: tuple(part_attr[key])
+                        for key in ("band_names", "units", "wavelengths")
+                        if key in part_attr and len(part_attr[key]) == count
+                    }
+                ),
+                dims=parts[0].dims,
+                coords=_band_coords(sources[i] if sources else None, count),
+            )
+        )
+    out = geoarray.concat(normalized, "band")
+    # geoarray's per-band keys exclude `units` (a carrier's units are
+    # usually one string); the readers declare one per band, so join them
+    # (concat keeps the first part's, so drop it unless every part has them)
+    units = [g.attrs.get("units") for g in normalized]
+    if all(isinstance(u, tuple) for u in units):
+        return out.with_attrs(units=tuple(item for u in units for item in u))
+    if "units" in out.attrs:
+        return out.with_data(out.data, attrs=out.attrs.drop("units"))
+    return out
+
+
+def _band_coords(source: Any, count: int) -> tuple[SpectralAxis, ...]:
+    """``source``'s `SpectralAxis` when it has one of ``count`` bands, else ``()``."""
+    axes = [c for c in getattr(source, "coords", ()) if isinstance(c, SpectralAxis)]
+    return (axes[0],) if len(axes) == 1 and axes[0].size == count else ()
 
 
 def _nan_filled(part: GeoArray) -> np.ndarray:

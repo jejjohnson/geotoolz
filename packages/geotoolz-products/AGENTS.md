@@ -73,7 +73,7 @@ if something is missing, add it there so the next reader gets it:
 | `geostationary.py` | the geostationary fixed grid (`FixedGrid`, `geos_crs`, `scan_angle_transform`, `on_earth`) |
 | `stack.py` | several readers on one reference grid (`geoproducts.stack`) |
 | `presets.py` | `Recipe`, `rgb_recipe`, `geotoolz_module` (the lazy geotoolz import), `parallax_correct` |
-| `constants.py` | lazy loaders for packaged CSV / JSON tables |
+| `constants.py` | lazy loaders for packaged CSV / JSON tables; `band_values` (one number per band from a `BANDS` table) |
 | `extras.py` | `require` / `missing_extra` / `install_hint` for optional dependencies |
 | `base.py` | `ProductReader`, `resolve_fill_value` |
 | `carrier.py` | `reject_georeader`, `require_source` (refuse georeader carriers at a public boundary) |

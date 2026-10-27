@@ -27,7 +27,7 @@ geoproducts/<sensor>/
 | `goes` | `l1b.py` (`Reader`, `QualityReader`), `l2.py` (`L2Reader`) | `aws.py` | `base.py` (ABI grid mapping), `metadata.py` |
 | `himawari` | `reader.py` (`Reader`), `l2.py` (`L2Reader`) | `aws.py` | `hsd.py` (the HSD decoder) |
 | `carbonmapper` | `image.py`, `rasters.py`, `sources_raster.py` | `api_queries.py`, `download.py` | — |
-| `toy_sensor` | `reader.py` | — | — |
+| `toy_sensor` | `reader.py` (`Reader`), `swath.py` (`SwathReader`, a `GeoSwath`) | — | — |
 
 ## Write the reader
 
@@ -125,7 +125,7 @@ add it here first.
 | `_src.files` | `atomic_path` / `atomic_write_text` / `write_private_json` — complete-or-absent writes; `private=True` is owner-only (`0600`) from the first byte | `himawari.aws`, `_src.credentials`, `_src.net` |
 | `_src.credentials` | `auth_path(provider)` (`~/.geoproducts/auth_<provider>.json`), `read_json_config`, `write_private_json`, `jwt_expiry` | `carbonmapper` |
 | `_src.query` | `validate_lonlat_bbox`, `as_utc`, `rfc3339_utc`, `time_interval` (STAC / OGC ranges) | `carbonmapper`, `goes.aws`, `himawari.aws` |
-| `_src.constants` | `load_csv` / `load_json` for packaged tables | `toy_sensor`, `goes`, `himawari` |
+| `_src.constants` | `load_csv` / `load_json` for packaged tables; `band_values` for one number per band (centre wavelength, FWHM) from a `BANDS` table | `toy_sensor`, `goes`, `himawari` |
 | `_src.extras` | `require`, `missing_extra`, `install_hint` for optional dependencies | every extra-gated feature |
 
 Object-store reads go through geotoolz-cloud (`geocloud.hdf.open_hdf5`,

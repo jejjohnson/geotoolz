@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from affine import Affine
-from geoarray import DIMS, FrozenAttrs, GeoArray, Grid, PixelWindow
+from geoarray import FrozenAttrs, GeoArray, Grid, PixelWindow
+from geoarray.coords import SpectralAxis
 
 
 if TYPE_CHECKING:
@@ -178,6 +179,33 @@ class ProductReader(ABC):
         # (see geoops._src.bands.DEFAULT_BAND_KEYS).
         return FrozenAttrs({"band_names": self.bands, **self._band_attrs()})
 
+    @property
+    def coords(self) -> tuple[Any, ...]:
+        """The coordinates every read carries: a `SpectralAxis` on ``band``.
+
+        Its names are `bands` and its centre wavelengths the ``wavelengths``
+        of :meth:`_band_attrs` (nm, one per band) when the reader declares
+        them; ``()`` for a reader without a ``band`` dim or whose band names
+        are not one unique name per band.
+
+        Example:
+            >>> import numpy as np
+            >>> from geoproducts.toy_sensor import Reader
+            >>> Reader("scene", data=np.zeros((4, 2, 2))).coords[0].names
+            ('blue', 'green', 'red', 'nir')
+        """
+        dims = self.dims
+        if "band" not in dims:
+            return ()
+        size = self.shape[dims.index("band")]
+        names = tuple(str(name) for name in self.bands)
+        if len(names) != size or len(set(names)) != size:
+            return ()
+        wavelengths = self._band_attrs().get("wavelengths")
+        if wavelengths is None or len(wavelengths) != size:
+            return (SpectralAxis(names),)
+        return (SpectralAxis(names, tuple(float(w) for w in wavelengths)),)
+
     def _band_attrs(self) -> dict[str, Any]:
         """Extra ``attrs`` every read carries (per-band ``units``, ``wavelengths``, …).
 
@@ -229,7 +257,8 @@ class ProductReader(ABC):
             self.grid.crs,
             fill_value=self.fill_value,
             attrs=self.attrs,
-            dims=DIMS[-np.ndim(values) :],
+            dims=self.dims,
+            coords=self.coords,
         )
 
     def load(self) -> GeoArray:

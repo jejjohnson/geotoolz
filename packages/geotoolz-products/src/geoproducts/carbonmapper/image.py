@@ -42,7 +42,7 @@ from urllib.parse import urlparse
 
 import numpy as np
 import requests
-from geoarray import DIMS, GeoArray
+from geoarray import GeoArray
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
@@ -812,7 +812,7 @@ class CMPlumeImage:
         if arr.ndim != 3 or arr.shape[0] < 4:
             return None
         return GeoArray(
-            arr[3] > 0, geo.transform, geo.crs, fill_value=False, dims=DIMS[-2:]
+            arr[3] > 0, geo.transform, geo.crs, fill_value=False, dims=("y", "x")
         )
 
     # ---- Internals -----------------------------------------------------
