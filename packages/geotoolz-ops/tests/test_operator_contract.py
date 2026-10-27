@@ -1808,3 +1808,24 @@ def test_a_numpy_operator_refuses_a_jax_carrier() -> None:
             NDVI()(scene)
     finally:
         jax.config.update("jax_enable_x64", x64)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},  # the carrier's own fill: geoarray's pad
+        {"fill_value": 5.0},  # another constant
+        {"mode": "edge"},
+        {"mode": "reflect"},
+    ],
+    ids=["own-fill", "other-constant", "edge", "reflect"],
+)
+@pytest.mark.parametrize("fill", [np.nan, None], ids=["nan-fill", "no-fill"])
+def test_pad_to_keeps_jax_on_every_path(kwargs: dict[str, Any], fill: Any) -> None:
+    """Every PadTo path runs on JAX and under jax.jit, as it declares (#580)."""
+    pytest.importorskip("jax")
+    from geoops.geom import PadTo
+
+    scene = _attributed_inputs()[0]
+    scene = scene.replace(fill_value=fill)
+    assert_backends(PadTo(shape=(20, 21), **kwargs), scene)

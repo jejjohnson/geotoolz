@@ -824,20 +824,21 @@ class PadTo(Operator):
         ):
             # Padding with the carrier's own fill is geoarray's ``pad``.
             return geoarray.pad(gt, pad_yx)
-        arr = np.asarray(gt)
-        pad_width = [(0, 0)] * (arr.ndim - 2) + list(pad_yx)
+        data = gt.data if isinstance(gt, GeoArray) else np.asarray(gt)
+        xp = gt.xp if isinstance(gt, GeoArray) else np
+        pad_width = [(0, 0)] * (data.ndim - 2) + list(pad_yx)
         if self.mode == "constant":
-            padded = np.pad(arr, pad_width, mode="constant", constant_values=constant)
+            padded = xp.pad(data, pad_width, mode="constant", constant_values=constant)
         else:
-            # `mode` is user-supplied (numpy pad-mode name); numpy's stubs
-            # only accept the literal names, so widen the check away for ty.
-            padded = np.pad(arr, pad_width, mode=cast("Any", self.mode))
+            # `mode` is user-supplied (a numpy / jax.numpy pad-mode name);
+            # the stubs only accept the literal names, so widen it for ty.
+            padded = xp.pad(data, pad_width, mode=cast("Any", self.mode))
         if not isinstance(gt, GeoArray):
             return padded
-        (top, _), (left, _) = pad_yx
-        return wrap_like(
-            gt, padded, transform=affine_of(gt) * Affine.translation(-left, -top)
-        )
+        # geoarray's pad moves the transform on either backend (and under
+        # jax.jit); the pixels are the ones padded above
+        moved = geoarray.pad(gt.replace(fill_value=None), pad_yx, fill_value=0)
+        return moved.with_data(padded, fill_value=carrier_fill)
 
     def get_config(self) -> dict[str, Any]:
         return {
