@@ -79,6 +79,25 @@ def test_stack_keeps_the_readers_dims_and_band_axis() -> None:
     assert out.coord("band") == SpectralAxis(("a", "b"), (500.0, 600.0))
 
 
+def test_stack_keeps_the_fwhm_of_every_reader() -> None:
+    """Review on #573: geoarray.concat joins the whole axis, FWHM included."""
+    parts = [
+        GeoArray(
+            np.ones((1, 3, 4), np.float32),
+            TRANSFORM,
+            4326,
+            fill_value=np.nan,
+            dims="band y x",
+            coords=(SpectralAxis((name,), (wl,), (fw,)),),
+        )
+        for name, wl, fw in (("a", 500.0, 20.0), ("b", 600.0, 30.0))
+    ]
+
+    out = stack(parts, resampling="nearest")
+
+    assert out.coord("band").fwhm_nm == (20.0, 30.0)
+
+
 def test_stack_names_the_bands_of_readers_without_band_attrs() -> None:
     """Review of the stack: readers name bands in coords, not only in attrs."""
     readers = [
@@ -152,3 +171,16 @@ def test_the_toy_swath_reader_checks_its_shapes(kwargs: dict, match: str) -> Non
     args = {"data": np.ones((4, 3, 5)), "lat": lat, "lon": lon, **kwargs}
     with pytest.raises(ValueError, match=match):
         toy_sensor.SwathReader("granule", **args)
+
+
+def test_band_values_reads_one_number_per_band_in_band_order() -> None:
+    """Review on #573: the shared band-table lookup both toy readers use."""
+    from geoproducts._src.constants import band_values
+    from geoproducts.toy_sensor import constants
+
+    assert band_values(constants.BANDS, ("nir", "blue"), "wavelength_nm") == (
+        858.0,
+        469.0,
+    )
+    with pytest.raises(KeyError):
+        band_values(constants.BANDS, ("swir",), "wavelength_nm")

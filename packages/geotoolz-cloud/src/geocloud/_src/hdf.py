@@ -547,38 +547,58 @@ def _cf_dims(holder: Any, var: Any, indexes: list[int] | None) -> tuple[Any, ...
         ``(dims, coords)``.
     """
     names = [str(name) for name in var.dimensions]
-    dims: list[str] = []
+    lead = names[:-2]
+    found = [_netcdf_lookup(holder, name) for name in lead]
+    attrs = [_plain(dict(v.__dict__)) if v is not None else {} for v in found]
+    kinds = [_cf_kind(name, a) for name, a in zip(lead, attrs, strict=True)]
+    dims = _unique_dims(lead, kinds)
     coords: list[Any] = []
-    for position, name in enumerate(names[:-2]):
-        coord_var = _in_group_or_parents(holder, name)
-        attrs = _plain(dict(coord_var.__dict__)) if coord_var is not None else {}
-        kind = _cf_kind(name, attrs)
-        dim = {"time": "time", "vertical": "level"}.get(kind, name)
-        if dim in dims or dim in ("y", "x"):
-            dim, kind = name, "other"
-        dims.append(dim)
-        if coord_var is None or len(coord_var.dimensions) != 1:
-            continue
+    for position, (name, coord_var, attr, kind, dim) in enumerate(
+        zip(lead, found, attrs, kinds, dims, strict=True)
+    ):
+        named = (kind, dim) in (("time", "time"), ("vertical", "level"))
+        if not named or coord_var is None or len(coord_var.dimensions) != 1:
+            continue  # kept its NetCDF name, or no 1-D coordinate to read
         values = np.asarray(coord_var[:])
         if position == 0 and indexes is not None:
             values = values[[index - 1 for index in indexes]]
-        if kind == "vertical":
+        if dim == "level":
             values_list = tuple(float(v) for v in values.tolist())
-            coords.append(VerticalAxis(values_list, _vertical(name, attrs)))
-        elif kind == "time":
-            stamps = _cf_times(values, attrs)
+            coords.append(VerticalAxis(values_list, _vertical(name, attr)))
+        else:  # time
+            stamps = _cf_times(values, attr)
             if stamps is not None:
                 coords.append(TimeAxis(stamps))
     return (*dims, "y", "x"), tuple(coords)
 
 
-def _in_group_or_parents(group: Any, name: str) -> Any | None:
-    """The variable ``name`` in ``group`` or the nearest parent holding it."""
-    while group is not None:
-        if name in group.variables:
-            return group.variables[name]
-        group = getattr(group, "parent", None)
-    return None
+def _unique_dims(lead: list[str], kinds: list[str]) -> list[str]:
+    """Leading dims named ``time`` / ``level`` by kind, without a repeat.
+
+    A dim keeps its NetCDF name when renaming it would repeat another dim's
+    name (two vertical dims, ``("depth", "level", y, x)``), or clash with
+    ``y`` / ``x``; renaming stops once the names are unique.
+
+    Example:
+        >>> _unique_dims(["depth", "level"], ["vertical", "vertical"])
+        ['depth', 'level']
+        >>> _unique_dims(["time", "depth"], ["time", "vertical"])
+        ['time', 'level']
+    """
+    dims = [
+        {"time": "time", "vertical": "level"}.get(k, n)
+        for n, k in zip(lead, kinds, strict=True)
+    ]
+    while True:
+        taken = [*dims, "y", "x"]
+        clash = [i for i, d in enumerate(dims) if d != lead[i] and taken.count(d) > 1]
+        if not clash:
+            break
+        for i in clash:
+            dims[i] = lead[i]
+    if len(set(dims)) != len(dims) or {"y", "x"} & set(dims):
+        return list(lead)  # the NetCDF names themselves repeat or clash: leave them
+    return dims
 
 
 def _cf_kind(name: str, attrs: Mapping[str, Any]) -> str:
