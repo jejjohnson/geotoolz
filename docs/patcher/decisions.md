@@ -899,7 +899,7 @@ and that is where the options differ.
    - Patches of any other carrier (plain arrays, non-grid DataArrays)
      raise `TypeError` naming the deprecated `BatchedPatch` path, which
      stays one release behind a `DeprecationWarning` and is removed in
-     geotoolz-patcher 0.14.
+     geotoolz-patcher 0.15 (the deprecation shipped in 0.14.0).
 7. **Same call, new yield type.**
    - `batch_split(patcher, field, *, batch_size, pad_last=True)` keeps
      its signature and yields `PatchBatch`.

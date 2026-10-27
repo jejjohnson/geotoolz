@@ -273,6 +273,25 @@ def test_batched_patch_split_is_deprecated_and_numpy() -> None:
     assert [p.anchor for p in patches] == [p.anchor for p in patcher.split(field)]
 
 
+def test_the_removal_release_is_after_the_installed_one() -> None:
+    """The deprecation shipped in 0.14.0, so removal is a later release."""
+    import re
+
+    from packaging.version import Version
+
+    import geopatcher
+
+    field = ArrayField(np.arange(256, dtype=np.float32).reshape(16, 16))
+    with pytest.raises(TypeError) as raised:
+        next(batch_split(_patcher(), field, batch_size=2))
+    with pytest.warns(DeprecationWarning) as warned:
+        BatchedPatch.split(_patcher(), field, batch_size=2)
+
+    for message in (str(raised.value), str(warned[0].message)):
+        (removed,) = re.findall(r"geotoolz-patcher (\d+\.\d+)", message)
+        assert Version(removed) > Version(geopatcher.__version__), message
+
+
 def test_a_grid_dataarray_field_batches_as_a_geoarray() -> None:
     xr = pytest.importorskip("xarray")
     pytest.importorskip("rioxarray")
