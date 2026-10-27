@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.5](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-reader-v0.0.4...xrtoolz-reader-v0.0.5) (2026-10-27)
+
+
+### Features
+
+* **reader:** open gridded CH₄ emission inventories as a CF flux ([#357](https://github.com/jejjohnson/xrtoolz/issues/357)) ([405466b](https://github.com/jejjohnson/xrtoolz/commit/405466bb39c696bcb532a666fbf1e0e52c33f245))
+
 ## [0.0.4](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-reader-v0.0.3...xrtoolz-reader-v0.0.4) (2026-09-18)
 
 

@@ -28,6 +28,13 @@
 
 * `xrtoolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xrtoolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.0.6](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.5...xrtoolz-v0.0.6) (2026-10-27)
+
+
+### Bug Fixes
+
+* **metrics:** score a single-member ensemble CRPS as absolute error ([#352](https://github.com/jejjohnson/xrtoolz/issues/352)) ([2f6318d](https://github.com/jejjohnson/xrtoolz/commit/2f6318d614061dcff472c4d8546ece4813471c41))
+
 ## [0.0.5](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.4...xrtoolz-v0.0.5) (2026-10-05)
 
 
