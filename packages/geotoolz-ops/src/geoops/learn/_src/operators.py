@@ -103,6 +103,8 @@ class SklearnOp(Operator):
         >>> projected = op.transform(scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
@@ -521,6 +523,8 @@ class ModelOp(Operator):
             op = ModelOp(model=unet_model, batch_size=8)
             preds = op(chips_gt)  # iterates 8 chips at a time
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
     # ConfigMixin would auto-derive `model` from `__init__` as a non-JSON

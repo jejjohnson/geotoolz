@@ -31,7 +31,7 @@ import numbers
 import re
 import warnings
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import einx as _einx
 import numpy as np
@@ -268,6 +268,8 @@ class Einx(Operator):
         ... )
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -436,6 +438,8 @@ class PerBandReduce(Operator):
         >>> band_means = gz.PerBandReduce()(reflectance_gt)  # (C,)  # doctest: +SKIP
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     pattern = "... c y x -> ... c"
 
     def __init__(self, *, reduce: str = "mean") -> None:
@@ -505,6 +509,8 @@ class SpatialPool(Operator):
         >>> import geoops as gz
         >>> coarse = gz.SpatialPool(reduce="mean", factor=4)(scene_gt)  # doctest: +SKIP
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     pattern = "... (y py) (x px) -> ... y x"
 

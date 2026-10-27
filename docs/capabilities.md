@@ -1471,6 +1471,7 @@ upstream, not here.
 | `AssertHasAttribute` | class | Pass-through; raise `QCError` if attribute missing (or value mismatches). |
 | `AssertShape` | class | Pass-through; raise `QCError` if ``getattr(x, 'shape')`` mismatches. |
 | `AsyncMap` | class | Apply ``op`` to each item of an iterable inside an async event loop. |
+| `BackendError` | class | Inputs on more than one backend, or a backend the code does not run on. |
 | `BatchedMap` | class | Split an iterable into batches and call ``op`` on each batch as a list. |
 | `Branch` | class | Binary conditional: run ``if_true`` or ``if_false`` based on a predicate. |
 | `Cache` | class | Memoise an inner operator by hashing its input and config. |
@@ -1508,6 +1509,8 @@ upstream, not here.
 | `ThreadMap` | class | Apply ``op`` to each item of an iterable using a thread pool. |
 | `Try` | class | Run ``primary``; on caught exceptions run ``fallback``. |
 | `allowed` | function | Return the registered class names (``"module.Class"`` keys). |
+| `backend_name` | function | ``"jax"``, ``"dask"`` or ``"numpy"`` for raw data (tracers count as JAX). |
+| `backend_of` | function | The backend of a carrier or a raw array; ``None`` for any other value. |
 | `check_pickleable` | function | Return the list of `forbid_in_yaml`-flagged operators inside ``op``. |
 | `complement` | function | Return a predicate that negates ``predicate``. |
 | `compose` | function | Right-to-left composition (mathematical order). |
@@ -1542,7 +1545,7 @@ helper is added here, not inline in one caller.
 | `geoops._src.bands` | Shared utilities for resolving band references against GeoArray metadata. | `band_count`, `per_band_values`, `strip_band_attrs`, `take_band_coords`, `take_band_attrs`, `concat_band_attrs`, `band_names`, `resolve_band`, `resolve_bands`, `resolve_wavelengths` |
 | `geoops._src.blending` | Shared overlap-add blending primitives. | `triangular_weights`, `overlap_add`, `normalize_overlap_add` |
 | `geoops._src.config` | Shared ``get_config()`` coercion helpers. | `jsonable`, `as_tuple`, `mapping_to_pairs`, `mapping_from_pairs`, `reject_config_summary` |
-| `geoops._src.contract` | The pipekit `Operator` and `GeoArray` carrier contracts, as assertions. | `geoarrays`, `is_nested_operator`, `same`, `assert_keyword_only`, `assert_config_round_trips`, `assert_graph_mode`, `assert_same_carrier`, `assert_consistent_attrs`, `assert_fill_matches_dtype`, `assert_rejects_geotensor`, `assert_clear_rank_error`, `time_stack_of`, `time_series_of`, `frames`, `assert_time_stack` |
+| `geoops._src.contract` | The pipekit `Operator` and `GeoArray` carrier contracts, as assertions. | `geoarrays`, `is_nested_operator`, `same`, `assert_keyword_only`, `assert_config_round_trips`, `assert_graph_mode`, `assert_same_carrier`, `assert_consistent_attrs`, `assert_fill_matches_dtype`, `assert_rejects_geotensor`, `assert_clear_rank_error`, `time_stack_of`, `time_series_of`, `frames`, `assert_time_stack`, `assert_backends` |
 | `geoops._src.dtype` | Shared dtype primitives: float promotion and fills a dtype can hold. | `as_float`, `holds_fill`, `fill_for` |
 | `geoops._src.engine` | The georeader engine boundary: geotoolz carriers in, georeader out, and back. | `to_engine`, `from_engine` |
 | `geoops._src.fitted` | Shared plumbing for fitted operators (the ``fit`` / ``transform`` seam). | `PicklableLock`, `fit_lock`, `fit_once` |

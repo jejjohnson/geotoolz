@@ -247,6 +247,8 @@ class StratifiedSample(Operator):
         seed: Optional seed for reproducible draws.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
@@ -315,6 +317,8 @@ class BalancedSampler(Operator):
             present under a candidate chip centre.
         seed: Optional seed for reproducible draws.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
 

@@ -332,3 +332,90 @@ def assert_time_stack(op: Any, frame: Any) -> None:
     np.testing.assert_allclose(
         got.astype(np.float64), want.astype(np.float64), equal_nan=True
     )
+
+
+#: The backends an operator may list.
+KNOWN_BACKENDS = frozenset({"numpy", "jax", "dask"})
+
+
+def assert_backends(op: Any, sample: Any, *others: Any) -> None:
+    """``op`` declares its backends and keeps them (#532).
+
+    - ``backends`` is a non-empty tuple of known backend names.
+    - When JAX is installed: an operator that does not list ``"jax"``
+      refuses a JAX carrier with `pipekit.BackendError` naming itself; one
+      that lists it matches its NumPy result on JAX carriers, returns JAX
+      data, and traces once under ``jax.jit`` for two same-shape inputs
+      on different grids (the transform is a leaf, never static).
+
+    Each call uses a fresh copy of ``op``. 64-bit JAX is switched on for the
+    check and restored after (a carrier's transform is float64).
+
+    Args:
+        op: The operator.
+        sample: A NumPy `GeoArray` ``op`` accepts.
+        *others: Further carriers of a multi-input operator, on ``sample``'s
+            grid.
+    """
+    from pipekit import BackendError, backend_of
+
+    name = type(op).__name__
+    backends = op.backends
+    assert backends, (
+        f"{name} declares no backends: set backends = ('numpy',), or "
+        "('numpy', 'jax') when it runs on JAX carriers"
+    )
+    assert set(backends) <= KNOWN_BACKENDS, f"{name}: unknown backends {backends}"
+    try:
+        import jax
+    except ImportError:
+        return
+    carriers = (sample, *others)
+    if not all(isinstance(c, GeoArray) for c in carriers):
+        return
+    x64 = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        jaxed = [c.to_jax() for c in carriers]
+        if "jax" not in backends:
+            try:
+                copy.deepcopy(op)(*jaxed)
+            except BackendError as exc:
+                assert name in str(exc), f"BackendError does not name {name}: {exc}"
+            else:
+                raise AssertionError(
+                    f"{name} lists {backends} but ran on JAX carriers: refuse them "
+                    "(pipekit's backends check) or list 'jax' and keep its contract"
+                )
+            return
+        want = copy.deepcopy(op)(*carriers)
+        got = copy.deepcopy(op)(*jaxed)
+        for g, w in zip(geoarrays(got), geoarrays(want), strict=True):
+            assert backend_of(g) == "jax", f"{name} returned {backend_of(g)} data"
+            np.testing.assert_allclose(
+                np.asarray(g, dtype=np.float64),
+                np.asarray(w, dtype=np.float64),
+                equal_nan=True,
+                err_msg=f"{name} on JAX does not match its NumPy result",
+            )
+        traces = 0
+
+        def run(*xs: Any) -> Any:
+            nonlocal traces
+            traces += 1
+            return copy.deepcopy(op)(*xs)
+
+        jitted = jax.jit(run)
+        shift = np.array([0.0, 0.0, 10.0, 0.0, 0.0, -10.0])
+        moved = [
+            c.replace(transform=np.asarray(c.transform) + shift).to_jax()
+            for c in carriers
+        ]
+        first, second = jitted(*jaxed), jitted(*moved)
+        assert traces == 1, f"{name} retraced under jax.jit for a new grid"
+        for a, b in zip(geoarrays(first), geoarrays(second), strict=True):
+            assert not np.array_equal(
+                np.asarray(a.transform), np.asarray(b.transform)
+            ), f"{name} under jax.jit lost the input's transform"
+    finally:
+        jax.config.update("jax_enable_x64", x64)

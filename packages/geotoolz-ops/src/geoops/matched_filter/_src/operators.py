@@ -139,6 +139,8 @@ class MatchedFilter(Operator):
         >>> scores = mf(scene)  # reuses the fitted background
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -279,6 +281,8 @@ class MatchedFilterPixel(Operator):
         target: Target signature ``(c,)``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(
@@ -320,6 +324,8 @@ class MatchedFilterSNR(Operator):
             ``(c, c)`` matrix.
         target: Target signature ``(c,)``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 
@@ -365,6 +371,8 @@ class DetectionThreshold(Operator):
         target: Target signature ``(c,)``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(
@@ -408,6 +416,8 @@ class ValidateMFInputs(Operator):
         target: Target signature ``(c,)``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
     def __init__(
         self,
         *,
@@ -449,6 +459,8 @@ class EstimateMean(Operator):
             axis: Deprecated: the band axis position. ``-3`` maps to
                 ``dim="band"``; removed in the next minor release.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -492,6 +504,8 @@ class EstimateCovEmpirical(Operator):
         axis: Deprecated: the band axis position. ``-3`` maps to
             ``dim="band"``; removed in the next minor release.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -540,6 +554,8 @@ class EstimateCovShrunk(Operator):
         axis: Deprecated: the band axis position. ``-3`` maps to
             ``dim="band"``; removed in the next minor release.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -593,6 +609,8 @@ class EstimateCovLowRank(Operator):
         axis: Deprecated: the band axis position. ``-3`` maps to
             ``dim="band"``; removed in the next minor release.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -660,6 +678,8 @@ class GMMClusterBackground(Operator):
             ``dim="band"``; removed in the next minor release.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -707,6 +727,8 @@ class AdaptiveWindowBackground(Operator):
             ``dim="band"``; removed in the next minor release.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -751,6 +773,8 @@ class ApplyClusterMF(Operator):
         axis: Deprecated: the band axis position. ``-3`` maps to
             ``dim="band"``; removed in the next minor release.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -806,6 +830,8 @@ class ApplyAdaptiveMF(Operator):
         axis: Deprecated: the band axis position. ``-3`` maps to
             ``dim="band"``; removed in the next minor release.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -870,6 +896,8 @@ class StreamingBackground(Operator):
         axis: Deprecated: the band axis position. ``-3`` maps to
             ``dim="band"``; removed in the next minor release.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -937,6 +965,8 @@ class LinearTargetFromObs(Operator):
         axis: Deprecated: the band axis position. ``-3`` maps to
             ``dim="band"``; removed in the next minor release.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -1009,6 +1039,8 @@ class NonlinearTargetFromObs(Operator):
         axis: Deprecated: the band axis position. ``-3`` maps to
             ``dim="band"``; removed in the next minor release.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -1085,6 +1117,8 @@ class ColumnEnhancement(Operator):
         axis: Deprecated: the band axis position. ``-3`` maps to
             ``dim="band"``; removed in the next minor release.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,

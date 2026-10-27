@@ -16,7 +16,7 @@ See ``docs/catalog/design/query-matchup.md`` §5.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import numpy as np
 from pipekit import Operator
@@ -153,6 +153,8 @@ class RasterToRasterLike(Operator):
         >>> # `aligned_s2` has MODIS's CRS, transform, and spatial shape.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, resampling: str = "bilinear") -> None:
         self.resampling = resampling
 
@@ -194,6 +196,8 @@ class RasterToPoints(Operator):
             DataArray before extraction).
         out_var: Name attached to the output DataArray.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -287,6 +291,8 @@ class PointsToRaster(Operator):
             Required for GeoDataFrame; ignored for xvec-indexed
             DataArray.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -429,6 +435,8 @@ class RasterToPointCloud(Operator):
             (k>=1; inverse-distance weighted mean of the k nearest).
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -558,6 +566,8 @@ class PointCloudToRaster(Operator):
             Pixels with no points within this radius receive NaN.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -674,6 +684,8 @@ class VectorToRasterAgg(Operator):
             rasterio default — and ours), only pixels whose centre
             falls inside the geometry contribute.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,

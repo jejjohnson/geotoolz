@@ -117,6 +117,8 @@ class PerBandStats(Operator):
         [...]
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, percentiles: list[float] | None = None) -> None:
         self.percentiles = [1.0, 99.0] if percentiles is None else list(percentiles)
         self.stats: dict[str, Any] = {}
@@ -154,6 +156,8 @@ class CLAHE(Operator):
         >>> from geoops.normalize import CLAHE
         >>> out = CLAHE(window=(8, 8), clip_limit=0.03)(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -242,6 +246,8 @@ class StandardScaler(Operator):
         >>> normed = fit(scene)
         >>> fit.mean_  # fitted per-band ndarray
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -356,6 +362,8 @@ class RobustScaler(Operator):
         >>> op.median_, op.iqr_
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -464,6 +472,8 @@ class MinMaxScaler(Operator):
         >>> display = op(scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -559,6 +569,8 @@ class HistogramStretch(Operator):
         >>> display = op(reflectance_scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -612,6 +624,8 @@ class HistogramMatch(Operator):
         >>> op = HistogramMatch(reference=reference_scene)
         >>> matched = op(source_scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     # Holds a live GeoArray reference, which is not JSON/YAML
     # serialisable.
@@ -671,6 +685,8 @@ class LogScale(Operator):
         >>> log_sar = LogScale(base=10.0, eps=1e-6)(sar_backscatter)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, base: float = 10.0, eps: float = 1e-6) -> None:
         self.base = base
         self.eps = eps
@@ -701,6 +717,8 @@ class AsinhScale(Operator):
         >>> out = AsinhScale(a=0.1)(scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, a: float = 1.0) -> None:
         self.a = a
 
@@ -730,6 +748,8 @@ class PowerScale(Operator):
         >>> from geoops.normalize import PowerScale
         >>> out = PowerScale(gamma=0.5)(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, gamma: float = 0.5) -> None:
         self.gamma = gamma
@@ -795,6 +815,8 @@ class ZeroOne(Operator):
         >>> from geoops.normalize import ZeroOne
         >>> display = ZeroOne(per_band=True)(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, per_band: bool = True) -> None:
         self.per_band = per_band

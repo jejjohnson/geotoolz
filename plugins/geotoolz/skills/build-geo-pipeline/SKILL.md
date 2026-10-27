@@ -156,6 +156,9 @@ pipeline.
   - Set `_terminal = True` when it returns something other than a raster
     (a table, a number, `None`); `Sequential` then accepts it only as the
     last step.
+  - Set `backends = ("numpy",)`, or `("numpy", "jax")` when it runs on
+    JAX carriers; a geoops step on the wrong backend raises
+    `BackendError` (convert with `to_numpy()` / `to_jax()`).
 - **Don't rewrite pipekit.** It already has `Retry`, `Try` / `Coalesce`,
   `Branch` / `Switch`, `Cache` / `Memoize`, `Tap` / `Snapshot`,
   `AssertShape` / `AssertDType`, `ThreadMap` / `ProcessMap` /
@@ -197,6 +200,8 @@ from geoops.carrier import mask_invalid_to_nan, over_frames, wrap_like
 
 class ZScore(Operator):
     """Standardise each pixel against a fixed mean and std (bands kept)."""
+
+    backends = ("numpy",)  # computes with NumPy; refuses JAX carriers
 
     def __init__(self, *, mean: float, std: float) -> None:  # keyword-only, config only
         self.mean = mean  # stored under its own name → get_config() for free
