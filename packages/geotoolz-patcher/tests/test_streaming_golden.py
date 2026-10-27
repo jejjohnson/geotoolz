@@ -55,6 +55,7 @@ def domain() -> GeoArray:
         data=np.zeros((64, 64), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
+        dims="y x",
     )
 
 

@@ -36,6 +36,7 @@ def make_raster_field(
             data=arr,
             transform=rasterio.Affine.identity(),
             crs=crs,
+            dims="y x",
         )
     )
 

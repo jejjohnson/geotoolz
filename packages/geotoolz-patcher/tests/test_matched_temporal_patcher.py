@@ -332,6 +332,7 @@ def _raster_series(values: np.ndarray, fill: Any = np.nan) -> Any:
             transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
             crs="EPSG:32629",
             fill_value=fill,
+            dims="band y x",
         )
     )
 

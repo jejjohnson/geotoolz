@@ -21,6 +21,7 @@ def _stack(values: dict[str, float]) -> GeoArray:
         "EPSG:4326",
         fill_value=np.nan,
         attrs={"band_names": tuple(values)},
+        dims="band y x",
     )
 
 
@@ -68,6 +69,7 @@ def test_mask_clouds_reads_the_cloud_mask() -> None:
         Affine(0.01, 0.0, 140.0, 0.0, -0.01, 35.0),
         "EPSG:4326",
         attrs={"band_names": ("CloudMaskBinary", "CloudMask")},
+        dims="band y x",
     )
     default = np.asarray(himawari.MaskClouds()(scene))
     assert default.dtype == bool and not default[0, 0] and default.sum() == 15

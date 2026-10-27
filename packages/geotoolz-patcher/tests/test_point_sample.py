@@ -14,7 +14,7 @@ from geopatcher.fields import PointDomain
 def raster() -> GeoArray:
     """A 4x5 raster whose pixel (r, c) holds the value r * 10 + c."""
     values = (np.arange(4)[:, None] * 10 + np.arange(5)[None, :]).astype(np.float64)
-    return GeoArray(values, rasterio.Affine.identity(), None)
+    return GeoArray(values, rasterio.Affine.identity(), None, dims="y x")
 
 
 class TestNearest:
@@ -87,6 +87,7 @@ def test_geoarray_input() -> None:
         np.arange(16, dtype=np.float32).reshape(4, 4),
         rasterio.Affine.identity(),
         "EPSG:32630",
+        dims="y x",
     )
     domain = PointDomain(coords=np.array([[1.5, 2.5]]), kdtree=None)
     np.testing.assert_allclose(domain.sample(scene), [9.0])

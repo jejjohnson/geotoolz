@@ -883,6 +883,7 @@ class TestTileCrop:
                 t_from_bounds(0, 0, 100, 100, 4, 4),
                 "EPSG:32613",
                 fill_value=np.nan,
+                dims="band y x",
             )
 
         fake_tile = MagicMock(name="CMImageRaster")

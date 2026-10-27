@@ -18,6 +18,7 @@ def raster_domain() -> GeoArray:
         data=np.zeros((1, 64, 64), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
+        dims="band y x",
     )
 
 
@@ -73,6 +74,7 @@ class TestSpatialJitteredStride:
                 data=np.zeros((n, n), dtype=np.uint8),
                 transform=rasterio.Affine.identity(),
                 crs="EPSG:32630",
+                dims="y x",
             )
         geom = spatial.geometry.Rectangular(size=(size, size))
         s = spatial.sampler.JitteredStride(step=step, jitter=0.5, seed=0)
@@ -131,6 +133,7 @@ class TestSpatialPoissonDisk:
             data=np.zeros((40, 40), dtype=np.float32),
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
+            dims="y x",
         )
         geom = spatial.geometry.Rectangular(size=(1, 1))
         s = spatial.sampler.PoissonDisk(min_dist=min_dist, seed=seed)

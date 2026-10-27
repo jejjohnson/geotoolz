@@ -92,7 +92,9 @@ class Case:
 
 
 def _raster_geoarray(tmp_path: Path) -> Case:
-    gt = GeoArray(data=_values(), transform=_T, crs=_CRS, fill_value=-1.0)
+    gt = GeoArray(
+        data=_values(), transform=_T, crs=_CRS, fill_value=-1.0, dims="band y x"
+    )
     return Case(RasterField(gt), _values(), _T)
 
 
@@ -145,7 +147,9 @@ def _reprojecting_3d(tmp_path: Path) -> Case:
     # Same-CRS, same-resolution, nearest: the warp is the identity, so the
     # merge must reproduce the source exactly while every chip still goes
     # through the per-chip crop + warp path.
-    gt = GeoArray(data=_values(), transform=_T, crs=_CRS, fill_value=-1.0)
+    gt = GeoArray(
+        data=_values(), transform=_T, crs=_CRS, fill_value=-1.0, dims="band y x"
+    )
     field = ReprojectingRasterField(
         gt, dst_crs=_CRS, resolution=10.0, resampling="nearest"
     )

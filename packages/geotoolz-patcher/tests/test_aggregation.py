@@ -31,6 +31,7 @@ def empty_field() -> GeoArray:
         data=np.zeros((4, 4), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
+        dims="y x",
     )
 
 
@@ -80,6 +81,7 @@ class TestSpatialOverlapAdd:
             data=np.zeros((3, 4, 4), dtype=np.float32),  # (band, H, W)
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
+            dims="band y x",
         )
         # Two non-overlapping (3-band, 2x2) patches at (0,0) and (2,2).
         p1 = _patch(np.full((3, 2, 2), 1.0), 0, 0, weights=np.ones((2, 2)))
@@ -254,7 +256,9 @@ def test_masked_mean_through_polygon_patcher() -> None:
     # previously the whole bounding box was written.
     t = rasterio.transform.from_origin(0.0, 8.0, 1.0, 1.0)
     source = np.arange(64, dtype=np.float32).reshape(8, 8)
-    field = RasterField(GeoArray(data=source, transform=t, crs="EPSG:32630"))
+    field = RasterField(
+        GeoArray(data=source, transform=t, crs="EPSG:32630", dims="y x")
+    )
     # The hypotenuse passes through no pixel centre (no edge ambiguity).
     tri = shapely.Polygon([(0.0, 8.0), (8.0, 8.0), (0.0, 0.5)])
     patcher = SpatialPatcher(
@@ -330,6 +334,7 @@ def _hann_constant_field(fill: float | None = None) -> RasterField:
             data=np.full((24, 24), 2.5),
             transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 240.0),
             crs="EPSG:32630",
+            dims="y x",
             **kwargs,
         )
     )
@@ -402,6 +407,7 @@ def test_soft_vote_band_domain() -> None:
         data=np.zeros((3, 8, 8), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
+        dims="band y x",
     )
     probs = np.stack([np.full((4, 4), 0.2), np.full((4, 4), 0.8)])
     p1 = _patch(probs, 0, 0)
@@ -442,6 +448,7 @@ def test_dense_merge_takes_band_axes_from_patches(aggregation, cells) -> None:
         data=np.zeros((4, 8, 8), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
+        dims="band y x",
     )
     patches = [
         _patch(np.full(cells, float(r // 4 + c // 4)), r, c)
@@ -458,6 +465,7 @@ def test_dense_merge_rejects_patches_with_different_band_axes() -> None:
         data=np.zeros((4, 8, 8), dtype=np.float32),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
+        dims="band y x",
     )
     patches = [_patch(np.ones((1, 4, 4)), 0, 0), _patch(np.ones((2, 4, 4)), 0, 4)]
     with pytest.raises(
@@ -499,6 +507,7 @@ def test_mean_std_and_min_max_are_nan_aware_and_crop_pad_fill() -> None:
             data=np.arange(36, dtype=np.float64).reshape(6, 6) + 1,
             transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 6.0),
             crs="EPSG:32630",
+            dims="y x",
         )
     )
     patcher = SpatialPatcher(
@@ -561,7 +570,10 @@ def _reference_stack(patches: list[Patch], shape: tuple[int, int]) -> np.ndarray
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_median_and_mode_match_reference(seed: int) -> None:
     domain = GeoArray(
-        data=np.zeros((8, 8)), transform=rasterio.Affine.identity(), crs="EPSG:32630"
+        data=np.zeros((8, 8)),
+        transform=rasterio.Affine.identity(),
+        crs="EPSG:32630",
+        dims="y x",
     )
     patches = _random_overlapping(seed)
     ref = _reference_stack(patches, (8, 8))

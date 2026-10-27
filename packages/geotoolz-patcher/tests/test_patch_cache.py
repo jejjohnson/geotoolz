@@ -484,6 +484,7 @@ def _geoarray_field(tmp_path: Path) -> tuple[Any, PatchCache, SpatialPatcher]:
             "scale": (1, 2.5),
             "gain": np.float32(0.5),
         },
+        dims="band y x",
     )
     return RasterField(gt), PatchCache(tmp_path, field_id="gt"), _patcher()
 

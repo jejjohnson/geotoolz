@@ -30,6 +30,7 @@ def raster_domain() -> GeoArray:
         data=np.zeros((1, 100, 100), dtype=np.float32),
         transform=rasterio.Affine.translation(0, 100) * rasterio.Affine.scale(1, -1),
         crs="EPSG:32630",
+        dims="band y x",
     )
 
 
@@ -239,7 +240,9 @@ _NON_ALIGNED_POLYGONS: list[tuple[str, Any, tuple[int, int, int, int]]] = [
 
 def _poly_raster_field() -> RasterField:
     arr = np.arange(_POLY_H * _POLY_W, dtype=np.float32).reshape(_POLY_H, _POLY_W)
-    return RasterField(GeoArray(data=arr, transform=_POLY_T, crs="EPSG:32630"))
+    return RasterField(
+        GeoArray(data=arr, transform=_POLY_T, crs="EPSG:32630", dims="y x")
+    )
 
 
 def _poly_patcher(polys: list[Any]) -> SpatialPatcher:

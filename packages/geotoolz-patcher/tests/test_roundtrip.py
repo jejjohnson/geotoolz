@@ -62,6 +62,7 @@ def _field(shape: tuple[int, int], fill: float | None = None) -> RasterField:
             data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
+            dims="y x",
         )
     )
 
@@ -332,7 +333,9 @@ def test_hann_overlap_add_identity(normalize_by_window: bool) -> None:
         0.37 * rows - 1.21 * cols + np.random.default_rng(0).standard_normal(_C1_SHAPE)
     )  # (H, W) float64
     field = RasterField(
-        GeoArray(data=x, transform=rasterio.Affine.identity(), crs="EPSG:32630")
+        GeoArray(
+            data=x, transform=rasterio.Affine.identity(), crs="EPSG:32630", dims="y x"
+        )
     )
     patcher = SpatialPatcher(
         geometry=spatial.geometry.Rectangular(size=(_C1_SIZE, _C1_SIZE)),

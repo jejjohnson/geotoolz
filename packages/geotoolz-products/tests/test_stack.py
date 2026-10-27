@@ -14,7 +14,9 @@ TRANSFORM = (0.1, 0.0, 10.0, 0.0, -0.1, 50.0)
 
 
 def _part(data: np.ndarray, fill: float | int | None, name: str) -> GeoArray:
-    return GeoArray(data, TRANSFORM, 4326, fill, {"band_names": (name,)})
+    return GeoArray(
+        data, TRANSFORM, 4326, fill, {"band_names": (name,)}, dims="band y x"
+    )
 
 
 def _nan_fill(g: GeoArray) -> bool:

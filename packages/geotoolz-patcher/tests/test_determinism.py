@@ -45,6 +45,7 @@ def domain() -> RasterField:
             data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
+            dims="y x",
         )
     )
 
@@ -205,6 +206,7 @@ def test_spatial_random_bit_identical_for_any_int_seed(seed: int) -> None:
             data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
+            dims="y x",
         )
     )
     geom = spatial.geometry.Rectangular(size=(8, 8))
@@ -221,6 +223,7 @@ def test_jittered_stride_bit_identical_for_any_int_seed(seed: int) -> None:
             data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
+            dims="y x",
         )
     )
     geom = spatial.geometry.Rectangular(size=(8, 8))

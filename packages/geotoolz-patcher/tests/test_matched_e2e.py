@@ -528,6 +528,7 @@ class TestRealSpatialPatcherIntegration:
             transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
             crs="EPSG:32629",
             fill_value=np.nan,
+            dims="y x",
         )
         primary = RasterField(tensor)
         secondary = RasterField(tensor)
@@ -586,6 +587,7 @@ def _raster_mfield(coreg: Any = None, *, values: Any = None) -> MatchedField:
         transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
         crs="EPSG:32629",
         fill_value=np.nan,
+        dims="y x",
     )
     return MatchedField(
         primary=RasterField(tensor),
@@ -596,6 +598,7 @@ def _raster_mfield(coreg: Any = None, *, values: Any = None) -> MatchedField:
                     transform=tensor.grid.affine,
                     crs=tensor.crs,
                     fill_value=np.nan,
+                    dims="y x",
                 )
             )
         },
