@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.7.0...geotoolz-products-v0.7.1) (2026-10-27)
+
+
+### Features
+
+* **products:** readers name their dims; a toy GeoSwath reader ([#573](https://github.com/jejjohnson/geotoolz/issues/573)) ([a87a7e6](https://github.com/jejjohnson/geotoolz/commit/a87a7e6987c903cd41f7baa958f32cc1cff6f625))
+
 ## [0.7.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-products-v0.6.0...geotoolz-products-v0.7.0) (2026-10-24)
 
 

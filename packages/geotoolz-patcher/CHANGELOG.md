@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.14.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.14.0...geotoolz-patcher-v0.14.1) (2026-10-27)
+
+
+### Features
+
+* **patcher:** merge takes PatchBatch and batched GeoArray items ([#570](https://github.com/jejjohnson/geotoolz/issues/570)) ([9c1e0dd](https://github.com/jejjohnson/geotoolz/commit/9c1e0dd1a347a47ff99802dc27104c399dc44b6d))
+
+
+### Bug Fixes
+
+* **patcher:** BatchedPatch is removed in 0.15, the release after its deprecation ([#569](https://github.com/jejjohnson/geotoolz/issues/569)) ([bc34bd5](https://github.com/jejjohnson/geotoolz/commit/bc34bd5e0988ca723cd574ff10d0ae2a95b8e97c))
+
 ## [0.14.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.13.0...geotoolz-patcher-v0.14.0) (2026-10-26)
 
 

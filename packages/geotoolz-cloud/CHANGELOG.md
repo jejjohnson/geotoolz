@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.7.0...geotoolz-cloud-v0.7.1) (2026-10-27)
+
+
+### Features
+
+* **cloud:** name the dims of COG and NetCDF reads ([#572](https://github.com/jejjohnson/geotoolz/issues/572)) ([68690ec](https://github.com/jejjohnson/geotoolz/commit/68690ecdb87c2ad7916e6083215c008ddd2a5644))
+
 ## [0.7.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-cloud-v0.6.0...geotoolz-cloud-v0.7.0) (2026-10-24)
 
 
