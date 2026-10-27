@@ -84,4 +84,14 @@ the antimeridian afterwards raises), `time` as a per-scanline mask on
 `xrtoolz.geo`, so the reader can screen without importing `xrtoolz`. See the
 [TROPOMI recipe](../recipes/tropomi_ch4_screen.md) for a worked example.
 
+**Emission inventories.** `open_ch4_inventory(path, variable=None, units=None,
+source=None)` opens a gridded CH₄ inventory (EDGAR, GFEI, EPA) as
+`ch4_emission_flux` in kg m⁻² s⁻¹ on `([time,] lat, lon)`, with `lat`
+ascending and `lon` wrapped to `[-180, 180)`. The file's area-flux units are
+converted through `UNIT_FACTORS` (kg m⁻² s⁻¹, g m⁻² s⁻¹, Mg km⁻² a⁻¹ with a
+365.25-day year); the factor and the original units are kept as attributes.
+Per-cell totals such as EDGAR's `emi` files (tonnes per cell, per year or per
+month) are rejected because the period is not in the file: read the `flx`
+files instead. It is a plain opener, not a catalog entry.
+
 ::: xrreader

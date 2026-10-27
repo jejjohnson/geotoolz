@@ -13,7 +13,8 @@ Reader API:
 - Adapters: :class:`CMEMSSource`, :class:`CDSSource`, :class:`AemetSource`,
   :class:`LocalL2Source` (files already on disk; TROPOMI / EMIT / GHGSat
   methane L2 openers :func:`open_tropomi_ch4_l2`, :func:`open_emit_ch4_l2b`,
-  :func:`open_ghgsat_ch4_l2`).
+  :func:`open_ghgsat_ch4_l2`; gridded emission inventories through
+  :func:`open_ch4_inventory`).
 - Credentials: :class:`CMEMSCredentials`, :class:`CDSCredentials`,
   :class:`AEMETCredentials`, :func:`load_cmems`, :func:`load_cds`,
   :func:`load_aemet`.
@@ -67,6 +68,7 @@ from xrreader._src.credentials import (
 )
 from xrreader._src.local import (
     LocalL2Source,
+    open_ch4_inventory,
     open_emit_ch4_l2b,
     open_ghgsat_ch4_l2,
     open_tropomi_ch4_l2,
@@ -138,6 +140,7 @@ __all__ = [
     "load_aemet",
     "load_cds",
     "load_cmems",
+    "open_ch4_inventory",
     "open_emit_ch4_l2b",
     "open_ghgsat_ch4_l2",
     "open_tropomi_ch4_l2",

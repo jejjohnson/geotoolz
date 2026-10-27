@@ -393,6 +393,14 @@ DRY_AIR_SUBCOLUMNS = Variable(
     cmap="viridis",
 )
 
+CH4_EMISSION_FLUX = Variable(
+    name="ch4_emission_flux",
+    standard_name="tendency_of_atmosphere_mass_content_of_methane_due_to_emission",
+    long_name="Methane emission flux",
+    units="kg m-2 s-1",
+    cmap="magma",
+)
+
 QA_VALUE = Variable(
     name="qa_value",
     long_name="Quality assurance value",
@@ -1296,6 +1304,7 @@ REGISTRY: dict[str, Variable] = {
         DRY_AIR_SUBCOLUMNS,
         QA_VALUE,
         CH4_COLUMN,
+        CH4_EMISSION_FLUX,
         # Ocean colour
         CHL,
         KD490,
