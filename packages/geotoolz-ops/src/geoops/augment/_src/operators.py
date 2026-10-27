@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import inspect
 import warnings
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from affine import Affine
@@ -309,6 +309,8 @@ class Compose(Sequential):
         >>> out = pipe(patch)  # doctest: +SKIP
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -403,6 +405,8 @@ class RandomFlip(Operator):
         >>> out = op(patch)  # doctest: +SKIP
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -472,6 +476,8 @@ class RandomRotate90(Operator):
         >>> out = op(patch)  # doctest: +SKIP
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, p: float = 0.75, seed: int | None = None) -> None:
         _check_probability(p, "p")
         self.p = p
@@ -517,6 +523,8 @@ class RandomCrop(Operator):
         >>> op = gz.augment.RandomCrop(size=(3, 4), seed=0)
         >>> out = op(patch)  # doctest: +SKIP
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, size: tuple[int, int], seed: int | None = None) -> None:
         if size[0] <= 0 or size[1] <= 0:
@@ -566,6 +574,8 @@ class RandomShift(Operator):
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, max_shift: tuple[int, int], seed: int | None = None) -> None:
         if max_shift[0] < 0 or max_shift[1] < 0:
             raise ValueError("max_shift entries must be non-negative.")
@@ -605,6 +615,8 @@ class BrightnessJitter(Operator):
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -660,6 +672,8 @@ class ContrastJitter(Operator):
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -723,6 +737,8 @@ class GaussianNoise(Operator):
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -780,6 +796,8 @@ class SpeckleNoise(Operator):
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, sigma: ScalarOrRange = 0.05, seed: int | None = None) -> None:
         sigma = as_tuple(sigma)
         _validate_range(sigma, "sigma")
@@ -817,6 +835,8 @@ class BandDropout(Operator):
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self, *, p: float = 0.1, fill_value: float = 0.0, seed: int | None = None
@@ -859,6 +879,8 @@ class BandJitter(Operator):
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -915,6 +937,8 @@ class SunAngleJitter(Operator):
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -963,6 +987,8 @@ class AtmosphericHaze(Operator):
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self, *, intensity: ScalarOrRange = (0.0, 0.05), seed: int | None = None
@@ -1014,6 +1040,8 @@ class SimulatedClouds(Operator):
         seed: Seed of the operator's own draw stream, which advances on
             every call; a per-call ``seed`` makes a one-off draw instead.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -1110,6 +1138,8 @@ class CutMix(Operator):
         >>> op = gz.augment.CutMix(p=1.0, seed=0)
         >>> out = op(patch, donor)  # doctest: +SKIP
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,

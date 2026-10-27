@@ -177,6 +177,8 @@ class SBMP(Operator):
             mask = gz.plume.PlumeMask(threshold="percentile:99.5")(score)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -253,6 +255,8 @@ class PlumeMask(Operator):
         ... )(enhancement)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -297,6 +301,8 @@ class PlumeContours(Operator):
     Examples:
         >>> labels = gz.plume.PlumeContours(min_area_px=50)(mask)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -367,6 +373,8 @@ class PlumeFootprint(Operator):
     Examples:
         >>> gdf = gz.plume.PlumeFootprint(min_area_m2=500.0)(mask, kg_m2)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 
@@ -589,6 +597,8 @@ class WindAdvectionCone(Operator):
         ... )(enhancement)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -709,6 +719,8 @@ class IMEEstimate(Operator):
             print(result["emission_rate_kg_s"])
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(
@@ -818,6 +830,8 @@ class CrossSectionalFlux(Operator):
             )(kg_m2, mask)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(
@@ -918,6 +932,8 @@ class ColumnToMass(Operator):
         ... )(enhancement)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -999,6 +1015,8 @@ class PlumeShapeFilter(Operator):
         min_fiber_width: Lower bound on ``area / fiber_length``.
         max_fiber_width: Upper bound on ``area / fiber_length``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -1112,6 +1130,8 @@ class PlumeColumnStats(Operator):
     (single-band ``GeoArray`` or plain array) on the label map's pixel
     grid (``ValueError`` otherwise).
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 
@@ -1269,6 +1289,8 @@ class PlumeQNDFeatures(Operator):
         perc_threshold: Percentile (within the instance mask) above which
             pixels are eligible for clustering.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 

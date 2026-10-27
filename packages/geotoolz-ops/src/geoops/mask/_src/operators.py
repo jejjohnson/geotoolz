@@ -91,6 +91,8 @@ class PolygonMask(Operator):
         >>> PolygonMask(geometry=box(1.0, 1.0, 3.0, 3.0))(scene)  # doctest: +SKIP
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
@@ -384,6 +386,8 @@ class AltitudeMask(Operator):
         >>> AltitudeMask(min_elev=500.0)(scene, dem)  # doctest: +SKIP
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -436,6 +440,8 @@ class SlopeMask(Operator):
         >>> SlopeMask(max_slope_deg=10.0)(scene, dem)  # doctest: +SKIP
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -477,6 +483,8 @@ class DilateMask(Operator):
         >>> DilateMask(iterations=2)(mask)  # doctest: +SKIP
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self, *, iterations: int = 1, structure: np.ndarray | None = None
     ) -> None:
@@ -504,6 +512,8 @@ class ErodeMask(Operator):
     Examples:
         >>> ErodeMask(iterations=1)(mask)  # doctest: +SKIP
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self, *, iterations: int = 1, structure: np.ndarray | None = None
@@ -534,6 +544,8 @@ class OpenMask(Operator):
         >>> OpenMask(iterations=1)(mask)  # doctest: +SKIP
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, iterations: int = 1) -> None:
         self.iterations = iterations
 
@@ -555,6 +567,8 @@ class CloseMask(Operator):
     Examples:
         >>> CloseMask(iterations=1)(mask)  # doctest: +SKIP
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, iterations: int = 1) -> None:
         self.iterations = iterations
@@ -582,6 +596,8 @@ class BufferMask(Operator):
     Examples:
         >>> BufferMask(radius=2.0)(mask)  # doctest: +SKIP
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, radius: float, unit: str = "pixels") -> None:
         self.radius = radius
@@ -614,6 +630,8 @@ class RemoveSmallObjects(Operator):
         min_area_px: Minimum component area, in pixels, to keep.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, min_area_px: int) -> None:
         self.min_area_px = min_area_px
 
@@ -632,6 +650,8 @@ class RemoveSmallHoles(Operator):
     Args:
         max_hole_area_px: Maximum hole area, in pixels, to fill.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, max_hole_area_px: int) -> None:
         self.max_hole_area_px = max_hole_area_px
@@ -655,6 +675,8 @@ class CleanMask(Operator):
         close_iter: Binary-closing iterations applied last; ``0`` skips
             the closing step.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -696,6 +718,8 @@ class CombineMasks(Operator):
         op: ``"or"`` (default), ``"and"`` or ``"xor"``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, op: str = "or") -> None:
         self.op = op
 
@@ -717,6 +741,8 @@ class InvertMask(Operator):
     the package's drop polarity, and back. Accepts a GeoArray or a
     plain ndarray and returns the same carrier kind. Takes no parameters.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def _apply(self, mask: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = invert_mask(np.asarray(mask))
@@ -763,6 +789,8 @@ class ApplyMask(Operator):
         >>> out = keep_aoi(scene)  # doctest: +SKIP
         >>> out = gz.mask.ApplyMask()(scene, cloud_mask)  # doctest: +SKIP
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,

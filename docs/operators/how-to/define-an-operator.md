@@ -24,6 +24,8 @@ from geoops.testing import check_operator
 class Scale(gz.Operator):
     """Multiply digital numbers by a scale factor."""
 
+    backends = ("numpy",)                                           # it computes with NumPy
+
     def __init__(self, *, scale: float = 1e-4) -> None:
         self.scale = scale                                          # same name as the argument
 
@@ -57,6 +59,9 @@ assert gz.Operator.from_state(op.state).get_config() == op.get_config()
 - the per-band `attrs` keys match the output bands;
 - the fill suits the output dtype, the input's nodata stays nodata, and
   the input is left untouched;
+- `backends` is declared: a NumPy-only operator refuses a JAX carrier
+  with `pipekit.BackendError`, and one that lists `"jax"` matches its
+  NumPy result and traces once under `jax.jit`;
 - a `(T, C, H, W)` stack matches the per-frame results, or is rejected
   with an error naming the operator;
 - a georeader `GeoTensor` is refused with a `TypeError` naming
@@ -72,6 +77,7 @@ assert gz.Operator.from_state(op.state).get_config() == op.get_config()
 | Hold configuration only, never a carrier | A second raster is a positional `_apply` argument, so a `Graph` can wire it in. |
 | Implement `_apply`, never `__call__` | `__call__` switches between eager runs and graph recording. |
 | Read with `np.asarray(gt)`, rewrap with `wrap_like` | Plain arrays and GeoArrays both work; CRS, transform and attrs carry over. |
+| Declare `backends` | `("numpy",)` for an `_apply` that reads with `np.asarray`; `("numpy", "jax")` only when it computes with the carrier's namespace and runs under `jax.jit`. A carrier on another backend is refused before `_apply` runs, never converted. |
 | Never mutate the input | The same scene may feed other branches. |
 | Declare the output fill | `False` for masks, `0` for labels and counts, `NaN` for new float quantities, `carried_fill(gt, dtype)` for carried values. |
 | Use the shared parameter names | `red` / `nir` / `qa_band` for one band, `bands`, `fill_value`, `window`, `seed`, `eps`. |
@@ -98,6 +104,8 @@ from geoops.testing import check_operator
 
 class RedEdgeChlorophyll(gz.Operator):
     """CIre = NIR / red edge - 1 (Gitelson 2003); NaN where either band is nodata."""
+
+    backends = ("numpy",)
 
     def __init__(self, *, nir: int | str = 3, red_edge: int | str = 2, eps: float = 1e-10) -> None:
         self.nir, self.red_edge, self.eps = nir, red_edge, eps
@@ -144,6 +152,7 @@ class ApplyFunction(gz.Operator):
     """Apply an elementwise function to every pixel."""
 
     forbid_in_yaml = True
+    backends = ("numpy",)
 
     def __init__(self, *, fn: Callable[[np.ndarray], np.ndarray]) -> None:
         self.fn = fn
@@ -178,6 +187,7 @@ class SaveNpy(gz.Operator):
     """Write the array to a .npy file; returns None."""
 
     _terminal = True
+    backends = ("numpy",)
 
     def __init__(self, *, path: str) -> None:
         self.path = path

@@ -134,6 +134,8 @@ class MatchedFilter(Operator):
         >>> scores = mf(scene)  # reuses the fitted background
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -275,6 +277,8 @@ class MatchedFilterPixel(Operator):
         target: Target signature ``(c,)``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(
@@ -316,6 +320,8 @@ class MatchedFilterSNR(Operator):
             ``(c, c)`` matrix.
         target: Target signature ``(c,)``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 
@@ -361,6 +367,8 @@ class DetectionThreshold(Operator):
         target: Target signature ``(c,)``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(
@@ -404,6 +412,8 @@ class ValidateMFInputs(Operator):
         target: Target signature ``(c,)``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
     def __init__(
         self,
         *,
@@ -443,6 +453,8 @@ class EstimateMean(Operator):
             axis: Position of the spectral axis. Default ``-3``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -480,6 +492,8 @@ class EstimateCovEmpirical(Operator):
         ridge: Optional Tikhonov ridge added to the diagonal.
         axis: Position of the spectral axis. Default ``-3``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self, *, mean: np.ndarray | None = None, ridge: float = 0.0, axis: int = -3
@@ -519,6 +533,8 @@ class EstimateCovShrunk(Operator):
             ``"oas"``.
         axis: Position of the spectral axis. Default ``-3``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -567,6 +583,8 @@ class EstimateCovLowRank(Operator):
         n_oversamples: Extra random probe vectors beyond ``rank``.
         axis: Position of the spectral axis. Default ``-3``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -629,6 +647,8 @@ class GMMClusterBackground(Operator):
         axis: Position of the spectral axis. Default ``-3``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -671,6 +691,8 @@ class AdaptiveWindowBackground(Operator):
         axis: Position of the spectral axis. Default ``-3``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self, *, window: int = 7, pad_mode: str = "reflect", axis: int = -3
     ) -> None:
@@ -706,6 +728,8 @@ class ApplyClusterMF(Operator):
         target: Target signature ``(c,)``.
         axis: Position of the spectral axis. Default ``-3``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -758,6 +782,8 @@ class ApplyAdaptiveMF(Operator):
             Default ``0.0``.
         axis: Position of the spectral axis. Default ``-3``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -817,6 +843,8 @@ class StreamingBackground(Operator):
             is added to the diagonal in both cases.
         axis: Position of the spectral axis in each cube. Default ``-3``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -879,6 +907,8 @@ class LinearTargetFromObs(Operator):
             the first flat pixel when ``None``.
         axis: Position of the spectral axis. Default ``-3``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -947,6 +977,8 @@ class NonlinearTargetFromObs(Operator):
             the first flat pixel when ``None``.
         axis: Position of the spectral axis. Default ``-3``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -1019,6 +1051,8 @@ class ColumnEnhancement(Operator):
             ``None`` means the default ``1e-3``.
         axis: Position of the spectral axis. Default ``-3``.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,

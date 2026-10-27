@@ -38,9 +38,11 @@ from typing import Any
 import numpy as np
 import pytest
 from _helpers import all_operator_classes, fill_pixel_mask
+from geoarray import GeoArray
 from pipekit import Input, Operator
 
 from geoops._src.contract import (
+    assert_backends,
     assert_clear_rank_error,
     assert_config_round_trips,
     assert_consistent_attrs,
@@ -1746,3 +1748,84 @@ def test_time_stack_contract(cls: type) -> None:
         _assert_matches_frames(key, out, per_frame)
     if not ran:
         pytest.skip("no toy input is valid for this operator")
+
+
+@pytest.mark.parametrize("cls", [pytest.param(c, id=_key(c)) for c in _CLASSES])
+def test_operators_declare_and_keep_their_backends(cls: type) -> None:
+    """Every operator lists its backends and keeps them (#532).
+
+    A NumPy-only operator refuses a JAX carrier with ``BackendError``; one
+    that lists ``"jax"`` matches its NumPy result on JAX carriers and
+    traces once under ``jax.jit`` for two grids (``assert_backends``).
+    """
+    assert cls.backends, f"{_key(cls)}: declare backends = ('numpy',) or more"
+    try:
+        op = _build_seeded(cls)
+    except pytest.skip.Exception:
+        return
+    from geoops.io._src.operators import SinkOperator
+
+    if isinstance(op, SinkOperator) or not _single_carrier_in(op):
+        return
+    for scene in _attributed_inputs():
+        if not isinstance(scene, GeoArray):
+            continue
+        try:
+            _call(_build_seeded(cls), scene)
+        except Exception:
+            continue
+        extra = MULTI_INPUTS.get(_key(cls))
+        others = () if extra is None else tuple(extra(scene))
+        assert_backends(op, scene, *others)
+        return
+
+
+def test_assert_backends_catches_a_false_jax_claim() -> None:
+    """An operator that lists "jax" but computes on the host is caught."""
+    pytest.importorskip("jax")
+    from geoops.indices import NDVI
+
+    class HostNDVI(NDVI):
+        backends = ("numpy", "jax")
+
+    scene = _attributed_inputs()[1]  # 13 bands: NDVI's defaults apply
+    with pytest.raises(AssertionError, match="HostNDVI returned numpy data"):
+        assert_backends(HostNDVI(), scene)
+
+
+def test_a_numpy_operator_refuses_a_jax_carrier() -> None:
+    """The refusal names the operator and says how to convert (#532)."""
+    jax = pytest.importorskip("jax")
+    from pipekit import BackendError
+
+    from geoops.indices import NDVI
+
+    x64 = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        scene = _attributed_inputs()[1].to_jax()
+        with pytest.raises(BackendError, match=r"NDVI runs on numpy only, not jax"):
+            NDVI()(scene)
+    finally:
+        jax.config.update("jax_enable_x64", x64)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},  # the carrier's own fill: geoarray's pad
+        {"fill_value": 5.0},  # another constant
+        {"mode": "edge"},
+        {"mode": "reflect"},
+    ],
+    ids=["own-fill", "other-constant", "edge", "reflect"],
+)
+@pytest.mark.parametrize("fill", [np.nan, None], ids=["nan-fill", "no-fill"])
+def test_pad_to_keeps_jax_on_every_path(kwargs: dict[str, Any], fill: Any) -> None:
+    """Every PadTo path runs on JAX and under jax.jit, as it declares (#580)."""
+    pytest.importorskip("jax")
+    from geoops.geom import PadTo
+
+    scene = _attributed_inputs()[0]
+    scene = scene.replace(fill_value=fill)
+    assert_backends(PadTo(shape=(20, 21), **kwargs), scene)

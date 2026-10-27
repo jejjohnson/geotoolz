@@ -68,6 +68,8 @@ class PeakLocalMax(Operator):
         TypeError: If the input is not a georeferenced GeoArray.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(
@@ -132,6 +134,8 @@ class _BlobBase(Operator):
     Raises:
         TypeError: If the input is not a georeferenced GeoArray.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 
@@ -315,6 +319,8 @@ class Canny(Operator):
             ``None`` uses the skimage default.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -353,6 +359,8 @@ class CornerHarris(Operator):
     Raises:
         TypeError: If the input is not a georeferenced GeoArray.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 
@@ -407,6 +415,8 @@ class HOG(Operator):
         cells_per_block: Block size in cells, ``(rows, cols)``.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(
@@ -451,6 +461,8 @@ class StructureTensor(Operator):
             gradient products, in pixels.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, sigma: float = 1.0) -> None:
         self.sigma = sigma
 
@@ -478,6 +490,8 @@ class MultiscaleBasicFeatures(Operator):
         sigma_min: Smallest smoothing scale, in pixels.
         sigma_max: Largest smoothing scale, in pixels.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -519,6 +533,8 @@ class HoughLines(Operator):
     Args:
         num_peaks: Maximum number of line peaks to return.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 
@@ -568,6 +584,8 @@ class HoughCircles(Operator):
     Raises:
         TypeError: If the input is not a georeferenced GeoArray.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 

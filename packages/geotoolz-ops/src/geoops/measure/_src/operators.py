@@ -58,6 +58,8 @@ class LabelConnectedComponents(Operator):
             become background. ``0`` keeps every component.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -121,6 +123,8 @@ class RegionProps(Operator):
             column is requested on non-square (anisotropic or sheared)
             pixels, where no single pixel length exists.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 
@@ -215,6 +219,8 @@ class FindContours(Operator):
         TypeError: If the input is not a georeferenced GeoArray.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(
@@ -283,6 +289,8 @@ class ProfileLine(Operator):
         mode: Boundary handling mode for samples outside the image.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(
@@ -335,6 +343,8 @@ class RANSAC(Operator):
         **kwargs: Extra keyword arguments forwarded to
             :func:`skimage.measure.ransac` (e.g. ``max_trials``, ``rng``).
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 
@@ -410,6 +420,8 @@ class SkeletonLength(Operator):
             georeferenced GeoArray.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(self, *, scale_to_crs: bool = False) -> None:
@@ -435,6 +447,8 @@ class ShannonEntropy(Operator):
     Args:
         base: Logarithm base for the entropy (``2.0`` gives bits).
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 

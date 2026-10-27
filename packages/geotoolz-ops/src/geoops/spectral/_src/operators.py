@@ -44,7 +44,7 @@ place each: :class:`geoops.indices.NormalizedDifference` and
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 from geoarray import GeoArray
@@ -115,6 +115,8 @@ class SelectBands(Operator):
         >>> rgb = spectral.SelectBands(bands=["B4", "B3", "B2"])
         >>> out = rgb(reflectance_geoarray)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, bands: list[BandRef], axis: int = -3) -> None:
         self.bands = bands
@@ -212,6 +214,8 @@ class StackBands(Operator):
         >>> stacked = stack([gt_b4, gt_b8])  # (2, H, W)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, axis: int = -3) -> None:
         self.axis = axis
 
@@ -279,6 +283,8 @@ class SplitBands(Operator):
         >>> red, green, blue = bands
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, names: list[str] | None = None, axis: int = -3) -> None:
         self.names = names
         self.axis = axis
@@ -339,6 +345,8 @@ class BandMath(Operator):
         >>> ndvi_map = ndvi(reflectance_geoarray)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -392,6 +400,8 @@ class BandRatio(Operator):
         >>> srvi = spectral.BandRatio(numerator="B8", denominator="B4")
         >>> ratio = srvi(reflectance_geoarray)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -460,6 +470,8 @@ class ContinuumRemoval(Operator):
         >>> band_depth = cr(swir2_geoarray)  # (B, H, W), values in (0, 1]
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -524,6 +536,8 @@ class SpectralBinning(Operator):
         ... )
         >>> coarse = binner(hyperspectral_geoarray)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -600,6 +614,8 @@ class SpectralSmoothing(Operator):
         ... )
         >>> denoised = smooth(hyperspectral_geoarray)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,

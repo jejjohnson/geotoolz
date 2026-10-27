@@ -31,7 +31,7 @@ declares ``fill_value=False`` (saturation flags live in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
 import numpy as np
 from pipekit import Operator
@@ -148,6 +148,8 @@ class DespeckleLee(Operator):
         >>> clean = pipe(sar_geoarray)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, window: int = 7, cu: float = 0.523) -> None:
         self.window = window
         self.cu = cu
@@ -176,6 +178,8 @@ class DespeckleFrost(Operator):
         >>> gz.restore.DespeckleFrost(window=7, damping=2.0)(sar_geoarray)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, window: int = 7, damping: float = 2.0) -> None:
         self.window = window
         self.damping = damping
@@ -201,6 +205,8 @@ class DespeckleRefinedLee(Operator):
     Examples:
         >>> gz.restore.DespeckleRefinedLee(window=7)(sar_geoarray)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, window: int = 7) -> None:
         self.window = window
@@ -235,6 +241,8 @@ class DestripeColumn(Operator):
     Examples:
         >>> gz.restore.DestripeColumn(method="median", direction="column")(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -272,6 +280,8 @@ class MomentMatching(Operator):
         >>> gz.restore.MomentMatching(window=21)(scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, window: int | None = 21) -> None:
         self.window = window
 
@@ -308,6 +318,8 @@ class DenoisePCA(Operator):
     Examples:
         >>> gz.restore.DenoisePCA(n_components=10)(hyperspectral_scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, n_components: int, axis: int = -3) -> None:
         self.n_components = n_components
@@ -376,6 +388,8 @@ class MNF(Operator):
         >>> scores = mnf(scene)
         >>> denoised = mnf.inverse(scores)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, n_components: int | None = None, axis: int = -3) -> None:
         self.n_components = n_components
@@ -483,6 +497,8 @@ class GaussianDenoise(Operator):
         >>> gz.restore.GaussianDenoise(sigma=1.0)(scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, sigma: float = 1.0) -> None:
         self.sigma = sigma
 
@@ -504,6 +520,8 @@ class MedianDenoise(Operator):
     Examples:
         >>> gz.restore.MedianDenoise(window=3)(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, window: int = 3) -> None:
         self.window = window
@@ -528,6 +546,8 @@ class BilateralDenoise(Operator):
     Examples:
         >>> gz.restore.BilateralDenoise(sigma_color=0.1, sigma_space=5.0)(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, sigma_color: float = 0.1, sigma_space: float = 5.0) -> None:
         self.sigma_color = sigma_color
@@ -559,6 +579,8 @@ class NLMeans(Operator):
     Examples:
         >>> gz.restore.NLMeans(window=5, search_radius=6, h=0.1)(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self, *, window: int = 5, search_radius: int = 6, h: float = 0.1
@@ -597,6 +619,8 @@ class GapFillIDW(Operator):
         >>> gz.restore.GapFillIDW(power=2.0, radius=5)(scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, power: float = 2.0, radius: int = 5) -> None:
         self.power = power
         self.radius = radius
@@ -625,6 +649,8 @@ class GapFillInpaintBiharmonic(Operator):
         >>> gz.restore.GapFillInpaintBiharmonic()(scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _gap_fill(gt, gap_fill_biharmonic)
 
@@ -646,6 +672,8 @@ class GapFillLaplacian(Operator):
     Examples:
         >>> gz.restore.GapFillLaplacian(iterations=500)(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, iterations: int = 200) -> None:
         self.iterations = iterations
@@ -674,6 +702,8 @@ class GapFillNearest(Operator):
         >>> gz.restore.GapFillNearest(max_distance=3)(scene)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, max_distance: int | None = None) -> None:
         self.max_distance = max_distance
 
@@ -698,6 +728,8 @@ class OutlierMask(Operator):
     Examples:
         >>> gz.restore.OutlierMask(method="mad", k=3.0)(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self, *, method: Literal["mad", "zscore"] = "mad", k: float = 3.0
@@ -727,6 +759,8 @@ class ReplaceOutliers(Operator):
     Examples:
         >>> gz.restore.ReplaceOutliers(method="mad", k=3.0, strategy="median")(scene)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,

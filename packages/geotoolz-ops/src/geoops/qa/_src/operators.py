@@ -309,6 +309,8 @@ class DecodeBitmask(Operator):
         >>> layers = op(landsat_stack)  # (3, H, W) bool GeoArray
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -411,6 +413,8 @@ class MaskInvalid(Operator):
         >>> clean = ApplyMask(mask=MaskInvalid(), fill_value=np.nan)(geoarray)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self, *, invalid_value: float | int | None = None, axis: int = -3
     ) -> None:
@@ -450,6 +454,8 @@ class _QAMask(Operator):
     Returns:
         GeoArray | numpy.ndarray: Boolean mask, True = drop.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _target_name: ClassVar[str] = "qa"
 
@@ -636,6 +642,8 @@ class MaskSaturated(Operator):
         >>> sat = MaskSaturated(saturation_value=1.0, reduce_bands=False)(refl)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -700,6 +708,8 @@ class S2QA60(Operator):
         >>> mask = S2QA60()(s2_l1c_stack_with_qa60_appended)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -750,6 +760,8 @@ class S2SCL(Operator):
         >>> # Custom: mask clouds, cirrus and cloud shadow only.
         >>> mask = S2SCL(targets=["cloud", "cirrus", "cloud_shadow"])(s2_l2a)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _DEFAULT_TARGETS: ClassVar[tuple[str, ...]] = (
         "no_data",
@@ -826,6 +838,8 @@ class LandsatQA_PIXEL(Operator):
         USGS, "Landsat 4-7 Collection 2 Level-2 Science Product Guide",
         LSDS-1618, 2022.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _SENSOR_KEYS: ClassVar[dict[str, str]] = {
         "l89": "landsat_qa_pixel",
@@ -911,6 +925,8 @@ class MODISStateQA(Operator):
         2015, Table 12.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -954,6 +970,8 @@ class S2Cloudless(Operator):
         {'threshold': 0.4}
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     # Calling this Operator raises ImportError — its `get_config` is
     # still serialisable, but actually instantiating the underlying
     # model is closure-like. Mark non-YAML so callers don't accidentally
@@ -981,6 +999,8 @@ class OmniCloudMask(Operator):
         {'checkpoint': 'default'}
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(self, *, checkpoint: str = "default") -> None:
@@ -1003,6 +1023,8 @@ class CloudSEN12(Operator):
         >>> CloudSEN12(checkpoint="default").get_config()
         {'checkpoint': 'default'}
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     forbid_in_yaml: ClassVar[bool] = True
 

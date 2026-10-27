@@ -49,6 +49,10 @@ step-by-step.
     or estimator.
   - **Non-carrier output** (a number, a table, `None`): set
     `_terminal = True`.
+  - **Backends:** declare `backends = ("numpy",)`, or `("numpy", "jax")`
+    when `_apply` computes with the carrier's namespace and runs under
+    `jax.jit`; the contract test checks the claim. Rerun
+    `make capabilities` to update `docs/operators/api/backends.md`.
   - **Output fill** follows the output: `False` for masks, `0` for labels
     and counts, `NaN` for new float quantities, and
     `geoops._src.valid.carried_fill` for outputs that carry the input's

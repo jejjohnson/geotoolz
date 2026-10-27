@@ -119,6 +119,8 @@ class ToFloat32(Operator):
         >>> reflectance = pipe(uint16_dn_geoarray)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         # Rewrap (not `GeoArray.astype`) so integer DN promoted to float
         # get the carried NaN fill at their nodata pixels.
@@ -159,6 +161,8 @@ class DNToRadiance(Operator):
         >>> dn_to_rad = DNToRadiance(gain=gains, offset=offsets)
         >>> radiance = dn_to_rad(dn_geoarray)  # shape preserved
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -220,6 +224,8 @@ class RadianceToDN(Operator):
         >>> np.allclose(np.asarray(dn), np.asarray(dn_geoarray))
         True
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -291,6 +297,8 @@ class DNToReflectance(Operator):
         >>> op_l8 = DNToReflectance(scale=2.75e-5, offset=-0.2)
         >>> reflectance = op_l8(landsat_c2_sr_geoarray)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -368,6 +376,8 @@ class RadianceToReflectance(Operator):
         ... )
         >>> reflectance = op(radiance_geoarray)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -476,6 +486,8 @@ class ReflectanceToRadiance(Operator):
         >>> radiance_out = inv(fwd(radiance_geoarray))
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -572,6 +584,8 @@ class EarthSunDistanceCorrection(Operator):
         position of the sun. *Search* 2(5), 172.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     _terminal: ClassVar[bool] = True
 
     def __init__(self, *, acquisition_date: datetime | str) -> None:
@@ -612,6 +626,8 @@ class ComputeSZA(Operator):
         ... )
         >>> sza_deg = op()  # ~16° (close to local solar noon)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     _terminal: ClassVar[bool] = True
 
@@ -692,6 +708,8 @@ class IntegratedIrradiance(Operator):
         200 to 2400 nm as Measured by the SOLSPEC Spectrometer. *Solar
         Physics* 214(1), 1–22.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     # Holds a ``pandas.DataFrame``, not YAML-serialisable.
     forbid_in_yaml: ClassVar[bool] = True
@@ -888,6 +906,8 @@ class ApplySRF(Operator):
         ... )(emit_geoarray)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -1029,6 +1049,8 @@ class BTFromRadiance(Operator):
         constants).
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(
         self,
         *,
@@ -1105,6 +1127,8 @@ class DOS1(Operator):
         Sensing* 62(9), 1025–1036.
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, dark_percentile: float = 1.0) -> None:
         self.dark_percentile = dark_percentile
 
@@ -1137,6 +1161,8 @@ class SimpleAtmosphericCorrection(Operator):
     References:
         See `DOS1` for the Chavez 1988/1996 references.
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -1181,6 +1207,8 @@ class MinMaxStretch(Operator):
         >>> display_ready = op(reflectance_geoarray)
     """
 
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+
     def __init__(self, *, vmin: float, vmax: float, clip: bool = True) -> None:
         self.vmin = vmin
         self.vmax = vmax
@@ -1220,6 +1248,8 @@ class PercentileClip(Operator):
         >>> op = PercentileClip(lower=2.0, upper=98.0)
         >>> rgb = op(reflectance_geoarray)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
         self,
@@ -1273,6 +1303,8 @@ class Gamma(Operator):
         ... )
         >>> rgb = pipe(reflectance_geoarray)
     """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(self, *, gamma: float = 1.2) -> None:
         self.gamma = gamma
