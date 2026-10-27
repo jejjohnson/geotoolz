@@ -10,12 +10,18 @@ a ``GeoArray``.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 from affine import Affine
 from jaxtyping import Bool, Float, Shaped
-from rasterio.enums import Resampling
 
 from geoops._src.blending import triangular_weights
+from geoops._src.optional import optional_name
+
+
+if TYPE_CHECKING:
+    from rasterio.enums import Resampling
 
 
 # Aliases between the user-friendly resampling names and the
@@ -41,6 +47,12 @@ def resolve_resampling(name: str | Resampling) -> Resampling:
     Returns:
         The matching :class:`rasterio.enums.Resampling` enum member.
     """
+    Resampling = optional_name(
+        "rasterio.enums",
+        "Resampling",
+        "raster",
+        feature="geoops.geom",
+    )
     if isinstance(name, Resampling):
         return name
     return Resampling[_RASTERIO_ALIASES.get(name, name)]

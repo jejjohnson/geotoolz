@@ -22,7 +22,9 @@ classifiers = [
 # under its own name (geoops, geopatcher, geocatalog, geocloud, geoproducts).
 # Lower bounds only: workspace siblings released in lockstep.
 dependencies = [
-    "geotoolz-ops>=0.12",
+    # geoops' base became slim (#538): these four extras are what its base
+    # installed before, so `pip install geotoolz` installs the same set.
+    "geotoolz-ops[raster,vector,morph,sensors]>=0.12",
     "geotoolz-patcher>=0.12",
     "geotoolz-catalog>=0.7",
     "geotoolz-cloud>=0.6",

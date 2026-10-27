@@ -25,7 +25,6 @@ from shapely.geometry import box
 
 import geoops as gz
 from geoops import io
-from geoops.io._src import operators as io_operators
 
 
 def _sample_geotensor() -> GeoArray:
@@ -323,7 +322,9 @@ def test_read_window_delegates_custom_sources_without_indexes(
         assert boundless is True
         return to_georeader(gt)
 
-    monkeypatch.setattr(io_operators.read, "read_from_window", fake_read_from_window)
+    import georeader.read  # the module the operator imports when it runs
+
+    monkeypatch.setattr(georeader.read, "read_from_window", fake_read_from_window)
 
     out = io.ReadWindow(src=source, window=window)()
     assert isinstance(out, GeoArray)
@@ -656,7 +657,9 @@ def test_write_geotiff_passes_blocksize_and_metadata(
         captured["tags"] = tags
         captured["profile_arg"] = profile_arg
 
-    monkeypatch.setattr(io_operators.save, "save_tiled_geotiff", fake_save_tiled)
+    import georeader.save  # the module the operator imports when it runs
+
+    monkeypatch.setattr(georeader.save, "save_tiled_geotiff", fake_save_tiled)
 
     gt = _sample_geotensor()
     io.WriteGeoTIFF(

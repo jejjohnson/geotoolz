@@ -515,7 +515,9 @@ def test_natural_earth_mask_constructors_use_cached_loader(
         return countries
 
     mask_operators._load_natural_earth.cache_clear()
-    monkeypatch.setattr(mask_operators.gpd, "read_file", fake_read_file)
+    import geopandas  # the module the operator imports when it runs
+
+    monkeypatch.setattr(geopandas, "read_file", fake_read_file)
     source = str(tmp_path / "natural-earth.gpkg")
 
     try:

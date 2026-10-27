@@ -5,11 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import geopandas as gpd
 import numpy as np
 from pipekit import Operator
-from shapely.geometry import LineString
-from skimage.measure import find_contours, profile_line, ransac, shannon_entropy
 
 from geoops._src.config import as_tuple
 from geoops._src.geo import (
@@ -34,6 +31,12 @@ from geoops.measure._src.array import (
 
 if TYPE_CHECKING:
     from geoarray import GeoArray
+
+from geoops._src.optional import import_optional, optional_name
+
+
+if TYPE_CHECKING:
+    import geopandas as gpd
 
 
 class LabelConnectedComponents(Operator):
@@ -141,6 +144,9 @@ class RegionProps(Operator):
     def _apply(
         self, gt: GeoArray, intensity_image: GeoArray | np.ndarray | None = None
     ) -> gpd.GeoDataFrame:
+        gpd = import_optional(
+            "geopandas", "vector", feature="geoops.measure.RegionProps"
+        )
         require_geoarray(gt, "RegionProps")
         if intensity_image is not None:
             require_grid_match(
@@ -221,6 +227,21 @@ class FindContours(Operator):
         self.fully_connected = fully_connected
 
     def _apply(self, gt: GeoArray) -> gpd.GeoDataFrame:
+        LineString = optional_name(
+            "shapely.geometry",
+            "LineString",
+            "vector",
+            feature="geoops.measure.FindContours",
+        )
+        find_contours = optional_name(
+            "skimage.measure",
+            "find_contours",
+            "morph",
+            feature="geoops.measure.FindContours",
+        )
+        gpd = import_optional(
+            "geopandas", "vector", feature="geoops.measure.FindContours"
+        )
         require_geoarray(gt, "FindContours")
         contours = find_contours(
             single_band(np.asarray(gt, dtype=float), name="FindContours"),
@@ -280,6 +301,12 @@ class ProfileLine(Operator):
         self.mode = mode
 
     def _apply(self, gt: GeoArray | np.ndarray) -> np.ndarray:
+        profile_line = optional_name(
+            "skimage.measure",
+            "profile_line",
+            "morph",
+            feature="geoops.measure.ProfileLine",
+        )
         reject_geotensor(gt, type(self).__name__)
         return profile_line(
             single_band(np.asarray(gt), name="ProfileLine"),
@@ -327,6 +354,12 @@ class RANSAC(Operator):
         self.kwargs = kwargs
 
     def _apply(self, data: Any) -> Any:
+        ransac = optional_name(
+            "skimage.measure",
+            "ransac",
+            "morph",
+            feature="geoops.measure.RANSAC",
+        )
         return ransac(
             data,
             self.model_class,
@@ -409,6 +442,12 @@ class ShannonEntropy(Operator):
         self.base = base
 
     def _apply(self, gt: GeoArray | np.ndarray) -> float:
+        shannon_entropy = optional_name(
+            "skimage.measure",
+            "shannon_entropy",
+            "morph",
+            feature="geoops.measure.ShannonEntropy",
+        )
         reject_geotensor(gt, type(self).__name__)
         return float(
             shannon_entropy(

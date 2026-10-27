@@ -12,9 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import einx
 import numpy as np
-import rasterio.windows
 from geoarray import DIMS, GeoArray
-from georeader import read
 
 from geoops._src.engine import to_engine
 from geoops._src.geo import affine_of
@@ -27,6 +25,12 @@ if TYPE_CHECKING:
     from affine import Affine
     from jaxtyping import Float, Num
     from scipy.spatial import KDTree
+
+from geoops._src.optional import optional_name, optional_root
+
+
+if TYPE_CHECKING:
+    pass
 
 
 def _require_axis_aligned(transform: Any, op_name: str) -> None:
@@ -140,6 +144,17 @@ def reproject_like(
         The warped values on the destination grid, same leading dims
         and dtype as ``src_values``.
     """
+    rasterio = optional_root(
+        "rasterio.windows",
+        "raster",
+        feature="geoops.geom",
+    )
+    read = optional_name(
+        "georeader",
+        "read",
+        "sensors",
+        feature="geoops.geom",
+    )
     values = np.asarray(src_values)
     if fill_value is None:
         fill_value = np.nan if np.issubdtype(values.dtype, np.floating) else 0

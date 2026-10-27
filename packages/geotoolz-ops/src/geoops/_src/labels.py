@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from heapq import heappop, heappush
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -31,8 +31,12 @@ from jaxtyping import Bool, Int, Shaped
 from scipy import ndimage
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
-from skimage.measure import regionprops_table
-from skimage.morphology import skeletonize
+
+from geoops._src.optional import optional_name
+
+
+if TYPE_CHECKING:
+    pass
 
 
 __all__ = [
@@ -225,6 +229,12 @@ def skeleton_length(
     Raises:
         ValueError: If ``connectivity`` is not 4 or 8.
     """
+    skeletonize = optional_name(
+        "skimage.morphology",
+        "skeletonize",
+        "morph",
+        feature="geoops",
+    )
     arr = np.asarray(mask)
     binary = arr if arr.dtype == bool else np.nan_to_num(arr, nan=0.0) > 0
     if connectivity not in (4, 8):
@@ -269,6 +279,12 @@ def regionprops_frame(
         One row per label, columns named as skimage names them
         (``"centroid-0"``, ``"bbox-3"``, ...).
     """
+    regionprops_table = optional_name(
+        "skimage.measure",
+        "regionprops_table",
+        "morph",
+        feature="geoops",
+    )
     return pd.DataFrame(
         regionprops_table(
             np.asarray(labels).astype(np.int32, copy=False),

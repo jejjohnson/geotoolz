@@ -8,16 +8,12 @@ import tempfile
 from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.request import urlopen
 from zipfile import ZipFile
 
-import geopandas as gpd
 import numpy as np
-import shapely.geometry
-import shapely.geometry.base
 from geoarray import GeoArray
-from georeader import rasterize
 from pipekit import Operator
 
 from geoops._src.config import jsonable, nested_config
@@ -28,6 +24,7 @@ from geoops._src.geo import (
     require_grid_match,
     require_projected_crs,
 )
+from geoops._src.optional import import_optional, optional_name, optional_root
 from geoops._src.shape import gather_inputs
 from geoops._src.valid import carried_fill, carrier_fill_value, wrap_filled
 from geoops._src.wrap import wrap_like
@@ -50,6 +47,12 @@ from geoops.mask._src.array import (
     remove_small_objects,
     slope_mask,
 )
+
+
+if TYPE_CHECKING:
+    import geopandas as gpd
+    import shapely.geometry
+    import shapely.geometry.base
 
 
 _NATURAL_EARTH_URLS = {
@@ -148,6 +151,11 @@ class BBoxMask(PolygonMask):
         crs: str | None = None,
         keep: Keep = "inside",
     ) -> None:
+        shapely = optional_root(
+            "shapely.geometry.base",
+            "vector",
+            feature="geoops.mask.BBoxMask",
+        )
         self.bounds = tuple(bounds)
         if len(self.bounds) != 4:
             raise ValueError("BBoxMask: `bounds` must contain exactly four values")
@@ -817,6 +825,17 @@ def _rasterize_geometry_like(
     crs: str | None,
     all_touched: bool,
 ) -> np.ndarray:
+    gpd = import_optional(
+        "geopandas",
+        "vector",
+        feature="geoops.mask",
+    )
+    rasterize = optional_name(
+        "georeader",
+        "rasterize",
+        "sensors",
+        feature="geoops.mask",
+    )
     if isinstance(geometry, gpd.GeoDataFrame):
         gdf = geometry.copy()
         if gdf.crs is None:
@@ -863,6 +882,7 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
     :func:`clear_natural_earth_cache`. The downloaded zip and extracted
     shapefile are cached separately on disk across sessions.
     """
+    gpd = import_optional("geopandas", "vector", feature="geoops.mask")
     if source != "natural_earth_10m":
         return gpd.read_file(source)
 
@@ -985,6 +1005,12 @@ def _geometry_config(
     dicts (with tuples cast to lists for strict JSON safety). GeoDataFrames
     are summarised by length + CRS to avoid embedding many features.
     """
+    gpd = import_optional("geopandas", "vector", feature="geoops.mask")
+    shapely = optional_root(
+        "shapely.geometry.base",
+        "vector",
+        feature="geoops.mask",
+    )
     if isinstance(geometry, gpd.GeoDataFrame):
         return {
             "type": "GeoDataFrame",

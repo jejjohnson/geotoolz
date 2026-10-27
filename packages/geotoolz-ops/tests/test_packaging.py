@@ -161,7 +161,7 @@ def _all_module_scope_imports() -> dict[str, list[str]]:
 def test_scanner_sees_known_top_level_imports() -> None:
     # Guard against a scanner bug silently making the tests vacuous.
     imports = _all_module_scope_imports()
-    for expected in ("numpy", "rasterio", "affine", "pipekit", "georeader", "geoarray"):
+    for expected in ("numpy", "scipy", "affine", "pipekit", "geoarray", "pandas"):
         assert expected in imports, expected
 
 
@@ -214,6 +214,12 @@ def test_heavy_optional_backends_are_extras_not_base() -> None:
         ("scikit-learn", "learn"),
         ("joblib", "learn"),
         ("zarr", "zarr"),
+        # the slim base (#538)
+        ("rasterio", "raster"),
+        ("geopandas", "vector"),
+        ("shapely", "vector"),
+        ("scikit-image", "morph"),
+        ("georeader-spaceml", "sensors"),
     ]:
         assert dist not in base, dist
         assert dist in extras.get(extra, set()), (dist, extra)
