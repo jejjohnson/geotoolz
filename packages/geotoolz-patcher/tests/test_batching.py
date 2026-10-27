@@ -110,7 +110,7 @@ def test_patches_with_different_fills_are_rejected() -> None:
             )
 
     field = TwoFills(GeoArray(np.zeros((16, 16)), UTM, "EPSG:32630", dims="y x"))
-    with pytest.raises(ValueError, match="one fill"):
+    with pytest.raises(ValueError, match="fill_value"):
         next(batch_split(_patcher(), field, batch_size=4))
 
 
@@ -350,3 +350,19 @@ def test_batched_patch_is_a_pytree_once_jax_loads() -> None:
     assert len(jax.tree_util.tree_leaves(batch)) == 2  # data and valid
     assert isinstance(doubled, BatchedPatch) and doubled.anchors == batch.anchors
     np.testing.assert_array_equal(doubled.data, batch.data * 2)
+
+
+def test_a_float_field_without_a_fill_batches_with_nan() -> None:
+    """pipekit#119: each float chip with no fill takes NaN, so batches agree."""
+    data = np.random.default_rng(2).random((16, 16))
+    field = RasterField(GeoArray(data, UTM, "EPSG:32630", dims="y x"))
+
+    (patches, _), *_ = batch_split(_patcher(), field, batch_size=4)
+
+    assert np.isnan(patches.fill_value)
+
+
+def test_the_shape_error_names_both_patches() -> None:
+    field = _scene(20)  # 8-px patches → 4-px edge chips
+    with pytest.raises(ValueError, match=r"\(0, 16\): \(3, 8, 4\)"):
+        list(batch_split(_patcher("shrink"), field, batch_size=9))

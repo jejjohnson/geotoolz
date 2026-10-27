@@ -327,6 +327,69 @@ def stack(
     return first.with_data(data, dims=dims, coords=coords)
 
 
+def stack_items_carriers(carriers: Sequence[GeoArray], dim: str) -> GeoArray:
+    """Items on their own grids along a new leading batch dim ``dim``.
+
+    What ``geoarray.stack_items`` (``pipekit_array.stack_items``) runs for
+    carriers: the inverse of the split `map_over` makes along a batch dim.
+    Where `stack` requires one shared grid, each item keeps its transform as
+    a row of a ``(n, 6)`` transform, so ``dim`` is a batch dim (patches,
+    frames on per-frame grids). Everything else is one value for the batch:
+    the dims, shape, CRS, fill, coordinates and attrs must be equal.
+
+    Raises:
+        ValueError: ``dim`` is already a dim, an item is batched, or the
+            items differ in dims, shape, fill, coordinates or attrs.
+        GridMismatchError: The items' CRS or spatial shape differ.
+        pipekit_array.BackendError: NumPy and JAX items are mixed.
+
+    Example:
+        >>> import numpy as np
+        >>> import geoarray
+        >>> t = (10, 0, 0, 0, -10, 40)
+        >>> a = geoarray.GeoArray(np.zeros((4, 4)), t, 32630, dims="y x")
+        >>> b = a.with_data(np.ones((4, 4)), transform=(10, 0, 40, 0, -10, 40))
+        >>> batch = geoarray.stack_items([a, b], "patch")
+        >>> batch.dims, batch.transform.shape
+        (('patch', 'y', 'x'), (2, 6))
+    """
+    gs = _require_carriers(carriers, "stack_items")
+    first = gs[0]
+    if dim in first.dims:
+        raise ValueError(f"stack_items: {dim!r} is already a dim of {first.dims}")
+    for i, g in enumerate(gs):
+        if g.batch_shape:
+            raise ValueError(
+                f"stack_items: item {i} is already batched {g.batch_dims}; "
+                "concat along its batch dim instead"
+            )
+    backends = {g.backend for g in gs}
+    if len(backends) > 1:
+        from pipekit_array import BackendError
+
+        raise BackendError(
+            f"stack_items: items on {sorted(backends)}; call .to_jax() on the "
+            "NumPy ones first (inputs never move between backends silently)."
+        )
+    _require_same_crs_and_shape(gs, "stack_items")
+    _require_same_fill(gs, "stack_items")
+    for i, g in enumerate(gs[1:], start=1):
+        for field in ("dims", "shape", "coords", "attrs"):
+            if getattr(g, field) != getattr(first, field):
+                raise ValueError(
+                    f"stack_items: item {i} has {field} {getattr(g, field)!r}, "
+                    f"not {getattr(first, field)!r}"
+                )
+    xp = first.xp
+    return first.with_data(
+        xp.stack([g.data for g in gs]),
+        transform=xp.stack([xp.asarray(g.transform) for g in gs]),
+        attrs=first.attrs,
+        dims=(dim, *first.dims),
+        coords=first.coords,
+    )
+
+
 def concat_carriers(carriers: Sequence[GeoArray], dim: str) -> GeoArray:
     """Join carriers on one grid along an existing non-spatial dim.
 

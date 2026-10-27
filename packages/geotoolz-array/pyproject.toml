@@ -33,7 +33,7 @@ dependencies = [
     # KernelOp that geoarray registers with and re-exports; pipekit 0.1.3
     # adds `on_import`, which registers the pytrees once JAX is imported.
     "pipekit>=0.1.3",
-    "pipekit-array>=0.0.5",
+    "pipekit-array>=0.0.6",
 ]
 
 [project.optional-dependencies]

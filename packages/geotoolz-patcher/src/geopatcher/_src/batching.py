@@ -71,9 +71,11 @@ def batch_split(
 
     Groups consecutive patches into batches of exactly ``batch_size``; only
     the final batch can be short, and ``pad_last`` decides what happens to
-    it. Every patch must be a `GeoArray` (any raster field adapter) or a
-    ``DataArray`` that reads as a grid (`GeoArray.from_xarray`), of one
-    shape.
+    it. The grouping, padding and mask are `pipekit_array.batch`'s (with
+    `geoarray.stack_items` stacking the transform rows), the rule every
+    padded batch in the stack follows. Every patch must be a `GeoArray`
+    (any raster field adapter) or a ``DataArray`` that reads as a grid
+    (`GeoArray.from_xarray`), of one shape.
 
     Args:
         patcher: Any patcher exposing ``split(field) -> Iterator[Patch]``
@@ -96,9 +98,10 @@ def batch_split(
     Raises:
         ValueError: ``batch_size`` is not positive; the patches of one
             batch differ in shape (``boundary="shrink"`` edge chips) or in
-            CRS, fill, coordinates or attrs (a float field's ``None`` fill
-            and the NaN its ``boundary="pad"`` edge chips declare count as
-            one: the batch's fill is NaN).
+            fill, coordinates or attrs (`geoarray.stack_items`). A float
+            patch with no fill takes NaN, so a float field's interior chips
+            and the NaN its ``boundary="pad"`` edge chips declare agree.
+        geoarray.GridMismatchError: The patches of one batch differ in CRS.
         TypeError: A patch is not a raster carrier (a plain array, a
             ``DataArray`` with no grid): use the deprecated
             `BatchedPatch.split` for those, until geotoolz-patcher 0.15.
@@ -110,14 +113,12 @@ def batch_split(
     """
     if batch_size <= 0:
         raise ValueError(f"batch_size must be positive, got {batch_size}")
-    group: list[Patch] = []
-    for patch in patcher.split(field):
-        group.append(patch)
-        if len(group) == batch_size:
-            yield _patch_batch(group, batch_size, pad=False)
-            group = []
-    if group:
-        yield _patch_batch(group, batch_size, pad=pad_last)
+    from pipekit_array import batch
+
+    items = _batch_items(patcher.split(field), batch_size)
+    pad = "last" if pad_last else "none"
+    for padded in batch(items, size=batch_size, dim=PATCH, pad=pad):
+        yield PatchBatch(padded.value, np.asarray(padded.valid, dtype=bool))
 
 
 def unbatch(
@@ -182,36 +183,31 @@ def unbatch(
     return _unbatch(batch, data, patcher, domain)
 
 
-def _patch_batch(patches: list[Patch], batch_size: int, *, pad: bool) -> PatchBatch:
-    _check_shapes(patches)
-    items = [_as_geoarray(p.data) for p in patches]
-    first = items[0]
-    fill = _batch_fill(items)
-    for item in items[1:]:
-        if not _same_static(item, first):
+def _batch_items(patches: Iterator[Patch], size: int) -> Iterator[GeoArray]:
+    """Each patch as the carrier `pipekit_array.batch` stacks, lazily.
+
+    Patches of one batch (``size`` consecutive ones) must share a shape; the
+    error names their anchors, which the stacked carriers no longer know. A
+    float patch with no fill takes NaN: geoarray already reads non-finite
+    pixels as nodata, and the ``boundary="pad"`` edge chips of such a field
+    declare NaN, so one batch keeps one fill.
+    """
+    first: tuple[Any, tuple[int, ...]] | None = None
+    for k, patch in enumerate(patches):
+        shape = tuple(np.shape(patch.data))
+        if k % size == 0:
+            first = (patch.anchor, shape)
+        elif first is not None and shape != first[1]:
             raise ValueError(
-                "batch_split needs patches with one CRS, dims, coordinates "
-                f"and attrs; got {_describe(first)} and {_describe(item)}"
+                "batch_split needs equal-shaped patches to stack, got "
+                f"{first[0]!r}: {first[1]} and {patch.anchor!r}: {shape}. Edge "
+                "chips shrink under boundary='shrink'; use boundary='pad', "
+                "'reflect' or 'drop' for fixed-size chips."
             )
-    data = [np.asarray(item.data) for item in items]
-    transforms = [np.asarray(item.transform, dtype=np.float64) for item in items]
-    valid = [True] * len(items)
-    if pad:
-        # copies of the last real patch: finite, and in distribution (ADR-013)
-        for _ in range(batch_size - len(items)):
-            data.append(data[-1])
-            transforms.append(transforms[-1])
-            valid.append(False)
-    stacked = GeoArray(
-        np.stack(data),
-        np.stack(transforms),
-        first.crs,
-        fill_value=fill,
-        attrs=first.attrs,
-        dims=(PATCH, *first.dims),
-        coords=first.coords,
-    )
-    return PatchBatch(stacked, np.asarray(valid, dtype=bool))
+        item = _as_geoarray(patch.data)
+        if item.fill_value is None and np.issubdtype(item.dtype, np.floating):
+            item = item.with_data(item.data, fill_value=np.nan)
+        yield item
 
 
 def _check_shapes(patches: list[Patch]) -> None:
@@ -248,48 +244,6 @@ def _not_a_raster(data: Any) -> TypeError:
         "deprecated geopatcher.run.BatchedPatch.split (removed in "
         "geotoolz-patcher 0.15)."
     )
-
-
-def _batch_fill(items: list[GeoArray]) -> Any:
-    """The fill every patch of a batch shares.
-
-    ``boundary="pad"`` declares NaN on the edge chips of a float field with
-    no fill, while interior chips keep ``None``: one field, so the batch
-    takes NaN. Any other difference is a real mismatch.
-    """
-    fills = [item.fill_value for item in items]
-    first = fills[0]
-    if all(_same_fill(f, first) for f in fills):
-        return first
-    floating = np.issubdtype(items[0].dtype, np.floating)
-    if floating and all(f is None or _is_nan(f) for f in fills):
-        return np.nan
-    raise ValueError(
-        f"batch_split needs patches with one fill, got {sorted(set(map(repr, fills)))}"
-    )
-
-
-def _same_fill(a: Any, b: Any) -> bool:
-    return (_is_nan(a) and _is_nan(b)) or (
-        a is None if b is None else (a is not None and bool(a == b))
-    )
-
-
-def _same_static(a: GeoArray, b: GeoArray) -> bool:
-    return (
-        a.dims == b.dims
-        and a.coords == b.coords
-        and a.crs == b.crs
-        and a.attrs == b.attrs
-    )
-
-
-def _is_nan(value: Any) -> bool:
-    return isinstance(value, float) and value != value
-
-
-def _describe(g: GeoArray) -> str:
-    return f"(crs={g.crs.to_string()}, fill={g.fill_value!r}, dims={g.dims})"
 
 
 def _unbatch(
