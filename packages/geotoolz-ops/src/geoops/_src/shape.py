@@ -313,13 +313,16 @@ def map_frames(fn: Callable[[Any], Any], x: Any, *, name: str) -> Any:
     stacked = np.stack(arrays)
     if not isinstance(first, GeoArray):
         return stacked
-    # a 2-D result keeps a singleton band axis on a stack that has bands
-    # (#147); a single-band ("time", "y", "x") series stays one
-    has_bands = not isinstance(x, GeoArray) or "band" in x.dims
-    if first.ndim == 2 and not has_bands:
+    # a 2-D result keeps a singleton axis, named like the input's, on a stack
+    # with a dim between time and the grid ("band", or any other name;
+    # #147); a single-band ("time", "y", "x") series stays one
+    channel = (
+        "band" if not isinstance(x, GeoArray) else (x.dims[1] if x.ndim > 3 else None)
+    )
+    if first.ndim == 2 and channel is None:
         stacked = stacked[:, 0]
     frame_dims = (
-        first.dims if first.ndim == 3 or not has_bands else ("band", *first.dims)
+        first.dims if first.ndim == 3 or channel is None else (channel, *first.dims)
     )
     # each frame lost the time coordinate; the frames are in order, so the
     # input's comes back with the restacked time dim

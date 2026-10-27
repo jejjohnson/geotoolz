@@ -2021,3 +2021,19 @@ def test_pad_to_keeps_jax_on_every_path(kwargs: dict[str, Any], fill: Any) -> No
     scene = _attributed_inputs()[0]
     scene = scene.replace(fill_value=fill)
     assert_backends(PadTo(shape=(20, 21), **kwargs), scene)
+
+
+def test_a_renamed_channel_dim_keeps_its_singleton_axis_on_a_stack() -> None:
+    """``SLIC(dim="wavelength")`` on a stack gives ``(T, 1, H, W)`` as for "band"."""
+    from geoops.segment import SLIC
+
+    stack = time_stack_of(_attributed_inputs()[0])  # ("time", "band", "y", "x")
+    renamed = stack.replace(
+        dims=("time", "wavelength", "y", "x"),
+        coords=tuple(c for c in stack.coords if c.dim != "band"),
+    )
+    want = SLIC()(stack)
+    got = SLIC(dim="wavelength")(renamed)
+    assert got.shape == want.shape == (2, 1, *stack.shape[-2:])
+    assert got.dims == ("time", "wavelength", "y", "x")
+    np.testing.assert_array_equal(np.asarray(got), np.asarray(want))

@@ -221,3 +221,19 @@ def test_map_frames_splits_a_single_band_series_by_name() -> None:
     assert seen == [("y", "x"), ("y", "x")]
     assert out.dims == ("time", "y", "x")  # no dummy band axis
     np.testing.assert_array_equal(np.asarray(out), np.asarray(series) * 2)
+
+
+def test_map_frames_keeps_a_renamed_channel_dim() -> None:
+    """A 2-D per-frame result keeps the stack's own channel dim, by its name."""
+    stack = time_stack()  # ("time", "band", "y", "x")
+    renamed = stack.replace(
+        dims=("time", "wavelength", "y", "x"),
+        coords=tuple(c for c in stack.coords if c.dim != "band"),
+    )
+
+    def band_sum(frame: GeoArray) -> GeoArray:
+        return frame.with_data(np.asarray(frame).sum(axis=0), dims=("y", "x"))
+
+    out = map_frames(band_sum, renamed, name="BandSum")
+    assert out.dims == ("time", "wavelength", "y", "x")
+    assert out.shape == (stack.shape[0], 1, *stack.shape[-2:])
