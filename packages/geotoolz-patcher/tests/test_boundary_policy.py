@@ -63,6 +63,7 @@ def misaligned_field() -> RasterField:
         data=arr,
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
+        dims="y x",
     )
     return RasterField(gt)
 
@@ -140,6 +141,7 @@ class TestAlignedDomainIsUnchanged:
             data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
+            dims="y x",
         )
         return RasterField(gt)
 
@@ -180,6 +182,7 @@ class TestBoundaryHonoredByAllRasterSamplers:
             data=arr,
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
+            dims="y x",
         )
         return RasterField(gt)
 
@@ -204,6 +207,7 @@ class TestBoundaryHonoredByAllRasterSamplers:
                 data=np.ones((10, 10), dtype=np.float32),
                 transform=rasterio.Affine.identity(),
                 crs="EPSG:32630",
+                dims="y x",
             )
         )
         patcher = SpatialPatcher(
@@ -272,7 +276,9 @@ class TestBoundaryHonoredByAllRasterSamplers:
 def _arange_field(n: int = 10) -> RasterField:
     """``n x n`` field of ``arange`` values on an identity transform."""
     arr = np.arange(n * n, dtype=np.float32).reshape(n, n)
-    gt = GeoArray(data=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630")
+    gt = GeoArray(
+        data=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630", dims="y x"
+    )
     return RasterField(gt)
 
 
@@ -347,7 +353,9 @@ class TestReflectAndPadValue:
         # overflow on every side.
         utm = rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0)
         arr = np.arange(100, dtype=np.float32).reshape(10, 10)
-        field = RasterField(GeoArray(data=arr, transform=utm, crs="EPSG:32630"))
+        field = RasterField(
+            GeoArray(data=arr, transform=utm, crs="EPSG:32630", dims="y x")
+        )
         patcher = SpatialPatcher(
             geometry=spatial.geometry.Rectangular(size=(4, 4), boundary=boundary),
             sampler=spatial.sampler.Explicit([anchor]),
@@ -427,7 +435,9 @@ def _ramp(h: int = _H, w: int = _W) -> np.ndarray:
 
 
 def _raster_case() -> RasterField:
-    return RasterField(GeoArray(data=_ramp(), transform=_T, crs="EPSG:32630"))
+    return RasterField(
+        GeoArray(data=_ramp(), transform=_T, crs="EPSG:32630", dims="y x")
+    )
 
 
 def _rioxarray_case() -> Any:
@@ -767,7 +777,12 @@ class TestPadValueValidation:
     def _field(dtype: Any) -> RasterField:
         arr = np.arange(100).reshape(10, 10).astype(dtype)
         return RasterField(
-            GeoArray(data=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630")
+            GeoArray(
+                data=arr,
+                transform=rasterio.Affine.identity(),
+                crs="EPSG:32630",
+                dims="y x",
+            )
         )
 
     @pytest.mark.parametrize(

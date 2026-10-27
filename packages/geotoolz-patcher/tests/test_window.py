@@ -164,6 +164,7 @@ def _constant_field(n: int) -> RasterField:
             data=np.full((n, n), _C, dtype=np.float64),
             transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
             crs="EPSG:32630",
+            dims="y x",
         )
     )
 

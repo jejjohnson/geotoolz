@@ -344,6 +344,7 @@ def test_read_reproject_like_matches_sync(cog_path: Path):
         Affine(0.0003, 0.0, lon, 0.0, -0.0003, lat),
         "EPSG:4326",
         fill_value=0,
+        dims="band y x",
     )
     got = asyncio.run(cog.read_reproject_like(reader, like))
     _assert_same(got, read.read_reproject_like(sync, to_georeader(like)))
@@ -378,6 +379,7 @@ def test_read_reproject_like_anisotropic_resolution_keeps_extent(cog_path: Path)
         Affine(0.0003, 0.0, lon, 0.0, -0.0003, lat),
         "EPSG:4326",
         fill_value=0,
+        dims="band y x",
     )
     got = asyncio.run(
         cog.read_reproject_like(reader, like, resolution_dst=(0.0006, 0.0002))

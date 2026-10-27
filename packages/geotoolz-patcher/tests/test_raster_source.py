@@ -29,7 +29,9 @@ _T = rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0)
 
 def _scene(n: int = 32, bands: int = 2) -> GeoArray:
     values = np.arange(bands * n * n, dtype=np.float32).reshape(bands, n, n)
-    return GeoArray(values, _T, "EPSG:32630", fill_value=-1.0, attrs={"k": 1})
+    return GeoArray(
+        values, _T, "EPSG:32630", fill_value=-1.0, attrs={"k": 1}, dims="band y x"
+    )
 
 
 def _patcher(size: int = 8) -> SpatialPatcher:
@@ -319,7 +321,9 @@ class TestPaddingNeedsAFill:
     """``boundary="pad"`` never writes pixels the chip would count as data."""
 
     def test_float_source_without_fill_pads_nan_and_declares_it(self) -> None:
-        scene = GeoArray(np.ones((1, 12, 12), np.float32), _T, "EPSG:32630")
+        scene = GeoArray(
+            np.ones((1, 12, 12), np.float32), _T, "EPSG:32630", dims="band y x"
+        )
         patches = list(_pad_patcher().split(RasterField(scene)))
         edge = next(p for p in patches if p.anchor == (8, 8))
         chip = np.asarray(edge.data)
@@ -332,14 +336,16 @@ class TestPaddingNeedsAFill:
 
     @pytest.mark.parametrize("dtype", [np.uint8, np.int16, np.bool_])
     def test_integer_source_without_fill_raises(self, dtype: Any) -> None:
-        scene = GeoArray(np.ones((1, 12, 12), dtype), _T, "EPSG:32630")
+        scene = GeoArray(np.ones((1, 12, 12), dtype), _T, "EPSG:32630", dims="band y x")
         with pytest.raises(ValueError, match="fill_value=None"):
             list(_pad_patcher().split(RasterField(scene)))
 
     def test_integer_source_without_fill_raises_on_the_async_path(self) -> None:
         import asyncio
 
-        scene = GeoArray(np.ones((1, 12, 12), np.uint16), _T, "EPSG:32630")
+        scene = GeoArray(
+            np.ones((1, 12, 12), np.uint16), _T, "EPSG:32630", dims="band y x"
+        )
         field = AsyncRasterField(_AsyncSource(scene))
 
         async def run() -> list[Any]:
@@ -356,9 +362,9 @@ class TestPaddingNeedsAFill:
             window=spatial.window.Boxcar(),
             aggregation=spatial.aggregation.OverlapAdd(),
         )
-        no_fill = GeoArray(values, _T, "EPSG:32630")
+        no_fill = GeoArray(values, _T, "EPSG:32630", dims="band y x")
         assert len(list(reflect.split(RasterField(no_fill)))) == 4
-        filled = GeoArray(values, _T, "EPSG:32630", fill_value=0)
+        filled = GeoArray(values, _T, "EPSG:32630", fill_value=0, dims="band y x")
         edge = list(_pad_patcher().split(RasterField(filled)))[-1]
         assert edge.data.fill_value == 0
         assert (np.asarray(edge.data)[:, 4:, :] == 0).all()
@@ -369,7 +375,11 @@ class TestRewrapFill:
 
     def test_uint8_output_of_a_float_source_with_a_negative_fill(self) -> None:
         scene = GeoArray(
-            np.zeros((2, 8, 8), np.float32), _T, "EPSG:32630", fill_value=-9999.0
+            np.zeros((2, 8, 8), np.float32),
+            _T,
+            "EPSG:32630",
+            fill_value=-9999.0,
+            dims="band y x",
         )
         out = RasterField(scene).with_data(np.ones((2, 8, 8), np.uint8))
         assert out.dtype == np.uint8
@@ -377,7 +387,11 @@ class TestRewrapFill:
 
     def test_fill_kept_when_the_output_dtype_holds_it(self) -> None:
         scene = GeoArray(
-            np.zeros((2, 8, 8), np.float32), _T, "EPSG:32630", fill_value=-9999.0
+            np.zeros((2, 8, 8), np.float32),
+            _T,
+            "EPSG:32630",
+            fill_value=-9999.0,
+            dims="band y x",
         )
         assert RasterField(scene).with_data(
             np.ones((2, 8, 8), np.int16)
@@ -385,7 +399,13 @@ class TestRewrapFill:
         assert RasterField(scene).with_data(np.ones((2, 8, 8))).fill_value == -9999.0
 
     def test_float_output_of_an_integer_source_is_nan_filled(self) -> None:
-        scene = GeoArray(np.zeros((1, 8, 8), np.uint8), _T, "EPSG:32630", fill_value=0)
+        scene = GeoArray(
+            np.zeros((1, 8, 8), np.uint8),
+            _T,
+            "EPSG:32630",
+            fill_value=0,
+            dims="band y x",
+        )
         out = RasterField(scene).with_data(np.ones((1, 8, 8), np.float32))
         assert np.isnan(float(out.fill_value))
 
@@ -394,7 +414,11 @@ class TestRewrapFill:
         from geopatcher.integrations.pipekit import MergePatches
 
         scene = GeoArray(
-            np.zeros((2, 8, 8), np.float32), _T, "EPSG:32630", fill_value=-9999.0
+            np.zeros((2, 8, 8), np.float32),
+            _T,
+            "EPSG:32630",
+            fill_value=-9999.0,
+            dims="band y x",
         )
         patches = [
             p.with_data(np.ones((1, *np.shape(p.data)[-2:]), np.uint8))

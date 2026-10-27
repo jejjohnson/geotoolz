@@ -127,6 +127,11 @@ invalid-argument-type = "ignore"
 invalid-return-type = "ignore"
 
 [tool.pytest.ini_options]
+filterwarnings = [
+    # W2 (jejjohnson/geostack#67): no carrier in this package or its tests
+    # takes its dims from the data's rank (geotoolz-array 0.3 deprecation).
+    "error:GeoArray dims read from:DeprecationWarning",
+]
 testpaths = ["tests"]
 addopts = "--cov=src/geocloud --cov-report=term-missing --cov-report=xml:coverage.xml --strict-markers"
 

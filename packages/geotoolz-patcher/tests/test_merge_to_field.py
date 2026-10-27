@@ -66,6 +66,7 @@ def _geoarray_field(dtype: Any = np.uint16) -> RasterField:
             crs="EPSG:32630",
             fill_value=fill,
             attrs={"band_names": ["b1", "b2"]},
+            dims="band y x",
         )
     )
 
@@ -339,6 +340,7 @@ def test_matched_merge_to_field_rebuilds_every_source_on_primary_grid() -> None:
             data=np.full((2, 16, 16), 7, dtype=np.int16),
             transform=rasterio.Affine(5.0, 0.0, 500_000.0, 0.0, -5.0, 4_600_000.0),
             crs="EPSG:32630",
+            dims="band y x",
         )
     )
     mfield = MatchedField(
@@ -404,6 +406,7 @@ def test_merge_to_field_carried_float_gaps_take_the_source_fill() -> None:
             transform=_T,
             crs="EPSG:32630",
             fill_value=-1.0,
+            dims="band y x",
         )
     )
     patcher = _patcher()
@@ -437,6 +440,7 @@ def test_merge_to_field_fully_covered_votes_declare_their_fill() -> None:
             transform=_T,
             crs="EPSG:32630",
             fill_value=0,
+            dims="band y x",
         )
     )
     patcher = _patcher(aggregation=spatial.aggregation.HardVote(n_classes=2))

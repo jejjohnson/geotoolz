@@ -436,6 +436,7 @@ def _time_raster(n_time: int, scale: float = 1.0) -> Any:
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
             fill_value=np.nan,
+            dims="band y x",
         )
     )
 

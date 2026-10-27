@@ -182,6 +182,7 @@ def stitch_field() -> RasterField:
         data=np.arange(16 * 16, dtype=np.float32).reshape(16, 16),
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
+        dims="y x",
     )
     return RasterField(gt)
 
@@ -242,7 +243,10 @@ class TestCogWriter:
         target = str(tmp_path / "rgb.tif")
         data = np.random.default_rng(0).random((3, 8, 8)).astype(np.float32)
         domain = GeoArray(
-            data=data, transform=rasterio.Affine.identity(), crs="EPSG:32630"
+            data=data,
+            transform=rasterio.Affine.identity(),
+            crs="EPSG:32630",
+            dims="band y x",
         )
         patch = Patch(data=data, anchor=(0, 0), indices=Window(0, 0, 8, 8))
         agg = spatial.aggregation.OverlapAdd(
@@ -258,7 +262,10 @@ class TestCogWriter:
         target = tmp_path / "a" / "b" / "out.tif"
         data = np.random.default_rng(0).random((1, 8, 8)).astype(np.float32)
         domain = GeoArray(
-            data=data, transform=rasterio.Affine.identity(), crs="EPSG:32630"
+            data=data,
+            transform=rasterio.Affine.identity(),
+            crs="EPSG:32630",
+            dims="band y x",
         )
         patch = Patch(data=data, anchor=(0, 0), indices=Window(0, 0, 8, 8))
         agg = spatial.aggregation.OverlapAdd(
@@ -317,6 +324,7 @@ class TestCogWriter:
                 data=values,
                 transform=rasterio.Affine(10.0, 0.0, 0.0, 0.0, -10.0, 640.0),
                 crs="EPSG:32630",
+                dims="y x",
             )
         )
         patcher = SpatialPatcher(
@@ -355,7 +363,10 @@ class TestCogWriter:
             streaming=True, target_path=str(target), writer="cog"
         )
         domain = GeoArray(
-            data=np.zeros((8, 8)), transform=rasterio.Affine.identity(), crs=None
+            data=np.zeros((8, 8)),
+            transform=rasterio.Affine.identity(),
+            crs=None,
+            dims="y x",
         )
         with pytest.raises(FileExistsError, match="overwrite=True"):
             agg.merge([], domain)

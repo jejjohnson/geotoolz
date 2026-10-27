@@ -147,6 +147,7 @@ class TestSplitBackpressureIntegration:
             data=np.arange(64, dtype=np.float32).reshape(8, 8),
             transform=rasterio.Affine.identity(),
             crs="EPSG:32630",
+            dims="y x",
         )
         return RasterField(gt)
 

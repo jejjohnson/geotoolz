@@ -32,7 +32,10 @@ TRANSFORM = Affine(10, 0, 500_000, 0, -10, 4_000_000)
 def scene(
     values: np.ndarray, *, fill: Any = 0, attrs: dict[str, Any] | None = None
 ) -> GeoArray:
-    return GeoArray(values, TRANSFORM, "EPSG:32630", fill_value=fill, attrs=attrs)
+    dims = {2: "y x", 3: "band y x", 4: "time band y x"}[np.ndim(values)]
+    return GeoArray(
+        values, TRANSFORM, "EPSG:32630", fill_value=fill, attrs=attrs, dims=dims
+    )
 
 
 @pytest.fixture
@@ -208,7 +211,7 @@ def test_bad_arguments(tmp_path: Path, kwargs: dict[str, Any], match: str) -> No
 def test_bad_data(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match=r"\(T, C, H, W\)"):
         write_cog(scene(np.ones((2, 1, 8, 8), "uint8")), tmp_path / "x.tif")
-    no_crs = GeoArray(np.ones((8, 8), "uint8"), TRANSFORM, None)
+    no_crs = GeoArray(np.ones((8, 8), "uint8"), TRANSFORM, None, dims="y x")
     with pytest.raises(ValueError, match="no CRS"):
         write_cog(no_crs, tmp_path / "x.tif")
     with pytest.raises(TypeError, match=r"GeoArray or a geoarray\.RasterSource"):

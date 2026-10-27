@@ -222,6 +222,11 @@ invalid-return-type = "ignore"
 unresolved-attribute = "ignore"
 
 [tool.pytest.ini_options]
+filterwarnings = [
+    # W2 (jejjohnson/geostack#67): no carrier in this package or its tests
+    # takes its dims from the data's rank (geotoolz-array 0.3 deprecation).
+    "error:GeoArray dims read from:DeprecationWarning",
+]
 testpaths = ["tests"]
 # `bench_*.py` is the benchmark-suite convention; the default
 # `test_*.py` discovery doesn't pick them up, so opt them in

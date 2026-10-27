@@ -91,8 +91,11 @@ class _Recorder:
 
 def _raster(shape: tuple[int, ...]) -> RasterField:
     arr = np.arange(int(np.prod(shape)), dtype=np.float32).reshape(shape)
+    dims = "y x" if arr.ndim == 2 else "band y x"
     return RasterField(
-        GeoArray(data=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630")
+        GeoArray(
+            data=arr, transform=rasterio.Affine.identity(), crs="EPSG:32630", dims=dims
+        )
     )
 
 

@@ -61,6 +61,7 @@ def _gt(values: np.ndarray) -> GeoArray:
         transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
         crs="EPSG:32629",
         fill_value=np.nan,
+        dims="y x",
     )
 
 
@@ -444,6 +445,7 @@ class TestHeterogeneousGrids:
             transform=rasterio.Affine(5.0, 0.0, 500_000.0, 0.0, -5.0, 4_000_000.0),
             crs="EPSG:32629",
             fill_value=np.nan,
+            dims="y x",
         )
         mf = MatchedField(
             primary=RasterField(_gt(primary_values)),
@@ -475,6 +477,7 @@ class TestHeterogeneousGrids:
             transform=rasterio.Affine(0.01, 0.0, -12.0, 0.0, -0.01, 39.0),
             crs="EPSG:4326",
             fill_value=np.nan,
+            dims="y x",
         )
         mf = MatchedField(
             primary=RasterField(primary),
@@ -548,6 +551,7 @@ class TestValidMaskNodata:
             transform=rasterio.Affine(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
             crs="EPSG:32629",
             fill_value=0,
+            dims="y x",
         )
         mf = MatchedField(
             primary=RasterField(tensor),

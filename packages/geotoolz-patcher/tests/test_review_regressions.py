@@ -35,7 +35,7 @@ def _ones_field(h: int = 32, w: int = 32) -> RasterField:
     transform = rasterio.transform.from_origin(
         west=0.0, north=float(h), xsize=1.0, ysize=1.0
     )
-    gt = GeoArray(data=arr, transform=transform, crs="EPSG:32630")
+    gt = GeoArray(data=arr, transform=transform, crs="EPSG:32630", dims="y x")
     return RasterField(gt)
 
 

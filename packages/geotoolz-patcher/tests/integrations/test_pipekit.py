@@ -38,6 +38,7 @@ def field() -> RasterField:
         data=arr,
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
+        dims="y x",
     )
     return RasterField(gt)
 

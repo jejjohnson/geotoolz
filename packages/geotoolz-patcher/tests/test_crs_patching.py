@@ -33,7 +33,9 @@ _UTM_CRS = "EPSG:32630"
 
 def _utm_field(n: int = 100) -> RasterField:
     arr = np.arange(n * n, dtype=np.float32).reshape(n, n)
-    return RasterField(GeoArray(data=arr, transform=_UTM_TRANSFORM, crs=_UTM_CRS))
+    return RasterField(
+        GeoArray(data=arr, transform=_UTM_TRANSFORM, crs=_UTM_CRS, dims="y x")
+    )
 
 
 def _pixel_center_lonlat(row: int, col: int) -> tuple[float, float]:
@@ -162,6 +164,7 @@ class TestPolarDatelineGuard:
                 data=arr,
                 transform=rasterio.Affine(1000, 0, -5000, 0, -1000, 5000),
                 crs="EPSG:3413",
+                dims="y x",
             )
         )
         geom = spatial.geometry.Rectangular(size=(2, 2))
@@ -233,7 +236,13 @@ def _utm_3d_scene(n: int = 100, bands: int = 2) -> GeoArray:
         ]
     )
     # 0 is the nodata the warp writes outside the source footprint.
-    return GeoArray(data=arr, transform=_UTM_TRANSFORM, crs=_UTM_CRS, fill_value=0.0)
+    return GeoArray(
+        data=arr,
+        transform=_UTM_TRANSFORM,
+        crs=_UTM_CRS,
+        fill_value=0.0,
+        dims="band y x",
+    )
 
 
 def _stride_patcher(size: int = 16) -> SpatialPatcher:

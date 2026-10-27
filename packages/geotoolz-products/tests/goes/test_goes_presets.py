@@ -23,6 +23,7 @@ def _stack(values: dict[str, float], *, crs: str = "EPSG:4326") -> GeoArray:
         crs,
         fill_value=np.nan,
         attrs={"band_names": tuple(values)},
+        dims="band y x",
     )
 
 

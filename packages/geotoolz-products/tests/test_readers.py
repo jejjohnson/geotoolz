@@ -270,6 +270,7 @@ def test_toy_sensor_ndvi_preset_matches_generic_operator() -> None:
         Affine.identity(),
         "EPSG:4326",
         attrs={"band_names": ("blue", "green", "red", "nir")},
+        dims="band y x",
     )
     np.testing.assert_allclose(np.asarray(op(scene)), 0.5)
     # The preset runs on a reader's read as it is.

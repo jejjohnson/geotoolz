@@ -324,6 +324,7 @@ def test_with_data_preserves_nodata_and_attrs(adapter: str) -> None:
         crs="EPSG:32630",
         fill_value=-1.0,
         attrs={"k": 1},
+        dims="y x",
     )
     field: Any = (
         RasterField(source)

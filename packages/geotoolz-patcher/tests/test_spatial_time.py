@@ -27,6 +27,7 @@ def time_field() -> RasterField:
         data=arr,
         transform=rasterio.Affine.identity(),
         crs="EPSG:32630",
+        dims="band y x",
     )
     return RasterField(gt)
 
@@ -92,6 +93,7 @@ class TestCoupledCoupling:
                 data=arr,
                 transform=rasterio.Affine.identity(),
                 crs="EPSG:32630",
+                dims="band y x",
             )
         )
         patches = list(stp.split(field))
@@ -282,6 +284,7 @@ def test_coupled_polygon_and_reflect(
             data=np.asarray(time_field.reader),
             transform=rasterio.Affine(1.0, 0.0, 0.0, 0.0, -1.0, 16.0),
             crs="EPSG:32630",
+            dims="band y x",
         )
     )
     tri = shapely.Polygon([(1, 9), (7, 9), (1, 15)])
