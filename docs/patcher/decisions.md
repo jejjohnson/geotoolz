@@ -947,7 +947,10 @@ for batch, valid in batch_split(patcher, field, batch_size=64):  # PatchBatch
 - *Code to change.* Code that reads `batch.data`, `batch.anchors`,
   `batch.indices` or `batch.weights` changes. `batch.patches.data`,
   `batch.valid` and the transform rows replace them, and `unbatch` /
-  `stitch` place patches from the transforms.
+  `stitch` place patches from the transforms. (#530: "stitch" is
+  `SpatialPatcher.merge` and its variants, which take `PatchBatch` and
+  batched `GeoArray` items directly; a separate `stitch` would need the
+  patcher's window passed in again.)
 - *One program.* A jitted step on a `PatchBatch` compiles once per patch
   shape, and the georeference reaches the model.
 - *x64.* Moving the batch to JAX needs `jax_enable_x64` (transforms are
