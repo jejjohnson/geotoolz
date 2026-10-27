@@ -1553,7 +1553,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-cloud"
-version = "0.7.0"
+version = "0.7.1"
 source = { editable = "packages/geotoolz-cloud" }
 dependencies = [
     { name = "georeader-spaceml" },
@@ -1842,7 +1842,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-patcher"
-version = "0.14.0"
+version = "0.14.1"
 source = { editable = "packages/geotoolz-patcher" }
 dependencies = [
     { name = "georeader-spaceml" },
@@ -1986,7 +1986,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.31" }]
 
 [[package]]
 name = "geotoolz-products"
-version = "0.7.0"
+version = "0.7.1"
 source = { editable = "packages/geotoolz-products" }
 dependencies = [
     { name = "affine" },

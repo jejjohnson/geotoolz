@@ -1,6 +1,6 @@
 [project]
 name = "geotoolz-products"
-version = "0.7.0"
+version = "0.7.1"
 description = "Readers for Earth-observation data products — each mission or provider product as a lazy geoarray RasterSource read into GeoArray."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
