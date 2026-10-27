@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+import geoarray
 import numpy as np
 from geoarray import FrozenAttrs, GeoArray, RasterSource
 from geoarray.coords import SpectralAxis
@@ -125,61 +126,52 @@ def _concatenate(
     part_attrs: list[Any],
     sources: list[Any] | None = None,
 ) -> GeoArray:
-    """Concatenate ``parts`` along bands; band names and per-band attrs come
-    from the readers (georeader's warp drops ``attrs`` and coordinates)."""
+    """Concatenate ``parts`` along bands with `geoarray.concat`.
+
+    georeader's warp drops ``attrs`` and coordinates, so each part is first
+    rebuilt on the reference grid with its reader's band axis (``coords``)
+    and per-band attrs; `geoarray.concat` then joins both, so names,
+    wavelengths and FWHM survive whenever every reader declares them.
+    """
     keys = {(np.dtype(p.dtype), _fill_key(p.fill_value)) for p in parts}
     integer = len(keys) == 1 and np.issubdtype(next(iter(keys))[0], np.integer)
-    arrays = [np.asarray(p) if integer else _nan_filled(p) for p in parts]
-    attrs: dict[str, Any] = {}
-    for key in ("band_names", "units", "wavelengths"):
-        values: list[Any] = []
-        for part, part_attr in zip(parts, part_attrs, strict=True):
-            per_band = part_attr.get(key)
-            if per_band is None or len(per_band) != np.asarray(part).shape[0]:
-                break
-            values.extend(per_band)
-        else:
-            attrs[key] = tuple(values)
-    axis = _band_axis(parts, sources or [])
-    return GeoArray(
-        np.concatenate(arrays, axis=0),
-        ref.transform,
-        ref.crs,
-        fill_value=parts[0].fill_value if integer else np.nan,
-        # the readers' attrs, carried: the 0.2 per-band keys stay as they are
-        attrs=FrozenAttrs(attrs),
-        # the readers' dims (band first): parts join along band
-        dims=parts[0].dims,
-        coords=() if axis is None else (axis,),
-    )
-
-
-def _band_axis(parts: list[GeoArray], sources: list[Any]) -> SpectralAxis | None:
-    """The readers' `SpectralAxis` entries joined, when every reader has one.
-
-    A `ProductReader` or a `GeoArray` names its bands in ``coords``; the
-    joined axis keeps wavelengths only when every reader declares them.
-    Without one per reader (a bare `RasterSource`), the stack falls back to
-    the 0.2 ``band_names`` attrs, which geoarray reads into an axis itself.
-    """
-    if len(sources) != len(parts):
-        return None
-    axes = []
-    for source, part in zip(sources, parts, strict=True):
-        found = [
-            c for c in getattr(source, "coords", ()) if isinstance(c, SpectralAxis)
-        ]
-        if len(found) != 1 or found[0].size != np.asarray(part).shape[0]:
-            return None
-        axes.append(found[0])
-    names = tuple(name for axis in axes for name in axis.names)
-    if len(set(names)) != len(names):
-        return None  # repeated names (one channel stacked twice): no valid axis
-    if all(axis.wavelength_nm is not None for axis in axes):
-        return SpectralAxis(
-            names, tuple(w for a in axes for w in a.wavelength_nm or ())
+    fill = parts[0].fill_value if integer else np.nan
+    sources = sources if sources is not None and len(sources) == len(parts) else []
+    normalized = []
+    for i, (part, part_attr) in enumerate(zip(parts, part_attrs, strict=True)):
+        values = np.asarray(part) if integer else _nan_filled(part)
+        count = values.shape[0]
+        normalized.append(
+            GeoArray(
+                values,
+                ref.transform,
+                ref.crs,
+                fill_value=fill,
+                # the readers' 0.2 per-band keys, where they fit this part
+                attrs=FrozenAttrs(
+                    {
+                        key: tuple(part_attr[key])
+                        for key in ("band_names", "units", "wavelengths")
+                        if key in part_attr and len(part_attr[key]) == count
+                    }
+                ),
+                dims=parts[0].dims,
+                coords=_band_coords(sources[i] if sources else None, count),
+            )
         )
-    return SpectralAxis(names)
+    out = geoarray.concat(normalized, "band")
+    # geoarray's per-band keys exclude `units` (a carrier's units are
+    # usually one string); the readers declare one per band, so join them
+    units = [g.attrs.get("units") for g in normalized]
+    if all(isinstance(u, tuple) for u in units):
+        out = out.with_attrs(units=tuple(item for u in units for item in u))
+    return out
+
+
+def _band_coords(source: Any, count: int) -> tuple[SpectralAxis, ...]:
+    """``source``'s `SpectralAxis` when it has one of ``count`` bands, else ``()``."""
+    axes = [c for c in getattr(source, "coords", ()) if isinstance(c, SpectralAxis)]
+    return (axes[0],) if len(axes) == 1 and axes[0].size == count else ()
 
 
 def _nan_filled(part: GeoArray) -> np.ndarray:

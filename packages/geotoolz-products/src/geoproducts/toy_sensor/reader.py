@@ -11,17 +11,13 @@ from geoarray import PixelWindow
 
 from geoproducts._src.base import ProductReader, Track, resolve_fill_value
 from geoproducts._src.carrier import reject_georeader
+from geoproducts._src.constants import band_values
 from geoproducts.toy_sensor import constants
 
 
 __all__ = ["Reader"]
 
 _DEFAULT_NUM_BANDS = 4
-
-
-def _wavelengths(bands: tuple[str, ...]) -> tuple[float, ...]:
-    table = {row["name"]: float(row["wavelength_nm"]) for row in constants.BANDS}
-    return tuple(table[band] for band in bands)
 
 
 class Reader(ProductReader):
@@ -116,7 +112,9 @@ class Reader(ProductReader):
 
     def _band_attrs(self) -> dict[str, Any]:
         # centre wavelengths (nm) from the band table, in band order
-        return {"wavelengths": _wavelengths(self._bands)}
+        return {
+            "wavelengths": band_values(constants.BANDS, self._bands, "wavelength_nm")
+        }
 
     @property
     def _track(self) -> Track:

@@ -16,8 +16,8 @@ from geoarray.coords import SpectralAxis
 
 from geoproducts._src.base import resolve_fill_value
 from geoproducts._src.carrier import reject_georeader
+from geoproducts._src.constants import band_values
 from geoproducts.toy_sensor import constants
-from geoproducts.toy_sensor.reader import _wavelengths
 
 
 __all__ = ["SwathReader"]
@@ -102,7 +102,8 @@ class SwathReader:
     @property
     def coords(self) -> tuple[SpectralAxis, ...]:
         """The band names and centre wavelengths (nm)."""
-        return (SpectralAxis(_BANDS, _wavelengths(_BANDS)),)
+        wavelengths = band_values(constants.BANDS, _BANDS, "wavelength_nm")
+        return (SpectralAxis(_BANDS, wavelengths),)
 
     def load(self) -> GeoSwath:
         """The whole granule."""
