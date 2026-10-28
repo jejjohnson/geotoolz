@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.14.0...geotoolz-ops-v0.15.0) (2026-10-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ops:** operator configs serialise `dim` instead of `axis`, and `get_config()` of every band-axis operator changes accordingly; `axis=` is deprecated (only the band position is accepted) and is removed in the next minor release. Operators given a carrier without a `band` dim (other than a 2-D map) raise a ValueError naming the operator and its dims.
+* **ops:** geoops operators refuse JAX carriers (BackendError) unless they list "jax"; convert with `to_numpy()` first. `geoops.testing.check_operator` fails an operator that declares no `backends`.
+
+### Features
+
+* **ops:** dim= replaces axis= across operators ([#579](https://github.com/jejjohnson/geotoolz/issues/579)) ([0d39da4](https://github.com/jejjohnson/geotoolz/commit/0d39da467f01766f35e2bd317284788582a6364b))
+* **ops:** operators declare backends; backend-parametrized contract test ([#580](https://github.com/jejjohnson/geotoolz/issues/580)) ([e30ff20](https://github.com/jejjohnson/geotoolz/commit/e30ff20a2010c2f6a646676eabf89541e5afb6c1))
+
 ## [0.14.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.13.0...geotoolz-ops-v0.14.0) (2026-10-27)
 
 
