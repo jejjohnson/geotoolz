@@ -1712,7 +1712,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-ops"
-version = "0.14.0"
+version = "0.15.0"
 source = { editable = "packages/geotoolz-ops" }
 dependencies = [
     { name = "affine" },
