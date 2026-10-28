@@ -52,6 +52,7 @@ from geoops._src.contract import (
     frames,
     geoarrays,
     same,
+    time_series_of,
     time_stack_of,
 )
 
@@ -586,7 +587,7 @@ RETIRED_PARAMS: dict[str, str] = {
     "patch_size": "window",
     "min_area": "min_area_px",
     "min_size": "min_area_px",
-    "channel_axis": "axis",
+    "channel_axis": "dim",
     "wavelengths_nm": "wavelengths",
 }
 
@@ -605,9 +606,10 @@ def test_constructor_vocabulary(cls: type) -> None:
     """Constructors use the package-wide parameter spellings.
 
     No retired alias (``fill``, ``random_state``, ``window_size`` ...), no
-    ``*_idx`` band-index twin, no ``kernel_size`` window, and ``axis`` is
-    only ever an integer band position (reductions use ``reduce_axes``,
-    orientations ``direction``).
+    ``*_idx`` band-index twin, no ``kernel_size`` window, and the band dim
+    is ``dim=`` (a name, #531): ``axis`` survives only as the deprecated
+    ``axis: int | None = None`` next to a ``dim`` (reductions use
+    ``reduce_axes``, orientations ``direction``).
     """
     key = _key(cls)
     params = inspect.signature(cls.__init__).parameters
@@ -619,11 +621,12 @@ def test_constructor_vocabulary(cls: type) -> None:
         )
         assert not name.endswith("_idx"), f"{key}: {name!r} -- use one BandRef name"
         assert name != "kernel_size", f"{key}: 'kernel_size' -> 'window'"
-        if name == "axis" and param.default is not inspect.Parameter.empty:
-            default = param.default
-            assert default is None or isinstance(default, int), (
-                f"{key}: axis={default!r} -- 'axis' is a band position; use "
-                "'reduce_axes' for reductions and 'direction' for orientations"
+        if name == "axis":
+            assert "dim" in params and param.default is None, (
+                f"{key}: 'axis' is retired: take the band dim by name, "
+                "dim: str = 'band' (axis= stays only as a deprecated None "
+                "default next to dim); reductions use 'reduce_axes', "
+                "orientations 'direction'"
             )
 
 
@@ -1690,6 +1693,61 @@ def _assert_matches_frames(key: str, out: Any, expected: list[Any]) -> None:
 
 
 @pytest.mark.parametrize("cls", _time_stack_params())
+def test_single_band_time_series_contract(cls: type) -> None:
+    """A ``("time", "y", "x")`` series runs per frame, without a dummy band (#531).
+
+    Time stacks are found by the ``time`` dim's name, not by rank: each
+    buildable single-input operator that runs on a 2-D toy scene, given a
+    two-frame series of it, returns the per-frame results restacked along
+    time with no band dim added, or rejects the series with an error naming
+    itself.
+    """
+    from geoops.io._src.operators import SinkOperator
+
+    op = _build_seeded(cls)
+    if (
+        isinstance(op, SinkOperator)
+        or not _single_carrier_in(op)
+        or _takes_sequence(op)
+    ):
+        pytest.skip("sink, sequence or not a single-input operator")
+    key = _key(cls)
+    ran = False
+    for scene in _attributed_inputs():
+        if not isinstance(scene, GeoArray) or scene.ndim != 2:
+            continue
+        try:
+            _call(_build_seeded(cls), scene)
+        except Exception:
+            continue
+        ran = True
+        series = time_series_of(scene)
+        try:
+            out = _call(_build_seeded(cls), series)
+        except Exception as exc:
+            assert_clear_rank_error(cls.__name__, exc)
+            continue
+        if key in STACK_AS_FEATURES:
+            assert np.shape(out)[-2:] == np.shape(series)[-2:]
+            continue
+        per_frame = [_call(_build_seeded(cls), f) for f in frames(series)]
+        if key in TIME_INVARIANT or not all(_is_frame_carrier(e) for e in per_frame):
+            continue
+        if all(isinstance(e, GeoArray) and e.ndim == 2 for e in per_frame):
+            assert isinstance(out, GeoArray), type(out)
+            assert out.dims == ("time", *per_frame[0].dims), out.dims
+        want = np.stack([np.asarray(e) for e in per_frame])
+        assert np.shape(out) == want.shape, (np.shape(out), want.shape)
+        if key in STOCHASTIC_PER_PIXEL or key in POOLED_STATISTICS:
+            continue
+        np.testing.assert_allclose(
+            np.asarray(out, dtype=np.float64), want.astype(np.float64), equal_nan=True
+        )
+    if not ran:
+        pytest.skip("no 2-D toy input is valid for this operator")
+
+
+@pytest.mark.parametrize("cls", _time_stack_params())
 def test_time_stack_contract(cls: type) -> None:
     """Every operator handles a ``(T, C, H, W)`` stack correctly or says no (#147).
 
@@ -1748,6 +1806,140 @@ def test_time_stack_contract(cls: type) -> None:
         _assert_matches_frames(key, out, per_frame)
     if not ran:
         pytest.skip("no toy input is valid for this operator")
+
+
+def test_axis_is_deprecated_and_serialises_as_dim() -> None:
+    """``axis=-3`` still builds an operator for one release, as ``dim="band"``."""
+    from geoops.indices import NDVI
+
+    with pytest.warns(DeprecationWarning, match=r"NDVI\(axis=...\) is deprecated"):
+        op = NDVI(axis=-3)
+    assert op.get_config()["dim"] == "band"
+    assert "axis" not in op.get_config()
+    rebuilt = Operator.from_state(op.state)
+    assert rebuilt.get_config() == op.get_config()
+
+
+def test_no_operator_reads_a_stored_band_axis() -> None:
+    """Operators hold ``self.dim``; the band position is read from the carrier."""
+    import pathlib
+
+    import geoops
+
+    root = pathlib.Path(geoops.__file__).parent
+    found = [
+        f"{path.relative_to(root)}:{node.lineno}"
+        for path in sorted(root.rglob("*.py"))
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Attribute)
+        and node.attr == "axis"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+    ]
+    assert not found, found
+
+
+def _dim_params() -> list[Any]:
+    return [
+        pytest.param(c, id=_key(c))
+        for c in _CLASSES
+        if "dim" in inspect.signature(c.__init__).parameters
+    ]
+
+
+@pytest.mark.parametrize("cls", _dim_params())
+def test_a_renamed_band_dim_gives_the_same_result(cls: type) -> None:
+    """``dim=`` follows the name: a ``wavelength`` dim works like ``band``.
+
+    Each operator taking ``dim``, built with ``dim="wavelength"`` and given a
+    scene whose band dim is named ``wavelength``, returns the values it
+    returns with the defaults on the ``band``-named scene (#531 review).
+    """
+    key = _key(cls)
+    for scene in _attributed_inputs():
+        if not isinstance(scene, GeoArray) or "band" not in scene.dims:
+            continue
+        try:
+            want = _call(_build_seeded(cls), scene)
+        except Exception:
+            continue
+        renamed = scene.replace(
+            dims=tuple("wavelength" if d == "band" else d for d in scene.dims),
+            coords=tuple(c for c in scene.coords if c.dim != "band"),
+        )
+        op = _build_seeded(cls)
+        op.dim = "wavelength"
+        for nested in vars(op).values():  # a wrapped operator follows suit
+            if isinstance(nested, Operator) and hasattr(nested, "dim"):
+                nested.dim = "wavelength"
+        got = _call(op, renamed)
+        if key in STOCHASTIC_PER_PIXEL:
+            assert np.shape(got) == np.shape(want)
+            return
+        if not geoarrays(want) and not isinstance(want, np.ndarray):
+            return  # a background statistic object: running is the check
+        for g, w in zip(
+            geoarrays(got) or [got], geoarrays(want) or [want], strict=True
+        ):
+            np.testing.assert_allclose(
+                np.asarray(g, dtype=np.float64),
+                np.asarray(w, dtype=np.float64),
+                equal_nan=True,
+                err_msg=key,
+            )
+        return
+    pytest.skip("no toy input with a band dim is valid for this operator")
+
+
+def test_subclasses_forward_dim() -> None:
+    """``dim=`` reaches the base class of the band-selection subclasses."""
+    from geoops.spectral import ReorderBands
+    from geoops.viz import Composite, FalseColor, SWIRComposite, TrueColor
+
+    for op in (
+        ReorderBands(order=[0], dim="wavelength"),
+        Composite(bands=[0, 1, 2], dim="wavelength"),
+        TrueColor(red=2, green=1, blue=0, dim="wavelength"),
+        FalseColor(nir=3, red=2, green=1, dim="wavelength"),
+        SWIRComposite(swir2=3, nir=2, red=1, dim="wavelength"),
+    ):
+        assert op.dim == "wavelength", type(op).__name__
+        assert op.get_config()["dim"] == "wavelength", type(op).__name__
+
+
+def test_segment_wrappers_take_dim_none_on_a_single_band() -> None:
+    """``dim=None`` is skimage's no-channel mode on a 2-D input."""
+    from _helpers import toy_geoarray
+
+    from geoops.segment import SLIC, Felzenszwalb, Quickshift
+
+    band = toy_geoarray(np.random.default_rng(0).random((16, 16)))
+    ops = (
+        Felzenszwalb(dim=None),
+        Quickshift(dim=None, convert2lab=False),  # Lab needs three channels
+        SLIC(dim=None),
+    )
+    for op in ops:
+        out = op(band)
+        assert np.shape(out) == (16, 16), type(op).__name__
+
+
+@pytest.mark.parametrize("fit_on_call", [False, True])
+def test_matched_filter_fits_on_a_renamed_band_dim(fit_on_call: bool) -> None:
+    """The background is estimated on the axis resolved from the carrier."""
+    from geoops.matched_filter import MatchedFilter
+
+    scene = _attributed_inputs()[1]  # 13 bands
+    renamed = scene.replace(
+        dims=("wavelength", "y", "x"),
+        coords=tuple(c for c in scene.coords if c.dim != "band"),
+    )
+    target = np.linspace(0.1, 1.0, scene.shape[0])
+    want = MatchedFilter(target=target, fit_on_call=fit_on_call)(scene)
+    got = MatchedFilter(target=target, fit_on_call=fit_on_call, dim="wavelength")(
+        renamed
+    )
+    np.testing.assert_allclose(np.asarray(got), np.asarray(want), equal_nan=True)
 
 
 @pytest.mark.parametrize("cls", [pytest.param(c, id=_key(c)) for c in _CLASSES])
@@ -1829,3 +2021,19 @@ def test_pad_to_keeps_jax_on_every_path(kwargs: dict[str, Any], fill: Any) -> No
     scene = _attributed_inputs()[0]
     scene = scene.replace(fill_value=fill)
     assert_backends(PadTo(shape=(20, 21), **kwargs), scene)
+
+
+def test_a_renamed_channel_dim_keeps_its_singleton_axis_on_a_stack() -> None:
+    """``SLIC(dim="wavelength")`` on a stack gives ``(T, 1, H, W)`` as for "band"."""
+    from geoops.segment import SLIC
+
+    stack = time_stack_of(_attributed_inputs()[0])  # ("time", "band", "y", "x")
+    renamed = stack.replace(
+        dims=("time", "wavelength", "y", "x"),
+        coords=tuple(c for c in stack.coords if c.dim != "band"),
+    )
+    want = SLIC()(stack)
+    got = SLIC(dim="wavelength")(renamed)
+    assert got.shape == want.shape == (2, 1, *stack.shape[-2:])
+    assert got.dims == ("time", "wavelength", "y", "x")
+    np.testing.assert_array_equal(np.asarray(got), np.asarray(want))

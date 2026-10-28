@@ -66,7 +66,7 @@ Anything two or more families need lives in `geoops/_src/`:
 | `engine.py` | `to_engine` / `from_engine` — the one boundary to georeader's functions (reprojection, mosaics, rasterize / vectorize, windowed reads, solar geometry); no `GeoTensor` crosses into or out of an operator |
 | `valid.py` | the nodata model: `invalid_values`, `valid_pixels`, `mask_invalid_to_nan`, `restore_fill`, `wrap_filled` |
 | `bands.py` | `resolve_band` / `resolve_bands` (index or name), `band_names`, `resolve_wavelengths`, band-attr bookkeeping |
-| `shape.py` | `band_axis`, `require_ndim`, `map_frames` / `over_frames` for 2-D…4-D carriers |
+| `shape.py` | `band_axis`, `band_dim` / `dim_axis` (an operator's `dim=` and its position), `require_ndim`, `map_frames` / `over_frames` (split a time series by its `time` dim) |
 | `dtype.py` | `as_float` — promote integer DNs before arithmetic |
 | `geo.py` | `require_geoarray`, `reject_geotensor`, `affine_of`, `as_pixel_window`, `require_projected_crs`, `ground_pixel_size`, `require_grid_match`, `pixel_xy` |
 | `labels.py` | connected components, holes, skeleton length, region properties |
@@ -87,7 +87,7 @@ family:
 
 | Concept | Name | Notes |
 |---|---|---|
-| Band axis position | `axis: int` (default `-3`) | Only ever the band axis — never a reduction or an orientation (`segment`'s skimage wrappers, formerly `channel_axis`, default to `0` of their per-frame `(C, H, W)` input). |
+| The band dim | `dim: str` (default `"band"`) | A dim *name*: the position is read from the carrier's stored dims (`geoops._src.shape.dim_axis`; `band_dim` handles the deprecated `axis: int \| None = None`, which maps `-3` to `"band"` for one release). Never a reduction or an orientation. `segment`'s skimage wrappers take `dim: str \| None`, `None` for no channel axis. Tier-A primitives keep a positional `axis`. |
 | Reduction axes | `reduce_axes` | Tuple of axes (or `None` = global): `radiometry.PercentileClip`, `viz.StretchToUint8`, the `normalize` primitives, `radiometry.dos1`. |
 | Orientation | `direction` | `"column"` / `"row"` (`restore.DestripeColumn`), `"scan"` / `"sample"` (`geom.SegmentStitch`). |
 | One band | one `BandRef` name per band (`red`, `nir`, `swir1`, `qa_band`, `band`, …) | Integer position *or* band name; no `*_idx` twins. Tier-A primitives take integer `*_idx` positions. |

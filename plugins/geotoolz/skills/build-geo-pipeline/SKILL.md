@@ -171,7 +171,8 @@ pipeline.
   `0`. Since geoarray 0.3 the dims are stored: build carriers with
   `dims=("band", "y", "x")` (omitting it reads the layout from the rank
   and is deprecated), and name band coordinates with
-  `geoarray.coords.SpectralAxis`.
+  `geoarray.coords.SpectralAxis`. Operators take the band dim by name,
+  `dim="band"` (the default); `axis=` is deprecated.
 - **Same carrier out.** A GeoArray input returns a GeoArray on the same
   `transform` and `crs`; a plain array returns a plain array. Never mutate
   the input. A georeader `GeoTensor` is refused, not taken as an array.

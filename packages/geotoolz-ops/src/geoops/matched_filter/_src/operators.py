@@ -34,8 +34,10 @@ import numpy as np
 from pipekit import Operator
 
 from geoops.carrier import (
+    band_dim,
     callable_name,
     cube_to_samples,
+    dim_axis,
     fit_once,
     invalid_values,
     jsonable,
@@ -123,7 +125,10 @@ class MatchedFilter(Operator):
         cov_method: Covariance estimator used when fitting —
             ``"empirical"``, ``"ledoit_wolf"``, ``"oas"``, or
             ``"lowrank"``. Default ``"ledoit_wolf"``.
-        axis: Position of the spectral axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Attributes:
         mean_: Background mean from :meth:`fit`, or ``None``.
@@ -145,7 +150,8 @@ class MatchedFilter(Operator):
         fit_on_call: bool = False,
         mean_method: MeanMethod = "median",
         cov_method: CovMethod = "ledoit_wolf",
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.mean = None if mean is None else np.asarray(mean, dtype=float)
         self.cov_op = (
@@ -157,32 +163,31 @@ class MatchedFilter(Operator):
         self.fit_on_call = fit_on_call
         self.mean_method = mean_method
         self.cov_method = cov_method
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "MatchedFilter")
         self.mean_: np.ndarray | None = None
         self.cov_op_: NumpyLinearOperator | np.ndarray | None = None
 
     def _estimate(
-        self, cube: np.ndarray, *, keep_supplied: bool
+        self, cube: np.ndarray, *, axis: int, keep_supplied: bool
     ) -> tuple[np.ndarray, NumpyLinearOperator | np.ndarray]:
         """Background ``(mean, cov_op)`` of ``cube``.
 
-        ``keep_supplied`` keeps the constructor's ``mean`` / ``cov_op``
-        and only estimates the missing ones.
+        ``axis`` is the band position, resolved from the carrier before its
+        names were dropped. ``keep_supplied`` keeps the constructor's
+        ``mean`` / ``cov_op`` and only estimates the missing ones.
         """
         mean = self.mean if keep_supplied else None
         cov_op = self.cov_op if keep_supplied else None
         if mean is None:
-            mean = estimate_mean(cube, method=self.mean_method, axis=self.axis)
+            mean = estimate_mean(cube, method=self.mean_method, axis=axis)
         if cov_op is None:
             if self.cov_method == "empirical":
-                cov_op = estimate_cov_empirical(
-                    cube, mean=mean, ridge=1e-8, axis=self.axis
-                )
+                cov_op = estimate_cov_empirical(cube, mean=mean, ridge=1e-8, axis=axis)
             elif self.cov_method == "lowrank":
-                cov_op = estimate_cov_lowrank(cube, mean=mean, axis=self.axis)
+                cov_op = estimate_cov_lowrank(cube, mean=mean, axis=axis)
             else:
                 cov_op = estimate_cov_shrunk(
-                    cube, mean=mean, method=self.cov_method, axis=self.axis
+                    cube, mean=mean, method=self.cov_method, axis=axis
                 )
         return np.asarray(mean, dtype=float), cov_op
 
@@ -192,8 +197,9 @@ class MatchedFilter(Operator):
         Returns:
             This operator, for chaining.
         """
-        cube, _ = _mask_invalid(gt, self.axis, type(self).__name__)
-        mean, cov_op = self._estimate(cube, keep_supplied=True)
+        axis = dim_axis(gt, self.dim, name="MatchedFilter")
+        cube, _ = _mask_invalid(gt, axis, type(self).__name__)
+        mean, cov_op = self._estimate(cube, axis=axis, keep_supplied=True)
         self.cov_op_ = cov_op
         self.mean_ = mean  # published last: the fit-once check reads ``mean_``
         return self
@@ -224,16 +230,13 @@ class MatchedFilter(Operator):
         cov_op: NumpyLinearOperator | np.ndarray,
         masked: tuple[np.ndarray, np.ndarray | None] | None = None,
     ) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="MatchedFilter")
         if self.target is None:
             raise ValueError("target must be supplied before applying MatchedFilter")
         cube, valid = (
-            _mask_invalid(gt, self.axis, type(self).__name__)
-            if masked is None
-            else masked
+            _mask_invalid(gt, axis, type(self).__name__) if masked is None else masked
         )
-        out = apply_image(
-            cube, mean=mean, cov_op=cov_op, target=self.target, axis=self.axis
-        )
+        out = apply_image(cube, mean=mean, cov_op=cov_op, target=self.target, axis=axis)
         return wrap_like(
             gt,
             keep_band_axis(_restore(gt, out, valid), gt),
@@ -244,8 +247,9 @@ class MatchedFilter(Operator):
         if self.fit_on_call:
             # Per-scene background: estimated locally, never stored, so
             # concurrent calls share no mutable state.
-            masked = _mask_invalid(gt, self.axis, type(self).__name__)
-            mean, cov_op = self._estimate(masked[0], keep_supplied=False)
+            axis = dim_axis(gt, self.dim, name="MatchedFilter")
+            masked = _mask_invalid(gt, axis, type(self).__name__)
+            mean, cov_op = self._estimate(masked[0], axis=axis, keep_supplied=False)
             return self._score(gt, mean, cov_op, masked)
         if self.mean is None or self.cov_op is None:
             fit_once(self, gt, lambda: self.mean_ is not None)
@@ -259,7 +263,7 @@ class MatchedFilter(Operator):
             "fit_on_call": self.fit_on_call,
             "mean_method": self.mean_method,
             "cov_method": self.cov_method,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -450,7 +454,10 @@ class EstimateMean(Operator):
             trim_proportion: Fraction cut from each tail for
                 ``method="trimmed"``.
             huber_c: Huber tuning constant for ``method="huber"``.
-            axis: Position of the spectral axis. Default ``-3``.
+            dim: Name of the band dim (default ``"band"``); its position is read
+                from the carrier's dims.
+            axis: Deprecated: the band axis position. ``-3`` maps to
+                ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -461,20 +468,22 @@ class EstimateMean(Operator):
         method: MeanMethod = "mean",
         trim_proportion: float = 0.1,
         huber_c: float = 1.345,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.method = method
         self.trim_proportion = trim_proportion
         self.huber_c = huber_c
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "EstimateMean")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> np.ndarray:
+        axis = dim_axis(gt, self.dim, name="EstimateMean")
         return estimate_mean(
-            _mask_invalid(gt, self.axis, type(self).__name__)[0],
+            _mask_invalid(gt, axis, type(self).__name__)[0],
             method=self.method,
             trim_proportion=self.trim_proportion,
             huber_c=self.huber_c,
-            axis=self.axis,
+            axis=axis,
         )
 
 
@@ -490,31 +499,40 @@ class EstimateCovEmpirical(Operator):
         mean: Optional precomputed mean spectrum ``(c,)`` to centre on;
             the sample mean is used when ``None``.
         ridge: Optional Tikhonov ridge added to the diagonal.
-        axis: Position of the spectral axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
-        self, *, mean: np.ndarray | None = None, ridge: float = 0.0, axis: int = -3
+        self,
+        *,
+        mean: np.ndarray | None = None,
+        ridge: float = 0.0,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.mean = mean
         self.ridge = ridge
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "EstimateCovEmpirical")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> NumpyLinearOperator:
+        axis = dim_axis(gt, self.dim, name="EstimateCovEmpirical")
         return estimate_cov_empirical(
-            _mask_invalid(gt, self.axis, type(self).__name__)[0],
+            _mask_invalid(gt, axis, type(self).__name__)[0],
             mean=self.mean,
             ridge=self.ridge,
-            axis=self.axis,
+            axis=axis,
         )
 
     def get_config(self) -> dict[str, Any]:
         return {
             "mean": None if self.mean is None else np.asarray(self.mean).tolist(),
             "ridge": self.ridge,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -531,7 +549,10 @@ class EstimateCovShrunk(Operator):
             the sample mean is used when ``None``.
         method: Shrinkage-intensity estimator, ``"ledoit_wolf"`` or
             ``"oas"``.
-        axis: Position of the spectral axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -541,25 +562,27 @@ class EstimateCovShrunk(Operator):
         *,
         mean: np.ndarray | None = None,
         method: CovShrinkageMethod = "ledoit_wolf",
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.mean = mean
         self.method = method
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "EstimateCovShrunk")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> NumpyLinearOperator:
+        axis = dim_axis(gt, self.dim, name="EstimateCovShrunk")
         return estimate_cov_shrunk(
-            _mask_invalid(gt, self.axis, type(self).__name__)[0],
+            _mask_invalid(gt, axis, type(self).__name__)[0],
             mean=self.mean,
             method=self.method,
-            axis=self.axis,
+            axis=axis,
         )
 
     def get_config(self) -> dict[str, Any]:
         return {
             "mean": None if self.mean is None else np.asarray(self.mean).tolist(),
             "method": self.method,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -581,7 +604,10 @@ class EstimateCovLowRank(Operator):
         seed: Seed for the randomized range finder; the default
             ``0`` makes the estimate deterministic.
         n_oversamples: Extra random probe vectors beyond ``rank``.
-        axis: Position of the spectral axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -594,24 +620,26 @@ class EstimateCovLowRank(Operator):
         tikhonov: float = 1e-3,
         seed: int | None = 0,
         n_oversamples: int = 10,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.mean = mean
         self.rank = rank
         self.tikhonov = tikhonov
         self.seed = seed
         self.n_oversamples = n_oversamples
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "EstimateCovLowRank")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> NumpyLinearOperator:
+        axis = dim_axis(gt, self.dim, name="EstimateCovLowRank")
         return estimate_cov_lowrank(
-            _mask_invalid(gt, self.axis, type(self).__name__)[0],
+            _mask_invalid(gt, axis, type(self).__name__)[0],
             mean=self.mean,
             rank=self.rank,
             tikhonov=self.tikhonov,
             seed=self.seed,
             n_oversamples=self.n_oversamples,
-            axis=self.axis,
+            axis=axis,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -621,7 +649,7 @@ class EstimateCovLowRank(Operator):
             "tikhonov": self.tikhonov,
             "seed": self.seed,
             "n_oversamples": self.n_oversamples,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -644,7 +672,10 @@ class GMMClusterBackground(Operator):
             reproducible backgrounds.
         bayesian: If ``True``, prune components with negligible mixture
             weight, so fewer than ``n_clusters`` clusters may remain.
-        axis: Position of the spectral axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -656,22 +687,24 @@ class GMMClusterBackground(Operator):
         cov_estimator: Literal["empirical", "ledoit_wolf", "oas"] = "ledoit_wolf",
         seed: int | None = 0,
         bayesian: bool = False,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.n_clusters = n_clusters
         self.cov_estimator = cov_estimator
         self.seed = seed
         self.bayesian = bayesian
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "GMMClusterBackground")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> ClusterBackground:
+        axis = dim_axis(gt, self.dim, name="GMMClusterBackground")
         return gmm_cluster_background(
-            _mask_invalid(gt, self.axis, type(self).__name__)[0],
+            _mask_invalid(gt, axis, type(self).__name__)[0],
             n_clusters=self.n_clusters,
             cov_estimator=self.cov_estimator,
             seed=self.seed,
             bayesian=self.bayesian,
-            axis=self.axis,
+            axis=axis,
         )
 
 
@@ -688,25 +721,34 @@ class AdaptiveWindowBackground(Operator):
             integer. Default ``7``.
         pad_mode: Boundary mode forwarded to
             :func:`scipy.ndimage.uniform_filter`. Default ``"reflect"``.
-        axis: Position of the spectral axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
-        self, *, window: int = 7, pad_mode: str = "reflect", axis: int = -3
+        self,
+        *,
+        window: int = 7,
+        pad_mode: str = "reflect",
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.window = window
         self.pad_mode = pad_mode
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "AdaptiveWindowBackground")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> AdaptiveBackground:
+        axis = dim_axis(gt, self.dim, name="AdaptiveWindowBackground")
         require_ndim(gt, 3, type(self).__name__)
         return adaptive_window_background(
-            _mask_invalid(gt, self.axis, type(self).__name__)[0],
+            _mask_invalid(gt, axis, type(self).__name__)[0],
             window=self.window,
             pad_mode=self.pad_mode,
-            axis=self.axis,
+            axis=axis,
         )
 
 
@@ -726,7 +768,10 @@ class ApplyClusterMF(Operator):
 
     Args:
         target: Target signature ``(c,)``.
-        axis: Position of the spectral axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -735,18 +780,18 @@ class ApplyClusterMF(Operator):
         self,
         *,
         target: np.ndarray,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.target = target
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "ApplyClusterMF")
 
     def _apply(
         self, gt: GeoArray | np.ndarray, cluster: ClusterBackground
     ) -> GeoArray | np.ndarray:
-        cube, valid = _mask_invalid(gt, self.axis, type(self).__name__)
-        out = apply_cluster_mf(
-            cube, cluster=cluster, target=self.target, axis=self.axis
-        )
+        axis = dim_axis(gt, self.dim, name="ApplyClusterMF")
+        cube, valid = _mask_invalid(gt, axis, type(self).__name__)
+        out = apply_cluster_mf(cube, cluster=cluster, target=self.target, axis=axis)
         return wrap_like(
             gt,
             keep_band_axis(_restore(gt, out, valid), gt),
@@ -754,7 +799,7 @@ class ApplyClusterMF(Operator):
         )
 
     def get_config(self) -> dict[str, Any]:
-        return {"target": np.asarray(self.target).tolist(), "axis": self.axis}
+        return {"target": np.asarray(self.target).tolist(), "dim": self.dim}
 
 
 class ApplyAdaptiveMF(Operator):
@@ -780,7 +825,10 @@ class ApplyAdaptiveMF(Operator):
         target: Target signature ``(c,)``.
         ridge: Non-negative variance floor added to every local ``σ²``.
             Default ``0.0``.
-        axis: Position of the spectral axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -790,23 +838,25 @@ class ApplyAdaptiveMF(Operator):
         *,
         target: np.ndarray,
         ridge: float = 0.0,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.target = target
         self.ridge = ridge
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "ApplyAdaptiveMF")
 
     def _apply(
         self, gt: GeoArray | np.ndarray, background: AdaptiveBackground
     ) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="ApplyAdaptiveMF")
         require_ndim(gt, 3, type(self).__name__)
-        cube, valid = _mask_invalid(gt, self.axis, type(self).__name__)
+        cube, valid = _mask_invalid(gt, axis, type(self).__name__)
         out = apply_adaptive_mf(
             cube,
             background=background,
             target=self.target,
             ridge=self.ridge,
-            axis=self.axis,
+            axis=axis,
         )
         return wrap_like(
             gt,
@@ -818,7 +868,7 @@ class ApplyAdaptiveMF(Operator):
         return {
             "target": np.asarray(self.target).tolist(),
             "ridge": self.ridge,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -841,7 +891,10 @@ class StreamingBackground(Operator):
             concatenated pixels, since the accumulator streams the
             fourth moment LW needs) or ``"empirical"``. A ``1e-8`` ridge
             is added to the diagonal in both cases.
-        axis: Position of the spectral axis in each cube. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -850,19 +903,21 @@ class StreamingBackground(Operator):
         self,
         *,
         cov_kind: Literal["empirical", "shrunk"] = "shrunk",
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.cov_kind = cov_kind
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "StreamingBackground")
 
     def _apply(
         self, cubes: Iterable[GeoArray | np.ndarray]
     ) -> StreamingBackgroundResult:
         acc: WelfordAccumulator | None = None
         for cube in cubes:
+            axis = dim_axis(cube, self.dim, name="StreamingBackground")
             samples, _ = cube_to_samples(
-                _mask_invalid(cube, self.axis, type(self).__name__)[0],
-                band_axis=self.axis,
+                _mask_invalid(cube, axis, type(self).__name__)[0],
+                band_axis=axis,
                 dtype=float,
             )
             if acc is None:
@@ -905,7 +960,10 @@ class LinearTargetFromObs(Operator):
             an explicit array broadcastable to the background state.
         pixel: Spatial index of the impulse for ``pattern="impulse"``;
             the first flat pixel when ``None``.
-        axis: Position of the spectral axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -919,13 +977,14 @@ class LinearTargetFromObs(Operator):
         vmr_background: np.ndarray | None = None,
         pattern: str | np.ndarray = "uniform",
         pixel: tuple[int, int] | None = None,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.obs_model = obs_model
         self.vmr_background = vmr_background
         self.pattern = pattern
         self.pixel = pixel
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "LinearTargetFromObs")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> np.ndarray:
         return (
@@ -936,7 +995,7 @@ class LinearTargetFromObs(Operator):
                 pattern=self.pattern,
                 pixel=self.pixel,
                 amplitude=TARGET_FINITE_DIFFERENCE_EPSILON,
-                axis=self.axis,
+                axis=dim_axis(gt, self.dim, name="LinearTargetFromObs"),
             )
             / TARGET_FINITE_DIFFERENCE_EPSILON
         )
@@ -951,7 +1010,7 @@ class LinearTargetFromObs(Operator):
             else np.asarray(self.pattern).tolist(),
             "obs_model": callable_name(self.obs_model),
             "pixel": self.pixel,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -975,7 +1034,10 @@ class NonlinearTargetFromObs(Operator):
             an explicit array broadcastable to the background state.
         pixel: Spatial index of the impulse for ``pattern="impulse"``;
             the first flat pixel when ``None``.
-        axis: Position of the spectral axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -990,14 +1052,15 @@ class NonlinearTargetFromObs(Operator):
         amplitude: float = 1.0,
         pattern: str | np.ndarray = "uniform",
         pixel: tuple[int, int] | None = None,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.obs_model = obs_model
         self.vmr_background = vmr_background
         self.amplitude = amplitude
         self.pattern = pattern
         self.pixel = pixel
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "NonlinearTargetFromObs")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> np.ndarray:
         return _target_from_obs(
@@ -1007,7 +1070,7 @@ class NonlinearTargetFromObs(Operator):
             pattern=self.pattern,
             pixel=self.pixel,
             amplitude=self.amplitude,
-            axis=self.axis,
+            axis=dim_axis(gt, self.dim, name="NonlinearTargetFromObs"),
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -1021,7 +1084,7 @@ class NonlinearTargetFromObs(Operator):
             else np.asarray(self.pattern).tolist(),
             "obs_model": callable_name(self.obs_model),
             "pixel": self.pixel,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -1049,7 +1112,10 @@ class ColumnEnhancement(Operator):
             default ``10``.
         tikhonov: Tikhonov regulariser for ``cov_method="lowrank"``;
             ``None`` means the default ``1e-3``.
-        axis: Position of the spectral axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -1065,7 +1131,8 @@ class ColumnEnhancement(Operator):
         target_pattern: str = "uniform",
         rank: int | None = None,
         tikhonov: float | None = None,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.gas = gas
         self.sensor = sensor
@@ -1075,33 +1142,32 @@ class ColumnEnhancement(Operator):
         self.target_pattern = target_pattern
         self.rank = rank
         self.tikhonov = tikhonov
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "ColumnEnhancement")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        _check_spectral_axis(gt, self.axis, type(self).__name__)
-        mean = EstimateMean(method=self.mean_method, axis=self.axis)(gt)
+        axis = dim_axis(gt, self.dim, name="ColumnEnhancement")
+        _check_spectral_axis(gt, axis, type(self).__name__)
+        mean = EstimateMean(method=self.mean_method, dim=self.dim)(gt)
         if self.cov_method == "lowrank":
             cov_op = EstimateCovLowRank(
                 mean=mean,
                 rank=10 if self.rank is None else self.rank,
                 tikhonov=1e-3 if self.tikhonov is None else self.tikhonov,
-                axis=self.axis,
+                dim=self.dim,
             )(gt)
         else:
-            cov_op = EstimateCovShrunk(
-                mean=mean, method=self.cov_method, axis=self.axis
-            )(gt)
+            cov_op = EstimateCovShrunk(mean=mean, method=self.cov_method, dim=self.dim)(
+                gt
+            )
         if self.obs_model is None:
             target = np.ones_like(mean)
         else:
             target = LinearTargetFromObs(
                 obs_model=self.obs_model,
                 pattern=self.target_pattern,
-                axis=self.axis,
+                dim=self.dim,
             )(gt)
-        return MatchedFilter(mean=mean, cov_op=cov_op, target=target, axis=self.axis)(
-            gt
-        )
+        return MatchedFilter(mean=mean, cov_op=cov_op, target=target, dim=self.dim)(gt)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -1117,7 +1183,7 @@ class ColumnEnhancement(Operator):
             "target_pattern": self.target_pattern,
             "rank": self.rank,
             "tikhonov": self.tikhonov,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 

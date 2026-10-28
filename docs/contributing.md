@@ -225,7 +225,7 @@ Issue node IDs are resolved via `gh api repos/:owner/:repo/issues/<N> --jq .node
 ## Operator parameter vocabulary
 
 Every `pipekit.Operator` constructor is keyword-only, and one concept has one
-parameter name across every family (`axis`, `bands`, `window`, `size`,
+parameter name across every family (`dim`, `bands`, `window`, `size`,
 `fill_value`, `seed`, …). The full table lives with the rest of the geotoolz
 package rules in
 [`packages/geotoolz-ops/AGENTS.md`](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz-ops/AGENTS.md#operator-parameter-vocabulary);

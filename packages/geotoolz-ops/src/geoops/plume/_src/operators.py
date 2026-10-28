@@ -47,8 +47,10 @@ from geoops.carrier import (
     BandRef,
     affine_of,
     as_tuple,
+    band_dim,
     callable_name,
     carried_fill,
+    dim_axis,
     import_optional,
     invalid_values,
     keep_band_axis,
@@ -106,9 +108,9 @@ def _extract_and_clip_band(arr: np.ndarray, index: int, axis: int) -> np.ndarray
     return np.maximum(np.take(arr, index, axis=axis), 0.0)
 
 
-def _single_band_nan(x: GeoArray | np.ndarray) -> np.ndarray:
+def _single_band_nan(x: GeoArray | np.ndarray, name: str = "plume") -> np.ndarray:
     """Single-band ``(H, W)`` float map of ``x`` with nodata pixels set to NaN."""
-    return squeeze_single_band(mask_invalid_to_nan(x))
+    return squeeze_single_band(mask_invalid_to_nan(x), name=name)
 
 
 class SBMP(Operator):
@@ -158,7 +160,10 @@ class SBMP(Operator):
     Args:
         swir1: Index or band name of the SWIR-1 channel. Default ``"B11"``.
         swir2: Index or band name of the SWIR-2 channel. Default ``"B12"``.
-        axis: Band axis of the input. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         eps: Numerical guard against division by zero. Default ``1e-10``.
 
     Called as ``op(scene, reference_scene=None)``. The optional
@@ -184,12 +189,13 @@ class SBMP(Operator):
         *,
         swir1: BandRef = "B11",
         swir2: BandRef = "B12",
-        axis: int = -3,
+        dim: str = "band",
         eps: float = 1e-10,
+        axis: int | None = None,
     ) -> None:
         self.swir1 = swir1
         self.swir2 = swir2
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "SBMP")
         self.eps = eps
 
     def _apply(
@@ -197,32 +203,33 @@ class SBMP(Operator):
         gt: GeoArray | np.ndarray,
         reference_scene: GeoArray | np.ndarray | None = None,
     ) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="SBMP")
         if reference_scene is not None:
             require_grid_match(
                 gt, reference_scene, "SBMP", names=("scene", "reference_scene")
             )
         arr = np.asarray(gt, dtype=float)
-        idx1 = _band_position(gt, self.swir1, self.axis)
-        idx2 = _band_position(gt, self.swir2, self.axis)
-        swir1 = _extract_and_clip_band(arr, idx1, self.axis)
-        swir2 = _extract_and_clip_band(arr, idx2, self.axis)
+        idx1 = _band_position(gt, self.swir1, axis)
+        idx2 = _band_position(gt, self.swir2, axis)
+        swir1 = _extract_and_clip_band(arr, idx1, axis)
+        swir2 = _extract_and_clip_band(arr, idx2, axis)
         ratio = np.log((swir1 + self.eps) / (swir2 + self.eps))
         if reference_scene is not None:
             ref = np.asarray(reference_scene, dtype=float)
             # A named reference resolves its own bands; an unnamed one is
             # assumed to share the scene's band layout.
             if isinstance(reference_scene, GeoArray):
-                idx1 = _band_position(reference_scene, self.swir1, self.axis)
-                idx2 = _band_position(reference_scene, self.swir2, self.axis)
-            ref_swir1 = _extract_and_clip_band(ref, idx1, self.axis)
-            ref_swir2 = _extract_and_clip_band(ref, idx2, self.axis)
+                idx1 = _band_position(reference_scene, self.swir1, axis)
+                idx2 = _band_position(reference_scene, self.swir2, axis)
+            ref_swir1 = _extract_and_clip_band(ref, idx1, axis)
+            ref_swir2 = _extract_and_clip_band(ref, idx2, axis)
             ref_ratio = np.log((ref_swir1 + self.eps) / (ref_swir2 + self.eps))
             out = ratio - ref_ratio
         else:
             out = (swir1 - swir2) / (swir1 + swir2 + self.eps)
-        invalid = invalid_values(gt).any(axis=self.axis)
+        invalid = invalid_values(gt).any(axis=axis)
         if reference_scene is not None:
-            invalid = invalid | invalid_values(reference_scene).any(axis=self.axis)
+            invalid = invalid | invalid_values(reference_scene).any(axis=axis)
         return wrap_filled(
             gt, keep_band_axis(out, gt), fill_value=np.nan, valid=~invalid
         )
@@ -273,7 +280,7 @@ class PlumeMask(Operator):
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         mask = plume_mask(
-            _single_band_nan(gt),
+            _single_band_nan(gt, name="PlumeMask"),
             threshold=self.threshold,
             min_area_px=self.min_area_px,
             connectivity=self.connectivity,
@@ -319,7 +326,8 @@ class PlumeContours(Operator):
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         valid = valid_pixels(gt)
         labels = label_components(
-            squeeze_single_band(np.asarray(gt)).astype(bool) & valid,
+            squeeze_single_band(np.asarray(gt), name="PlumeContours").astype(bool)
+            & valid,
             min_area_px=self.min_area_px,
             connectivity=self.connectivity,
         )
@@ -424,10 +432,10 @@ class PlumeFootprint(Operator):
             require_grid_match(
                 gt, enhancement, "PlumeFootprint", names=("mask", "enhancement")
             )
-        mask_arr = squeeze_single_band(np.asarray(gt))
+        mask_arr = squeeze_single_band(np.asarray(gt), name="PlumeFootprint")
         if mask_arr.dtype == bool:
             labels = label_components(
-                mask_arr & squeeze_single_band(valid_pixels(gt)),
+                mask_arr & squeeze_single_band(valid_pixels(gt), name="PlumeFootprint"),
                 min_area_px=1,
                 connectivity=8,
             )
@@ -435,7 +443,11 @@ class PlumeFootprint(Operator):
             # Non-positive labels (background, or a label image's fill
             # value such as -9999) are not plumes.
             labels = np.where(mask_arr > 0, mask_arr, 0).astype(np.int32, copy=False)
-        enh = None if enhancement is None else _single_band_nan(enhancement)
+        enh = (
+            None
+            if enhancement is None
+            else _single_band_nan(enhancement, name="PlumeFootprint")
+        )
         properties = list(self.properties)
         if enh is not None:
             properties.extend(
@@ -620,7 +632,7 @@ class WindAdvectionCone(Operator):
     def _apply(self, gt: GeoArray) -> GeoArray:
         require_geoarray(gt, "WindAdvectionCone")
         require_projected_crs(gt, "WindAdvectionCone")
-        arr = squeeze_single_band(np.asarray(gt))
+        arr = squeeze_single_band(np.asarray(gt), name="WindAdvectionCone")
         source = self.source
         if self.crs is not None:
             if gt.crs is None:
@@ -749,8 +761,10 @@ class IMEEstimate(Operator):
         require_grid_match(
             gt, plume_mask, "IMEEstimate", names=("enhancement", "plume_mask")
         )
-        mask = squeeze_single_band(np.asarray(plume_mask)).astype(bool)
-        enhancement = _single_band_nan(gt)
+        mask = squeeze_single_band(np.asarray(plume_mask), name="IMEEstimate").astype(
+            bool
+        )
+        enhancement = _single_band_nan(gt, name="IMEEstimate")
         area = (
             self.pixel_area_m2
             if self.pixel_area_m2 is not None
@@ -870,8 +884,10 @@ class CrossSectionalFlux(Operator):
         wind_norm = float(np.hypot(self.wind_u, self.wind_v))
         if wind_norm == 0.0:
             raise ValueError("wind vector must be non-zero")
-        mask = squeeze_single_band(np.asarray(plume_mask)).astype(bool)
-        enhancement = _single_band_nan(gt)
+        mask = squeeze_single_band(
+            np.asarray(plume_mask), name="CrossSectionalFlux"
+        ).astype(bool)
+        enhancement = _single_band_nan(gt, name="CrossSectionalFlux")
         area = pixel_area(affine_of(gt))
         width = float(np.sqrt(area))
         xs, ys = pixel_centers(mask.shape, affine_of(gt))
@@ -1045,7 +1061,9 @@ class PlumeShapeFilter(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
+        labels = squeeze_single_band(np.asarray(gt), name="PlumeShapeFilter").astype(
+            np.int64, copy=False
+        )
         kept: set[int] = set()
         for lbl, compact, _bbox in _iter_instances(labels):
             area = int(compact.sum())
@@ -1141,8 +1159,12 @@ class PlumeColumnStats(Operator):
         reject_geotensor(gt, "PlumeColumnStats")
         require_ndim(gt, (2, 3), "PlumeColumnStats")
         require_grid_match(gt, column, "PlumeColumnStats", names=("labels", "column"))
-        labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
-        col_arr = _single_band_nan(column).astype(float, copy=False)
+        labels = squeeze_single_band(np.asarray(gt), name="PlumeColumnStats").astype(
+            np.int64, copy=False
+        )
+        col_arr = _single_band_nan(column, name="PlumeColumnStats").astype(
+            float, copy=False
+        )
         if col_arr.shape != labels.shape:
             raise ValueError(
                 "column shape "
@@ -1328,8 +1350,12 @@ class PlumeQNDFeatures(Operator):
             require_grid_match(
                 gt, albedo, "PlumeQNDFeatures", names=("labels", "albedo")
             )
-        labels = squeeze_single_band(np.asarray(gt)).astype(np.int64, copy=False)
-        col_arr = _single_band_nan(column).astype(float, copy=False)
+        labels = squeeze_single_band(np.asarray(gt), name="PlumeQNDFeatures").astype(
+            np.int64, copy=False
+        )
+        col_arr = _single_band_nan(column, name="PlumeQNDFeatures").astype(
+            float, copy=False
+        )
         if col_arr.shape != labels.shape:
             raise ValueError(
                 "column shape "
@@ -1338,7 +1364,9 @@ class PlumeQNDFeatures(Operator):
         if albedo is None:
             alb_arr = None
         else:
-            alb_arr = _single_band_nan(albedo).astype(float, copy=False)
+            alb_arr = _single_band_nan(albedo, name="PlumeQNDFeatures").astype(
+                float, copy=False
+            )
             if alb_arr.shape != labels.shape:
                 raise ValueError(
                     "albedo shape "

@@ -12,6 +12,8 @@ from geoarray import GeoArray
 from geoops._src.shape import (
     BAND_AXIS,
     band_axis,
+    band_dim,
+    dim_axis,
     keep_band_axis,
     map_frames,
     over_frames,
@@ -160,3 +162,78 @@ def test_map_frames_keeps_the_time_coordinate() -> None:
     )
     out = qa.MaskInvalid()(x)
     assert out.coord("time") == stamps
+
+
+# ---- dim= (#531): the band dim by name, axis= deprecated ----
+
+
+def test_band_dim_passes_dim_through() -> None:
+    assert band_dim("band", None, "Op") == "band"
+    assert band_dim(None, None, "Op") is None
+
+
+def test_band_dim_maps_the_old_band_axis_with_a_warning() -> None:
+    with pytest.warns(DeprecationWarning, match=r"Op\(axis=...\) is deprecated"):
+        assert band_dim("band", -3, "Op") == "band"
+    with pytest.warns(DeprecationWarning):
+        assert band_dim("band", 0, "Seg", legacy=(0, -3)) == "band"
+
+
+def test_band_dim_refuses_another_axis_or_both() -> None:
+    with (
+        pytest.warns(DeprecationWarning),
+        pytest.raises(ValueError, match="axis=1 is not the band axis"),
+    ):
+        band_dim("band", 1, "Op")
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="not both"):
+        band_dim("time", -3, "Op")
+
+
+def test_dim_axis_reads_stored_dims() -> None:
+    stack = time_stack()  # ("time", "band", "y", "x")
+    assert dim_axis(stack, "band", name="Op") == -3
+    assert dim_axis(stack, "time", name="Op") == -4
+    series = toy_geoarray(np.zeros((4, 4))).with_data(
+        np.zeros((2, 4, 4)), dims=("time", "y", "x")
+    )
+    with pytest.raises(ValueError, match=r"Op: the carrier has no 'band' dim"):
+        dim_axis(series, "band", name="Op")
+
+
+def test_dim_axis_reads_plain_arrays_in_the_old_layout() -> None:
+    assert dim_axis(np.zeros((3, 4, 4)), "band", name="Op") == -3
+    assert dim_axis(np.zeros((2, 3, 4, 4)), "time", name="Op") == -4
+    # a single-band map keeps the old band position
+    assert dim_axis(np.zeros((4, 4)), "band", name="Op") == BAND_AXIS
+
+
+def test_map_frames_splits_a_single_band_series_by_name() -> None:
+    series = toy_geoarray(np.zeros((4, 4))).with_data(
+        np.arange(32, dtype=float).reshape(2, 4, 4), dims=("time", "y", "x")
+    )
+    seen: list[tuple[str, ...]] = []
+
+    def double(frame: GeoArray) -> GeoArray:
+        seen.append(frame.dims)
+        return frame.with_data(np.asarray(frame) * 2)
+
+    out = map_frames(double, series, name="Double")
+    assert seen == [("y", "x"), ("y", "x")]
+    assert out.dims == ("time", "y", "x")  # no dummy band axis
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(series) * 2)
+
+
+def test_map_frames_keeps_a_renamed_channel_dim() -> None:
+    """A 2-D per-frame result keeps the stack's own channel dim, by its name."""
+    stack = time_stack()  # ("time", "band", "y", "x")
+    renamed = stack.replace(
+        dims=("time", "wavelength", "y", "x"),
+        coords=tuple(c for c in stack.coords if c.dim != "band"),
+    )
+
+    def band_sum(frame: GeoArray) -> GeoArray:
+        return frame.with_data(np.asarray(frame).sum(axis=0), dims=("y", "x"))
+
+    out = map_frames(band_sum, renamed, name="BandSum")
+    assert out.dims == ("time", "wavelength", "y", "x")
+    assert out.shape == (stack.shape[0], 1, *stack.shape[-2:])

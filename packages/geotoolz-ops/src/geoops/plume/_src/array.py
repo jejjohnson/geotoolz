@@ -44,6 +44,8 @@ STANDARD_MOLAR_VOLUME_M3_PER_MOL = 0.024465
 
 def squeeze_single_band(
     values: Shaped[np.ndarray, "h w"] | Shaped[np.ndarray, "1 h w"],
+    *,
+    name: str = "plume",
 ) -> Shaped[np.ndarray, "h w"]:
     """Return a 2-D plume map from a 2-D or singleton-band array.
 
@@ -53,6 +55,7 @@ def squeeze_single_band(
     Args:
         values: A ``(H, W)`` array or a ``(1, H, W)`` singleton-band
             cube. Any array-like is accepted.
+        name: Who needs the map, for the error message (an operator name).
 
     Returns:
         The ``(H, W)`` array. No copy is made for ndarray input.
@@ -60,7 +63,7 @@ def squeeze_single_band(
     Raises:
         ValueError: If ``values`` is neither ``(H, W)`` nor ``(1, H, W)``.
     """
-    return single_band(values, name="plume")
+    return single_band(values, name=name)
 
 
 def plume_mask(

@@ -308,8 +308,8 @@ def test_operator_configs_are_json_safe() -> None:
         DespeckleRefinedLee(window=5),
         DestripeColumn(method="median", direction="row", window=15),
         MomentMatching(window=11),
-        DenoisePCA(n_components=2, axis=0),
-        MNF(n_components=2, axis=0),
+        DenoisePCA(n_components=2, dim="band"),
+        MNF(n_components=2, dim="band"),
         GaussianDenoise(sigma=1.0),
         MedianDenoise(window=3),
         BilateralDenoise(sigma_color=0.1, sigma_space=2.0),
@@ -863,7 +863,7 @@ def test_mnf_fitted_state_excluded_from_config() -> None:
         mnf.inverse(np.ones((2, 4, 4)))
     mnf(np.random.default_rng(22).normal(size=(3, 6, 6)))
     assert mnf.state_ is not None
-    assert mnf.get_config() == config == {"n_components": 2, "axis": -3}
+    assert mnf.get_config() == config == {"n_components": 2, "dim": "band"}
 
 
 def test_mnf_rejects_mismatched_bands_and_components() -> None:

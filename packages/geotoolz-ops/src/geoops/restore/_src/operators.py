@@ -37,7 +37,7 @@ import numpy as np
 from pipekit import Operator
 
 from geoops._src.fitted import fit_once
-from geoops._src.shape import require_ndim
+from geoops._src.shape import band_dim, dim_axis, require_ndim
 from geoops._src.valid import (
     carried_fill,
     invalid_values,
@@ -307,8 +307,10 @@ class DenoisePCA(Operator):
     Args:
         n_components: Number of principal components to keep.
             ``n_components < bands`` performs noise reduction.
-        axis: Position of the band axis. Defaults to ``-3``
-            (``(bands, H, W)`` or ``(time, bands, H, W)``).
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Inputs are ``(C, H, W)`` cubes or ``(T, C, H, W)`` stacks; a stack is
     fitted once over the pixels of every frame (one PCA basis for the
@@ -321,14 +323,17 @@ class DenoisePCA(Operator):
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
-    def __init__(self, *, n_components: int, axis: int = -3) -> None:
+    def __init__(
+        self, *, n_components: int, dim: str = "band", axis: int | None = None
+    ) -> None:
         self.n_components = n_components
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "DenoisePCA")
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        axis = dim_axis(gt, self.dim, name="DenoisePCA")
         require_ndim(gt, (3, 4), type(self).__name__)
         out = pca_denoise(
-            _band_masked(gt, self.axis), n_components=self.n_components, axis=self.axis
+            _band_masked(gt, axis), n_components=self.n_components, axis=axis
         )
         return _rewrap_finite(gt, out)
 
@@ -369,7 +374,10 @@ class MNF(Operator):
 
     Args:
         n_components: Number of components to keep. ``None`` keeps all.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Attributes:
         state_: The fitted basis (``"components"`` ``A_k``,
@@ -391,9 +399,15 @@ class MNF(Operator):
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
-    def __init__(self, *, n_components: int | None = None, axis: int = -3) -> None:
+    def __init__(
+        self,
+        *,
+        n_components: int | None = None,
+        dim: str = "band",
+        axis: int | None = None,
+    ) -> None:
         self.n_components = n_components
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "MNF")
         self.state_: dict[str, np.ndarray] | None = None
         self.eigenvalues_: np.ndarray | None = None
         self.snr_: np.ndarray | None = None
@@ -404,11 +418,12 @@ class MNF(Operator):
         Returns:
             This operator, for chaining.
         """
+        axis = dim_axis(gt, self.dim, name="MNF")
         require_ndim(gt, (3, 4), type(self).__name__)
         fitted = fit_mnf(
-            _band_masked(gt, self.axis),
+            _band_masked(gt, axis),
             n_components=self.n_components,
-            axis=self.axis,
+            axis=axis,
         )
         eigenvalues = np.asarray(fitted["eigenvalues"])
         self.eigenvalues_ = eigenvalues
@@ -438,13 +453,14 @@ class MNF(Operator):
             ValueError: If the operator is not fitted, ``gt`` is not 3-D /
                 4-D or has a different band count than the fit.
         """
+        axis = dim_axis(gt, self.dim, name="MNF")
         require_ndim(gt, (3, 4), type(self).__name__)
         state = self._fitted()
         scores = project_bands(
-            _band_masked(gt, self.axis),
+            _band_masked(gt, axis),
             components=state["components"],
             mean=state["mean"],
-            axis=self.axis,
+            axis=axis,
         )
         # Scores are a new quantity: NaN marks nodata, never the input fill.
         return wrap_filled(gt, scores, fill_value=np.nan, valid=np.isfinite(scores))
@@ -471,13 +487,14 @@ class MNF(Operator):
             ValueError: If the operator is not fitted or ``gt`` has a
                 different component count.
         """
+        axis = dim_axis(gt, self.dim, name="MNF")
         require_ndim(gt, (3, 4), f"{type(self).__name__}.inverse")
         state = self._fitted()
         out = reconstruct_bands(
-            _band_masked(gt, self.axis),
+            _band_masked(gt, axis),
             loadings=state["loadings"],
             mean=state["mean"],
-            axis=self.axis,
+            axis=axis,
         )
         return _rewrap_finite(gt, out)
 

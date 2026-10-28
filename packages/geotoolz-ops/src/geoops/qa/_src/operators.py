@@ -57,7 +57,7 @@ from pipekit import Operator
 from geoops._src.bands import resolve_band, strip_band_attrs
 from geoops._src.config import mapping_from_pairs, mapping_to_pairs
 from geoops._src.geo import reject_geotensor
-from geoops._src.shape import over_frames
+from geoops._src.shape import band_dim, dim_axis, over_frames
 from geoops._src.valid import invalid_values, valid_pixels, wrap_filled
 from geoops._src.wrap import wrap_like
 from geoops.qa._src.array import (
@@ -288,8 +288,10 @@ class DecodeBitmask(Operator):
             useful for confidence-pair sub-fields).
         qa_band: Optional integer or named band selector. When omitted,
             the input carrier itself is treated as the QA band.
-        axis: Position of the band axis when ``qa_band`` selects from a
-            stack.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Returns:
         GeoArray | numpy.ndarray: A multi-band boolean carrier with
@@ -317,7 +319,8 @@ class DecodeBitmask(Operator):
         bits: Mapping[str, Sequence[int]] | Sequence[Sequence[Any]],
         mode: str = "any",
         qa_band: BandSelector = None,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         bits_map = mapping_from_pairs(bits)
         if not bits_map:
@@ -333,12 +336,12 @@ class DecodeBitmask(Operator):
                 raise ValueError(f"bits[{name!r}] must not be empty")
         self.mode = mode
         self.qa_band = qa_band
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "DecodeBitmask")
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         reject_geotensor(gt, type(self).__name__)
-        qa = _select_qa(gt, self.qa_band, self.axis)
+        qa = _select_qa(gt, self.qa_band, dim_axis(gt, self.dim, name="DecodeBitmask"))
         names = list(self.bits)
         layers = [
             _decode_bits_with_mode(qa, self.bits[name], self.mode) for name in names
@@ -359,7 +362,7 @@ class DecodeBitmask(Operator):
             "bits": mapping_to_pairs(self.bits),
             "mode": self.mode,
             "qa_band": self.qa_band,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -403,8 +406,10 @@ class MaskInvalid(Operator):
     Args:
         invalid_value: Sentinel value treated as "invalid". ``None``
             uses the carrier's ``fill_value``.
-        axis: Position of the band axis (used for the per-pixel
-            ANY-band reduction). Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops.mask import ApplyMask
@@ -416,15 +421,24 @@ class MaskInvalid(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     def __init__(
-        self, *, invalid_value: float | int | None = None, axis: int = -3
+        self,
+        *,
+        invalid_value: float | int | None = None,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.invalid_value = invalid_value
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "MaskInvalid")
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         reject_geotensor(gt, type(self).__name__)
-        mask = _invalid_mask(gt, self.invalid_value, self.axis, "MaskInvalid")
+        mask = _invalid_mask(
+            gt,
+            self.invalid_value,
+            dim_axis(gt, self.dim, name="MaskInvalid"),
+            "MaskInvalid",
+        )
         return wrap_like(gt, mask, fill_value=False)
 
 
@@ -446,7 +460,10 @@ class _QAMask(Operator):
         values: Categorical values (e.g. SCL classes) to mark. Pass
             exactly one of ``bits`` / ``values``.
         mode: ``"any"`` (default) or ``"all"``; only used with ``bits``.
-        axis: Position of the band axis. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
         invert: Mark pixels that do *not* match instead — a keep-list
             (e.g. ``values=[SCL.VEGETATION], invert=True`` drops every
             other class).
@@ -466,8 +483,9 @@ class _QAMask(Operator):
         bits: Sequence[int] | None = None,
         values: Sequence[int] | None = None,
         mode: str = "any",
-        axis: int = -3,
+        dim: str = "band",
         invert: bool = False,
+        axis: int | None = None,
     ) -> None:
         self.qa_band = qa_band
         self.bits = _normalize_int_sequence(bits, "bits")
@@ -475,12 +493,12 @@ class _QAMask(Operator):
         if mode not in {"any", "all"}:
             raise ValueError("mode must be 'any' or 'all'")
         self.mode = mode
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "_QAMask")
         self.invert = invert
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        qa = _select_qa(gt, self.qa_band, self.axis)
+        qa = _select_qa(gt, self.qa_band, dim_axis(gt, self.dim, name="_QAMask"))
         mask = _mask_from_definition(
             qa,
             bits=self.bits,
@@ -496,7 +514,7 @@ class _QAMask(Operator):
             "bits": None if self.bits is None else list(self.bits),
             "values": None if self.values is None else list(self.values),
             "mode": self.mode,
-            "axis": self.axis,
+            "dim": self.dim,
             "invert": self.invert,
         }
 
@@ -602,7 +620,9 @@ class MaskNoData(_QAMask):
                 "MaskNoData: qa_band needs bits or values to decode; drop "
                 "qa_band to fall back to the carrier fill value."
             )
-        mask = _invalid_mask(gt, None, self.axis, "MaskNoData")
+        mask = _invalid_mask(
+            gt, None, dim_axis(gt, self.dim, name="MaskNoData"), "MaskNoData"
+        )
         return wrap_like(gt, mask, fill_value=False)
 
 
@@ -625,8 +645,10 @@ class MaskSaturated(Operator):
             OR-reduce the per-band flags over ``axis`` into one
             ``(H, W)`` mask; when False, return one flag per band
             (same shape as the input).
-        axis: Position of the band axis (used for the cross-band
-            reduction).
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Returns:
         GeoArray | numpy.ndarray: Boolean mask with saturated pixels
@@ -650,16 +672,18 @@ class MaskSaturated(Operator):
         qa_band: BandSelector = None,
         saturation_value: float | int | None = None,
         reduce_bands: bool = True,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.qa_band = qa_band
         self.saturation_value = saturation_value
         self.reduce_bands = reduce_bands
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "MaskSaturated")
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        arr = _select_qa(gt, self.qa_band, self.axis)
+        axis = dim_axis(gt, self.dim, name="MaskSaturated")
+        arr = _select_qa(gt, self.qa_band, axis)
         saturation_value = self.saturation_value
         if saturation_value is None:
             if np.issubdtype(arr.dtype, np.integer):
@@ -672,7 +696,7 @@ class MaskSaturated(Operator):
                 )
         mask = arr >= saturation_value
         if self.reduce_bands and self.qa_band is None and mask.ndim > 2:
-            mask = np.any(mask, axis=self.axis)
+            mask = np.any(mask, axis=axis)
         valid = valid_pixels(gt) if np.ndim(gt) >= 2 else ~invalid_values(gt)
         return wrap_filled(gt, mask, fill_value=False, valid=valid)
 
@@ -701,7 +725,10 @@ class S2QA60(Operator):
         qa_band: Band selector for QA60 within the input stack.
         targets: Target names to OR together (``"cloud"``,
             ``"cirrus"``). Default both.
-        axis: Band axis position. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops.qa import S2QA60
@@ -715,15 +742,16 @@ class S2QA60(Operator):
         *,
         qa_band: int | str = "QA60",
         targets: Sequence[str] = ("cloud", "cirrus"),
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.qa_band = qa_band
         self.targets = tuple(str(target) for target in targets)
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "S2QA60")
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        qa = _select_qa(gt, self.qa_band, self.axis)
+        qa = _select_qa(gt, self.qa_band, dim_axis(gt, self.dim, name="S2QA60"))
         mask = _decode_targets_to_mask(qa, "s2_qa60", self.targets)
         return wrap_like(gt, mask, fill_value=False)
 
@@ -731,7 +759,7 @@ class S2QA60(Operator):
         return {
             "qa_band": self.qa_band,
             "targets": list(self.targets),
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -751,7 +779,10 @@ class S2SCL(Operator):
         qa_band: Band selector for the SCL band.
         targets: Class names to mask out. See
             ``SENSOR_QA_REGISTRY["s2_scl"]`` for the full vocabulary.
-        axis: Band axis position. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops.qa import S2SCL
@@ -779,15 +810,16 @@ class S2SCL(Operator):
         *,
         qa_band: int | str = "SCL",
         targets: Sequence[str] = _DEFAULT_TARGETS,
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.qa_band = qa_band
         self.targets = tuple(str(name) for name in targets)
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "S2SCL")
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        qa = _select_qa(gt, self.qa_band, self.axis)
+        qa = _select_qa(gt, self.qa_band, dim_axis(gt, self.dim, name="S2SCL"))
         mask = _decode_targets_to_mask(qa, "s2_scl", self.targets)
         return wrap_like(gt, mask, fill_value=False)
 
@@ -795,7 +827,7 @@ class S2SCL(Operator):
         return {
             "qa_band": self.qa_band,
             "targets": list(self.targets),
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -821,7 +853,10 @@ class LandsatQA_PIXEL(Operator):
             target names.
         sensor: ``"l89"`` (Landsat 8/9, default) or ``"l7"`` (Landsat
             4-7).
-        axis: Band axis position. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops.qa import LandsatQA_PIXEL
@@ -858,7 +893,8 @@ class LandsatQA_PIXEL(Operator):
         qa_band: int | str = "QA_PIXEL",
         targets: Sequence[str] | None = None,
         sensor: str = "l89",
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         if sensor not in self._SENSOR_KEYS:
             raise ValueError(
@@ -873,12 +909,14 @@ class LandsatQA_PIXEL(Operator):
         self.qa_band = qa_band
         self.targets = tuple(str(target) for target in targets)
         self.sensor = sensor
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "LandsatQA_PIXEL")
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         registry_key = self._SENSOR_KEYS[self.sensor]
-        qa = _select_qa(gt, self.qa_band, self.axis)
+        qa = _select_qa(
+            gt, self.qa_band, dim_axis(gt, self.dim, name="LandsatQA_PIXEL")
+        )
         mask = _decode_targets_to_mask(qa, registry_key, self.targets)
         return wrap_like(gt, mask, fill_value=False)
 
@@ -887,7 +925,7 @@ class LandsatQA_PIXEL(Operator):
             "qa_band": self.qa_band,
             "targets": list(self.targets),
             "sensor": self.sensor,
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
@@ -911,7 +949,10 @@ class MODISStateQA(Operator):
         qa_band: Band selector for the state QA band.
         targets: Target flag names to OR together. See
             ``SENSOR_QA_REGISTRY["modis_state_qa"]``.
-        axis: Band axis position. Default ``-3``.
+        dim: Name of the band dim (default ``"band"``); its position is read
+            from the carrier's dims.
+        axis: Deprecated: the band axis position. ``-3`` maps to
+            ``dim="band"``; removed in the next minor release.
 
     Examples:
         >>> from geoops.qa import MODISStateQA
@@ -932,15 +973,16 @@ class MODISStateQA(Operator):
         *,
         qa_band: int | str = "state_1km",
         targets: Sequence[str] = ("cloud", "cloud_shadow"),
-        axis: int = -3,
+        dim: str = "band",
+        axis: int | None = None,
     ) -> None:
         self.qa_band = qa_band
         self.targets = tuple(str(target) for target in targets)
-        self.axis = axis
+        self.dim = band_dim(dim, axis, "MODISStateQA")
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        qa = _select_qa(gt, self.qa_band, self.axis)
+        qa = _select_qa(gt, self.qa_band, dim_axis(gt, self.dim, name="MODISStateQA"))
         mask = _decode_targets_to_mask(qa, "modis_state_qa", self.targets)
         return wrap_like(gt, mask, fill_value=False)
 
@@ -948,7 +990,7 @@ class MODISStateQA(Operator):
         return {
             "qa_band": self.qa_band,
             "targets": list(self.targets),
-            "axis": self.axis,
+            "dim": self.dim,
         }
 
 
