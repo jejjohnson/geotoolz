@@ -8,98 +8,98 @@ coordinate and attribute handling.
 
 ## Spectra
 
-::: xrtoolz.transforms.operators.PowerSpectrum
+::: xrops.transforms.operators.PowerSpectrum
 
-::: xrtoolz.transforms.operators.CrossSpectrum
+::: xrops.transforms.operators.CrossSpectrum
 
-::: xrtoolz.transforms.operators.Coherence
+::: xrops.transforms.operators.Coherence
 
-::: xrtoolz.transforms.operators.RotarySpectrum
+::: xrops.transforms.operators.RotarySpectrum
 
-::: xrtoolz.transforms.operators.STFT
+::: xrops.transforms.operators.STFT
 
-::: xrtoolz.transforms.operators.DCT
+::: xrops.transforms.operators.DCT
 
-::: xrtoolz.transforms.operators.DST
+::: xrops.transforms.operators.DST
 
-::: xrtoolz.transforms.operators.CWT
+::: xrops.transforms.operators.CWT
 
 ## Spectral flux
 
-::: xrtoolz.transforms.operators.KESpectralFlux
+::: xrops.transforms.operators.KESpectralFlux
 
-::: xrtoolz.transforms.operators.EnstrophySpectralFlux
+::: xrops.transforms.operators.EnstrophySpectralFlux
 
 ## Spectral functions
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.transforms.power_spectrum
+::: xrops.transforms.power_spectrum
 
-::: xrtoolz.transforms.isotropic_power_spectrum
+::: xrops.transforms.isotropic_power_spectrum
 
-::: xrtoolz.transforms.cross_spectrum
+::: xrops.transforms.cross_spectrum
 
-::: xrtoolz.transforms.coherence
+::: xrops.transforms.coherence
 
-::: xrtoolz.transforms.rotary_spectrum
+::: xrops.transforms.rotary_spectrum
 
-::: xrtoolz.transforms.compensated_spectrum
+::: xrops.transforms.compensated_spectrum
 
-::: xrtoolz.transforms.stft
+::: xrops.transforms.stft
 
-::: xrtoolz.transforms.dct
+::: xrops.transforms.dct
 
-::: xrtoolz.transforms.idct
+::: xrops.transforms.idct
 
-::: xrtoolz.transforms.dst
+::: xrops.transforms.dst
 
-::: xrtoolz.transforms.idst
+::: xrops.transforms.idst
 
-::: xrtoolz.transforms.cwt
+::: xrops.transforms.cwt
 
-::: xrtoolz.transforms.dwt
+::: xrops.transforms.dwt
 
-::: xrtoolz.transforms.drop_negative_frequencies
+::: xrops.transforms.drop_negative_frequencies
 
-::: xrtoolz.transforms.to_phase
+::: xrops.transforms.to_phase
 
-::: xrtoolz.transforms.fit_spectral_slope
+::: xrops.transforms.fit_spectral_slope
 
-::: xrtoolz.transforms.integral_scale
+::: xrops.transforms.integral_scale
 
-::: xrtoolz.transforms.ke_spectral_flux
+::: xrops.transforms.ke_spectral_flux
 
-::: xrtoolz.transforms.enstrophy_spectral_flux
+::: xrops.transforms.enstrophy_spectral_flux
 
 ## Matrix decompositions
 
 These return `XarrayEstimator` instances (the scikit-learn ↔ xarray
 bridge) configured for the named decomposition.
 
-::: xrtoolz.transforms.pca
+::: xrops.transforms.pca
 
-::: xrtoolz.transforms.eof
+::: xrops.transforms.eof
 
-::: xrtoolz.transforms.ica
+::: xrops.transforms.ica
 
-::: xrtoolz.transforms.nmf
+::: xrops.transforms.nmf
 
-::: xrtoolz.transforms.kmeans
+::: xrops.transforms.kmeans
 
 ::: xrsklearn.SklearnOp
 
 ## Mask morphology
 
-::: xrtoolz.transforms.binary_opening_2d
+::: xrops.transforms.binary_opening_2d
 
-::: xrtoolz.transforms.binary_closing_2d
+::: xrops.transforms.binary_closing_2d
 
-::: xrtoolz.transforms.remove_small_holes_2d
+::: xrops.transforms.remove_small_holes_2d
 
-::: xrtoolz.transforms.remove_small_objects_2d
+::: xrops.transforms.remove_small_objects_2d
 
-::: xrtoolz.transforms.clean_mask
+::: xrops.transforms.clean_mask
 
 ## Axis remapping
 
@@ -112,4 +112,4 @@ per column — terrain-following or hybrid vertical grids — and
 range. See the *Vertical & axis remapping* section of the
 [interpolation API](interpolate.md) for the operator-level presets.
 
-::: xrtoolz.transforms.remap_axis
+::: xrops.transforms.remap_axis

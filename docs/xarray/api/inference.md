@@ -7,8 +7,8 @@ agnostic (duck-typed `predict` / `__call__`); `SklearnModelOp` and
 lazily, so installing JAX or scikit-learn is only required for the wrapper
 you actually use.
 
-::: xrtoolz.inference.ModelOp
+::: xrops.inference.ModelOp
 
-::: xrtoolz.inference.SklearnModelOp
+::: xrops.inference.SklearnModelOp
 
-::: xrtoolz.inference.JaxModelOp
+::: xrops.inference.JaxModelOp

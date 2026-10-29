@@ -4,20 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`xrtoolz` is a uv workspace of six packages that together provide a composable operator library for geoprocessing Earth System Data Cubes — preprocess, infer, and evaluate xarray datasets with a uniform pipeline abstraction. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework.
+`xrtoolz` is a uv workspace of seven packages that together provide a composable operator library for geoprocessing Earth System Data Cubes — preprocess, infer, and evaluate xarray datasets with a uniform pipeline abstraction. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework.
 
 The packages (distribution name → import name):
 
 | Package | Import | Purpose |
 |---|---|---|
-| `xrtoolz` | `xrtoolz` | Main operator families (geo, ocn, budgets, interpolate, transforms, metrics, viz, …) |
+| `xrtoolz-ops` | `xrops` | Main operator families (geo, ocn, budgets, interpolate, transforms, metrics, viz, …) |
+| `xrtoolz` | `xrtoolz` | The umbrella: no code; installs the other six |
 | `xrtoolz-core` | `xrcore` | xarray-aware `Operator` (DataTree dispatch) + `Signature` shape descriptor |
 | `xrtoolz-grad` | `xrgrad` | Finite-difference calculus on labeled grids (sole carrier of the finitediffx/JAX stack) |
 | `xrtoolz-einx` | `xreinx` | xarray ↔ einx named-tensor bridge (functions + Operators; einx loads lazily) |
 | `xrtoolz-sklearn` | `xrsklearn` | scikit-learn ↔ xarray bridge (`XarrayEstimator`, `.sklearn` accessors, `SklearnOp`) |
 | `xrtoolz-reader` | `xrreader` | Authenticated archive readers (CMEMS, CDS, AEMET) + the typed request vocabulary / CF `Variable` registry |
 
-`xrtoolz` depends on the other five, so `pip install xrtoolz` behaves exactly as the pre-split package. Deprecation shims keep `xrtoolz.calc` / `xrtoolz.einx` / `xrtoolz.signature` / `xrtoolz.utils.XarrayEstimator` / `xrtoolz.transforms.SklearnOp` importable through 0.x; new code imports `xrgrad` / `xreinx` / `xrcore` / `xrsklearn` directly.
+`xrtoolz` holds no code and depends on the other six, so `pip install xrtoolz` installs the whole family. There are no compatibility shims: renames and removals are outright, and every caller in the stack moves in the same release.
 
 ## Architecture
 
@@ -31,33 +32,28 @@ The packages (distribution name → import name):
 
 ### Package structure
 
-Each package lives in `packages/<distribution>/src/<import name>/` with its own `pyproject.toml` and `tests/`; the workspace root ships no code (the top-level `pyproject.toml` only configures `[tool.uv.workspace]` plus shared dev/lint/typecheck/docs groups and git sources for `pipekit`/`xrreader`). The main package's public API is re-exported through `packages/xrtoolz/src/xrtoolz/__init__.py`; the composition primitives (`Sequential`, `Graph`, `Input`, `Node`, `Tap`) are re-exported from `pipekit`, and `Operator` / `Signature` from `xrcore`.
+Each package lives in `packages/<distribution>/src/<import name>/` with its own `pyproject.toml` and `tests/`; the workspace root ships no code (the top-level `pyproject.toml` only configures `[tool.uv.workspace]` plus shared dev/lint/typecheck/docs groups and git sources for `pipekit`/`xrreader`). The operators live in `packages/xrtoolz-ops/src/xrops/`; `xrops/__init__.py` exports only its own combinators. Import the composition primitives (`Sequential`, `Graph`, `Input`, `Node`, `Tap`) from `pipekit`, and `Operator` / `Signature` from `xrcore`.
 
 ### Submodule layout
 
 | Path | Scope |
 |------|-------|
-| `xrtoolz.combinators` | `Augment`, `ApplyToEach` — xarray-Dataset-specific combinators built on `pipekit.Operator` |
-| `xrtoolz.signature` | Shim → `xrcore.Signature` (dict-keyed shape descriptor) |
-| `xrtoolz.einx` | Deprecation shim → `xreinx` (the xarray ↔ einx bridge package). See `docs/design/bridges/einx/`. |
-| `xrtoolz.geo` | Generic xarray geoprocessing — coordinate validation/CF renaming, subset, masks, detrend/climatology, CRS, regions, regimes, extremes, along-track, 1-D/2-D wavelet spectra |
-| `xrtoolz.ocn` | Oceanography physics — kinematics (vorticity, divergence, strain, Okubo–Weiss, streamfunction, geostrophic velocities, KE), SSH diagnostics, CF metadata validation |
-| `xrtoolz.calc` | Deprecation shim → `xrgrad` (finite-difference calculus: `partial`/`gradient`/`curl`/`divergence`/`laplacian`, geometry dispatch, grid metrics, constants) |
-| `xrtoolz.budgets` | Conservation budgets — heat/salt/volume/KE residuals, control-volume integrals, boundary fluxes |
-| `xrtoolz.interpolate` | Gap-filling (`FillNaN*`), regridding, KNN, binning, smoothing, coarsen/refine, downscaling, resampling, points↔grid, vertical coordinate remapping |
-| `xrtoolz.metrics` | Verification metrics — pixel, spectral (PSD, resolved scale), distributional, probabilistic, structural, object-based, physical, forecast, masked, multiscale, Diebold–Mariano, region/leadtime composites, leaderboard |
-| `xrtoolz.transforms` | Fourier/DCT/wavelet transforms, signal decompositions, morphology, coordinate remapping, space/time/basis encoders, sklearn bridge (`SklearnOp`) |
-| `xrtoolz.inference` | `ModelOp` inference wrappers (duck-typed; sklearn/JAX adapters). Not re-exported at top level — import explicitly |
-| `xrtoolz.utils` | Shared helpers — finite-mask utilities, grid spacing/resolution, validation guards; re-exports `XarrayEstimator` from `xrsklearn` (importing it still registers the `.sklearn` accessors) |
-| `xrtoolz.viz` | Colormaps, norms, projections, and `viz.validation` panel Operators (spatial maps, PSD, rotary, budgets, events, regime bars) |
-| `xrtoolz.atm` / `xrtoolz.atm.gas.ch4` | Atmospheric physics — `open_wrfout` (WRF → CF Dataset), wind speed/direction/components, column integral, hypsometric height, bulk-Richardson PBL height; methane columns under `gas.ch4` (column averaging kernel, dry-air column, mixing ratio ↔ column). Potential temperature still planned |
-| `xrtoolz.rs` | Remote sensing — **empty namespace stub** |
-| `xrtoolz.ice` | Cryosphere — **empty namespace stub** |
+| `xrops.combinators` | `Augment`, `ApplyToEach` — xarray-Dataset-specific combinators built on `pipekit.Operator` |
+| `xrops.geo` | Generic xarray geoprocessing — coordinate validation/CF renaming, subset, masks, detrend/climatology, CRS, regions, regimes, extremes, along-track, 1-D/2-D wavelet spectra |
+| `xrops.ocn` | Oceanography physics — kinematics (vorticity, divergence, strain, Okubo–Weiss, streamfunction, geostrophic velocities, KE), SSH diagnostics, CF metadata validation |
+| `xrops.budgets` | Conservation budgets — heat/salt/volume/KE residuals, control-volume integrals, boundary fluxes |
+| `xrops.interpolate` | Gap-filling (`FillNaN*`), regridding, KNN, binning, smoothing, coarsen/refine, downscaling, resampling, points↔grid, vertical coordinate remapping |
+| `xrops.metrics` | Verification metrics — pixel, spectral (PSD, resolved scale), distributional, probabilistic, structural, object-based, physical, forecast, masked, multiscale, Diebold–Mariano, region/leadtime composites, leaderboard |
+| `xrops.transforms` | Fourier/DCT/wavelet transforms, signal decompositions, morphology, coordinate remapping, space/time/basis encoders, the sklearn bridge itself is `xrsklearn` |
+| `xrops.inference` | `ModelOp` inference wrappers (duck-typed; sklearn/JAX adapters). Not re-exported at top level — import explicitly |
+| `xrops.utils` | Shared helpers — finite-mask utilities, grid spacing/resolution, validation guards |
+| `xrops.viz` | Colormaps, norms, projections, and `viz.validation` panel Operators (spatial maps, PSD, rotary, budgets, events, regime bars) |
+| `xrops.atm` / `xrops.atm.gas.ch4` | Atmospheric physics — `open_wrfout` (WRF → CF Dataset), wind speed/direction/components, column integral, hypsometric height, bulk-Richardson PBL height; methane columns under `gas.ch4` (column averaging kernel, dry-air column, mixing ratio ↔ column). Potential temperature still planned |
 
 Design rules:
 
 - Anything domain-agnostic lives in `geo`/`interpolate`/`transforms`/`utils` (or a sibling workspace package — `xrgrad`, `xreinx`, `xrsklearn`); only true physics lives in the domain submodules (`ocn`, `budgets`, `atm`, …). The composition primitives themselves live in `pipekit` (and their xarray-aware base in `xrcore`), not here.
-- Implementation lives in each submodule's `_src/` directory; public names are re-exported through the submodule `__init__.py` (and, for `metrics`, per-family facade modules like `metrics.pixel`). **Every** public Operator class is importable from its domain package (`xrtoolz.ocn.Streamfunction`, not just `xrtoolz.ocn.operators.Streamfunction`).
+- Implementation lives in each submodule's `_src/` directory; public names are re-exported through the submodule `__init__.py` (and, for `metrics`, per-family facade modules like `metrics.pixel`). **Every** public Operator class is importable from its domain package (`xrops.ocn.Streamfunction`, not just `xrops.ocn.operators.Streamfunction`).
 - Operator constructor conventions: `variable=` (not `var=`) for a single variable name, `variables=` for lists; singular `dim=` (accepting `str | Sequence[str]`) for reduce-style "dimension(s) to act over" parameters, plural `dims=` only when the value is inherently a fixed collection of axes (image-plane pairs, FFT axes).
 
 ### Key directories

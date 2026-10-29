@@ -1,6 +1,6 @@
 # Visualization
 
-`xrtoolz.viz` provides plotting helpers and a family of **validation
+`xrops.viz` provides plotting helpers and a family of **validation
 panels** — `Operator` subclasses that return a `matplotlib.figure.Figure`,
 so a panel slots into a `Sequential` or `Graph` pipeline as the final step.
 
@@ -11,13 +11,13 @@ looks up the default colormap for a variable; `shared_norm` derives a
 common colour normalization across panels; `PRESETS` is the registry of
 named cartopy extents.
 
-::: xrtoolz.viz.make_axes
+::: xrops.viz.make_axes
 
-::: xrtoolz.viz.cmap_for
+::: xrops.viz.cmap_for
 
-::: xrtoolz.viz.shared_norm
+::: xrops.viz.shared_norm
 
-::: xrtoolz.viz.PRESETS
+::: xrops.viz.PRESETS
 
 !!! note "Cartopy presets"
     The `projection` kwarg of `SpatialMapPanel` (and `make_axes`) accepts a
@@ -34,38 +34,38 @@ named cartopy extents.
 
 ## V1 — Scale & spectral skill
 
-::: xrtoolz.viz.validation.LeadTimeSkillPanel
+::: xrops.viz.validation.LeadTimeSkillPanel
 
-::: xrtoolz.viz.validation.ScaleSkillPanel
+::: xrops.viz.validation.ScaleSkillPanel
 
-::: xrtoolz.viz.validation.SpectralSkillPanel
+::: xrops.viz.validation.SpectralSkillPanel
 
-::: xrtoolz.viz.validation.TimeSeriesErrorPanel
+::: xrops.viz.validation.TimeSeriesErrorPanel
 
 ## V1.5 — PSD plots
 
 Power-spectrum visualisations consuming `transforms.power_spectrum` and
 `metrics.psd_score` outputs.
 
-::: xrtoolz.viz.validation.PSDIsotropicPanel
+::: xrops.viz.validation.PSDIsotropicPanel
 
-::: xrtoolz.viz.validation.PSDIsotropicScorePanel
+::: xrops.viz.validation.PSDIsotropicScorePanel
 
-::: xrtoolz.viz.validation.PSDSpaceTimePanel
+::: xrops.viz.validation.PSDSpaceTimePanel
 
-::: xrtoolz.viz.validation.PSDSpaceTimeScorePanel
+::: xrops.viz.validation.PSDSpaceTimeScorePanel
 
 ## Region & rotary diagnostics
 
-::: xrtoolz.viz.validation.RegionScoreBarPanel
+::: xrops.viz.validation.RegionScoreBarPanel
 
-::: xrtoolz.viz.validation.RotaryPolarizationPanel
+::: xrops.viz.validation.RotaryPolarizationPanel
 
 ## Spatial snapshots
 
-::: xrtoolz.viz.validation.SpatialMapPanel
+::: xrops.viz.validation.SpatialMapPanel
 
-::: xrtoolz.viz.validation.HovmollerPanel
+::: xrops.viz.validation.HovmollerPanel
 
 ### Cartesian model output
 
@@ -75,28 +75,28 @@ Idealised f/β-plane runs have `x`/`y` in metres and no lon/lat.
 invariants over time. Both compose with the wrappers below:
 
 ```python
-from xrtoolz.viz.validation import AnimatePanel, CartesianMapPanel, EnergyTimeSeriesPanel
+from xrops.viz.validation import AnimatePanel, CartesianMapPanel, EnergyTimeSeriesPanel
 
 CartesianMapPanel(variable="zeta", contour="psi")(snapshots)
 AnimatePanel(CartesianMapPanel(variable="zeta"))(snapshots)  # FuncAnimation
 EnergyTimeSeriesPanel(["kinetic_energy", "enstrophy"], relative=True)(invariants)
 ```
 
-::: xrtoolz.viz.validation.CartesianMapPanel
+::: xrops.viz.validation.CartesianMapPanel
 
-::: xrtoolz.viz.validation.EnergyTimeSeriesPanel
+::: xrops.viz.validation.EnergyTimeSeriesPanel
 
 ## V3 — Lagrangian / Eulerian
 
-::: xrtoolz.viz.validation.EulerianLagrangianPanel
+::: xrops.viz.validation.EulerianLagrangianPanel
 
 ## V4 — Process budgets
 
-::: xrtoolz.viz.validation.ProcessBudgetPanel
+::: xrops.viz.validation.ProcessBudgetPanel
 
 ## V5 — Event verification
 
-::: xrtoolz.viz.validation.EventVerificationPanel
+::: xrops.viz.validation.EventVerificationPanel
 
 ## Composable wrappers
 
@@ -121,18 +121,18 @@ and the six-panel `scale × (ref, study, diff)` mosaic is
     non-matplotlib backends (plotly, hvplot, bokeh) are also out of
     scope.
 
-::: xrtoolz.viz.validation.FacetPanel
+::: xrops.viz.validation.FacetPanel
 
-::: xrtoolz.viz.validation.seasonal_groupby
+::: xrops.viz.validation.seasonal_groupby
 
-::: xrtoolz.viz.validation.PairwiseComparePanel
+::: xrops.viz.validation.PairwiseComparePanel
 
-::: xrtoolz.viz.validation.SpatialDiffPanel
+::: xrops.viz.validation.SpatialDiffPanel
 
-::: xrtoolz.viz.validation.AnimatePanel
+::: xrops.viz.validation.AnimatePanel
 
-::: xrtoolz.viz.validation.save_animation
+::: xrops.viz.validation.save_animation
 
 ## Palette helper
 
-::: xrtoolz.viz.validation.method_palette
+::: xrops.viz.validation.method_palette

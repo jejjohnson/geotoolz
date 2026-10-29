@@ -20,7 +20,7 @@ converted (`q = r / (1 + r)`) before it is CF specific humidity.
 `qa_value` carry the TROPOMI L2 product names as `tropomi` aliases;
 `ch4_enhancement` (ppm m) is the EMIT L2B plume-enhancement quantity, and
 `ch4_column` (kg m⁻², `atmosphere_mass_content_of_methane`) is the canonical
-column-mass output of the `xrtoolz.atm.gas.ch4` operators. All of them
+column-mass output of the `xrops.atm.gas.ch4` operators. All of them
 resolve through `xrreader.resolve` and stamp CF attributes through
 `apply_cf_attrs`.
 
@@ -81,7 +81,7 @@ the antimeridian afterwards raises), `time` as a per-scanline mask on
 `paths=[a, b]` concatenates granules along `time` in the order given.
 `subset_bbox`, `subset_where` and `subset_time` now live in
 `xrreader.types` (pure xarray) and are re-exported unchanged by
-`xrtoolz.geo`, so the reader can screen without importing `xrtoolz`. See the
+`xrops.geo`, so the reader can screen without importing `xrtoolz`. See the
 [TROPOMI recipe](../recipes/tropomi_ch4_screen.md) for a worked example.
 
 **Emission inventories.** `open_ch4_inventory(path, variable=None, units=None,

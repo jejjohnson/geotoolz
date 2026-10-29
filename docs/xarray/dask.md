@@ -28,9 +28,9 @@ whole `Sequential` / `Graph` stays lazy until you ask for a result:
 
 ```python
 import xarray as xr
-from xrtoolz import Sequential
-from xrtoolz.geo import RemoveMean
-from xrtoolz.ocn.operators import Streamfunction, GeostrophicVelocities
+from pipekit import Sequential
+from xrops.geo import RemoveMean
+from xrops.ocn.operators import Streamfunction, GeostrophicVelocities
 
 ds = xr.open_mfdataset("ssh_*.nc").chunk({"time": 1, "lat": -1, "lon": -1})
 

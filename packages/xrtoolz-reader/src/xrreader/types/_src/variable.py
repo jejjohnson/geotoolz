@@ -1089,7 +1089,7 @@ SNOW_WATER_EQUIVALENT = Variable(
 
 # ---- Ocean kinematic diagnostics ----------------------------------------
 #
-# Output names produced by ``xrtoolz.ocn.operators`` (RelativeVorticity,
+# Output names produced by ``xrops.ocn.operators`` (RelativeVorticity,
 # KineticEnergy, Streamfunction, etc.). These are derived diagnostics
 # rather than CF physical variables, so ``standard_name`` mirrors the
 # Layer-0 op's ``standard_name`` attribute (see ``ocn/_src/kinematics.py``)
@@ -1366,7 +1366,7 @@ REGISTRY: dict[str, Variable] = {
         WAVE_FROM_DIRECTION,
         FRESH_SNOW,
         SNOW_WATER_EQUIVALENT,
-        # Ocean kinematic diagnostics (xrtoolz.ocn outputs)
+        # Ocean kinematic diagnostics (xrops.ocn outputs)
         PSI,
         KE,
         EKE,

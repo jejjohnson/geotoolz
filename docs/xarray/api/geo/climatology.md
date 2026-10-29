@@ -13,32 +13,32 @@ $\bar{x}(\tau)$ before subtraction.
 
 ## Operators
 
-::: xrtoolz.geo.operators.CalculateClimatology
+::: xrops.geo.operators.CalculateClimatology
 
-::: xrtoolz.geo.operators.CalculateClimatologySmoothed
+::: xrops.geo.operators.CalculateClimatologySmoothed
 
-::: xrtoolz.geo.operators.RemoveClimatology
+::: xrops.geo.operators.RemoveClimatology
 
-::: xrtoolz.geo.operators.AddClimatology
+::: xrops.geo.operators.AddClimatology
 
-::: xrtoolz.geo.operators.RemoveMean
+::: xrops.geo.operators.RemoveMean
 
 ## Functional primitives (Layer 0)
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.geo.calculate_climatology
+::: xrops.geo.calculate_climatology
 
-::: xrtoolz.geo.calculate_climatology_season
+::: xrops.geo.calculate_climatology_season
 
-::: xrtoolz.geo.calculate_climatology_smoothed
+::: xrops.geo.calculate_climatology_smoothed
 
-::: xrtoolz.geo.calculate_anomaly
+::: xrops.geo.calculate_anomaly
 
-::: xrtoolz.geo.calculate_anomaly_smoothed
+::: xrops.geo.calculate_anomaly_smoothed
 
-::: xrtoolz.geo.remove_climatology
+::: xrops.geo.remove_climatology
 
-::: xrtoolz.geo.add_climatology
+::: xrops.geo.add_climatology
 
-::: xrtoolz.geo.remove_mean
+::: xrops.geo.remove_mean

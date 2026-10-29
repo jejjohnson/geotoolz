@@ -44,7 +44,7 @@ service client is an optional extra, imported lazily at first use:
 
 That light core is load-bearing for the workspace: `xrtoolz` depends on
 `xrtoolz-reader` for the shared typed request vocabulary and the CF `Variable`
-registry (`xrtoolz.geo` and `xrtoolz.viz` import from `xrreader.types`), so the
+registry (`xrops.geo` and `xrops.viz` import from `xrreader.types`), so the
 archive clients must stay out of a plain `pip install xrtoolz`.
 
 ## The request vocabulary

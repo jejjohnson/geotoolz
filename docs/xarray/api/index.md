@@ -48,7 +48,6 @@ physics lives here.
 |------|-------|
 | [Oceanography](ocn.md) | Geostrophy, vorticity, kinetic energy, stratification, SSH diagnostics |
 | [Atmosphere](atm.md) | Atmospheric and trace-gas physics (planned) |
-| [Remote Sensing](rs.md) | Radiometry and spectral indices (planned) |
 
 ## Diagnostics & evaluation
 
@@ -70,7 +69,7 @@ physics lives here.
 
 For a flat, searchable dump of every public symbol:
 
-::: xrtoolz
+::: xrops
     options:
       show_root_heading: false
       show_source: false

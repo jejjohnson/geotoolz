@@ -1,6 +1,6 @@
 # Metrics
 
-`xrtoolz.metrics` groups evaluation metrics by *scientific diagnostic
+`xrops.metrics` groups evaluation metrics by *scientific diagnostic
 family*. Each family pairs Layer-0 xarray functions with Layer-1 `Operator`
 wrappers that compose into `Sequential` pipelines and `Graph` networks.
 
@@ -26,12 +26,12 @@ map](../design/api/validation.md).
 
 !!! tip "Ergonomic re-exports"
     The Layer-1 operators are re-exported flat from the package root, and a
-    dedicated `xrtoolz.metrics.operators` module mirrors them:
+    dedicated `xrops.metrics.operators` module mirrors them:
 
     ```python
-    from xrtoolz.metrics import RMSE, MSE, MAE, NRMSE, Bias, Correlation, R2Score, PSDScore
+    from xrops.metrics import RMSE, MSE, MAE, NRMSE, Bias, Correlation, R2Score, PSDScore
     # equivalently:
-    from xrtoolz.metrics.operators import RMSE, PSDScore
+    from xrops.metrics.operators import RMSE, PSDScore
     ```
 
 ## Pixel — pointwise errors
@@ -39,54 +39,54 @@ map](../design/api/validation.md).
 Per-pixel scalar error and skill: MSE, RMSE, MAE, bias, normalized RMSE
 (and its skill-score form), correlation, and R².
 
-::: xrtoolz.metrics.operators.MSE
+::: xrops.metrics.operators.MSE
 
-::: xrtoolz.metrics.operators.RMSE
+::: xrops.metrics.operators.RMSE
 
-::: xrtoolz.metrics.operators.MAE
+::: xrops.metrics.operators.MAE
 
-::: xrtoolz.metrics.operators.Bias
+::: xrops.metrics.operators.Bias
 
-::: xrtoolz.metrics.operators.NRMSE
+::: xrops.metrics.operators.NRMSE
 
-::: xrtoolz.metrics.operators.NRMSEScore
+::: xrops.metrics.operators.NRMSEScore
 
-::: xrtoolz.metrics.operators.Correlation
+::: xrops.metrics.operators.Correlation
 
-::: xrtoolz.metrics.operators.R2Score
+::: xrops.metrics.operators.R2Score
 
 ### Functions
 
-::: xrtoolz.metrics.pixel
+::: xrops.metrics.pixel
 
 ## Spectral — power-spectrum skill
 
 Power-spectral-density scores and the resolved-scale diagnostic (the
 wavelength at which a prediction's PSD score crosses a threshold).
 
-::: xrtoolz.metrics.operators.PSDScore
+::: xrops.metrics.operators.PSDScore
 
-::: xrtoolz.metrics.operators.SegmentedPSDScore
+::: xrops.metrics.operators.SegmentedPSDScore
 
-::: xrtoolz.metrics.operators.WaveletPSDScore
+::: xrops.metrics.operators.WaveletPSDScore
 
 ### Functions
 
-::: xrtoolz.metrics.spectral
+::: xrops.metrics.spectral
 
 ## Multiscale — region & band conditioned
 
 Stratify skill by geographic region or by frequency band.
 
-::: xrtoolz.metrics.operators.EvaluateByRegion
+::: xrops.metrics.operators.EvaluateByRegion
 
-::: xrtoolz.metrics.operators.RegionScores
+::: xrops.metrics.operators.RegionScores
 
-::: xrtoolz.metrics.operators.FrequencyBandSkill
+::: xrops.metrics.operators.FrequencyBandSkill
 
-::: xrtoolz.metrics.operators.BandLimitedRMSE
+::: xrops.metrics.operators.BandLimitedRMSE
 
-::: xrtoolz.metrics.operators.SkillByLeadTime
+::: xrops.metrics.operators.SkillByLeadTime
 
 ## Physical — balance residuals
 
@@ -97,10 +97,10 @@ conservation, density inversions).
 The derivative-based metrics default to lon/lat in degrees with
 latitude-derived Coriolis. Idealised f/β-plane model output in metres
 passes the horizontal dims, the geometry and an explicit Coriolis
-parameter (same `f=` forms as [`xrtoolz.ocn`](ocn.md)):
+parameter (same `f=` forms as [`xrops.ocn`](ocn.md)):
 
 ```python
-from xrtoolz.metrics import divergence_error, geostrophic_imbalance
+from xrops.metrics import divergence_error, geostrophic_imbalance
 
 cart = {"dims": ("x", "y"), "geometry": "cartesian"}
 geostrophic_imbalance(run, ssh_var="eta", **cart, f=(1e-4, 1.6e-11))  # 0 = balanced
@@ -111,62 +111,62 @@ divergence_error(run, **cart, reduce="rms")                           # 1/s
 $\mathrm{rms}(f\,\hat k\times\mathbf u + g\nabla\eta)\,/\,\mathrm{rms}(f\,\hat k\times\mathbf u)$:
 0 for exact geostrophy, 1 for purely inertial flow.
 
-::: xrtoolz.metrics.operators.GeostrophicBalanceError
+::: xrops.metrics.operators.GeostrophicBalanceError
 
-::: xrtoolz.metrics.operators.GeostrophicImbalance
+::: xrops.metrics.operators.GeostrophicImbalance
 
-::: xrtoolz.metrics.operators.DivergenceError
+::: xrops.metrics.operators.DivergenceError
 
-::: xrtoolz.metrics.operators.PVConservationError
+::: xrops.metrics.operators.PVConservationError
 
-::: xrtoolz.metrics.operators.DensityInversionFraction
+::: xrops.metrics.operators.DensityInversionFraction
 
 ## Masked — coverage aware
 
 Wrap any metric so it ignores masked / missing cells and reports coverage.
 
-::: xrtoolz.metrics.operators.MaskedMetric
+::: xrops.metrics.operators.MaskedMetric
 
-::: xrtoolz.metrics.operators.BinnedResiduals2D
+::: xrops.metrics.operators.BinnedResiduals2D
 
 ## Distributional distances
 
 Distance between predicted and reference distributions.
 
-::: xrtoolz.metrics.operators.CRPS
+::: xrops.metrics.operators.CRPS
 
-::: xrtoolz.metrics.operators.Wasserstein1
+::: xrops.metrics.operators.Wasserstein1
 
-::: xrtoolz.metrics.operators.EnergyDistance
+::: xrops.metrics.operators.EnergyDistance
 
 ## Structural & probabilistic
 
-::: xrtoolz.metrics.operators.SSIM
+::: xrops.metrics.operators.SSIM
 
-::: xrtoolz.metrics.operators.GradientDifference
+::: xrops.metrics.operators.GradientDifference
 
-::: xrtoolz.metrics.operators.PhaseShiftError
+::: xrops.metrics.operators.PhaseShiftError
 
-::: xrtoolz.metrics.operators.EnsembleCoverage
+::: xrops.metrics.operators.EnsembleCoverage
 
-::: xrtoolz.metrics.operators.SpreadSkillRatio
+::: xrops.metrics.operators.SpreadSkillRatio
 
-::: xrtoolz.metrics.operators.RankHistogram
+::: xrops.metrics.operators.RankHistogram
 
-::: xrtoolz.metrics.operators.ReliabilityCurve
+::: xrops.metrics.operators.ReliabilityCurve
 
 ## Object / event verification
 
-::: xrtoolz.metrics.operators.InstanceMatcher
+::: xrops.metrics.operators.InstanceMatcher
 
-::: xrtoolz.metrics.operators.InstanceF1AtIoU
+::: xrops.metrics.operators.InstanceF1AtIoU
 
-::: xrtoolz.metrics.operators.AveragePrecisionMatched
+::: xrops.metrics.operators.AveragePrecisionMatched
 
-::: xrtoolz.metrics.operators.CentroidDisplacement
+::: xrops.metrics.operators.CentroidDisplacement
 
-::: xrtoolz.metrics.operators.MaskIoU
+::: xrops.metrics.operators.MaskIoU
 
 ## Forecast comparison
 
-::: xrtoolz.metrics.operators.DieboldMariano
+::: xrops.metrics.operators.DieboldMariano

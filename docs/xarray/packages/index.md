@@ -1,9 +1,10 @@
 # The Workspace Packages
 
-`xrtoolz` is a uv workspace of six packages. The main `xrtoolz`
-distribution carries the domain operator families and depends on the
-other five, so `pip install xrtoolz` gives you the whole stack — but
-each foundation layer also installs and works on its own.
+`xrtoolz` is a uv workspace of seven packages. `xrtoolz-ops` (import
+`xrops`) carries the domain operator families, and the `xrtoolz`
+umbrella holds no code and installs the other six, so `pip install
+xrtoolz` gives you the whole stack — but each package also installs and
+works on its own.
 
 | Distribution | Import | Scope | Standalone deps |
 |---|---|---|---|
@@ -12,17 +13,17 @@ each foundation layer also installs and works on its own.
 | [`xrtoolz-einx`](einx.md) | `xreinx` | xarray ↔ einx named-tensor bridge | xrcore, einx |
 | [`xrtoolz-sklearn`](sklearn.md) | `xrsklearn` | scikit-learn ↔ xarray bridge | xrcore, scikit-learn |
 | [`xrtoolz-reader`](reader.md) | `xrreader` | Authenticated archive readers (CMEMS, CDS, AEMET) | numpy, pandas, xarray |
-| `xrtoolz` | `xrtoolz` | geo, ocn, budgets, interpolate, transforms, metrics, viz, … | all of the above |
+| `xrtoolz-ops` | `xrops` | geo, ocn, budgets, interpolate, transforms, metrics, viz, … | all of the above |
+| `xrtoolz` | `xrtoolz` | the umbrella: no code, installs the family | all of the above |
 
 ## Which import do I use?
 
-New code imports the scoped packages directly — `import xrgrad`,
+Import each package under its own name — `import xrops`, `import xrgrad`,
 `import xreinx`, `from xrsklearn import XarrayEstimator`, `from xrcore
-import Operator, Signature`. The historical paths (`xrtoolz.calc`,
-`xrtoolz.einx`, `xrtoolz.utils.XarrayEstimator`,
-`xrtoolz.transforms.SklearnOp`) keep working through the 0.x series via
-re-export shims; the renamed modules emit one `DeprecationWarning`
-naming the replacement.
+import Operator, Signature`. There are no compatibility paths: the old
+`xrtoolz.*` modules (and the `xrtoolz.calc`, `xrtoolz.einx`,
+`xrtoolz.utils.XarrayEstimator` and `xrtoolz.transforms.SklearnOp`
+re-exports) were removed when the operators moved to `xrops`.
 
 ## Dependency shape
 

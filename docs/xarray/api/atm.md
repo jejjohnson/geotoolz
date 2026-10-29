@@ -3,7 +3,7 @@
 Atmospheric physics on CF datasets. The design rule still holds: only
 true physics lives here; anything domain-agnostic belongs in
 [`geo`](geo/coords.md). Trace-gas (methane) physics sits under
-`xrtoolz.atm.gas.ch4`.
+`xrops.atm.gas.ch4`.
 
 ## WRF
 
@@ -23,7 +23,7 @@ $$
 
 Everything stays lazy, so `chunks={"time": 1}` keeps the file dask backed.
 
-::: xrtoolz.atm
+::: xrops.atm
     options:
       members:
         - open_wrfout
@@ -50,7 +50,7 @@ $z_{k+1}=z_k+\frac{R_d\,\bar T_{v,k}}{g}\ln\frac{p_k}{p_{k+1}}$, and the
 bulk-Richardson boundary-layer height
 $Ri_b(z)=\frac{g\,(\theta_v-\theta_{v,s})(z-z_s)}{\theta_{v,s}\,(u^2+v^2)}$.
 
-::: xrtoolz.atm
+::: xrops.atm
     options:
       members:
         - wind_speed
@@ -77,7 +77,7 @@ and the single-layer column mass to $\Delta\chi$ conversion
 $\Delta\chi=\frac{m\,N_A/M_\text{gas}}{n_\text{air}\,L}$ with
 $n_\text{air}=p/(k_B T)$.
 
-::: xrtoolz.atm.gas.ch4
+::: xrops.atm.gas.ch4
     options:
       members:
         - apply_column_averaging_kernel

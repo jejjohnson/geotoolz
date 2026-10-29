@@ -11,34 +11,34 @@ $$
 
 ## Operators
 
-::: xrtoolz.geo.operators.WaveletPowerSpectrum
+::: xrops.geo.operators.WaveletPowerSpectrum
 
-::: xrtoolz.geo.operators.WaveletScalogram
+::: xrops.geo.operators.WaveletScalogram
 
-::: xrtoolz.geo.operators.WaveletSignificance
+::: xrops.geo.operators.WaveletSignificance
 
-::: xrtoolz.geo.operators.BandpassWavelength
+::: xrops.geo.operators.BandpassWavelength
 
 ## Functional primitives (Layer 0)
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.geo.cwt1d
+::: xrops.geo.cwt1d
 
-::: xrtoolz.geo.icwt1d
+::: xrops.geo.icwt1d
 
-::: xrtoolz.geo.cwt2
+::: xrops.geo.cwt2
 
-::: xrtoolz.geo.morlet2_ft
+::: xrops.geo.morlet2_ft
 
-::: xrtoolz.geo.build_coi_mask
+::: xrops.geo.build_coi_mask
 
-::: xrtoolz.geo.dominant_period_map
+::: xrops.geo.dominant_period_map
 
-::: xrtoolz.geo.wvlt_power_spectrum
+::: xrops.geo.wvlt_power_spectrum
 
-::: xrtoolz.geo.wvlt_cross_spectrum
+::: xrops.geo.wvlt_cross_spectrum
 
-::: xrtoolz.geo.wavelet_significance
+::: xrops.geo.wavelet_significance
 
-::: xrtoolz.geo.bandpass_wavelength
+::: xrops.geo.bandpass_wavelength

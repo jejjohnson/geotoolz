@@ -7,7 +7,7 @@ dimension names, so `einsum` / `rearrange` / `reduce` / `repeat` operate by
 Dataset's variables into a single packed axis and back.
 
 !!! warning "`geo.Reduce` vs `einx.Reduce`"
-    `einx.Reduce` reduces along an einx *pattern*; `xrtoolz.geo.Reduce`
+    `einx.Reduce` reduces along an einx *pattern*; `xrops.geo.Reduce`
     aggregates Dataset variables. They are different operators that happen to
     share a name — pick by import path.
 

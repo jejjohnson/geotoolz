@@ -46,6 +46,10 @@ PACKAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         "packages/xrtoolz-grad/pyproject.toml",
         ("packages/xrtoolz-grad/src/xrgrad",),
     ),
+    "xrtoolz-ops": (
+        "packages/xrtoolz-ops/pyproject.toml",
+        ("packages/xrtoolz-ops/src/xrops",),
+    ),
     "xrtoolz-reader": (
         "packages/xrtoolz-reader/pyproject.toml",
         ("packages/xrtoolz-reader/src/xrreader",),
@@ -79,6 +83,7 @@ FORBIDDEN: dict[str, str] = {
 
 #: stack libraries xrtoolz may use: import name -> distribution
 ALLOWED: dict[str, str] = {
+    "geoarray": "geotoolz-array",
     "geocatalog": "geotoolz-catalog",
     "geocloud": "geotoolz-cloud",
     "geoops": "geotoolz-ops",
@@ -96,6 +101,7 @@ ALLOWED: dict[str, str] = {
     "xrcore": "xrtoolz-core",
     "xreinx": "xrtoolz-einx",
     "xrgrad": "xrtoolz-grad",
+    "xrops": "xrtoolz-ops",
     "xrreader": "xrtoolz-reader",
     "xrsklearn": "xrtoolz-sklearn",
     "xrtoolz": "xrtoolz",

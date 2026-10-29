@@ -22,7 +22,7 @@ no lon/lat — passes the dims, the geometry and an explicit Coriolis
 parameter instead:
 
 ```python
-from xrtoolz.ocn import GeostrophicVelocities, OkuboWeiss, relative_vorticity
+from xrops.ocn import GeostrophicVelocities, OkuboWeiss, relative_vorticity
 
 cart = {"dims": ("x", "y"), "geometry": "cartesian"}  # or "rectilinear"
 
@@ -40,130 +40,130 @@ calling these diagnostics.
 
 ## Rotation & geostrophy
 
-::: xrtoolz.ocn.operators.CoriolisNormalized
+::: xrops.ocn.operators.CoriolisNormalized
 
-::: xrtoolz.ocn.operators.Streamfunction
+::: xrops.ocn.operators.Streamfunction
 
-::: xrtoolz.ocn.operators.GeostrophicVelocities
+::: xrops.ocn.operators.GeostrophicVelocities
 
-::: xrtoolz.ocn.operators.AgeostrophicVelocities
+::: xrops.ocn.operators.AgeostrophicVelocities
 
 ## Vorticity & strain
 
-::: xrtoolz.ocn.operators.RelativeVorticity
+::: xrops.ocn.operators.RelativeVorticity
 
-::: xrtoolz.ocn.operators.AbsoluteVorticity
+::: xrops.ocn.operators.AbsoluteVorticity
 
-::: xrtoolz.ocn.operators.ShearVorticity
+::: xrops.ocn.operators.ShearVorticity
 
-::: xrtoolz.ocn.operators.CurvatureVorticity
+::: xrops.ocn.operators.CurvatureVorticity
 
-::: xrtoolz.ocn.operators.Divergence
+::: xrops.ocn.operators.Divergence
 
-::: xrtoolz.ocn.operators.ShearStrain
+::: xrops.ocn.operators.ShearStrain
 
-::: xrtoolz.ocn.operators.TensorStrain
+::: xrops.ocn.operators.TensorStrain
 
-::: xrtoolz.ocn.operators.StrainMagnitude
+::: xrops.ocn.operators.StrainMagnitude
 
-::: xrtoolz.ocn.operators.OkuboWeiss
+::: xrops.ocn.operators.OkuboWeiss
 
-::: xrtoolz.ocn.operators.Enstrophy
+::: xrops.ocn.operators.Enstrophy
 
-::: xrtoolz.ocn.operators.PotentialVorticityBarotropic
+::: xrops.ocn.operators.PotentialVorticityBarotropic
 
 ## Energy & transport
 
-::: xrtoolz.ocn.operators.KineticEnergy
+::: xrops.ocn.operators.KineticEnergy
 
-::: xrtoolz.ocn.operators.EddyKineticEnergy
+::: xrops.ocn.operators.EddyKineticEnergy
 
-::: xrtoolz.ocn.operators.VelocityMagnitude
+::: xrops.ocn.operators.VelocityMagnitude
 
-::: xrtoolz.ocn.operators.HorizontalVelocityMagnitude
+::: xrops.ocn.operators.HorizontalVelocityMagnitude
 
-::: xrtoolz.ocn.operators.Advection
+::: xrops.ocn.operators.Advection
 
-::: xrtoolz.ocn.operators.Frontogenesis
+::: xrops.ocn.operators.Frontogenesis
 
 ## Stratification
 
-::: xrtoolz.ocn.operators.BruntVaisalaFrequency
+::: xrops.ocn.operators.BruntVaisalaFrequency
 
-::: xrtoolz.ocn.operators.MixedLayerDepth
+::: xrops.ocn.operators.MixedLayerDepth
 
-::: xrtoolz.ocn.operators.LapseRate
+::: xrops.ocn.operators.LapseRate
 
 ## Sea-surface height
 
-::: xrtoolz.ocn.operators.CalculateSSHAlongtrack
+::: xrops.ocn.operators.CalculateSSHAlongtrack
 
 ## Validation
 
-::: xrtoolz.ocn.operators.ValidateSSH
+::: xrops.ocn.operators.ValidateSSH
 
-::: xrtoolz.ocn.operators.ValidateVelocity
+::: xrops.ocn.operators.ValidateVelocity
 
 ## Functional primitives (Layer 0)
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.ocn.coriolis_parameter
+::: xrops.ocn.coriolis_parameter
 
-::: xrtoolz.ocn.coriolis_normalized
+::: xrops.ocn.coriolis_normalized
 
-::: xrtoolz.ocn.streamfunction
+::: xrops.ocn.streamfunction
 
-::: xrtoolz.ocn.geostrophic_velocities
+::: xrops.ocn.geostrophic_velocities
 
-::: xrtoolz.ocn.ageostrophic_velocities
+::: xrops.ocn.ageostrophic_velocities
 
-::: xrtoolz.ocn.relative_vorticity
+::: xrops.ocn.relative_vorticity
 
-::: xrtoolz.ocn.absolute_vorticity
+::: xrops.ocn.absolute_vorticity
 
-::: xrtoolz.ocn.shear_vorticity
+::: xrops.ocn.shear_vorticity
 
-::: xrtoolz.ocn.curvature_vorticity
+::: xrops.ocn.curvature_vorticity
 
-::: xrtoolz.ocn.divergence
+::: xrops.ocn.divergence
 
-::: xrtoolz.ocn.shear_strain
+::: xrops.ocn.shear_strain
 
-::: xrtoolz.ocn.tensor_strain
+::: xrops.ocn.tensor_strain
 
-::: xrtoolz.ocn.strain_magnitude
+::: xrops.ocn.strain_magnitude
 
-::: xrtoolz.ocn.okubo_weiss
+::: xrops.ocn.okubo_weiss
 
-::: xrtoolz.ocn.enstrophy
+::: xrops.ocn.enstrophy
 
-::: xrtoolz.ocn.potential_vorticity_barotropic
+::: xrops.ocn.potential_vorticity_barotropic
 
-::: xrtoolz.ocn.kinetic_energy
+::: xrops.ocn.kinetic_energy
 
-::: xrtoolz.ocn.eddy_kinetic_energy
+::: xrops.ocn.eddy_kinetic_energy
 
-::: xrtoolz.ocn.velocity_magnitude
+::: xrops.ocn.velocity_magnitude
 
-::: xrtoolz.ocn.horizontal_velocity_magnitude
+::: xrops.ocn.horizontal_velocity_magnitude
 
-::: xrtoolz.ocn.advection
+::: xrops.ocn.advection
 
-::: xrtoolz.ocn.frontogenesis
+::: xrops.ocn.frontogenesis
 
-::: xrtoolz.ocn.brunt_vaisala_frequency
+::: xrops.ocn.brunt_vaisala_frequency
 
-::: xrtoolz.ocn.mixed_layer_depth
+::: xrops.ocn.mixed_layer_depth
 
-::: xrtoolz.ocn.lapse_rate
+::: xrops.ocn.lapse_rate
 
-::: xrtoolz.ocn.density_from_ts
+::: xrops.ocn.density_from_ts
 
-::: xrtoolz.ocn.calculate_ssh_alongtrack
+::: xrops.ocn.calculate_ssh_alongtrack
 
-::: xrtoolz.ocn.calculate_ssh_unfiltered
+::: xrops.ocn.calculate_ssh_unfiltered
 
-::: xrtoolz.ocn.validate_ssh
+::: xrops.ocn.validate_ssh
 
-::: xrtoolz.ocn.validate_velocity
+::: xrops.ocn.validate_velocity

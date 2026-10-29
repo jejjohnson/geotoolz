@@ -14,36 +14,36 @@ volume, or kinetic energy.
 
 ## Building blocks
 
-::: xrtoolz.budgets.operators.ControlVolumeIntegral
+::: xrops.budgets.operators.ControlVolumeIntegral
 
-::: xrtoolz.budgets.operators.BoundaryFlux
+::: xrops.budgets.operators.BoundaryFlux
 
-::: xrtoolz.budgets.operators.BudgetResidual
+::: xrops.budgets.operators.BudgetResidual
 
 ## Tracer-specific residuals
 
-::: xrtoolz.budgets.operators.HeatBudgetResidual
+::: xrops.budgets.operators.HeatBudgetResidual
 
-::: xrtoolz.budgets.operators.SaltBudgetResidual
+::: xrops.budgets.operators.SaltBudgetResidual
 
-::: xrtoolz.budgets.operators.VolumeBudgetResidual
+::: xrops.budgets.operators.VolumeBudgetResidual
 
-::: xrtoolz.budgets.operators.KineticEnergyBudgetResidual
+::: xrops.budgets.operators.KineticEnergyBudgetResidual
 
 ## Functional primitives (Layer 0)
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.budgets.control_volume_integral
+::: xrops.budgets.control_volume_integral
 
-::: xrtoolz.budgets.boundary_flux
+::: xrops.budgets.boundary_flux
 
-::: xrtoolz.budgets.budget_residual
+::: xrops.budgets.budget_residual
 
-::: xrtoolz.budgets.heat_budget_residual
+::: xrops.budgets.heat_budget_residual
 
-::: xrtoolz.budgets.salt_budget_residual
+::: xrops.budgets.salt_budget_residual
 
-::: xrtoolz.budgets.volume_budget_residual
+::: xrops.budgets.volume_budget_residual
 
-::: xrtoolz.budgets.kinetic_energy_budget_residual
+::: xrops.budgets.kinetic_energy_budget_residual

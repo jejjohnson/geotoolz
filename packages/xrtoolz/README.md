@@ -1,22 +1,17 @@
 # xrtoolz
 
-Composable operator library for geoprocessing Earth System Data Cubes —
-preprocess, infer, and evaluate xarray datasets with a uniform pipeline
-abstraction built on [pipekit](https://github.com/jejjohnson/pipekit).
+The xarray side of the geostack in one install. This distribution holds no code: it installs the family, and each package is imported under its own name.
 
-This is the main member of the xrtoolz workspace. The foundation layers
-live in sibling packages and are installed automatically with it:
-
-| Distribution | Import | Scope |
-|---|---|---|
-| `xrtoolz-core` | `xrcore` | xarray-aware `Operator` (DataTree dispatch) + `Signature` |
-| `xrtoolz-grad` | `xrgrad` | Finite-difference calculus on labeled grids |
-| `xrtoolz-einx` | `xreinx` | xarray ↔ einx named-tensor bridge |
-| `xrtoolz-sklearn` | `xrsklearn` | scikit-learn ↔ xarray bridge (`XarrayEstimator`, `SklearnOp`) |
+| Distribution | Import | Use it for |
+| --- | --- | --- |
+| `xrtoolz-ops` | `xrops` | Operator families on xarray: atm, ocn, budgets, geo, interpolate, metrics, transforms, viz |
+| `xrtoolz-reader` | `xrreader` | Readers for CMEMS, CDS, AEMET and local L2 products |
+| `xrtoolz-core` | `xrcore` | The xarray `Operator` base and `Signature` |
+| `xrtoolz-grad` | `xrgrad` | Finite-difference calculus on xarray |
+| `xrtoolz-einx` | `xreinx` | The einx bridge |
+| `xrtoolz-sklearn` | `xrsklearn` | The scikit-learn bridge |
 
 ```bash
-pip install xrtoolz
+pip install xrtoolz          # the whole family
+pip install xrtoolz-ops      # only the operators
 ```
-
-See the [repository root](https://github.com/jejjohnson/xrtoolz) for the
-full documentation site, and `CHANGELOG.md` here for release history.

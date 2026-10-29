@@ -7,51 +7,51 @@ coordinates into a higher-dimensional sinusoidal basis.
 
 ## Operators
 
-::: xrtoolz.transforms.operators.EncodeTimeCyclical
+::: xrops.transforms.operators.EncodeTimeCyclical
 
-::: xrtoolz.transforms.operators.EncodeTimeOrdinal
+::: xrops.transforms.operators.EncodeTimeOrdinal
 
-::: xrtoolz.transforms.operators.CyclicalEncode
+::: xrops.transforms.operators.CyclicalEncode
 
-::: xrtoolz.transforms.operators.FourierFeatures
+::: xrops.transforms.operators.FourierFeatures
 
-::: xrtoolz.transforms.operators.RandomFourierFeatures
+::: xrops.transforms.operators.RandomFourierFeatures
 
-::: xrtoolz.transforms.operators.PositionalEncoding
+::: xrops.transforms.operators.PositionalEncoding
 
-::: xrtoolz.transforms.operators.TimeRescale
+::: xrops.transforms.operators.TimeRescale
 
-::: xrtoolz.transforms.operators.TimeUnrescale
+::: xrops.transforms.operators.TimeUnrescale
 
 ## Functional primitives (Layer 0)
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.transforms.encoders.encode_time_cyclical
+::: xrops.transforms.encoders.encode_time_cyclical
 
-::: xrtoolz.transforms.encoders.encode_time_ordinal
+::: xrops.transforms.encoders.encode_time_ordinal
 
-::: xrtoolz.transforms.encoders.cyclical_encode
+::: xrops.transforms.encoders.cyclical_encode
 
-::: xrtoolz.transforms.encoders.fourier_features
+::: xrops.transforms.encoders.fourier_features
 
-::: xrtoolz.transforms.encoders.random_fourier_features
+::: xrops.transforms.encoders.random_fourier_features
 
-::: xrtoolz.transforms.encoders.positional_encoding
+::: xrops.transforms.encoders.positional_encoding
 
-::: xrtoolz.transforms.encoders.time_rescale
+::: xrops.transforms.encoders.time_rescale
 
-::: xrtoolz.transforms.encoders.time_unrescale
+::: xrops.transforms.encoders.time_unrescale
 
 ## Coordinate-range conversions
 
 Convert longitude between $[-180, 180)$ and $[0, 360)$, and latitude
 between the $[-90, 90]$ and $[0, 180]$ conventions.
 
-::: xrtoolz.transforms.encoders.lon_180_to_360
+::: xrops.transforms.encoders.lon_180_to_360
 
-::: xrtoolz.transforms.encoders.lon_360_to_180
+::: xrops.transforms.encoders.lon_360_to_180
 
-::: xrtoolz.transforms.encoders.lat_90_to_180
+::: xrops.transforms.encoders.lat_90_to_180
 
-::: xrtoolz.transforms.encoders.lat_180_to_90
+::: xrops.transforms.encoders.lat_180_to_90

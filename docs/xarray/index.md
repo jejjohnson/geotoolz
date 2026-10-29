@@ -64,11 +64,10 @@ Compute geostrophic surface currents from sea-surface height, then map them
 — as a single pipeline:
 
 ```python
-import xrtoolz
-from xrtoolz import Sequential
-from xrtoolz.geo import RemoveMean
-from xrtoolz.ocn import Streamfunction, GeostrophicVelocities
-from xrtoolz.viz.validation import SpatialMapPanel
+from pipekit import Sequential
+from xrops.geo import RemoveMean
+from xrops.ocn import Streamfunction, GeostrophicVelocities
+from xrops.viz.validation import SpatialMapPanel
 
 pipeline = Sequential(
     RemoveMean(dim=("lat", "lon")),  # subtract the spatial mean

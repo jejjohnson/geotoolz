@@ -1,6 +1,6 @@
 """Grid-metrics helpers — derive cell widths / volumes from coordinates.
 
-V4.4. Budget operators in :mod:`xrtoolz.budgets` take grid metrics as
+V4.4. Budget operators in :mod:`xrops.budgets` take grid metrics as
 explicit constructor arguments rather than guessing them from
 coordinates. This module ships :func:`grid_metrics_from_coords`, the
 *opt-in* helper that turns a Dataset's lon/lat (and optional depth)

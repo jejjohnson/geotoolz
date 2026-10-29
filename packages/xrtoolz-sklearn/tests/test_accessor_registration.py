@@ -1,9 +1,9 @@
 """Regression guard for the ``.sklearn`` accessor registration side effect.
 
-The accessors must resolve after a bare ``import xrsklearn`` — and,
-because ``xrtoolz.utils`` re-imports this package, after
-``import xrtoolz`` too. Each check runs in a fresh interpreter so the
-registration can't leak in from another test's imports.
+The accessors must resolve after a bare ``import xrsklearn``. The check
+runs in a fresh interpreter so the registration can't leak in from
+another test's imports. (``xrops`` no longer imports this package for
+the side effect: import :mod:`xrsklearn` to register the accessors.)
 """
 
 from __future__ import annotations
@@ -31,15 +31,6 @@ def _run(code: str) -> None:
 def test_import_xrsklearn_registers_accessors() -> None:
     _run(
         "import numpy as np, xarray as xr, xrsklearn; "
-        "da = xr.DataArray(np.arange(4.0), dims='time'); "
-        "assert hasattr(da, 'sklearn'); "
-        "assert hasattr(xr.Dataset({'v': da}), 'sklearn')"
-    )
-
-
-def test_import_xrtoolz_registers_accessors() -> None:
-    _run(
-        "import numpy as np, xarray as xr, xrtoolz.utils; "
         "da = xr.DataArray(np.arange(4.0), dims='time'); "
         "assert hasattr(da, 'sklearn'); "
         "assert hasattr(xr.Dataset({'v': da}), 'sklearn')"

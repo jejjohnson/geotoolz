@@ -8,60 +8,60 @@ or from CF standard names, and measure grid resolution.
     `RenameToCFStandardNames` / `RenameFromCFStandardNames` use the curated
     `Variable` registry that now lives in
     [`xrreader.types`](../reader.md) — the same
-    registry that drives the colormap lookup in `xrtoolz.viz`.
+    registry that drives the colormap lookup in `xrops.viz`.
 
 ## Coordinate validation
 
-::: xrtoolz.geo.operators.ValidateLongitude
+::: xrops.geo.operators.ValidateLongitude
 
-::: xrtoolz.geo.operators.ValidateLatitude
+::: xrops.geo.operators.ValidateLatitude
 
-::: xrtoolz.geo.operators.ValidateCoords
+::: xrops.geo.operators.ValidateCoords
 
-::: xrtoolz.geo.operators.ValidateTime
+::: xrops.geo.operators.ValidateTime
 
-::: xrtoolz.geo.operators.DecodeCFTime
+::: xrops.geo.operators.DecodeCFTime
 
 ## Renaming & CF standard names
 
-::: xrtoolz.geo.operators.RenameCoords
+::: xrops.geo.operators.RenameCoords
 
-::: xrtoolz.geo.operators.RenameVariables
+::: xrops.geo.operators.RenameVariables
 
-::: xrtoolz.geo.operators.RenameToCFStandardNames
+::: xrops.geo.operators.RenameToCFStandardNames
 
-::: xrtoolz.geo.operators.RenameFromCFStandardNames
+::: xrops.geo.operators.RenameFromCFStandardNames
 
 ## Functional primitives (Layer 0)
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.geo.check_dataset_coords
+::: xrops.geo.check_dataset_coords
 
-::: xrtoolz.geo.validate_longitude
+::: xrops.geo.validate_longitude
 
-::: xrtoolz.geo.validate_latitude
+::: xrops.geo.validate_latitude
 
-::: xrtoolz.geo.validate_time
+::: xrops.geo.validate_time
 
-::: xrtoolz.geo.decode_cf_time
+::: xrops.geo.decode_cf_time
 
-::: xrtoolz.geo.rename_coords
+::: xrops.geo.rename_coords
 
-::: xrtoolz.geo.rename_variables
+::: xrops.geo.rename_variables
 
-::: xrtoolz.geo.rename_to_cf_standard_names
+::: xrops.geo.rename_to_cf_standard_names
 
-::: xrtoolz.geo.rename_from_cf_standard_names
+::: xrops.geo.rename_from_cf_standard_names
 
-::: xrtoolz.geo.calc_latlon
+::: xrops.geo.calc_latlon
 
-::: xrtoolz.geo.get_dataset_resolution
+::: xrops.geo.get_dataset_resolution
 
-::: xrtoolz.geo.median_dx_km
+::: xrops.geo.median_dx_km
 
-::: xrtoolz.geo.geometric_scales
+::: xrops.geo.geometric_scales
 
-::: xrtoolz.geo.scale_to_wavenumber
+::: xrops.geo.scale_to_wavenumber
 
-::: xrtoolz.geo.wavenumber_to_scale
+::: xrops.geo.wavenumber_to_scale

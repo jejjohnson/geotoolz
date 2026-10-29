@@ -1,24 +1,26 @@
 # Composition
 
 The composition primitives are carrier-agnostic and live in
-[`pipekit`](https://github.com/jejjohnson/pipekit); `xrtoolz` re-exports
-them at the top level so the common names are one import away:
+[`pipekit`](https://github.com/jejjohnson/pipekit); the xarray-aware
+`Operator` base is `xrcore`, and the Dataset combinators are `xrops`:
 
 ```python
-from xrtoolz import Operator, Sequential, Graph, Input, Node, Augment
+from pipekit import Sequential, Graph, Input, Node
+from xrcore import Operator
+from xrops import Augment
 ```
 
-`xrtoolz.Operator` is a thin xarray-aware subclass of `pipekit.Operator`
+`xrcore.Operator` is a thin xarray-aware subclass of `pipekit.Operator`
 that adds `xarray.DataTree` dispatch to `__call__` — every operator in the
 library inherits it, so all of them map leaf-wise over a `DataTree` for
 free. The xarray-Dataset-specific combinators (`Augment`, `ApplyToEach`)
-live in `xrtoolz.combinators`.
+live in `xrops.combinators`.
 
 !!! example "Linear and DAG composition, same operators"
     ```python
-    from xrtoolz import Sequential, Graph, Input
-    from xrtoolz.geo import RemoveMean
-    from xrtoolz.ocn import Streamfunction, GeostrophicVelocities
+    from pipekit import Sequential, Graph, Input
+    from xrops.geo import RemoveMean
+    from xrops.ocn import Streamfunction, GeostrophicVelocities
 
     # Linear pipeline
     pipe = Sequential(RemoveMean(dim=("lat", "lon")), GeostrophicVelocities())
@@ -61,9 +63,9 @@ the data flowing through.
 than replacing it); `ApplyToEach` maps an operator over every data
 variable independently.
 
-::: xrtoolz.combinators.Augment
+::: xrops.combinators.Augment
 
-::: xrtoolz.combinators.ApplyToEach
+::: xrops.combinators.ApplyToEach
 
 ## Shape signatures
 

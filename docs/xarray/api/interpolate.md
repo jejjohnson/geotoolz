@@ -24,7 +24,7 @@ Three ways to move a field between grids, by what they preserve:
 
 ```python
 import numpy as np
-from xrtoolz.interpolate import RegridConservative
+from xrops.interpolate import RegridConservative
 
 # 0.1° inventory -> analysis grid; basin totals are preserved.
 regrid = RegridConservative(
@@ -34,77 +34,77 @@ regrid = RegridConservative(
 prior = regrid(inventory)
 ```
 
-::: xrtoolz.interpolate.operators.RegridLike
+::: xrops.interpolate.operators.RegridLike
 
-::: xrtoolz.interpolate.operators.RegridConservative
+::: xrops.interpolate.operators.RegridConservative
 
-::: xrtoolz.interpolate.operators.Coarsen
+::: xrops.interpolate.operators.Coarsen
 
-::: xrtoolz.interpolate.operators.Refine
+::: xrops.interpolate.operators.Refine
 
-::: xrtoolz.interpolate.operators.Upscale
+::: xrops.interpolate.operators.Upscale
 
-::: xrtoolz.interpolate.operators.Downscale
+::: xrops.interpolate.operators.Downscale
 
-::: xrtoolz.interpolate.operators.ResampleTime
+::: xrops.interpolate.operators.ResampleTime
 
 ## Gap-filling
 
-::: xrtoolz.interpolate.operators.FillNaNSpatial
+::: xrops.interpolate.operators.FillNaNSpatial
 
-::: xrtoolz.interpolate.operators.FillNaNTemporal
+::: xrops.interpolate.operators.FillNaNTemporal
 
-::: xrtoolz.interpolate.operators.FillNaNLaplacian
+::: xrops.interpolate.operators.FillNaNLaplacian
 
-::: xrtoolz.interpolate.operators.FillNaNBiharmonic
+::: xrops.interpolate.operators.FillNaNBiharmonic
 
-::: xrtoolz.interpolate.operators.FillNaNRBF
+::: xrops.interpolate.operators.FillNaNRBF
 
-::: xrtoolz.interpolate.operators.FillNaNIDW
+::: xrops.interpolate.operators.FillNaNIDW
 
-::: xrtoolz.interpolate.operators.FillNaNClimatology
+::: xrops.interpolate.operators.FillNaNClimatology
 
 ## Binning & gridding scattered data
 
-::: xrtoolz.interpolate.operators.Bin2D
+::: xrops.interpolate.operators.Bin2D
 
-::: xrtoolz.interpolate.operators.Histogram2D
+::: xrops.interpolate.operators.Histogram2D
 
-::: xrtoolz.interpolate.operators.KDEToGrid
+::: xrops.interpolate.operators.KDEToGrid
 
-::: xrtoolz.interpolate.operators.PointsToGrid
+::: xrops.interpolate.operators.PointsToGrid
 
-::: xrtoolz.interpolate.operators.IDWToGrid
+::: xrops.interpolate.operators.IDWToGrid
 
-::: xrtoolz.interpolate.operators.IDWToPoints
+::: xrops.interpolate.operators.IDWToPoints
 
 ## Smoothing & filtering
 
-::: xrtoolz.interpolate.operators.GaussianSmooth
+::: xrops.interpolate.operators.GaussianSmooth
 
-::: xrtoolz.interpolate.operators.GaussianSmoothMasked
+::: xrops.interpolate.operators.GaussianSmoothMasked
 
-::: xrtoolz.interpolate.operators.MovingAverage
+::: xrops.interpolate.operators.MovingAverage
 
-::: xrtoolz.interpolate.operators.LowpassFilter
+::: xrops.interpolate.operators.LowpassFilter
 
 ## Mask cleanup
 
-::: xrtoolz.interpolate.operators.CleanMask
+::: xrops.interpolate.operators.CleanMask
 
-::: xrtoolz.interpolate.operators.MaskBinaryOpening
+::: xrops.interpolate.operators.MaskBinaryOpening
 
-::: xrtoolz.interpolate.operators.MaskBinaryClosing
+::: xrops.interpolate.operators.MaskBinaryClosing
 
-::: xrtoolz.interpolate.operators.MaskRemoveSmallHoles
+::: xrops.interpolate.operators.MaskRemoveSmallHoles
 
-::: xrtoolz.interpolate.operators.MaskRemoveSmallObjects
+::: xrops.interpolate.operators.MaskRemoveSmallObjects
 
 ## Point sampling
 
-::: xrtoolz.interpolate.operators.SampleAtPoints
+::: xrops.interpolate.operators.SampleAtPoints
 
-::: xrtoolz.interpolate.operators.AlongTrack
+::: xrops.interpolate.operators.AlongTrack
 
 ## Vertical & axis remapping
 
@@ -124,7 +124,7 @@ target names. Two options cover terrain-following (WRF η) and hybrid
 
 ```python
 import numpy as np
-from xrtoolz.interpolate import ToHeight
+from xrops.interpolate import ToHeight
 
 # ds: (time, level, y, x) model-level fields plus a 4-D ``z_agl`` coordinate.
 to_height = ToHeight(
@@ -139,86 +139,86 @@ Chunked inputs stay lazy along every dim except the source dim, which must
 sit in a single chunk. With a 1-D dimension coordinate and the default
 `extrapolate="nan"` the operator is unchanged from earlier releases.
 
-::: xrtoolz.interpolate.operators.RemapAxis
+::: xrops.interpolate.operators.RemapAxis
 
-::: xrtoolz.interpolate.operators.ToHeight
+::: xrops.interpolate.operators.ToHeight
 
-::: xrtoolz.interpolate.operators.ToPressureLevels
+::: xrops.interpolate.operators.ToPressureLevels
 
-::: xrtoolz.interpolate.operators.ToSigma
+::: xrops.interpolate.operators.ToSigma
 
-::: xrtoolz.interpolate.operators.FromSigma
+::: xrops.interpolate.operators.FromSigma
 
-::: xrtoolz.interpolate.operators.ToIsopycnal
+::: xrops.interpolate.operators.ToIsopycnal
 
-::: xrtoolz.interpolate.operators.ToPhase
+::: xrops.interpolate.operators.ToPhase
 
 ## Functional primitives (Layer 0)
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.interpolate.regrid_like
+::: xrops.interpolate.regrid_like
 
-::: xrtoolz.interpolate.regrid_conservative
+::: xrops.interpolate.regrid_conservative
 
-::: xrtoolz.interpolate.overlap_weights_1d
+::: xrops.interpolate.overlap_weights_1d
 
-::: xrtoolz.interpolate.coarsen
+::: xrops.interpolate.coarsen
 
-::: xrtoolz.interpolate.coarsen_conservative
+::: xrops.interpolate.coarsen_conservative
 
-::: xrtoolz.interpolate.refine
+::: xrops.interpolate.refine
 
-::: xrtoolz.interpolate.resample_time
+::: xrops.interpolate.resample_time
 
-::: xrtoolz.interpolate.fillnan_spatial
+::: xrops.interpolate.fillnan_spatial
 
-::: xrtoolz.interpolate.fillnan_temporal
+::: xrops.interpolate.fillnan_temporal
 
-::: xrtoolz.interpolate.fillnan_laplacian
+::: xrops.interpolate.fillnan_laplacian
 
-::: xrtoolz.interpolate.fillnan_biharmonic
+::: xrops.interpolate.fillnan_biharmonic
 
-::: xrtoolz.interpolate.fillnan_rbf
+::: xrops.interpolate.fillnan_rbf
 
-::: xrtoolz.interpolate.fillnan_idw
+::: xrops.interpolate.fillnan_idw
 
-::: xrtoolz.interpolate.fillnan_climatology
+::: xrops.interpolate.fillnan_climatology
 
-::: xrtoolz.interpolate.bin_2d
+::: xrops.interpolate.bin_2d
 
-::: xrtoolz.interpolate.histogram_2d
+::: xrops.interpolate.histogram_2d
 
-::: xrtoolz.interpolate.kde_to_grid
+::: xrops.interpolate.kde_to_grid
 
-::: xrtoolz.interpolate.points_to_grid
+::: xrops.interpolate.points_to_grid
 
-::: xrtoolz.interpolate.idw_to_grid
+::: xrops.interpolate.idw_to_grid
 
-::: xrtoolz.interpolate.idw_to_points
+::: xrops.interpolate.idw_to_points
 
-::: xrtoolz.interpolate.gaussian_smooth
+::: xrops.interpolate.gaussian_smooth
 
-::: xrtoolz.interpolate.gaussian_smooth_masked
+::: xrops.interpolate.gaussian_smooth_masked
 
-::: xrtoolz.interpolate.moving_average
+::: xrops.interpolate.moving_average
 
-::: xrtoolz.interpolate.lowpass_filter
+::: xrops.interpolate.lowpass_filter
 
-::: xrtoolz.interpolate.fir_filter
+::: xrops.interpolate.fir_filter
 
-::: xrtoolz.interpolate.sample_at_points
+::: xrops.interpolate.sample_at_points
 
-::: xrtoolz.interpolate.along_track
+::: xrops.interpolate.along_track
 
-::: xrtoolz.interpolate.remap_axis
+::: xrops.interpolate.remap_axis
 
-::: xrtoolz.interpolate.to_phase
+::: xrops.interpolate.to_phase
 
 ## Grid carriers
 
-::: xrtoolz.interpolate.Grid
+::: xrops.interpolate.Grid
 
-::: xrtoolz.interpolate.SpaceTimeGrid
+::: xrops.interpolate.SpaceTimeGrid
 
-::: xrtoolz.interpolate.Period
+::: xrops.interpolate.Period

@@ -7,45 +7,45 @@ GeoJSON polygons.
 
 ## Subsetting
 
-::: xrtoolz.geo.operators.SubsetBBox
+::: xrops.geo.operators.SubsetBBox
 
-::: xrtoolz.geo.operators.SubsetTime
+::: xrops.geo.operators.SubsetTime
 
-::: xrtoolz.geo.operators.SubsetToRegion
+::: xrops.geo.operators.SubsetToRegion
 
-::: xrtoolz.geo.operators.SelectVariables
+::: xrops.geo.operators.SelectVariables
 
 ## Masks
 
-::: xrtoolz.geo.operators.AddLandMask
+::: xrops.geo.operators.AddLandMask
 
-::: xrtoolz.geo.operators.AddOceanMask
+::: xrops.geo.operators.AddOceanMask
 
-::: xrtoolz.geo.operators.AddCountryMask
+::: xrops.geo.operators.AddCountryMask
 
-::: xrtoolz.geo.operators.ApplyMask
+::: xrops.geo.operators.ApplyMask
 
 ## Functional primitives (Layer 0)
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.geo.subset_bbox
+::: xrops.geo.subset_bbox
 
-::: xrtoolz.geo.subset_time
+::: xrops.geo.subset_time
 
-::: xrtoolz.geo.subset_to_region
+::: xrops.geo.subset_to_region
 
-::: xrtoolz.geo.subset_where
+::: xrops.geo.subset_where
 
-::: xrtoolz.geo.select_variables
+::: xrops.geo.select_variables
 
-::: xrtoolz.geo.add_land_mask
+::: xrops.geo.add_land_mask
 
-::: xrtoolz.geo.add_ocean_mask
+::: xrops.geo.add_ocean_mask
 
-::: xrtoolz.geo.add_country_mask
+::: xrops.geo.add_country_mask
 
-::: xrtoolz.geo.apply_mask
+::: xrops.geo.apply_mask
 
 ## Region registry
 
@@ -53,20 +53,20 @@ These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dat
 bounding-box descriptor. The helpers below resolve a region from a name, a
 dict, or a GeoJSON polygon.
 
-::: xrtoolz.geo.REGIONS
+::: xrops.geo.REGIONS
 
-::: xrtoolz.geo.RegionSpec
+::: xrops.geo.RegionSpec
 
-::: xrtoolz.geo.bbox_region
+::: xrops.geo.bbox_region
 
-::: xrtoolz.geo.custom_region
+::: xrops.geo.custom_region
 
-::: xrtoolz.geo.resolve_region
+::: xrops.geo.resolve_region
 
-::: xrtoolz.geo.region_from_dict
+::: xrops.geo.region_from_dict
 
-::: xrtoolz.geo.region_to_dict
+::: xrops.geo.region_to_dict
 
-::: xrtoolz.geo.load_region_file
+::: xrops.geo.load_region_file
 
-::: xrtoolz.geo.polygon_from_geojson
+::: xrops.geo.polygon_from_geojson

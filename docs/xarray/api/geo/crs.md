@@ -7,7 +7,7 @@ at a site (UTM zone picked from the origin).
 
 ## Operators
 
-::: xrtoolz.geo.operators.AssignLocalXY
+::: xrops.geo.operators.AssignLocalXY
 
 ## Local metric frames
 
@@ -19,24 +19,24 @@ gives metres east / north of the origin and whose `to_lonlat` inverts it.
 the inverse direction for gridded
 rasters that already carry projected `x`/`y` axes.
 
-::: xrtoolz.geo.utm_crs_for
+::: xrops.geo.utm_crs_for
 
-::: xrtoolz.geo.LocalFrame
+::: xrops.geo.LocalFrame
 
-::: xrtoolz.geo.local_frame
+::: xrops.geo.local_frame
 
-::: xrtoolz.geo.assign_local_xy
+::: xrops.geo.assign_local_xy
 
 ## Functions
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrtoolz.geo.assign_crs
+::: xrops.geo.assign_crs
 
-::: xrtoolz.geo.get_crs
+::: xrops.geo.get_crs
 
-::: xrtoolz.geo.reproject
+::: xrops.geo.reproject
 
-::: xrtoolz.geo.lonlat_to_xy
+::: xrops.geo.lonlat_to_xy
 
-::: xrtoolz.geo.xy_to_lonlat
+::: xrops.geo.xy_to_lonlat

@@ -2,9 +2,9 @@
 
 These are the pure-xarray subsetting helpers that both the archive readers
 (which screen a freshly opened product by bounding box, time window or
-quality flag) and :mod:`xrtoolz.geo` (which re-exports them) rely on. They
-live here rather than in ``xrtoolz`` because the dependency runs
-``xrtoolz -> xrreader``, never the other way round.
+quality flag) and :mod:`xrops.geo` (which re-exports them) rely on. They
+live here rather than in ``xrops`` because the dependency runs
+``xrops -> xrreader``, never the other way round.
 """
 
 from __future__ import annotations

@@ -17,7 +17,7 @@ Exports:
   :func:`apply_cf_attrs`, :class:`ValidationReport`, :class:`Issue`,
   :class:`Severity`.
 - Subsetting: :func:`subset_bbox`, :func:`subset_where`,
-  :func:`subset_time` (pure xarray; re-exported by :mod:`xrtoolz.geo`).
+  :func:`subset_time` (pure xarray; re-exported by :mod:`xrops.geo`).
 """
 
 from xrreader.types._src.geometry import BBox

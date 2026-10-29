@@ -15,7 +15,7 @@ feature grid seen at fit time is recorded as a layout
 and reordered to it, so the columns sklearn sees always mean what they
 meant during ``fit``.
 
-This is the foundation used by :mod:`xrtoolz.transforms.decompose` to
+This is the foundation used by :mod:`xrops.transforms.decompose` to
 expose PCA / EOF / ICA / NMF / KMeans as thin presets.
 """
 

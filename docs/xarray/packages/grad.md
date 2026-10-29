@@ -235,7 +235,7 @@ Two things to take from that:
   solves `∇²u = 0`, so the filled gradient is an artefact of the fill —
   four orders of magnitude worse than losing the cells, and invisible
   because the output looks complete. The `fillnan_*` family in
-  `xrtoolz.interpolate` is the right tool when you want a gap-free
+  `xrops.interpolate` is the right tool when you want a gap-free
   *field*, not for derivative accuracy near a mask.
 - **Coastal cells cost one order of accuracy**, since they use a
   one-sided stencil. Raising `accuracy` buys it back, as the table
@@ -260,7 +260,7 @@ chain is itself method selection — and the option composes with
 ## Grid metrics and constants
 
 `grid_metrics_from_coords` derives the cell-width / face-area Datasets
-consumed by `xrtoolz.budgets` from a Dataset's lon/lat (and optional
+consumed by `xrops.budgets` from a Dataset's lon/lat (and optional
 depth) coordinates. The physical constants `EARTH_RADIUS`, `GRAVITY`,
 and `OMEGA` are exported at the top level and replace the equivalent
 `metpy.constants` lookups.

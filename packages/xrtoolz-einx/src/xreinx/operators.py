@@ -170,7 +170,7 @@ class Reduce(Operator):
     the bracketed axis ``i``.
 
     Note:
-        Distinct from :class:`xrtoolz.geo.Reduce`, which aggregates a whole
+        Distinct from :class:`xrops.geo.Reduce`, which aggregates a whole
         Dataset over xarray dims; this reduces a single DataArray by an einx
         pattern.
 
