@@ -11,7 +11,7 @@ NumPy result on a JAX carrier and trace once under `jax.jit` for
 same-shape inputs on different grids (the contract test checks
 both).
 
-46 of 265 operators run on JAX today.
+49 of 268 operators run on JAX today.
 
 | Family | Operator | Backends |
 |---|---|---|
@@ -56,9 +56,12 @@ both).
 | `geom` | `BowtieCorrection` | numpy |
 | `geom` | `CropTo` | numpy, jax |
 | `geom` | `CropToBounds` | numpy |
+| `geom` | `Curl` | numpy, jax |
+| `geom` | `Divergence` | numpy, jax |
 | `geom` | `Georeference` | numpy |
 | `geom` | `GeostationaryParallaxCorrect` | numpy |
 | `geom` | `Gradient` | numpy, jax |
+| `geom` | `Laplacian` | numpy, jax |
 | `geom` | `Mosaic` | numpy |
 | `geom` | `OpticalFlowILK` | numpy |
 | `geom` | `OpticalFlowTVL1` | numpy |

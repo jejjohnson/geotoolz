@@ -657,6 +657,264 @@ def adaptive_gradient(
     return xp.stack([d_y, d_x])
 
 
+def divergence(
+    u: Float[np.ndarray, "*batch h w"],
+    v: Float[np.ndarray, "*batch h w"],
+    dy: Float[np.ndarray, "h w"] | float = 1.0,
+    dx: Float[np.ndarray, "h w"] | float = 1.0,
+    *,
+    accuracy: int = 1,
+    periodic_x: bool = False,
+) -> Float[np.ndarray, "*batch h w"]:
+    r"""Divergence ``∂u/∂x + ∂v/∂y`` over the last two axes; a NaN propagates.
+
+    .. math::
+
+        \nabla \cdot \mathbf{u} = \frac{\partial u}{\partial x}
+                                + \frac{\partial v}{\partial y}
+
+    :func:`difference` of ``u`` along columns (``axis=-1``, step ``dx``) plus
+    that of ``v`` along rows (``axis=-2``, step ``dy``), so a uniform-grid
+    field needs no carrier.
+
+    Args:
+        u: The component along columns, rows and columns last.
+        v: The component along rows, on ``u``'s shape.
+        dy: The signed step between row centres, a scalar or ``(H, W)``.
+        dx: The signed step between column centres, a scalar or ``(H, W)``.
+        accuracy: The accuracy order (see :func:`difference`).
+        periodic_x: The columns wrap (a global longitude).
+
+    Returns:
+        The divergence, ``u``'s shape.
+
+    Examples:
+        >>> y, x = np.mgrid[0:4, 0:5].astype(float)
+        >>> float(np.abs(divergence(-y, x)).max())  # solid-body rotation
+        0.0
+        >>> float(divergence(x, y).min())  # a uniform expansion
+        2.0
+    """
+    reject_geotensor(u, "divergence")
+    reject_geotensor(v, "divergence")
+    d_u = difference(u, axis=-1, step=dx, accuracy=accuracy, periodic=periodic_x)
+    return d_u + difference(v, axis=-2, step=dy, accuracy=accuracy)
+
+
+def adaptive_divergence(
+    u: Float[np.ndarray, "*batch h w"],
+    v: Float[np.ndarray, "*batch h w"],
+    dy: Float[np.ndarray, "h w"] | float = 1.0,
+    dx: Float[np.ndarray, "h w"] | float = 1.0,
+    *,
+    mask: Bool[np.ndarray, "*batch h w"] | None = None,
+    accuracy: int = 1,
+    periodic_x: bool = False,
+) -> Float[np.ndarray, "*batch h w"]:
+    """Mask-aware divergence: :func:`adaptive_difference` for each derivative.
+
+    Each term uses, per point, the widest stencil lying on valid data, so a
+    linear field stays exact up to the coast. A cell is ``NaN`` where ``mask``
+    drops it or either component is non-finite.
+
+    Args:
+        u: The component along columns.
+        v: The component along rows.
+        dy: The signed step between row centres.
+        dx: The signed step between column centres.
+        mask: ``True`` drops the cell; ``None`` drops only non-finite cells.
+        accuracy: The highest accuracy order to try.
+        periodic_x: The columns wrap.
+
+    Returns:
+        The divergence, ``u``'s shape.
+
+    Example:
+        >>> y, x = np.mgrid[0:5, 0:6].astype(float)
+        >>> land = (y == 2) & (x == 3)
+        >>> div = adaptive_divergence(x, y, mask=land)
+        >>> int(np.isnan(div).sum()), float(np.nanmax(np.abs(div - 2.0)))
+        (1, 0.0)
+    """
+    reject_geotensor(u, "adaptive_divergence")
+    reject_geotensor(v, "adaptive_divergence")
+    reject_geotensor(mask, "adaptive_divergence")
+    d_u = adaptive_difference(
+        u, mask=mask, axis=-1, step=dx, accuracy=accuracy, periodic=periodic_x
+    )
+    return d_u + adaptive_difference(v, mask=mask, axis=-2, step=dy, accuracy=accuracy)
+
+
+def curl(
+    u: Float[np.ndarray, "*batch h w"],
+    v: Float[np.ndarray, "*batch h w"],
+    dy: Float[np.ndarray, "h w"] | float = 1.0,
+    dx: Float[np.ndarray, "h w"] | float = 1.0,
+    *,
+    accuracy: int = 1,
+    periodic_x: bool = False,
+) -> Float[np.ndarray, "*batch h w"]:
+    r"""Curl (relative vorticity) ``∂v/∂x − ∂u/∂y`` over the last two axes.
+
+    .. math::
+
+        \zeta = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}
+
+    A NaN propagates through the stencils that read it.
+
+    Args:
+        u: The component along columns, rows and columns last.
+        v: The component along rows, on ``u``'s shape.
+        dy: The signed step between row centres, a scalar or ``(H, W)``.
+        dx: The signed step between column centres, a scalar or ``(H, W)``.
+        accuracy: The accuracy order (see :func:`difference`).
+        periodic_x: The columns wrap (a global longitude).
+
+    Returns:
+        The curl, ``u``'s shape.
+
+    Examples:
+        >>> y, x = np.mgrid[0:4, 0:5].astype(float)
+        >>> float(curl(-y, x).min()), float(curl(-y, x).max())  # solid-body rotation
+        (2.0, 2.0)
+        >>> float(np.abs(curl(x, y)).max())  # an irrotational expansion
+        0.0
+    """
+    reject_geotensor(u, "curl")
+    reject_geotensor(v, "curl")
+    d_v = difference(v, axis=-1, step=dx, accuracy=accuracy, periodic=periodic_x)
+    return d_v - difference(u, axis=-2, step=dy, accuracy=accuracy)
+
+
+def adaptive_curl(
+    u: Float[np.ndarray, "*batch h w"],
+    v: Float[np.ndarray, "*batch h w"],
+    dy: Float[np.ndarray, "h w"] | float = 1.0,
+    dx: Float[np.ndarray, "h w"] | float = 1.0,
+    *,
+    mask: Bool[np.ndarray, "*batch h w"] | None = None,
+    accuracy: int = 1,
+    periodic_x: bool = False,
+) -> Float[np.ndarray, "*batch h w"]:
+    """Mask-aware curl: :func:`adaptive_difference` for each derivative.
+
+    Args:
+        u: The component along columns.
+        v: The component along rows.
+        dy: The signed step between row centres.
+        dx: The signed step between column centres.
+        mask: ``True`` drops the cell; ``None`` drops only non-finite cells.
+        accuracy: The highest accuracy order to try.
+        periodic_x: The columns wrap.
+
+    Returns:
+        The curl, ``u``'s shape, ``NaN`` only where a cell is dropped.
+
+    Example:
+        >>> y, x = np.mgrid[0:5, 0:6].astype(float)
+        >>> wall = x == 2
+        >>> zeta = adaptive_curl(-y, x, mask=wall)
+        >>> int(np.isnan(zeta).sum()), float(np.nanmax(np.abs(zeta - 2.0)))
+        (5, 0.0)
+    """
+    reject_geotensor(u, "adaptive_curl")
+    reject_geotensor(v, "adaptive_curl")
+    reject_geotensor(mask, "adaptive_curl")
+    d_v = adaptive_difference(
+        v, mask=mask, axis=-1, step=dx, accuracy=accuracy, periodic=periodic_x
+    )
+    return d_v - adaptive_difference(u, mask=mask, axis=-2, step=dy, accuracy=accuracy)
+
+
+def laplacian(
+    f: Float[np.ndarray, "*batch h w"],
+    dy: Float[np.ndarray, "h w"] | float = 1.0,
+    dx: Float[np.ndarray, "h w"] | float = 1.0,
+    *,
+    accuracy: int = 1,
+    periodic_x: bool = False,
+) -> Float[np.ndarray, "*batch h w"]:
+    r"""Laplacian ``∂²f/∂x² + ∂²f/∂y²`` over the last two axes; a NaN propagates.
+
+    .. math::
+
+        \nabla^2 f = \frac{\partial^2 f}{\partial x^2}
+                   + \frac{\partial^2 f}{\partial y^2}
+
+    Second-derivative stencils (``derivative=2``), not two first derivatives:
+    the 3-point centred stencil inside and 3-point one-sided ones on the edges
+    at ``accuracy=1``, all exact for a quadratic.
+
+    Args:
+        f: The field, rows and columns last; leading axes are mapped.
+        dy: The step between row centres, a scalar or ``(H, W)``.
+        dx: The step between column centres, a scalar or ``(H, W)``.
+        accuracy: The accuracy order (see :func:`difference`).
+        periodic_x: The columns wrap (a global longitude).
+
+    Returns:
+        The Laplacian, ``f``'s shape.
+
+    Examples:
+        >>> y, x = np.mgrid[0:4, 0:5].astype(float)
+        >>> lap = laplacian(x**2 + y**2)
+        >>> float(lap.min()), float(lap.max())  # exact, edges included
+        (4.0, 4.0)
+        >>> float(laplacian(x**2, dx=0.5).max())  # steps in coordinate units
+        8.0
+    """
+    reject_geotensor(f, "laplacian")
+    d_xx = difference(
+        f, axis=-1, step=dx, derivative=2, accuracy=accuracy, periodic=periodic_x
+    )
+    return d_xx + difference(f, axis=-2, step=dy, derivative=2, accuracy=accuracy)
+
+
+def adaptive_laplacian(
+    f: Float[np.ndarray, "*batch h w"],
+    dy: Float[np.ndarray, "h w"] | float = 1.0,
+    dx: Float[np.ndarray, "h w"] | float = 1.0,
+    *,
+    mask: Bool[np.ndarray, "*batch h w"] | None = None,
+    accuracy: int = 1,
+    periodic_x: bool = False,
+) -> Float[np.ndarray, "*batch h w"]:
+    """Mask-aware Laplacian: :func:`adaptive_difference` of second order on each axis.
+
+    Args:
+        f: The field, rows and columns last.
+        dy: The step between row centres.
+        dx: The step between column centres.
+        mask: ``True`` drops the cell; ``None`` drops only non-finite cells.
+        accuracy: The highest accuracy order to try.
+        periodic_x: The columns wrap.
+
+    Returns:
+        The Laplacian, ``f``'s shape; a quadratic stays exact next to the mask.
+
+    Example:
+        >>> y, x = np.mgrid[0:7, 0:8].astype(float)
+        >>> island = (y == 3) & (x == 4)  # two cells from every edge
+        >>> lap = adaptive_laplacian(x**2 + y**2, mask=island)
+        >>> int(np.isnan(lap).sum()), float(np.nanmax(np.abs(lap - 4.0)))
+        (1, 0.0)
+    """
+    reject_geotensor(f, "adaptive_laplacian")
+    reject_geotensor(mask, "adaptive_laplacian")
+    d_xx = adaptive_difference(
+        f,
+        mask=mask,
+        axis=-1,
+        step=dx,
+        derivative=2,
+        accuracy=accuracy,
+        periodic=periodic_x,
+    )
+    return d_xx + adaptive_difference(
+        f, mask=mask, axis=-2, step=dy, derivative=2, accuracy=accuracy
+    )
+
+
 def _bounded(
     xp: Any, f: Any, axis: int, derivative: int, accuracy: int, method: Method
 ) -> Any:
