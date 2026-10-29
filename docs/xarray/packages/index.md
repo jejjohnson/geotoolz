@@ -12,7 +12,7 @@ works on its own.
 | [`xrtoolz-grad`](grad.md) | `xrgrad` | Finite-difference calculus on labeled grids | xarray, finitediffx |
 | [`xrtoolz-einx`](einx.md) | `xreinx` | xarray ↔ einx named-tensor bridge | xrcore, einx |
 | [`xrtoolz-sklearn`](sklearn.md) | `xrsklearn` | scikit-learn ↔ xarray bridge | xrcore, scikit-learn |
-| [`xrtoolz-reader`](reader.md) | `xrreader` | Authenticated archive readers (CMEMS, CDS, AEMET) | numpy, pandas, xarray |
+| [`xrtoolz-products`](reader.md) | `xrproducts` | Authenticated archive readers (CMEMS, CDS, AEMET) | numpy, pandas, xarray |
 | `xrtoolz-ops` | `xrops` | geo, ocn, budgets, interpolate, transforms, metrics, viz, … | all of the above |
 | `xrtoolz` | `xrtoolz` | the umbrella: no code, installs the family | all of the above |
 
@@ -32,5 +32,5 @@ pipekit's `Operator` protocol with xarray carriers). `xrgrad` is fully
 standalone — it is also the only member that pulls the finitediffx/JAX
 stack, so `xrtoolz-core`, `xrtoolz-einx`, and `xrtoolz-sklearn` install
 without JAX. The main `xrtoolz` package consumes all five — it depends on
-`xrtoolz-reader` for the shared typed request vocabulary and CF
+`xrtoolz-products` for the shared typed request vocabulary and CF
 `Variable` registry, whose service clients stay behind optional extras.

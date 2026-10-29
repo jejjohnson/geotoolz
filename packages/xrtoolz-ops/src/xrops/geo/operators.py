@@ -251,7 +251,7 @@ class RenameFromCFStandardNames(Operator):
     """Wrap :func:`xrops.geo.rename_from_cf_standard_names`.
 
     Renames CF ``standard_name``-shaped variables to their xrops
-    canonical names using the :mod:`xrreader.types.Variable` registry.
+    canonical names using the :mod:`xrproducts.types.Variable` registry.
 
     Args:
         fallback: ``"passthrough"`` (default) leaves unrecognized names

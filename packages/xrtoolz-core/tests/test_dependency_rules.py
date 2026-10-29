@@ -50,9 +50,9 @@ PACKAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         "packages/xrtoolz-ops/pyproject.toml",
         ("packages/xrtoolz-ops/src/xrops",),
     ),
-    "xrtoolz-reader": (
-        "packages/xrtoolz-reader/pyproject.toml",
-        ("packages/xrtoolz-reader/src/xrreader",),
+    "xrtoolz-products": (
+        "packages/xrtoolz-products/pyproject.toml",
+        ("packages/xrtoolz-products/src/xrproducts",),
     ),
     "xrtoolz-sklearn": (
         "packages/xrtoolz-sklearn/pyproject.toml",
@@ -102,7 +102,7 @@ ALLOWED: dict[str, str] = {
     "xreinx": "xrtoolz-einx",
     "xrgrad": "xrtoolz-grad",
     "xrops": "xrtoolz-ops",
-    "xrreader": "xrtoolz-reader",
+    "xrproducts": "xrtoolz-products",
     "xrsklearn": "xrtoolz-sklearn",
     "xrtoolz": "xrtoolz",
 }

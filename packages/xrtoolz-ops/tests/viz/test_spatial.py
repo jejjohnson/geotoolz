@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
-from xrreader.types import (
+from xrproducts.types import (
     ADT,
     CHL,
     ICE_CONC,

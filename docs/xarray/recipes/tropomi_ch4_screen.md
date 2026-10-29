@@ -5,12 +5,12 @@ retrieval over four NetCDF groups. `LocalL2Source` flattens them into a single
 CF Dataset, renames the variables to the registry names, and applies the
 quality, bounding-box and time screening in one call. The file itself has to
 be on disk already (Earthdata acquisition is a separate step), and reading it
-needs a NetCDF backend: `pip install 'xrtoolz-reader[local]'`.
+needs a NetCDF backend: `pip install 'xrtoolz-products[local]'`.
 
 ## One granule, screened
 
 ```python
-from xrreader import BBox, LocalL2Source, TimeRange
+from xrproducts import BBox, LocalL2Source, TimeRange
 
 src = LocalL2Source()
 ds = src.open(
@@ -62,7 +62,7 @@ Skip the screening and keep the whole swath — or the raw product names — wit
 the opener directly:
 
 ```python
-from xrreader import open_tropomi_ch4_l2
+from xrproducts import open_tropomi_ch4_l2
 
 raw = open_tropomi_ch4_l2(path, qa_min=None, keep_groups=True)   # product names
 ds = open_tropomi_ch4_l2(path)                                    # canonical, qa >= 0.5

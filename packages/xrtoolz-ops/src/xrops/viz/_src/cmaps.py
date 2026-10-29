@@ -1,16 +1,16 @@
 """Colormap resolution for spatial viz panels.
 
 Looks up a sensible default colormap for a given canonical variable
-name (or :class:`xrreader.types.Variable` instance) by reading the
+name (or :class:`xrproducts.types.Variable` instance) by reading the
 ``cmap`` field on entries of the curated
-:data:`xrreader.types.REGISTRY`. Falls back to ``default`` (default
+:data:`xrproducts.types.REGISTRY`. Falls back to ``default`` (default
 ``"viridis"``) when the variable is unknown or the registry entry
 has no ``cmap`` set.
 """
 
 from __future__ import annotations
 
-from xrreader.types import REGISTRY, Variable
+from xrproducts.types import REGISTRY, Variable
 
 
 def cmap_for(variable: str | Variable | None, default: str = "viridis") -> str:

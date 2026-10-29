@@ -11,7 +11,7 @@ from typing import Literal
 
 import numpy as np
 import xarray as xr
-from xrreader.types import Variable, apply_cf_attrs
+from xrproducts.types import Variable, apply_cf_attrs
 
 
 _WIND_SPEED = Variable(

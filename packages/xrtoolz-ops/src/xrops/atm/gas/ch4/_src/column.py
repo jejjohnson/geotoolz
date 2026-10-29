@@ -8,7 +8,7 @@ fraction directly.
 from __future__ import annotations
 
 import xarray as xr
-from xrreader.types import Variable, apply_cf_attrs
+from xrproducts.types import Variable, apply_cf_attrs
 
 from xrops.atm._src.constants import K_B, M_CH4, M_DRY, N_A, G
 from xrops.atm._src.vertical import column_integral

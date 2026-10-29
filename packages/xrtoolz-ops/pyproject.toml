@@ -69,11 +69,11 @@ dependencies = [
     "pipekit>=0.0.1",
     # The data-acquisition layer (CMEMS/CDS/AEMET readers) and the shared
     # typed request vocabulary + CF Variable registry live in the
-    # `xrtoolz-reader` workspace member, which imports as `xrreader`.
-    # `xrops.geo` / `xrops.viz` import the registry from `xrreader.types`;
+    # `xrtoolz-products` workspace member, which imports as `xrproducts`.
+    # `xrops.geo` / `xrops.viz` import the registry from `xrproducts.types`;
     # the reader's core is light (numpy/pandas/xarray) and its heavy service
     # clients are optional extras, so this stays a lightweight dependency.
-    "xrtoolz-reader>=0.0.2",
+    "xrtoolz-products>=0.0.2",
     # NetCDF4/HDF5 backend for xrops.atm.open_wrfout.
     "netcdf4>=1.6",
 ]

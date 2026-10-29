@@ -22,7 +22,7 @@ classifiers = [
 # package imported under its own name (see src/xrtoolz/__init__.py).
 dependencies = [
     "xrtoolz-ops>=0.0.0",
-    "xrtoolz-reader>=0.0.2",
+    "xrtoolz-products>=0.0.2",
     "xrtoolz-core>=0.0.1",
     "xrtoolz-grad>=0.0.1",
     "xrtoolz-einx>=0.0.1",

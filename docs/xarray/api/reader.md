@@ -21,7 +21,7 @@ converted (`q = r / (1 + r)`) before it is CF specific humidity.
 `ch4_enhancement` (ppm m) is the EMIT L2B plume-enhancement quantity, and
 `ch4_column` (kg m⁻², `atmosphere_mass_content_of_methane`) is the canonical
 column-mass output of the `xrops.atm.gas.ch4` operators. All of them
-resolve through `xrreader.resolve` and stamp CF attributes through
+resolve through `xrproducts.resolve` and stamp CF attributes through
 `apply_cf_attrs`.
 
 ## Local L2 products
@@ -32,7 +32,7 @@ already on disk — nothing is fetched (`download()` raises
 `ghgsat.ch4` (`source="local"`) each map to a product *opener* that turns one
 file into a flat CF Dataset. The openers read NetCDF, and the core install
 ships no backend for it — install the `local` extra
-(`pip install 'xrtoolz-reader[local]'`, which adds `netcdf4`):
+(`pip install 'xrtoolz-products[local]'`, which adds `netcdf4`):
 
 | Short name | Opener | Kind | Layout |
 |---|---|---|---|
@@ -59,7 +59,7 @@ preserved); `keep_groups=True` keeps the raw product names.
 **EMIT.** The L2B enhancement raster (`methane_plume_complex` as distributed,
 or the registry alias `ch4_enhancement` — either becomes `ch4_enhancement` in
 ppm m — plus `ch4_uncertainty` when present) is read from a NetCDF container;
-`rioxarray` is not an `xrreader` dependency, so GeoTIFF distributions have to
+`rioxarray` is not an `xrproducts` dependency, so GeoTIFF distributions have to
 be converted first. With `glt_path` the scene is orthorectified through the
 geometric lookup table (`glt_x` / `glt_y`, 1-based, `0` = no data) and the
 2-D `lon` / `lat` of the orthorectified grid come from the GLT's own `lon` /
@@ -80,7 +80,7 @@ the antimeridian afterwards raises), `time` as a per-scanline mask on
 `scanline_time` for swaths or a mask on the `time` coordinate for scenes, and
 `paths=[a, b]` concatenates granules along `time` in the order given.
 `subset_bbox`, `subset_where` and `subset_time` now live in
-`xrreader.types` (pure xarray) and are re-exported unchanged by
+`xrproducts.types` (pure xarray) and are re-exported unchanged by
 `xrops.geo`, so the reader can screen without importing `xrtoolz`. See the
 [TROPOMI recipe](../recipes/tropomi_ch4_screen.md) for a worked example.
 
@@ -94,4 +94,4 @@ Per-cell totals such as EDGAR's `emi` files (tonnes per cell, per year or per
 month) are rejected because the period is not in the file: read the `flx`
 files instead. It is a plain opener, not a catalog entry.
 
-::: xrreader
+::: xrproducts

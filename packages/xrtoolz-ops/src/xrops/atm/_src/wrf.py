@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
-from xrreader.types import Variable, apply_cf_attrs
+from xrproducts.types import Variable, apply_cf_attrs
 
 from xrops.atm._src.constants import C_P, R_D
 
@@ -313,7 +313,7 @@ def open_wrfout(
     ``HGT``, ``XLONG`` and ``XLAT`` lose their ``time`` axis only when they
     are the same at every step; on a moving nest they keep it. CF
     ``standard_name`` / ``units`` are stamped via
-    :func:`xrreader.apply_cf_attrs`. Nothing is materialised, so
+    :func:`xrproducts.apply_cf_attrs`. Nothing is materialised, so
     ``chunks={"time": 1}`` keeps every variable dask backed. The returned
     Dataset owns the file handle: closing it (or leaving a ``with`` block)
     closes the file.

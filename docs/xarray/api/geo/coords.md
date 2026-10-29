@@ -7,7 +7,7 @@ or from CF standard names, and measure grid resolution.
 !!! note "CF standard names"
     `RenameToCFStandardNames` / `RenameFromCFStandardNames` use the curated
     `Variable` registry that now lives in
-    [`xrreader.types`](../reader.md) — the same
+    [`xrproducts.types`](../reader.md) — the same
     registry that drives the colormap lookup in `xrops.viz`.
 
 ## Coordinate validation

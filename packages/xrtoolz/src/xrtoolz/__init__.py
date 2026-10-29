@@ -5,7 +5,7 @@ imported under its own name:
 
 - ``xrtoolz-ops`` (``xrops``): operator families on xarray (atm, ocn,
   budgets, geo, interpolate, metrics, transforms, viz);
-- ``xrtoolz-reader`` (``xrreader``): readers for CMEMS, CDS, AEMET and
+- ``xrtoolz-products`` (``xrproducts``): readers for CMEMS, CDS, AEMET and
   local L2 products;
 - ``xrtoolz-core`` (``xrcore``): the xarray ``Operator`` base and
   ``Signature``;
@@ -15,7 +15,7 @@ imported under its own name:
 
 Example:
     >>> import xrops
-    >>> import xrreader
+    >>> import xrproducts
 """
 
 from __future__ import annotations

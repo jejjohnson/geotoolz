@@ -16,7 +16,7 @@ The packages (distribution name → import name):
 | `xrtoolz-grad` | `xrgrad` | Finite-difference calculus on labeled grids (sole carrier of the finitediffx/JAX stack) |
 | `xrtoolz-einx` | `xreinx` | xarray ↔ einx named-tensor bridge (functions + Operators; einx loads lazily) |
 | `xrtoolz-sklearn` | `xrsklearn` | scikit-learn ↔ xarray bridge (`XarrayEstimator`, `.sklearn` accessors, `SklearnOp`) |
-| `xrtoolz-reader` | `xrreader` | Authenticated archive readers (CMEMS, CDS, AEMET) + the typed request vocabulary / CF `Variable` registry |
+| `xrtoolz-products` | `xrproducts` | Authenticated archive readers (CMEMS, CDS, AEMET) + the typed request vocabulary / CF `Variable` registry |
 
 `xrtoolz` holds no code and depends on the other six, so `pip install xrtoolz` installs the whole family. There are no compatibility shims: renames and removals are outright, and every caller in the stack moves in the same release.
 
@@ -32,7 +32,7 @@ The packages (distribution name → import name):
 
 ### Package structure
 
-Each package lives in `packages/<distribution>/src/<import name>/` with its own `pyproject.toml` and `tests/`; the workspace root ships no code (the top-level `pyproject.toml` only configures `[tool.uv.workspace]` plus shared dev/lint/typecheck/docs groups and git sources for `pipekit`/`xrreader`). The operators live in `packages/xrtoolz-ops/src/xrops/`; `xrops/__init__.py` exports only its own combinators. Import the composition primitives (`Sequential`, `Graph`, `Input`, `Node`, `Tap`) from `pipekit`, and `Operator` / `Signature` from `xrcore`.
+Each package lives in `packages/<distribution>/src/<import name>/` with its own `pyproject.toml` and `tests/`; the workspace root ships no code (the top-level `pyproject.toml` only configures `[tool.uv.workspace]` plus shared dev/lint/typecheck/docs groups and git sources for `pipekit`/`xrproducts`). The operators live in `packages/xrtoolz-ops/src/xrops/`; `xrops/__init__.py` exports only its own combinators. Import the composition primitives (`Sequential`, `Graph`, `Input`, `Node`, `Tap`) from `pipekit`, and `Operator` / `Signature` from `xrcore`.
 
 ### Submodule layout
 
@@ -65,7 +65,7 @@ Design rules:
 | `packages/xrtoolz-grad/src/xrgrad/` | Finite-difference calculus |
 | `packages/xrtoolz-einx/src/xreinx/` | xarray ↔ einx bridge |
 | `packages/xrtoolz-sklearn/src/xrsklearn/` | sklearn ↔ xarray bridge |
-| `packages/xrtoolz-reader/src/xrreader/` | Authenticated archive readers + request types |
+| `packages/xrtoolz-products/src/xrproducts/` | Authenticated archive readers + request types |
 | `packages/*/tests/` | Per-package test suites |
 | `docs/` | Documentation (MkDocs root site), including `docs/design/` with the full design doc |
 | `notebooks/` | Jupyter notebooks |

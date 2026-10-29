@@ -1,7 +1,7 @@
 """Spatial, temporal, and variable subsetting.
 
 ``subset_bbox``, ``subset_where`` and ``subset_time`` are defined in
-:mod:`xrreader.types` (pure xarray, shared with the archive readers) and
+:mod:`xrproducts.types` (pure xarray, shared with the archive readers) and
 re-exported here unchanged.
 """
 
@@ -11,7 +11,7 @@ from collections.abc import Sequence
 
 import regionmask
 import xarray as xr
-from xrreader.types import subset_bbox, subset_time, subset_where
+from xrproducts.types import subset_bbox, subset_time, subset_where
 
 from xrops.geo._src.regions import RegionSpec, resolve_region
 

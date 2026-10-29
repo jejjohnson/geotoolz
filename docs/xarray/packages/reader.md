@@ -1,31 +1,31 @@
-# xrtoolz-reader — authenticated archive readers
+# xrtoolz-products — authenticated archive readers
 
 ```bash
 # Pre-PyPI, install from the workspace via git. The core is light, so
 # this resolves on its own; add an extra for the service you need. Once
-# published this becomes a plain `pip install 'xrtoolz-reader[cmems]'`.
-uv pip install "xrtoolz-reader @ git+https://github.com/jejjohnson/xrtoolz@main#subdirectory=packages/xrtoolz-reader"
+# published this becomes a plain `pip install 'xrtoolz-products[cmems]'`.
+uv pip install "xrtoolz-products @ git+https://github.com/jejjohnson/xrtoolz@main#subdirectory=packages/xrtoolz-products"
 ```
 
-`xrreader` is the **data-acquisition** layer of the stack. It turns a typed
+`xrproducts` is the **data-acquisition** layer of the stack. It turns a typed
 *request* — variables, a bounding box, a time window — into the exact payload a
 remote archive expects, and hands back a ready-to-use `xarray.Dataset`. Where
 the rest of the workspace operates *on* data, this package is what *fetches* it.
 
-It imports as `xrreader` (the distribution is `xrtoolz-reader`, matching the
+It imports as `xrproducts` (the distribution is `xrtoolz-products`, matching the
 `xrtoolz-grad` → `xrgrad` convention), and was developed for a time in its own
 repository before being folded back into this workspace.
 
 ## Where it sits
 
 ```text
- geocatalog ──▶ xrreader ──▶ xrtoolz ──▶ geopatcher
+ geocatalog ──▶ xrproducts ──▶ xrtoolz ──▶ geopatcher
   index files    fetch the     operate     split → op
   / STAC         arrays        on data     → stitch
 ```
 
-`xrreader` complements [`geocatalog`](https://github.com/jejjohnson/geocatalog):
-geocatalog *indexes where data is* (files / STAC); `xrreader` *fetches the data
+`xrproducts` complements [`geocatalog`](https://github.com/jejjohnson/geocatalog):
+geocatalog *indexes where data is* (files / STAC); `xrproducts` *fetches the data
 itself* from API services that have their own authentication and server-side
 subsetting.
 
@@ -43,8 +43,8 @@ service client is an optional extra, imported lazily at first use:
 | `grib` | `cfgrib` | GRIB reader backend, for `CDSSource(format="grib")` |
 
 That light core is load-bearing for the workspace: `xrtoolz` depends on
-`xrtoolz-reader` for the shared typed request vocabulary and the CF `Variable`
-registry (`xrops.geo` and `xrops.viz` import from `xrreader.types`), so the
+`xrtoolz-products` for the shared typed request vocabulary and the CF `Variable`
+registry (`xrops.geo` and `xrops.viz` import from `xrproducts.types`), so the
 archive clients must stay out of a plain `pip install xrtoolz`.
 
 ## The request vocabulary
@@ -54,7 +54,7 @@ payload dialect — the per-service knowledge lives on the type, not scattered
 through the adapters:
 
 ```python
-from xrreader import BBox, TimeRange
+from xrproducts import BBox, TimeRange
 
 bbox = BBox(lon_min=-80, lon_max=-50, lat_min=30, lat_max=45)   # Gulf Stream
 time = TimeRange.parse("2020-01-01", "2020-01-31")
