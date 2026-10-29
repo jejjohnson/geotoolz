@@ -1,6 +1,6 @@
 [project]
 name = "xrtoolz-ops"
-version = "0.0.0"
+version = "0.1.0"
 description = "xarray operators for Earth System Data Cubes (import xrops), the operator package of the xrtoolz family."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

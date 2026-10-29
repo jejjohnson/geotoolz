@@ -12,7 +12,7 @@ xarray ``Operator`` base and ``Signature`` are :mod:`xrcore`.
 from xrops.combinators import ApplyToEach, Augment
 
 
-__version__ = "0.0.0"  # x-release-please-version
+__version__ = "0.1.0"  # x-release-please-version
 
 __all__ = [
     "ApplyToEach",
