@@ -41,6 +41,7 @@ __all__ = [
     "band_kernel",
     "carrier_kernel",
     "fill_of",
+    "mask_kernel",
     "named",
     "nodata_where",
     "select_band",
@@ -211,7 +212,7 @@ def band_kernel(
     out = _run(kernel, selected, [fill_of(carrier)] * len(selected), params)
     if "time" in dims and len(dims) == 4 and not _is_dataarray(carrier):
         out = _expand(out, dims.index(dim), dim)
-    return unwrap(_nan_fill(out))
+    return unwrap(_declare_fill(out, np.nan))
 
 
 def carrier_kernel(
@@ -255,7 +256,62 @@ def carrier_kernel(
         out = _run(kernel, carriers, [fill_of(c) for c in carriers], params)
     except GridMismatchError as exc:
         raise GridMismatchError(f"{message}: {exc}") from exc
-    return pairs[0][1](_nan_fill(out))
+    return pairs[0][1](_declare_fill(out, np.nan))
+
+
+def mask_kernel(
+    kernel: Callable[..., Any],
+    x: Any,
+    band: BandRef | None,
+    *,
+    dim: str,
+    name: str,
+    **params: Any,
+) -> Any:
+    """Run an element-wise mask kernel on one band of ``x``, or on all of it.
+
+    For decoders that read their own input (a QA band): no nodata is
+    judged, and the boolean result declares ``fill_value=False``.
+
+    Args:
+        kernel: The Tier-A kernel: one array, then ``**params``; returns a
+            boolean array of its shape.
+        x: The carrier: a `GeoArray`, a ``DataArray``, a `DimArray` or a
+            plain 2-D to 4-D array.
+        band: The band to decode along ``dim``, or ``None`` to decode every
+            element of ``x``.
+        dim: The band dim.
+        name: The operator's name, for messages.
+        **params: Keyword parameters of the kernel (``bits``, ``values``, …).
+
+    Returns:
+        The mask on ``x``'s carrier: ``x``'s dims when ``band`` is ``None``,
+        else ``dim`` collapsed (a singleton band dim on a ``(T, C, H, W)``
+        `GeoArray` or plain array).
+
+    Raises:
+        TypeError: ``x`` is a georeader ``GeoTensor``, or a band name meets
+            a carrier without band names.
+        ValueError: ``band`` is given and ``x`` has no ``dim``.
+
+    Example:
+        >>> from geoops.qa import mask_from_qa_bits
+        >>> qa = np.array([[0b1000, 0b0001]], dtype=np.uint16)
+        >>> mask_kernel(mask_from_qa_bits, qa, None, dim="band", name="Q", bits=(3,))
+        array([[ True, False]])
+    """
+    carrier, unwrap = named(x, name=name)
+    dims = _dims(carrier)
+    picked = carrier if band is None else select_band(carrier, dim, band, name=name)
+    out = KernelOp(kernel, "()->()", core={}, params=params)(picked)
+    if (
+        band is not None
+        and "time" in dims
+        and len(dims) == 4
+        and not _is_dataarray(carrier)
+    ):
+        out = _expand(out, dims.index(dim), dim)
+    return unwrap(_declare_fill(out, False))
 
 
 def _run(
@@ -274,14 +330,14 @@ def _run(
     return op(*inputs)
 
 
-def _nan_fill(out: Any) -> Any:
-    """Declare ``NaN`` as the output's fill, where the carrier declares one."""
+def _declare_fill(out: Any, fill: Any) -> Any:
+    """Declare ``fill`` as the output's fill, where the carrier declares one."""
     if isinstance(out, GeoArray):
-        return out.replace(fill_value=np.nan)
+        return out.replace(fill_value=fill)
     if _is_dataarray(out) and {"fill_value", "_FillValue"} & set(out.attrs):
         out = out.copy(deep=False)
         out.attrs = {k: v for k, v in out.attrs.items() if k != "_FillValue"}
-        out.attrs["fill_value"] = np.nan
+        out.attrs["fill_value"] = fill
     return out
 
 

@@ -31,9 +31,16 @@ independent flag bits, ``values`` lists categorical class / field
 values, and the sensor presets take ``targets`` — names from
 `SENSOR_QA_REGISTRY` to mask out.
 
-The band axis is ``-3`` by default. A ``(T, C, H, W)`` time stack is
-decoded frame by frame into a ``(T, 1, H, W)`` mask
-(``(T, n_layers, H, W)`` for `DecodeBitmask`).
+The generic ``Mask*`` decoders and the sensor presets run their
+element-wise decoder through `geoops._src.kernels.mask_kernel` (pipekit-array's
+``KernelOp``), so they take a NumPy or JAX ``GeoArray`` (under
+``jax.jit`` too), an ``xr.DataArray`` (lazily on dask) or a plain array.
+`DecodeBitmask`, `MaskInvalid`, `MaskSaturated`, `MaskNoData` and the
+model-backed masks stay NumPy-only.
+
+The band is picked along ``dim="band"``. A ``(T, C, H, W)`` time stack
+gives a ``(T, 1, H, W)`` mask (``(T, n_layers, H, W)`` for
+`DecodeBitmask`).
 
 References:
     USGS, "Landsat 8-9 Collection 2 Level-2 Science Product Guide",
@@ -57,10 +64,12 @@ from pipekit import Operator
 from geoops._src.bands import resolve_band, strip_band_attrs
 from geoops._src.config import mapping_from_pairs, mapping_to_pairs
 from geoops._src.geo import reject_geotensor
+from geoops._src.kernels import mask_kernel
 from geoops._src.shape import band_dim, dim_axis, over_frames
 from geoops._src.valid import invalid_values, valid_pixels, wrap_filled
 from geoops._src.wrap import wrap_like
 from geoops.qa._src.array import (
+    _as_int64,
     mask_from_bit_field,
     mask_from_qa_bits,
     mask_from_scl,
@@ -187,11 +196,10 @@ def _decode_bits_with_mode(
     if mode == "any":
         return mask_from_qa_bits(qa, bits_tuple)
     if mode == "all":
-        qa_int = qa.astype(np.int64, copy=False)
         bitmask = 0
         for bit in bits_tuple:
             bitmask |= 1 << bit
-        return (qa_int & bitmask) == bitmask
+        return (_as_int64(qa) & bitmask) == bitmask
     raise ValueError("mode must be 'any' or 'all'")
 
 
@@ -203,17 +211,25 @@ def _mask_from_definition(
     mode: str,
     invert: bool = False,
 ) -> np.ndarray:
-    """Build a mask from either bit positions or categorical values."""
-    if bits is None and values is None:
-        raise ValueError("provide either bits or values")
-    if bits is not None and values is not None:
-        raise ValueError("provide only one of bits or values")
+    """Build a mask from either bit positions or categorical values.
+
+    The kernel behind `_QAMask`: element-wise, on any backend.
+    """
+    _check_definition(bits, values)
     if bits is not None:
         mask = _decode_bits_with_mode(qa, bits, mode)
     else:
         # Delegate value-membership decoding to the shared cloud primitive.
         mask = mask_from_scl(qa, values or ())
     return ~mask if invert else mask
+
+
+def _check_definition(bits: Sequence[int] | None, values: Sequence[int] | None) -> None:
+    """Exactly one of ``bits`` and ``values``."""
+    if bits is None and values is None:
+        raise ValueError("provide either bits or values")
+    if bits is not None and values is not None:
+        raise ValueError("provide only one of bits or values")
 
 
 def _decode_registry_entry(
@@ -261,9 +277,23 @@ def _decode_targets_to_mask(
     out: np.ndarray | None = None
     for entry in entries.values():
         layer = _decode_registry_entry(qa, entry)
-        out = layer if out is None else np.logical_or(out, layer)
+        out = layer if out is None else out | layer
     assert out is not None  # _registry_bit_groups rejects empty targets
     return out
+
+
+def _preset_mask(gt: Any, op: Any, sensor: str, name: str) -> Any:
+    """A sensor preset's mask: ``op.targets`` of ``sensor`` OR-ed, on any carrier."""
+    _registry_bit_groups(sensor, op.targets)  # unknown targets fail eagerly
+    return mask_kernel(
+        _decode_targets_to_mask,
+        gt,
+        op.qa_band,
+        dim=op.dim,
+        name=name,
+        sensor=sensor,
+        targets=tuple(op.targets),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +502,7 @@ class _QAMask(Operator):
         GeoArray | numpy.ndarray: Boolean mask, True = drop.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     _target_name: ClassVar[str] = "qa"
 
@@ -496,17 +526,19 @@ class _QAMask(Operator):
         self.dim = band_dim(dim, axis, "_QAMask")
         self.invert = invert
 
-    @over_frames
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        qa = _select_qa(gt, self.qa_band, dim_axis(gt, self.dim, name="_QAMask"))
-        mask = _mask_from_definition(
-            qa,
+    def _apply(self, gt: Any) -> Any:
+        _check_definition(self.bits, self.values)
+        return mask_kernel(
+            _mask_from_definition,
+            gt,
+            self.qa_band,
+            dim=self.dim,
+            name=type(self).__name__,
             bits=self.bits,
             values=self.values,
             mode=self.mode,
             invert=self.invert,
         )
-        return wrap_like(gt, mask, fill_value=False)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -609,6 +641,10 @@ class MaskNoData(_QAMask):
         >>> # Fill-value fallback when no QA band is available.
         >>> nodata = MaskNoData()(carrier_with_fill_value)
     """
+
+    # the fill-driven path reads the whole carrier through the NumPy nodata
+    # model (geoops._src.valid), so the operator stays NumPy-only
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
@@ -735,7 +771,7 @@ class S2QA60(Operator):
         >>> mask = S2QA60()(s2_l1c_stack_with_qa60_appended)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -749,11 +785,8 @@ class S2QA60(Operator):
         self.targets = tuple(str(target) for target in targets)
         self.dim = band_dim(dim, axis, "S2QA60")
 
-    @over_frames
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        qa = _select_qa(gt, self.qa_band, dim_axis(gt, self.dim, name="S2QA60"))
-        mask = _decode_targets_to_mask(qa, "s2_qa60", self.targets)
-        return wrap_like(gt, mask, fill_value=False)
+    def _apply(self, gt: Any) -> Any:
+        return _preset_mask(gt, self, "s2_qa60", "S2QA60")
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -792,7 +825,7 @@ class S2SCL(Operator):
         >>> mask = S2SCL(targets=["cloud", "cirrus", "cloud_shadow"])(s2_l2a)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     _DEFAULT_TARGETS: ClassVar[tuple[str, ...]] = (
         "no_data",
@@ -817,11 +850,8 @@ class S2SCL(Operator):
         self.targets = tuple(str(name) for name in targets)
         self.dim = band_dim(dim, axis, "S2SCL")
 
-    @over_frames
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        qa = _select_qa(gt, self.qa_band, dim_axis(gt, self.dim, name="S2SCL"))
-        mask = _decode_targets_to_mask(qa, "s2_scl", self.targets)
-        return wrap_like(gt, mask, fill_value=False)
+    def _apply(self, gt: Any) -> Any:
+        return _preset_mask(gt, self, "s2_scl", "S2SCL")
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -874,7 +904,7 @@ class LandsatQA_PIXEL(Operator):
         LSDS-1618, 2022.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     _SENSOR_KEYS: ClassVar[dict[str, str]] = {
         "l89": "landsat_qa_pixel",
@@ -911,14 +941,9 @@ class LandsatQA_PIXEL(Operator):
         self.sensor = sensor
         self.dim = band_dim(dim, axis, "LandsatQA_PIXEL")
 
-    @over_frames
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+    def _apply(self, gt: Any) -> Any:
         registry_key = self._SENSOR_KEYS[self.sensor]
-        qa = _select_qa(
-            gt, self.qa_band, dim_axis(gt, self.dim, name="LandsatQA_PIXEL")
-        )
-        mask = _decode_targets_to_mask(qa, registry_key, self.targets)
-        return wrap_like(gt, mask, fill_value=False)
+        return _preset_mask(gt, self, registry_key, "LandsatQA_PIXEL")
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -966,7 +991,7 @@ class MODISStateQA(Operator):
         2015, Table 12.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -980,11 +1005,8 @@ class MODISStateQA(Operator):
         self.targets = tuple(str(target) for target in targets)
         self.dim = band_dim(dim, axis, "MODISStateQA")
 
-    @over_frames
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        qa = _select_qa(gt, self.qa_band, dim_axis(gt, self.dim, name="MODISStateQA"))
-        mask = _decode_targets_to_mask(qa, "modis_state_qa", self.targets)
-        return wrap_like(gt, mask, fill_value=False)
+    def _apply(self, gt: Any) -> Any:
+        return _preset_mask(gt, self, "modis_state_qa", "MODISStateQA")
 
     def get_config(self) -> dict[str, Any]:
         return {
