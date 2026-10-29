@@ -53,6 +53,7 @@ __all__ = [
     "invalid_values",
     "is_fill",
     "mask_invalid_to_nan",
+    "namespace_of",
     "restore_fill",
     "valid_pixels",
     "wrap_filled",
@@ -335,13 +336,39 @@ def wrap_filled(
     return wrap_like(ref, filled, fill_value=fill_value, **wrap_kwargs)
 
 
+def namespace_of(values: Any) -> Any:
+    """The array namespace of ``values``; a raw dask array maps to ``dask.array``.
+
+    pipekit-array's ``array_namespace`` dispatches NumPy and JAX through
+    their Array API namespaces, but a dask array implements none, so a
+    reduction over a whole dask array (not over its blocks inside
+    ``KernelOp``) needs ``dask.array`` named here. ``dask.array`` provides
+    the same ``nan*`` reductions, ``where`` and ``isfinite`` as NumPy.
+
+    Args:
+        values: A NumPy, JAX or dask array.
+
+    Returns:
+        ``dask.array`` for a dask array, else ``array_namespace(values)``.
+
+    Example:
+        >>> namespace_of(np.zeros(2)).__name__
+        'numpy'
+    """
+    if type(values).__module__.startswith("dask."):
+        import dask.array
+
+        return dask.array
+    return array_namespace(values)
+
+
 def invalid_elements(values: Any, fill_value: Any) -> Any:
     """Where ``values`` is non-finite or equals ``fill_value``, on its own backend.
 
     The element rule of :func:`invalid_values`, written on the array
     namespace so it runs on NumPy, on JAX (under ``jax.jit`` too) and on dask
-    blocks without a host copy. A ``NaN`` fill is covered by the finiteness
-    test; ``None`` means no fill.
+    (its blocks or a whole array) without a host copy. A ``NaN`` fill is
+    covered by the finiteness test; ``None`` means no fill.
 
     Args:
         values: A NumPy, JAX or dask array.
@@ -354,7 +381,7 @@ def invalid_elements(values: Any, fill_value: Any) -> Any:
         >>> invalid_elements(np.array([1.0, np.nan, -9.0]), -9.0)
         array([False,  True,  True])
     """
-    bad = ~array_namespace(values).isfinite(values)
+    bad = ~namespace_of(values).isfinite(values)
     if fill_value is not None and not _is_nan_scalar(fill_value):
         bad = bad | (values == fill_value)
     return bad
