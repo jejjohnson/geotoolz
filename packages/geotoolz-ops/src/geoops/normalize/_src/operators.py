@@ -51,7 +51,6 @@ from geoops._src.valid import (
     invalid_pixel_mask,
     invalid_values,
     mask_invalid_to_nan,
-    namespace_of,
     valid_pixels,
     wrap_filled,
 )
@@ -64,10 +63,12 @@ from geoops.normalize._src.array import (
     check_positive,
     clahe,
     histogram_match,
+    inverse_minmax_scale,
+    inverse_robust_scale,
+    inverse_standard_scale,
     log_scale,
     minmax_scale,
     power_scale,
-    reshape_stat,
     robust_scale,
     standard_scale,
     validate_out_range,
@@ -216,33 +217,6 @@ def _fit_stats(op: Any, x: Any, **kwargs: Any) -> dict[str, np.ndarray]:
         f"operator inside it; or use {_FUNCTIONAL}"
     )
     return _host_stats(x, f"{name}.fit", alternative, **kwargs)
-
-
-def _standard_inverse(x: Any, *, mean: Any, std: Any) -> Any:
-    """``x * std + mean``, a zero ``std`` read as ``1`` (`StandardScaler.inverse`)."""
-    std_b = reshape_stat(std, x, None)
-    return x * namespace_of(x).where(std_b != 0, std_b, 1.0) + reshape_stat(
-        mean, x, None
-    )
-
-
-def _robust_inverse(x: Any, *, median: Any, iqr: Any) -> Any:
-    """``x * iqr + median``, a zero ``iqr`` read as ``1`` (`RobustScaler.inverse`)."""
-    iqr_b = reshape_stat(iqr, x, None)
-    return x * namespace_of(x).where(iqr_b != 0, iqr_b, 1.0) + reshape_stat(
-        median, x, None
-    )
-
-
-def _minmax_inverse(
-    x: Any, *, vmin: Any, vmax: Any, out_range: tuple[float, float]
-) -> Any:
-    """Map ``out_range`` back onto ``[vmin, vmax]`` (`MinMaxScaler.inverse`)."""
-    vmin_b = reshape_stat(vmin, x, None)
-    vmax_b = reshape_stat(vmax, x, None)
-    span = namespace_of(x).where(vmax_b > vmin_b, vmax_b - vmin_b, 1.0)
-    out_min, out_max = out_range
-    return (x - out_min) / (out_max - out_min) * span + vmin_b
 
 
 def _stretch_kernel(x: Any, *, lo: Any, hi: Any, out_range: tuple[float, float]) -> Any:
@@ -500,12 +474,13 @@ class StandardScaler(Operator):
         _check_per_band(mean, gt)
         _check_per_band(std, gt)
         return pixel_kernel(
-            _standard_inverse,
+            inverse_standard_scale,
             gt,
             dim="band",
             name=f"{type(self).__name__}.inverse",
             mean=mean,
             std=std,
+            reduce_axes=None,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -610,12 +585,13 @@ class RobustScaler(Operator):
         _check_per_band(median, gt)
         _check_per_band(iqr, gt)
         return pixel_kernel(
-            _robust_inverse,
+            inverse_robust_scale,
             gt,
             dim="band",
             name="RobustScaler.inverse",
             median=median,
             iqr=iqr,
+            reduce_axes=None,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -733,13 +709,14 @@ class MinMaxScaler(Operator):
         _check_per_band(vmin, gt)
         _check_per_band(vmax, gt)
         return pixel_kernel(
-            _minmax_inverse,
+            inverse_minmax_scale,
             gt,
             dim="band",
             name="MinMaxScaler.inverse",
             vmin=vmin,
             vmax=vmax,
             out_range=self.out_range,
+            reduce_axes=None,
         )
 
     def get_config(self) -> dict[str, Any]:
