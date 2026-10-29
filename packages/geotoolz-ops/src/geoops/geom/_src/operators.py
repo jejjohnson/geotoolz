@@ -28,8 +28,9 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 import geoarray
 import numpy as np
 from affine import Affine
-from geoarray import DIMS, FrozenAttrs, GeoArray
-from pipekit import Operator
+from geoarray import DIMS, FrozenAttrs, GeoArray, GridMismatchError
+from pipekit import Operator, get_adapter
+from pipekit_array import array_namespace
 from pyproj import CRS
 from scipy.ndimage import shift as ndi_shift
 
@@ -51,15 +52,18 @@ from geoops._src.geo import (
 from geoops._src.shape import BAND_AXIS, over_frames, require_ndim, single_band
 from geoops._src.valid import (
     carried_fill,
+    invalid_pixel_mask,
     mask_invalid_to_nan,
     valid_pixels,
     wrap_filled,
 )
-from geoops._src.wrap import adopt_attrs, rewrap_attrs, wrap_like
+from geoops._src.wrap import adopt_attrs, rewrap_attrs, rewrap_dims, wrap_like
 from geoops.geom._src.array import (
+    adaptive_gradient,
     bowtie_detector_positions,
     center_offsets,
     feather_weights,
+    gradient,
     is_north_up,
     resolve_interpolation,
     resolve_resampling,
@@ -2688,3 +2692,204 @@ def _validate_segment_compatible(
         first_transform.e,
     ):
         raise ValueError("All segments must share pixel size.")
+
+
+class Gradient(Operator):
+    r"""Diagnostic gradient of a gridded field in map axes, NaN- and mask-aware (OP-O7).
+
+    **Masks.** ``nan_policy`` decides what a masked cell costs:
+
+    - ``"propagate"`` (default): the plain stencil; a masked cell (non-finite,
+      the carrier's fill, or ``True`` in ``mask``) makes every derivative
+      whose stencil reads it ``NaN``, a halo of about ``accuracy`` cells;
+    - ``"adaptive"``: per point, the widest stencil lying wholly on valid
+      data (central, then forward, then backward, at decreasing accuracy),
+      so valid cells next to land keep a one-order-lower estimate and only
+      masked cells are ``NaN``.
+
+    The arithmetic is the public L1 primitives, so the same maths is
+    available without a carrier: :func:`geoops.geom.gradient` /
+    :func:`geoops.geom.adaptive_gradient` over :func:`geoops.geom.difference`
+    / :func:`geoops.geom.adaptive_difference`, whose stencils come from
+    :func:`geoops.geom.difference_offsets` and :func:`geoops.geom.difference_coeffs`.
+
+    **Geometry**, derived from the carrier. The row and column derivatives
+    map to the CRS's ``x`` and ``y`` through the transform's Jacobian
+    (:math:`x = a\,j + b\,i + c,\; y = d\,j + e\,i + f`),
+
+    .. math::
+
+        \begin{pmatrix} \partial_x f \\ \partial_y f \end{pmatrix}
+        = \frac{1}{ae - bd}
+          \begin{pmatrix} e & -d \\ -b & a \end{pmatrix}
+          \begin{pmatrix} \partial_j f \\ \partial_i f \end{pmatrix},
+
+    exact for a linear field on north-up, flipped and rotated grids. On a
+    geographic CRS its angular unit (degrees, grads) becomes metres on the CRS's ellipsoid at each
+    pixel's latitude :math:`\varphi`:
+    :math:`\partial_{\mathrm{north}} f = \partial_\varphi f / (M(\varphi)\,\pi/180)`,
+    :math:`\partial_{\mathrm{east}} f = \partial_\lambda f / (N(\varphi)\cos\varphi\,\pi/180)`,
+    with :math:`M`, :math:`N` the meridional and prime-vertical radii.
+
+    The result gains a ``component`` dim just before ``y x`` holding
+    ``(∂f/∂y, ∂f/∂x)``, per CRS unit (per metre on a geographic CRS), and
+    declares ``fill_value=NaN``. A plain array is differentiated in pixel
+    units, rows then columns. A diagnostic: model-grade calculus on
+    staggered grids stays in finitevolX. A geometry operator, so a
+    ``DataArray`` is refused: lift it with ``xrops.lift``, or call the L1
+    primitives with coordinate spacings.
+
+    Args:
+        accuracy: Accuracy order of the one-sided stencils (the centred one
+            is one order higher); ``1`` is ``numpy.gradient``'s scheme.
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (above).
+        periodic_x: The columns wrap, for a global longitude grid.
+
+    Examples:
+        >>> import geoops as gz
+        >>> grad = gz.Gradient()(ssh_map)                 # (component, y, x)
+        >>> grad = gz.Gradient(nan_policy="adaptive")(ssh_map, land)  # keeps the coast
+        >>> step = jax.jit(gz.Gradient())                 # one trace across transforms
+        >>> d_y, d_x = gz.geom.adaptive_gradient(ssh, dy, dx, mask=land)  # arrays only
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def __init__(
+        self,
+        *,
+        accuracy: int = 1,
+        nan_policy: str = "propagate",
+        periodic_x: bool = False,
+    ) -> None:
+        if nan_policy not in ("propagate", "adaptive"):
+            raise ValueError(
+                f"nan_policy must be 'propagate' or 'adaptive'; got {nan_policy!r}"
+            )
+        if accuracy < 1:
+            raise ValueError(f"accuracy must be at least 1; got {accuracy}")
+        self.accuracy = accuracy
+        self.nan_policy = nan_policy
+        self.periodic_x = periodic_x
+
+    def _apply(self, gt: Any, mask: Any = None) -> Any:
+        reject_geotensor(gt, "Gradient")
+        if type(gt).__module__.startswith("xarray."):
+            raise TypeError(
+                "Gradient is a geometry operator and takes a GeoArray: lift it "
+                "over a DataArray cube with xrops.lift(Gradient(), dim=...), or "
+                "call geoops.geom.gradient / adaptive_gradient with coordinate "
+                "spacings."
+            )
+        if mask is not None and isinstance(gt, GeoArray) and isinstance(mask, GeoArray):
+            # geoarray's own grid check: exact, and deferred to run time under jit
+            try:
+                get_adapter(gt).check_compatible(gt, mask)
+            except GridMismatchError as exc:
+                raise GridMismatchError(
+                    f"Gradient: the mask is not on the field's pixel grid ({exc})"
+                ) from exc
+        if not isinstance(gt, GeoArray):
+            # a plain array (NumPy or JAX): pixel units, on its own backend
+            field = as_float(gt if hasattr(gt, "dtype") else np.asarray(gt))
+            xp = array_namespace(field)
+            grad = self._pixel_gradient(field, xp, _mask_data(mask, xp))
+            return xp.moveaxis(grad, 0, -3)
+        if gt.batch_dims:
+            raise ValueError(
+                f"Gradient: the carrier is batched over {gt.batch_dims} (one "
+                "transform per item); map it per item with "
+                f"geoarray.map_over(x, Gradient(...), {gt.batch_dims[0]!r})."
+            )
+        xp = gt.xp
+        data = as_float(gt.data)
+        # geoops' pixel nodata rule (any invalid band), on the carrier's backend
+        invalid = invalid_pixel_mask(gt, mask=_aligned_mask(mask, gt, xp))
+        mask_data = invalid
+        field = xp.where(invalid, xp.nan, data)
+        d_row, d_col = self._pixel_gradient(field, xp, mask_data)
+        d_y, d_x = _map_axes(gt, d_row, d_col)
+        # an invalid input pixel has no derivative, whatever its neighbours hold
+        grad = xp.where(invalid[..., None, :, :], xp.nan, xp.stack([d_y, d_x], axis=-3))
+        dims = (*gt.dims[:-2], "component", *gt.dims[-2:])
+        return rewrap_dims(gt, grad, dims, fill_value=np.nan)
+
+    def _pixel_gradient(self, field: Any, xp: Any, mask: Any) -> Any:
+        """``(∂f/∂i, ∂f/∂j)`` per pixel step, through the L1 primitives."""
+        if self.nan_policy == "adaptive":
+            return adaptive_gradient(
+                field, mask=mask, accuracy=self.accuracy, periodic_x=self.periodic_x
+            )
+        if mask is not None:
+            field = xp.where(mask, xp.nan, field)
+        out = gradient(field, accuracy=self.accuracy, periodic_x=self.periodic_x)
+        if mask is not None:
+            out = xp.where(mask, xp.nan, out)
+        return out
+
+
+def _aligned_mask(mask: Any, gt: GeoArray, xp: Any) -> Any:
+    """``mask`` as booleans aligned to ``gt``'s dims: by name for a carrier.
+
+    A `GeoArray` mask's dims must be among the field's; each missing dim
+    becomes a size-1 axis, so a ``(time, y, x)`` mask drops whole pixels of
+    a ``(time, band, y, x)`` field frame by frame. A plain array broadcasts
+    from the right, as NumPy does (an ``(H, W)`` mask on any field).
+    """
+    data = _mask_data(mask, xp)
+    if data is None or not isinstance(mask, GeoArray):
+        return data
+    extra = [d for d in mask.dims if d not in gt.dims]
+    if extra:
+        raise ValueError(
+            f"Gradient: the mask has dims {extra} the field lacks; its dims are "
+            f"{mask.dims}, the field's {gt.dims}"
+        )
+    present = [d for d in gt.dims if d in mask.dims]
+    data = xp.permute_dims(data, tuple(mask.dims.index(d) for d in present))
+    for axis, dim in enumerate(gt.dims):
+        if dim not in mask.dims:
+            data = xp.expand_dims(data, axis=axis)
+    return data
+
+
+def _mask_data(mask: Any, xp: Any) -> Any:
+    """The boolean array of a mask carrier (``True`` drops), or ``None``."""
+    if mask is None:
+        return None
+    reject_geotensor(mask, "Gradient")
+    data = mask.data if isinstance(mask, GeoArray) else mask
+    data = data if hasattr(data, "dtype") else np.asarray(data)
+    return data if data.dtype == bool else xp.astype(data, xp.bool)
+
+
+def _map_axes(gt: GeoArray, d_row: Any, d_col: Any) -> tuple[Any, Any]:
+    """``(∂f/∂y, ∂f/∂x)`` in the CRS's axes (metres on a geographic CRS)."""
+    a, b, _, d, e, f0 = (gt.transform[k] for k in range(6))
+    xp = gt.xp
+
+    def times(coeff: Any, value: Any) -> Any:
+        # a zero Jacobian entry must not pull in the other axis's NaN (0 * nan)
+        return xp.where(coeff == 0, 0.0, coeff * value)
+
+    det = a * e - b * d
+    d_x = (times(e, d_col) - times(d, d_row)) / det
+    d_y = (times(a, d_row) - times(b, d_col)) / det
+    crs = None if gt.crs is None else CRS.from_user_input(gt.crs)
+    if crs is None or not crs.is_geographic:
+        return d_y, d_x
+    # radians per CRS angular unit: degrees for EPSG:4326, grads for EPSG:4807
+    per_unit = crs.axis_info[0].unit_conversion_factor
+    height, width = gt.shape[-2:]
+    rows = xp.arange(height, dtype=xp.float64)[:, None] + 0.5
+    cols = xp.arange(width, dtype=xp.float64)[None, :] + 0.5
+    lat = (d * cols + e * rows + f0) * per_unit
+    ellipsoid = crs.ellipsoid
+    semi_major = ellipsoid.semi_major_metre
+    e2 = 1.0 - (ellipsoid.semi_minor_metre / semi_major) ** 2
+    w = xp.sqrt(1.0 - e2 * xp.sin(lat) ** 2)
+    meridional = semi_major * (1.0 - e2) / w**3
+    prime_vertical = semi_major / w
+    return d_y / (meridional * per_unit), d_x / (
+        prime_vertical * xp.cos(lat) * per_unit
+    )

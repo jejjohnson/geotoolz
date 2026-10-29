@@ -35,6 +35,7 @@ from pipekit_array import DimArray, KernelOp, array_namespace, isel
 from geoops._src.bands import BandRef, resolve_band
 from geoops._src.geo import reject_geotensor
 from geoops._src.shape import DIMS
+from geoops._src.valid import invalid_elements
 
 
 __all__ = [
@@ -141,11 +142,8 @@ def nodata_where(value: Any, *bands: Any, fill_values: Sequence[Any]) -> Any:
 
 
 def _valid(band: Any, fill: Any) -> Any:
-    """Where ``band`` is finite and not ``fill`` (a ``NaN`` fill: finite only)."""
-    ok = array_namespace(band).isfinite(band)
-    if fill is not None and not (isinstance(fill, float) and np.isnan(fill)):
-        ok = ok & (band != fill)
-    return ok
+    """Where ``band`` is finite and not ``fill`` (`geoops._src.valid`'s rule)."""
+    return ~invalid_elements(band, fill)
 
 
 def _masked_kernel(

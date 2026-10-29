@@ -148,17 +148,20 @@ def assert_same_carrier(src: Any, out: Any) -> None:
 def assert_consistent_attrs(inputs: Any, out: Any) -> None:
     """``out``'s per-band attrs match its band count.
 
+    The band count is the size of the stored ``band`` dim (`GeoArray.count`,
+    the rule geoarray keeps per-band attrs by), so an output with another dim
+    at ``-3`` (a gradient's ``component``) is counted by name.
     ``inputs`` is the operator's input (a carrier or a list of carriers).
     Returning an input object itself is allowed (a pass-through). attrs
     are immutable (`geoarray.FrozenAttrs`), so sharing them is safe.
     """
-    from geoops._src.bands import PER_BAND_KEYS, band_count
+    from geoops._src.bands import PER_BAND_KEYS
 
     sources = geoarrays(inputs)
     for gt in geoarrays(out):
         if any(gt is src for src in sources):
             continue
-        n_bands = band_count(gt.shape)
+        n_bands = gt.count
         for key in PER_BAND_KEYS:
             value = gt.attrs.get(key)
             if value is None or isinstance(value, str | dict):
