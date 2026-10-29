@@ -9,9 +9,7 @@ imported under its own name:
   local L2 products;
 - ``xrtoolz-core`` (``xrcore``): the xarray ``Operator`` base and
   ``Signature``;
-- ``xrtoolz-grad`` (``xrgrad``): finite-difference calculus on xarray;
-- ``xrtoolz-einx`` (``xreinx``): the einx bridge;
-- ``xrtoolz-sklearn`` (``xrsklearn``): the scikit-learn bridge.
+- ``xrtoolz-grad`` (``xrgrad``): finite-difference calculus on xarray.
 
 Example:
     >>> import xrops

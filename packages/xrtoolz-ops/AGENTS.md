@@ -4,21 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`xrtoolz` is a uv workspace of seven packages that together provide a composable operator library for geoprocessing Earth System Data Cubes — preprocess, infer, and evaluate xarray datasets with a uniform pipeline abstraction. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework.
+`xrtoolz` is a uv workspace of five packages that together provide a composable operator library for geoprocessing Earth System Data Cubes — preprocess, infer, and evaluate xarray datasets with a uniform pipeline abstraction. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework.
 
 The packages (distribution name → import name):
 
 | Package | Import | Purpose |
 |---|---|---|
 | `xrtoolz-ops` | `xrops` | Main operator families (geo, ocn, budgets, interpolate, transforms, metrics, viz, …) |
-| `xrtoolz` | `xrtoolz` | The umbrella: no code; installs the other six |
+| `xrtoolz` | `xrtoolz` | The umbrella: no code; installs the other four |
 | `xrtoolz-core` | `xrcore` | xarray-aware `Operator` (DataTree dispatch) + `Signature` shape descriptor |
 | `xrtoolz-grad` | `xrgrad` | Finite-difference calculus on labeled grids (sole carrier of the finitediffx/JAX stack) |
-| `xrtoolz-einx` | `xreinx` | xarray ↔ einx named-tensor bridge (functions + Operators; einx loads lazily) |
-| `xrtoolz-sklearn` | `xrsklearn` | scikit-learn ↔ xarray bridge (`XarrayEstimator`, `.sklearn` accessors, `SklearnOp`) |
 | `xrtoolz-products` | `xrproducts` | Authenticated archive readers (CMEMS, CDS, AEMET) + the typed request vocabulary / CF `Variable` registry |
 
-`xrtoolz` holds no code and depends on the other six, so `pip install xrtoolz` installs the whole family. There are no compatibility shims: renames and removals are outright, and every caller in the stack moves in the same release.
+`xrtoolz` holds no code and depends on the other four, so `pip install xrtoolz` installs the whole family. There are no compatibility shims: renames and removals are outright, and every caller in the stack moves in the same release.
 
 ## Architecture
 
@@ -53,7 +51,7 @@ Each package lives in `packages/<distribution>/src/<import name>/` with its own 
 
 Design rules:
 
-- Anything domain-agnostic lives in `geo`/`interpolate`/`transforms`/`utils` (or a sibling workspace package — `xrgrad`, `xreinx`, `xrsklearn`); only true physics lives in the domain submodules (`ocn`, `budgets`, `atm`, …). The composition primitives themselves live in `pipekit` (and their xarray-aware base in `xrcore`), not here.
+- Anything domain-agnostic lives in `geo`/`interpolate`/`transforms`/`utils` (or a sibling workspace package such as `xrgrad`; the einx and scikit-learn bridges are pipekit-array's, with `xrops.learn` on top); only true physics lives in the domain submodules (`ocn`, `budgets`, `atm`, …). The composition primitives themselves live in `pipekit` (and their xarray-aware base in `xrcore`), not here.
 - Implementation lives in each submodule's `_src/` directory; public names are re-exported through the submodule `__init__.py` (and, for `metrics`, per-family facade modules like `metrics.pixel`). **Every** public Operator class is importable from its domain package (`xrops.ocn.Streamfunction`, not just `xrops.ocn.operators.Streamfunction`).
 - Operator constructor conventions: `variable=` (not `var=`) for a single variable name, `variables=` for lists; singular `dim=` (accepting `str | Sequence[str]`) for reduce-style "dimension(s) to act over" parameters, plural `dims=` only when the value is inherently a fixed collection of axes (image-plane pairs, FFT axes).
 
@@ -64,8 +62,6 @@ Design rules:
 | `packages/xrtoolz/src/xrtoolz/` | Main package source code (domain submodules, combinators, shims) |
 | `packages/xrtoolz-core/src/xrcore/` | `Operator` (DataTree dispatch) + `Signature` |
 | `packages/xrtoolz-grad/src/xrgrad/` | Finite-difference calculus |
-| `packages/xrtoolz-einx/src/xreinx/` | xarray ↔ einx bridge |
-| `packages/xrtoolz-sklearn/src/xrsklearn/` | sklearn ↔ xarray bridge |
 | `packages/xrtoolz-products/src/xrproducts/` | Authenticated archive readers + request types |
 | `packages/*/tests/` | Per-package test suites |
 | `docs/` | Documentation (MkDocs root site), including `docs/design/` with the full design doc |
@@ -82,18 +78,18 @@ Design rules:
 | `regionmask` | Land/ocean/country masks |
 | `xrft` | Fourier transforms on xarray |
 | `xskillscore` | Verification metrics |
-| `einx` | Named-tensor backend for the einx-based kernels still in this package (`transforms.encoders.basis`, `metrics.instance`, `metrics.distributional`); the bridge itself is `xreinx` |
+| `einx` | Named-tensor backend for the einx-based kernels still in this package (`transforms.encoders.basis`, `metrics.instance`, `metrics.distributional`); the named-dims bridge itself is `pipekit_array.einx` |
 
-The finitediffx/JAX stack rides exclusively in `xrtoolz-grad`, so it still reaches a full `xrtoolz` install transitively (ocn/budgets/metrics call `xrgrad` eagerly) — but the scoped packages (`xrtoolz-core`, `xrtoolz-einx`, `xrtoolz-sklearn`) install without it, and making `xrtoolz-grad` optional later is now a packaging decision, not a refactor. PyTorch and sklearn *models* remain non-dependencies — `ModelOp` uses duck typing so the user installs only what they need.
+The finitediffx/JAX stack rides exclusively in `xrtoolz-grad`, so it still reaches a full `xrtoolz` install transitively (ocn/budgets/metrics call `xrgrad` eagerly) — but `xrtoolz-core` installs without it, and making `xrtoolz-grad` optional later is now a packaging decision, not a refactor. PyTorch and sklearn *models* remain non-dependencies — `ModelOp` uses duck typing so the user installs only what they need.
 
 ## Common Commands
 
 ```bash
 make install              # uv sync --all-packages --all-groups --all-extras + hooks
-make test                 # Fast tier across all six packages
+make test                 # Fast tier across all five packages
 make test-all             # Everything, including slow/integration
 make test-slow            # Only the slow/integration tiers
-make test-doctest         # Docstring examples in xrcore/xrgrad/xreinx/xrsklearn
+make test-doctest         # Docstring examples in xrcore/xrgrad
 make format               # Auto-fix: ruff format . && ruff check --fix .
 make lint                 # Lint code: ruff check .
 make typecheck            # ty check per package (from each package dir)
@@ -135,7 +131,7 @@ make typecheck                                # ty per package
 - Layer 0 pure functions live alongside Layer 1 operators in the same submodule
 - Stateful operations use the split-object pattern (`CalculateX` returns state, `ApplyX(state)` applies it). Exception: sklearn-style fit/transform state is handled by `xrops.learn.XarrayEstimator` (on `pipekit_array.Estimator`) instead
 - Operators holding live non-serializable state (models, closures, Datasets, child operators) set `forbid_in_yaml: ClassVar[bool] = True` (pipekit convention)
-- Google-style docstrings. In the scoped packages (`xrcore`, `xrgrad`, `xreinx`, `xrsklearn`) the bar is enforced: ruff's pydocstyle (`D`) rules are enabled per package, and every public symbol carries Args/Returns/Raises plus a runnable, self-contained `Example:` block executed by `make test-doctest` (CI runs it too). End a doctest block with a blank line before the closing ```` ``` ```` fence, or doctest reads the fence as expected output
+- Google-style docstrings. In the scoped packages (`xrcore`, `xrgrad`) the bar is enforced: ruff's pydocstyle (`D`) rules are enabled per package, and every public symbol carries Args/Returns/Raises plus a runnable, self-contained `Example:` block executed by `make test-doctest` (CI runs it too). End a doctest block with a blank line before the closing ```` ``` ```` fence, or doctest reads the fence as expected output
 - Type hints on all public functions and methods
 - Surgical changes only — don't refactor adjacent code or add docstrings to unchanged code
 

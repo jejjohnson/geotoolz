@@ -47,9 +47,9 @@ dependencies = [
     "numpy-groupies>=0.11",
     # Named-tensor backend for the einx-based kernels that stayed in this
     # package (transforms.encoders.basis, metrics.instance,
-    # metrics.distributional). The xarray↔einx *bridge* itself lives in
-    # the xrtoolz-einx workspace member (import name `xreinx`). einx
-    # pulls only numpy by default. Requires 0.4+ for `einx.dot`/`einx.id`.
+    # metrics.distributional). The named-dims einx *bridge* is
+    # pipekit_array.einx (geostack OP-O2). einx pulls only numpy by
+    # default. Requires 0.4+ for `einx.dot`/`einx.id`.
     "einx>=0.4",
     # Split-out workspace members: xrcore supplies the xarray-aware
     # Operator + Signature, xrgrad the finite-difference calculus (sole
@@ -196,7 +196,7 @@ ignore = [
 combine-as-imports = true
 lines-after-imports = 2
 # Sibling workspace members are first-party to the xrtoolz stack.
-known-first-party = ["xrops", "xrcore", "xrgrad", "xreinx", "xrsklearn"]
+known-first-party = ["xrops", "xrcore", "xrgrad"]
 
 [tool.ty.environment]
 python-version = "3.12"

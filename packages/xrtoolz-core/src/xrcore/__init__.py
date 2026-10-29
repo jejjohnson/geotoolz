@@ -1,7 +1,7 @@
 """xrcore — the xarray-aware operator base for the xrtoolz stack.
 
 Two building blocks, shared by every xarray-facing operator package
-(`xrtoolz`, `xrtoolz-einx`, `xrtoolz-sklearn`, …):
+(`xrtoolz-ops`, `xrtoolz-grad`, …):
 
 - :class:`Operator` — subclasses :class:`pipekit.Operator` and adds
   ``xr.DataTree`` leaf-wise dispatch, so any operator built on it

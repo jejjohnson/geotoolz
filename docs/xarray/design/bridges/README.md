@@ -11,7 +11,7 @@ keep reaching for:
 
 | Module             | Bridges                       | Purpose                                                                                                                          |
 | ------------------ | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `xrtoolz.einx`     | [einx]                        | Named-tensor algebra (einsum, rearrange, reduce, …) where the named axes *are* the DataArray dims.                               |
+| `xrtoolz.einx`     | [einx]                        | Retired: the named-dims einx bridge is `pipekit_array.einx` (geostack OP-O2); its design pages were removed with `xreinx`.       |
 | `xrtoolz.linalg`   | [gaussx] / [lineax] / [matfree] | Structured linear operators, solvers, logdet, sampling — all in DataArray-space, with physical dims as the row/column labels.    |
 | `xrtoolz.prob`     | [numpyro] / [pyrox]           | Probability/statistics on DataArrays: distributions parameterized by named tensors, sampling, log-probability, and posterior IO. |
 
@@ -33,11 +33,6 @@ The three modules are siblings of the existing domain packages
 design_docs/xrtoolz/
 ├── README.md          # This file — index + cross-cutting principles
 ├── overview.md        # Shared motivation, contracts, and dependency model
-├── einx/
-│   ├── vision.md      # Why bridge einx; user stories
-│   ├── architecture.md
-│   ├── api.md
-│   └── decisions.md
 ├── linalg/            # gaussx + lineax bridge
 │   ├── vision.md
 │   ├── architecture.md
@@ -55,14 +50,11 @@ design_docs/xrtoolz/
 1. **[overview.md](overview.md)** — the shared model: DataArray as the
    carrier, named dims as the type, lazy backend imports, Layer-0
    functions + thin `Operator` wrappers.
-2. **[einx/vision.md](einx/vision.md)** — start here for the lightest
-   bridge, since `linalg` and `prob` lean on the same dim-bookkeeping
-   patterns.
-3. **[linalg/vision.md](linalg/vision.md)** — gaussx-flavoured structured
+2. **[linalg/vision.md](linalg/vision.md)** — gaussx-flavoured structured
    linear algebra with physical dims as row/column labels.
-4. **[prob/vision.md](prob/vision.md)** — distributions whose parameters
+3. **[prob/vision.md](prob/vision.md)** — distributions whose parameters
    are DataArrays.
-5. Inside each subpackage: `architecture.md` → `api.md` →
+4. Inside each subpackage: `architecture.md` → `api.md` →
    `decisions.md`.
 
 ## Cross-cutting principles
@@ -97,13 +89,7 @@ These hold for all three modules; see `overview.md` for the reasoning.
 
 ## Status
 
-- **`einx`** — **implemented** (`src/xrtoolz/einx/`). einx is a core
-  dependency (reverses decision D9). The four pattern verbs
-  (`einsum` / `rearrange` / `reduce` / `repeat`), the `matmul` /
-  `outer` / `batch_matmul` conveniences, `pack_dataset` /
-  `unpack_dataset`, and the Layer-1 operators are live. Some signatures
-  shifted from the original draft (notably: `rearrange` is positional on
-  the input's current dim order, and `reduce` takes ``op=`` keyword-only).
+- **`einx`** — **retired**. The named-dims einx bridge is `pipekit_array.einx` (geostack OP-O2), and `pack_dataset` / `unpack_dataset` live in `xrops.utils`.
 - **`linalg`**, **`prob`** — still **draft / pre-implementation**.
 
 The docs describe the proposed API surface; concrete signatures may

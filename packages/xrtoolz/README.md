@@ -8,8 +8,6 @@ The xarray side of the geostack in one install. This distribution holds no code:
 | `xrtoolz-products` | `xrproducts` | Readers for CMEMS, CDS, AEMET and local L2 products |
 | `xrtoolz-core` | `xrcore` | The xarray `Operator` base and `Signature` |
 | `xrtoolz-grad` | `xrgrad` | Finite-difference calculus on xarray |
-| `xrtoolz-einx` | `xreinx` | The einx bridge |
-| `xrtoolz-sklearn` | `xrsklearn` | The scikit-learn bridge |
 
 ```bash
 pip install xrtoolz          # the whole family

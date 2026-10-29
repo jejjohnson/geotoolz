@@ -60,10 +60,10 @@ physics lives here.
 
 | Page | Scope |
 |------|-------|
-| [Named-tensor algebra (einx)](einx.md) | `einsum` / `rearrange` / `reduce` / `repeat`, `matmul` / `outer`, `pack`/`unpack` Dataset |
+| [scikit-learn on xarray](learn.md) | `XarrayEstimator` on DataArrays, Datasets and DataTrees, and the `.sklearn` accessor |
 | [Inference](inference.md) | `ModelOp` wrappers for sklearn / JAX / framework-agnostic models |
 | [Visualization](viz.md) | Cartopy axes, colormap registry, and the V1–V5 validation panels |
-| [Utilities](utils.md) | The scikit-learn ↔ xarray estimator bridge |
+| [Utilities](utils.md) | `pack_dataset` / `unpack_dataset` |
 
 ## Whole-package dump
 

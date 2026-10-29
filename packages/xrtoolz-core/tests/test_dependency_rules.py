@@ -38,10 +38,6 @@ PACKAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         "packages/xrtoolz-core/pyproject.toml",
         ("packages/xrtoolz-core/src/xrcore",),
     ),
-    "xrtoolz-einx": (
-        "packages/xrtoolz-einx/pyproject.toml",
-        ("packages/xrtoolz-einx/src/xreinx",),
-    ),
     "xrtoolz-grad": (
         "packages/xrtoolz-grad/pyproject.toml",
         ("packages/xrtoolz-grad/src/xrgrad",),
@@ -53,10 +49,6 @@ PACKAGES: dict[str, tuple[str, tuple[str, ...]]] = {
     "xrtoolz-products": (
         "packages/xrtoolz-products/pyproject.toml",
         ("packages/xrtoolz-products/src/xrproducts",),
-    ),
-    "xrtoolz-sklearn": (
-        "packages/xrtoolz-sklearn/pyproject.toml",
-        ("packages/xrtoolz-sklearn/src/xrsklearn",),
     ),
 }
 
@@ -99,11 +91,9 @@ ALLOWED: dict[str, str] = {
     "pipekit_jax": "pipekit-jax",
     "pipekit_train": "pipekit-train",
     "xrcore": "xrtoolz-core",
-    "xreinx": "xrtoolz-einx",
     "xrgrad": "xrtoolz-grad",
     "xrops": "xrtoolz-ops",
     "xrproducts": "xrtoolz-products",
-    "xrsklearn": "xrtoolz-sklearn",
     "xrtoolz": "xrtoolz",
 }
 
