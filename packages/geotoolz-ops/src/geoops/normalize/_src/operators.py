@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, Self
 
 import numpy as np
 from pipekit import Operator, get_adapter
+from pipekit_array import KernelOp
 
 from geoops._src.config import jsonable
 from geoops._src.fitted import fit_once, require_concrete
@@ -49,11 +50,7 @@ from geoops._src.shape import DIMS
 from geoops._src.stretch import check_percentiles, stretch_between
 from geoops._src.valid import (
     invalid_elements,
-    invalid_values,
-    mask_invalid_to_nan,
     namespace_of,
-    valid_pixels,
-    wrap_filled,
 )
 from geoops.normalize._src.array import (
     BAND_STATS,
@@ -77,24 +74,6 @@ from geoops.normalize._src.array import (
 
 if TYPE_CHECKING:
     from geoarray import GeoArray
-
-
-def _valid_mask(x: Any) -> np.ndarray:
-    """Validity mask of ``x``: per pixel (per frame for 4-D), else elementwise."""
-    if np.ndim(x) < 2:
-        return ~invalid_values(x)
-    return valid_pixels(x, keep_time=True)
-
-
-def _masked(x: Any) -> tuple[np.ndarray, np.ndarray]:
-    """Float64 copy of ``x`` with invalid pixels set to ``NaN``, plus the mask."""
-    valid = _valid_mask(x)
-    return mask_invalid_to_nan(x, valid=valid, dtype=float), valid
-
-
-def _rewrap(gt: Any, out: np.ndarray, valid: np.ndarray) -> Any:
-    """Write ``NaN`` into invalid pixels and rewrap like ``gt`` with a NaN fill."""
-    return wrap_filled(gt, out, fill_value=np.nan, valid=valid)
 
 
 def _check_per_band(stat: Any, gt: Any, dim: str = "band") -> None:
@@ -298,6 +277,25 @@ def _minmax_inverse(
     return (x - out_min) / (out_max - out_min) * span + vmin_b
 
 
+def _clahe_kernel(
+    x: Any,
+    *,
+    fill: Any,
+    banded: bool,
+    window: Any,
+    clip_limit: float,
+    nbins: int,
+) -> Any:
+    """`clahe` on ``(..., [C,] H, W)`` with the pixel nodata rule (`CLAHE`)."""
+    xp = namespace_of(x)
+    bad = invalid_elements(x, fill)
+    if banded:
+        bad = xp.broadcast_to(xp.any(bad, axis=-3, keepdims=True), x.shape)
+    values = xp.where(bad, xp.nan, x.astype(np.float64))
+    out = clahe(values, window=window, clip_limit=clip_limit, nbins=nbins)
+    return xp.where(bad, xp.nan, out)
+
+
 def _stretch_kernel(x: Any, *, lo: Any, hi: Any, out_range: tuple[float, float]) -> Any:
     """Clip to ``[lo, hi]`` per band and map into ``out_range`` (`HistogramStretch`)."""
     out_min, out_max = out_range
@@ -360,14 +358,19 @@ class PerBandStats(Operator):
 class CLAHE(Operator):
     """Contrast-Limited Adaptive Histogram Equalization.
 
-    Wraps :func:`skimage.exposure.equalize_adapthist` and applies it
-    independently per band for ``(C, H, W)`` carriers while preserving
-    NaN positions and GeoArray metadata. Nodata (fill / non-finite)
-    pixels are excluded from the histograms and hold the output fill.
+    Reproduces :func:`skimage.exposure.equalize_adapthist` (through
+    `clahe`, without scikit-image) independently per band for
+    ``(C, H, W)`` carriers while preserving NaN positions and GeoArray
+    metadata. Nodata (fill / non-finite) pixels are excluded from the
+    histograms and hold the output fill.
+
+    Backends: NumPy, JAX (under ``jax.jit`` too) and dask, where each
+    frame's whole ``(band, y, x)`` cube is one task: the tiles need every
+    pixel, so a spatially chunked cube is rechunked per frame.
 
     Args:
         window: Contextual-region shape for the local histograms.
-            ``None`` uses skimage's default (1/8 of the image height /
+            ``None`` uses scikit-image's default (1/8 of the image height /
             width). Lists (e.g. from Hydra / OmegaConf round-trips)
             are normalised to tuples.
         clip_limit: Contrast-limiting clip threshold in ``[0, 1]``.
@@ -379,7 +382,7 @@ class CLAHE(Operator):
         >>> out = CLAHE(window=(8, 8), clip_limit=0.03)(scene)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -390,22 +393,31 @@ class CLAHE(Operator):
     ) -> None:
         # Accept list inputs (e.g. round-trips through Hydra/OmegaConf,
         # which materialise sequences as lists) and normalise to tuple
-        # so :func:`equalize_adapthist` receives its expected type.
+        # so `clahe` receives its expected type.
         if isinstance(window, list):
             window = tuple(window)
         self.window = window
         self.clip_limit = clip_limit
         self.nbins = nbins
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        arr, valid = _masked(gt)
-        out = clahe(
-            arr,
-            window=self.window,
-            clip_limit=self.clip_limit,
-            nbins=self.nbins,
+    def _apply(self, gt: Any) -> Any:
+        carrier, unwrap = named(gt, name="CLAHE")
+        banded = "band" in tuple(get_adapter(carrier).dims(carrier))
+        # the whole (band, y, x) cube of a frame in one call: tiles need every
+        # pixel, and the pixel rule every band (one dask task per frame)
+        op = KernelOp(
+            _clahe_kernel,
+            "(c,y,x)->(c,y,x)" if banded else "(y,x)->(y,x)",
+            core={"c": "band", "y": "y", "x": "x"} if banded else {"y": "y", "x": "x"},
+            params={
+                "fill": fill_of(carrier),
+                "banded": banded,
+                "window": self.window,
+                "clip_limit": self.clip_limit,
+                "nbins": self.nbins,
+            },
         )
-        return _rewrap(gt, out, valid)
+        return unwrap(_declare_fill(op(carrier), np.nan))
 
     def get_config(self) -> dict[str, Any]:
         if isinstance(self.window, tuple):

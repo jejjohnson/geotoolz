@@ -84,10 +84,24 @@ def test_bad_parameters_fail_before_any_compute(scene: GeoArray) -> None:
 # --- mask-aware per-band statistics (#590) ---------------------------------
 
 
+def _masked(g: GeoArray) -> tuple[np.ndarray, None]:
+    """Float64 copy of ``g`` with every invalid pixel ``NaN`` in all bands, per frame.
+
+    The masked copy the NumPy-only operators reduced over before the ports.
+    """
+    arr = np.asarray(g, dtype=float).copy()
+    bad = ~np.isfinite(arr)
+    if g.fill_value is not None:
+        bad |= arr == g.fill_value
+    if arr.ndim >= 3:  # a 2-D map is judged element by element
+        bad = np.broadcast_to(bad.any(axis=-3, keepdims=True), arr.shape)
+    arr[bad] = np.nan
+    return arr, None
+
+
 def _numpy_reference(g: GeoArray, q: tuple[float, ...]) -> dict[str, np.ndarray]:
     """Today's NumPy fit path: masked float64 copy, ``stat_axes``, ``np.nan*``."""
     from geoops.normalize._src.array import stat_axes
-    from geoops.normalize._src.operators import _masked
 
     arr, _ = _masked(g)
     axis = stat_axes(arr)
@@ -175,7 +189,6 @@ def test_band_stats_reject_bad_requests(scene: GeoArray) -> None:
 def _old_stretch(g: GeoArray, op: object) -> np.ndarray:
     """The NumPy-only implementation before #591, as the reference."""
     from geoops.normalize._src.array import stat_axes
-    from geoops.normalize._src.operators import _masked
 
     arr, _ = _masked(g)
     if isinstance(op, gn.ZeroOne):
@@ -241,7 +254,6 @@ SCALERS = {
 def _old_fit(name: str, g: GeoArray) -> tuple[np.ndarray, np.ndarray]:
     """The NumPy-only fit before #592, as the reference."""
     from geoops.normalize._src.array import stat_axes
-    from geoops.normalize._src.operators import _masked
 
     arr, _ = _masked(g)
     axis = stat_axes(arr)
@@ -321,7 +333,6 @@ def test_scaler_statistics_must_match_the_band_dim_on_dask(scene: GeoArray) -> N
 
 def test_per_band_stats_agree_on_every_carrier(stats_scene: GeoArray) -> None:
     from geoops.normalize._src.array import stat_axes
-    from geoops.normalize._src.operators import _masked
 
     arr, _ = _masked(stats_scene)
     want = gn.per_band_stats(arr, percentiles=(2.0, 50.0), reduce_axes=stat_axes(arr))
@@ -367,8 +378,6 @@ def test_per_band_stats_refuse_a_jax_trace(scene: GeoArray) -> None:
 
 def _old_match(g: GeoArray, reference: GeoArray) -> np.ndarray:
     """The NumPy-only operator before #594 (exact rank matching), as the reference."""
-    from geoops.normalize._src.operators import _masked
-
     arr, _ = _masked(g)
     ref, _ = _masked(reference)
     if ref.ndim == 4:
@@ -430,3 +439,75 @@ def test_histogram_match_agrees_with_scikit_image(scene: GeoArray) -> None:
     got = gn.HistogramMatch(reference=toy_geoarray(target))(toy_geoarray(source))
     want = exposure.match_histograms(source, target, channel_axis=0)
     np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12)
+
+
+# --- CLAHE (#595) ------------------------------------------------------------
+
+
+def _skimage_clahe(g: GeoArray, op: gn.CLAHE) -> np.ndarray:
+    """The scikit-image operator before #595, slice by slice, as the oracle."""
+    exposure = pytest.importorskip("skimage.exposure")
+    arr, _ = _masked(g)
+    out = arr.copy()
+    for idx in np.ndindex(arr.shape[:-2]):
+        values = arr[idx]
+        valid = np.isfinite(values)
+        lo, hi = values[valid].min(), values[valid].max()
+        if hi <= lo:
+            continue
+        unit = np.where(
+            valid,
+            (values - lo) / (hi - lo),
+            (np.median(values[valid]) - lo) / (hi - lo),
+        )
+        eq = exposure.equalize_adapthist(
+            np.clip(unit, 0.0, 1.0),
+            kernel_size=op.window,
+            clip_limit=op.clip_limit,
+            nbins=op.nbins,
+        )
+        out[idx][valid] = eq[valid] * (hi - lo) + lo
+    return out
+
+
+CLAHES = [
+    pytest.param(gn.CLAHE(), id="default"),
+    pytest.param(gn.CLAHE(window=3, clip_limit=0.05), id="w3"),
+    pytest.param(gn.CLAHE(window=(4, 2), clip_limit=0.0, nbins=32), id="w4x2-noclip"),
+]
+
+
+@pytest.mark.parametrize("op", CLAHES)
+def test_clahe_agrees_with_scikit_image_on_every_carrier(
+    op: gn.CLAHE, stats_scene: GeoArray
+) -> None:
+    want = _skimage_clahe(stats_scene, op)
+    got = op(stats_scene)
+    assert isinstance(got, GeoArray)
+    assert np.isnan(got.fill_value)
+    np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12, equal_nan=True)
+
+    da = stats_scene.to_xarray()
+    lazy = op(da.chunk({"y": 2, "x": 2}))
+    assert hasattr(lazy.data, "dask")
+    jitted = jax.jit(lambda g: op(g))(stats_scene.to_jax())
+    assert jitted.backend == "jax"
+    for out in (op(stats_scene.to_jax()), jitted, op(da), lazy.compute()):
+        np.testing.assert_allclose(np.asarray(out), want, rtol=1e-12, equal_nan=True)
+
+
+def test_clahe_needs_no_scikit_image(
+    scene: GeoArray, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "skimage", None)
+    monkeypatch.setitem(sys.modules, "skimage.exposure", None)
+    out = gn.CLAHE(window=3)(scene)
+    assert np.isfinite(np.asarray(out)[:, 1, 1]).all()
+
+
+def test_clahe_leaves_a_constant_band_unchanged() -> None:
+    values = np.stack([np.full((6, 6), 0.4), np.linspace(0, 1, 36).reshape(6, 6)])
+    out = np.asarray(gn.CLAHE(window=3)(toy_geoarray(values)))
+    np.testing.assert_array_equal(out[0], values[0])
