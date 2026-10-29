@@ -38,13 +38,22 @@ def as_float(
             Default ``np.float32``; pass ``np.float64`` where the
             caller documents a ``float64`` result for integer input.
 
+    JAX and dask arrays (an Array API array with a ``dtype``) stay on their
+    backend, so a kernel can promote its input under ``jax.jit``; anything
+    without a ``dtype`` goes through ``np.asarray`` first.
+
     Returns:
-        A floating-point ndarray with the same shape and values.
+        A floating-point array with the same shape and values, on the
+        input's backend.
     """
-    arr = np.asarray(arr)
+    if not hasattr(arr, "dtype") or isinstance(arr, np.ndarray):
+        arr = np.asarray(arr)
+        if np.issubdtype(arr.dtype, np.inexact):
+            return arr
+        return arr.astype(np.result_type(arr, min_dtype), copy=False)
     if np.issubdtype(arr.dtype, np.inexact):
         return arr
-    return arr.astype(np.result_type(arr, min_dtype), copy=False)
+    return arr.astype(np.result_type(arr.dtype, min_dtype))
 
 
 def holds_fill(dtype: DTypeLike, fill: Any) -> bool:

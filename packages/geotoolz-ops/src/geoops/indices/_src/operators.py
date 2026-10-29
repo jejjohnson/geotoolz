@@ -1,33 +1,28 @@
-"""Tier-B Operators — carrier-aware wrappers around the indices primitives.
+"""Tier-B Operators: the spectral indices on every carrier.
 
-Each Operator here:
+Each index operator names the bands it reads (an integer position or a
+band name) and the band dim (``dim="band"``), and runs its Tier-A kernel
+from ``array.py`` through `geoops._src.kernels.band_kernel`, which wraps
+pipekit-array's `KernelOp`:
 
-1. Takes its parameters as **keyword-only** ctor args so YAML / Hydra
-   configs are unambiguous.
-2. Calls into the matching primitive in ``array.py`` for the math.
-3. Rewraps the result to match the input carrier via
-   `geoops._src.wrap.wrap_like`: a ``GeoArray`` input comes back as
-   a ``GeoArray`` (``transform``, ``crs`` and a
-   copy of ``attrs`` propagated, ``fill_value=NaN``, with per-band keys such as
-   ``band_names`` dropped because the band axis collapsed); a plain ``np.ndarray``
-   comes back as a plain ndarray. Named-band references (``red="B04"``)
-   need carrier metadata and therefore require a GeoArray input;
-   integer band indices work on both carriers.
-4. Returns its config via ``get_config()`` so the Operator round-trips
-   through ``hydra_zen.builds``.
+1. Each band is selected by position or name along ``dim``: names resolve
+   against the carrier's labels for that dim (a `SpectralAxis`, a
+   ``DataArray`` coordinate), then its band attrs.
+2. The element-wise kernel runs on the selected bands, on NumPy, on JAX
+   (under ``jax.jit`` too) and lazily on a dask-backed ``xr.DataArray``.
+3. Pixels where any band it read is non-finite or the carrier's
+   ``fill_value`` become ``NaN``; a `GeoArray` output declares
+   ``fill_value=NaN``, keeps the transform, CRS and whole-carrier attrs,
+   and drops per-band keys because the band dim collapsed.
 
-The wrap discipline: index primitives collapse the channel axis (``-3``
-by default) but preserve the trailing two spatial axes ``(H, W)``. On a
-``(T, C, H, W)`` time stack the result is ``(T, 1, H, W)``: one index map
-per frame, with a singleton band axis so the time axis is not read as
-bands. That matches
-``wrap_like``'s contract exactly — it accepts any result whose
-last two dims agree with the input's. Carriers' transforms therefore
-survive unchanged through every index operator here.
+A plain array is read in the 0.2 layout ``("time", "band", "y", "x")[-ndim:]``
+and comes back as a plain array; band names need a carrier that names
+its bands. On a ``(T, C, H, W)`` stack (a `GeoArray` or a plain array)
+the result keeps a singleton band axis, ``(T, 1, H, W)``, so the time
+axis is not read as bands; a ``DataArray`` comes back as ``(time, y, x)``.
 
-Each operator delegates its maths to the matching Tier-A primitive in
-``indices/_src/array.py``; this module only resolves bands, judges
-nodata and rewraps the result.
+Operators take keyword-only configuration and round-trip
+``get_config()`` for ``hydra_zen.builds``.
 """
 
 from __future__ import annotations
@@ -41,26 +36,19 @@ from geoops._src.bands import (
     BAND_NAME_KEYS,
     BandRef,
     per_band_values,
-    resolve_band as _resolve_band,
     strip_band_attrs,
 )
 from geoops._src.config import nested_config
-from geoops._src.geo import grid_matches
-from geoops._src.shape import band_dim, dim_axis, keep_band_axis
-from geoops._src.valid import (
-    carried_fill,
-    carrier_fill_value,
-    invalid_values,
-    restore_fill,
-    wrap_filled,
-)
-from geoops._src.wrap import wrap_like
+from geoops._src.kernels import band_kernel, carrier_kernel
+from geoops._src.shape import band_dim, dim_axis
+from geoops._src.valid import carried_fill, wrap_filled
 from geoops.indices._src.array import (
     arvi,
     bais2,
     bsi,
     ciri,
     clay_minerals,
+    dnbr,
     evi,
     evi2,
     gci,
@@ -81,33 +69,6 @@ from geoops.indices._src.array import (
 
 if TYPE_CHECKING:
     from geoarray import GeoArray
-
-
-def _wrap_index(
-    gt: GeoArray | np.ndarray,
-    out: np.ndarray,
-    *,
-    axis: int,
-    bands: tuple[BandRef, ...],
-) -> GeoArray | np.ndarray:
-    """Rewrap an index result, writing ``NaN`` into nodata pixels.
-
-    A pixel is nodata when *any band the index reads* (``bands``) is
-    non-finite or equals ``gt.fill_value`` (see
-    :mod:`geoops._src.valid`); its index value is meaningless (e.g. NDVI
-    of ``-9999 / -9999``), so it is replaced by ``NaN``. An index is a new
-    quantity -- the input's fill (``0`` especially) can be a real index
-    value -- so the output always declares ``fill_value=NaN``.
-    Bands the index does not read do not affect validity.
-
-    On a ``(T, C, H, W)`` stack the ``(T, H, W)`` result keeps a singleton
-    band axis, ``(T, 1, H, W)``, so it stays a time series.
-    """
-    idx = [_resolve_band(gt, band) for band in bands]
-    used = np.take(np.asarray(gt), idx, axis=axis)
-    valid = ~invalid_values(used, fill_value=carrier_fill_value(gt)).any(axis=axis)
-    out = keep_band_axis(out, gt)
-    return wrap_filled(gt, out, fill_value=np.nan, valid=valid)
 
 
 class NormalizedDifference(Operator):
@@ -148,7 +109,7 @@ class NormalizedDifference(Operator):
         >>> ndvi = NormalizedDifference(a="B8", b="B4")(reflectance_geoarray)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -164,16 +125,15 @@ class NormalizedDifference(Operator):
         self.dim = band_dim(dim, axis, "NormalizedDifference")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="NormalizedDifference")
-        out = normalized_difference(
-            np.asarray(gt),
-            _resolve_band(gt, self.a),
-            _resolve_band(gt, self.b),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            normalized_difference,
+            gt,
+            (self.a, self.b),
+            dim=self.dim,
+            name="NormalizedDifference",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.a, self.b))
 
 
 class NDVI(Operator):
@@ -221,7 +181,7 @@ class NDVI(Operator):
         >>> ndvi_map = pipe(dn_geoarray)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -237,16 +197,15 @@ class NDVI(Operator):
         self.dim = band_dim(dim, axis, "NDVI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="NDVI")
-        out = ndvi(
-            np.asarray(gt),
-            _resolve_band(gt, self.nir),
-            _resolve_band(gt, self.red),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            ndvi,
+            gt,
+            (self.nir, self.red),
+            dim=self.dim,
+            name="NDVI",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red))
 
 
 class NDWI(Operator):
@@ -282,7 +241,7 @@ class NDWI(Operator):
         >>> water_mask = np.asarray(ndwi_map) > 0  # rough surface-water mask
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -298,16 +257,15 @@ class NDWI(Operator):
         self.dim = band_dim(dim, axis, "NDWI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="NDWI")
-        out = ndwi_mcfeeters(
-            np.asarray(gt),
-            _resolve_band(gt, self.green),
-            _resolve_band(gt, self.nir),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            ndwi_mcfeeters,
+            gt,
+            (self.green, self.nir),
+            dim=self.dim,
+            name="NDWI",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.green, self.nir))
 
 
 class NDBI(Operator):
@@ -348,7 +306,7 @@ class NDBI(Operator):
         ... )
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -364,16 +322,15 @@ class NDBI(Operator):
         self.dim = band_dim(dim, axis, "NDBI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="NDBI")
-        out = ndbi(
-            np.asarray(gt),
-            _resolve_band(gt, self.swir),
-            _resolve_band(gt, self.nir),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            ndbi,
+            gt,
+            (self.swir, self.nir),
+            dim=self.dim,
+            name="NDBI",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.swir, self.nir))
 
 
 class NBR(Operator):
@@ -414,7 +371,7 @@ class NBR(Operator):
         >>> # Key & Benson thresholds: > 0.66 high severity, 0.27-0.44 low.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -430,16 +387,15 @@ class NBR(Operator):
         self.dim = band_dim(dim, axis, "NBR")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="NBR")
-        out = nbr(
-            np.asarray(gt),
-            _resolve_band(gt, self.nir),
-            _resolve_band(gt, self.swir2),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            nbr,
+            gt,
+            (self.nir, self.swir2),
+            dim=self.dim,
+            name="NBR",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.swir2))
 
 
 class SAVI(Operator):
@@ -481,7 +437,7 @@ class SAVI(Operator):
         >>> dryland_savi = SAVI(nir=7, red=3, L=1.0)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -499,17 +455,16 @@ class SAVI(Operator):
         self.dim = band_dim(dim, axis, "SAVI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="SAVI")
-        out = savi(
-            np.asarray(gt),
-            _resolve_band(gt, self.nir),
-            _resolve_band(gt, self.red),
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            savi,
+            gt,
+            (self.nir, self.red),
+            dim=self.dim,
+            name="SAVI",
             L=self.L,
-            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red))
 
 
 class EVI(Operator):
@@ -555,7 +510,7 @@ class EVI(Operator):
         >>> # correction first for cross-scene comparability.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -581,21 +536,19 @@ class EVI(Operator):
         self.dim = band_dim(dim, axis, "EVI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="EVI")
-        out = evi(
-            np.asarray(gt),
-            _resolve_band(gt, self.nir),
-            _resolve_band(gt, self.red),
-            _resolve_band(gt, self.blue),
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            evi,
+            gt,
+            (self.nir, self.red, self.blue),
+            dim=self.dim,
+            name="EVI",
             G=self.G,
             C1=self.C1,
             C2=self.C2,
             L=self.L,
-            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red, self.blue))
 
 
 class EVI2(Operator):
@@ -637,7 +590,7 @@ class EVI2(Operator):
         blue band." *Remote Sensing of Environment*, 112(10), 3833–3845.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -653,16 +606,15 @@ class EVI2(Operator):
         self.dim = band_dim(dim, axis, "EVI2")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="EVI2")
-        out = evi2(
-            np.asarray(gt),
-            _resolve_band(gt, self.nir),
-            _resolve_band(gt, self.red),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            evi2,
+            gt,
+            (self.nir, self.red),
+            dim=self.dim,
+            name="EVI2",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red))
 
 
 class ARVI(Operator):
@@ -707,7 +659,7 @@ class ARVI(Operator):
         Remote Sens.*, 30(2), 261–270.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -727,18 +679,16 @@ class ARVI(Operator):
         self.dim = band_dim(dim, axis, "ARVI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="ARVI")
-        out = arvi(
-            np.asarray(gt),
-            _resolve_band(gt, self.nir),
-            _resolve_band(gt, self.red),
-            _resolve_band(gt, self.blue),
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            arvi,
+            gt,
+            (self.nir, self.red, self.blue),
+            dim=self.dim,
+            name="ARVI",
             gamma=self.gamma,
-            axis=axis,
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red, self.blue))
 
 
 class GCI(Operator):
@@ -778,7 +728,7 @@ class GCI(Operator):
         *Geophys. Res. Lett.*, 30(5).
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -794,16 +744,15 @@ class GCI(Operator):
         self.dim = band_dim(dim, axis, "GCI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="GCI")
-        out = gci(
-            np.asarray(gt),
-            _resolve_band(gt, self.nir),
-            _resolve_band(gt, self.green),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            gci,
+            gt,
+            (self.nir, self.green),
+            dim=self.dim,
+            name="GCI",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.green))
 
 
 class kNDVI(Operator):
@@ -842,7 +791,7 @@ class kNDVI(Operator):
         terrestrial biosphere." *Science Advances*, 7(9), eabc7447.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -858,16 +807,15 @@ class kNDVI(Operator):
         self.dim = band_dim(dim, axis, "kNDVI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="kNDVI")
-        out = kndvi(
-            np.asarray(gt),
-            _resolve_band(gt, self.nir),
-            _resolve_band(gt, self.red),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            kndvi,
+            gt,
+            (self.nir, self.red),
+            dim=self.dim,
+            name="kNDVI",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.red))
 
 
 class MNDWI(Operator):
@@ -912,7 +860,7 @@ class MNDWI(Operator):
         3025–3033.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -928,16 +876,15 @@ class MNDWI(Operator):
         self.dim = band_dim(dim, axis, "MNDWI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="MNDWI")
-        out = mndwi(
-            np.asarray(gt),
-            _resolve_band(gt, self.green),
-            _resolve_band(gt, self.swir),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            mndwi,
+            gt,
+            (self.green, self.swir),
+            dim=self.dim,
+            name="MNDWI",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.green, self.swir))
 
 
 class NDMI(Operator):
@@ -978,7 +925,7 @@ class NDMI(Operator):
         *Remote Sensing of Environment*, 58(3), 257–266.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -994,16 +941,15 @@ class NDMI(Operator):
         self.dim = band_dim(dim, axis, "NDMI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="NDMI")
-        out = ndmi(
-            np.asarray(gt),
-            _resolve_band(gt, self.nir),
-            _resolve_band(gt, self.swir1),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            ndmi,
+            gt,
+            (self.nir, self.swir1),
+            dim=self.dim,
+            name="NDMI",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.nir, self.swir1))
 
 
 class NDSI(Operator):
@@ -1046,7 +992,7 @@ class NDSI(Operator):
         *Remote Sensing of Environment*, 54(2), 127–140.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -1062,16 +1008,15 @@ class NDSI(Operator):
         self.dim = band_dim(dim, axis, "NDSI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="NDSI")
-        out = ndsi(
-            np.asarray(gt),
-            _resolve_band(gt, self.green),
-            _resolve_band(gt, self.swir),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            ndsi,
+            gt,
+            (self.green, self.swir),
+            dim=self.dim,
+            name="NDSI",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.green, self.swir))
 
 
 class NBR2(Operator):
@@ -1106,7 +1051,7 @@ class NBR2(Operator):
         >>> v = nbr2_op(reflectance_geoarray)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -1122,16 +1067,15 @@ class NBR2(Operator):
         self.dim = band_dim(dim, axis, "NBR2")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="NBR2")
-        out = nbr2(
-            np.asarray(gt),
-            _resolve_band(gt, self.swir1),
-            _resolve_band(gt, self.swir2),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            nbr2,
+            gt,
+            (self.swir1, self.swir2),
+            dim=self.dim,
+            name="NBR2",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.swir1, self.swir2))
 
 
 class BAIS2(Operator):
@@ -1184,7 +1128,7 @@ class BAIS2(Operator):
         Sentinel-2." *Proceedings*, 2(7), 364.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -1206,29 +1150,14 @@ class BAIS2(Operator):
         self.dim = band_dim(dim, axis, "BAIS2")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="BAIS2")
-        out = bais2(
-            np.asarray(gt),
-            _resolve_band(gt, self.red),
-            _resolve_band(gt, self.red_edge1),
-            _resolve_band(gt, self.red_edge2),
-            _resolve_band(gt, self.nir),
-            _resolve_band(gt, self.swir2),
-            axis=axis,
-            eps=self.eps,
-        )
-        return _wrap_index(
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            bais2,
             gt,
-            out,
-            axis=axis,
-            bands=(
-                self.red,
-                self.red_edge1,
-                self.red_edge2,
-                self.nir,
-                self.swir2,
-            ),
+            (self.red, self.red_edge1, self.red_edge2, self.nir, self.swir2),
+            dim=self.dim,
+            name="BAIS2",
+            eps=self.eps,
         )
 
 
@@ -1268,17 +1197,10 @@ class dNBR(Operator):
         General Technical Report RMRS-GTR-164-CD.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
-    def _apply(
-        self, pre: GeoArray | np.ndarray, post: GeoArray | np.ndarray
-    ) -> GeoArray | np.ndarray:
-        if not grid_matches(pre, post):
-            raise ValueError("dNBR inputs must share shape, transform, and CRS.")
-        out = np.asarray(pre) - np.asarray(post)
-        valid = ~(invalid_values(pre) | invalid_values(post))
-        out = restore_fill(out.astype(np.result_type(out, np.float32)), valid, np.nan)
-        return wrap_like(pre, out, fill_value=np.nan)
+    def _apply(self, pre: Any, post: Any) -> Any:
+        return carrier_kernel(dnbr, pre, post, name="dNBR")
 
 
 class BSI(Operator):
@@ -1325,7 +1247,7 @@ class BSI(Operator):
         39–47.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -1345,22 +1267,14 @@ class BSI(Operator):
         self.dim = band_dim(dim, axis, "BSI")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="BSI")
-        out = bsi(
-            np.asarray(gt),
-            _resolve_band(gt, self.blue),
-            _resolve_band(gt, self.red),
-            _resolve_band(gt, self.nir),
-            _resolve_band(gt, self.swir),
-            axis=axis,
-            eps=self.eps,
-        )
-        return _wrap_index(
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            bsi,
             gt,
-            out,
-            axis=axis,
-            bands=(self.blue, self.red, self.nir, self.swir),
+            (self.blue, self.red, self.nir, self.swir),
+            dim=self.dim,
+            name="BSI",
+            eps=self.eps,
         )
 
 
@@ -1401,7 +1315,7 @@ class IronOxide(Operator):
         exploration." *Ore Geology Reviews*, 14(3-4), 157–183.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -1417,16 +1331,15 @@ class IronOxide(Operator):
         self.dim = band_dim(dim, axis, "IronOxide")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="IronOxide")
-        out = iron_oxide(
-            np.asarray(gt),
-            _resolve_band(gt, self.red),
-            _resolve_band(gt, self.blue),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            iron_oxide,
+            gt,
+            (self.red, self.blue),
+            dim=self.dim,
+            name="IronOxide",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.red, self.blue))
 
 
 class ClayMinerals(Operator):
@@ -1469,7 +1382,7 @@ class ClayMinerals(Operator):
         121–134.
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -1485,16 +1398,15 @@ class ClayMinerals(Operator):
         self.dim = band_dim(dim, axis, "ClayMinerals")
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="ClayMinerals")
-        out = clay_minerals(
-            np.asarray(gt),
-            _resolve_band(gt, self.swir1),
-            _resolve_band(gt, self.swir2),
-            axis=axis,
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(
+            clay_minerals,
+            gt,
+            (self.swir1, self.swir2),
+            dim=self.dim,
+            name="ClayMinerals",
             eps=self.eps,
         )
-        return _wrap_index(gt, out, axis=axis, bands=(self.swir1, self.swir2))
 
 
 class CIRI(Operator):
@@ -1532,7 +1444,7 @@ class CIRI(Operator):
         >>> cirrus_score = ciri_op(reflectance_geoarray)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -1544,10 +1456,8 @@ class CIRI(Operator):
         self.cirrus = cirrus
         self.dim = band_dim(dim, axis, "CIRI")
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        axis = dim_axis(gt, self.dim, name="CIRI")
-        out = ciri(np.asarray(gt), _resolve_band(gt, self.cirrus), axis=axis)
-        return _wrap_index(gt, out, axis=axis, bands=(self.cirrus,))
+    def _apply(self, gt: Any) -> Any:
+        return band_kernel(ciri, gt, (self.cirrus,), dim=self.dim, name="CIRI")
 
 
 class AppendIndex(Operator):

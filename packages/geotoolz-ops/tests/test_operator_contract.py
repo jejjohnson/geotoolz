@@ -1980,6 +1980,9 @@ def test_assert_backends_catches_a_false_jax_claim() -> None:
     class HostNDVI(NDVI):
         backends = ("numpy", "jax")
 
+        def _apply(self, gt):
+            return super()._apply(gt.to_numpy())
+
     scene = _attributed_inputs()[1]  # 13 bands: NDVI's defaults apply
     with pytest.raises(AssertionError, match="HostNDVI returned numpy data"):
         assert_backends(HostNDVI(), scene)
@@ -1990,14 +1993,14 @@ def test_a_numpy_operator_refuses_a_jax_carrier() -> None:
     jax = pytest.importorskip("jax")
     from pipekit import BackendError
 
-    from geoops.indices import NDVI
+    from geoops.normalize import CLAHE
 
     x64 = jax.config.jax_enable_x64
     jax.config.update("jax_enable_x64", True)
     try:
         scene = _attributed_inputs()[1].to_jax()
-        with pytest.raises(BackendError, match=r"NDVI runs on numpy only, not jax"):
-            NDVI()(scene)
+        with pytest.raises(BackendError, match=r"CLAHE runs on numpy only, not jax"):
+            CLAHE()(scene)
     finally:
         jax.config.update("jax_enable_x64", x64)
 
