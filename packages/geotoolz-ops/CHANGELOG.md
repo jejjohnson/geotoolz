@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.17.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.16.0...geotoolz-ops-v0.17.0) (2026-10-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ops:** geoops.Gradient is renamed Gradient2D, and geoops.geom.gradient / adaptive_gradient are renamed gradient_2d / adaptive_gradient_2d, with no aliases.
+
+### Features
+
+* **ops:** calculus operators in 1-D, 2-D and 3-D; Gradient becomes Gradient2D ([#608](https://github.com/jejjohnson/geotoolz/issues/608)) ([5c46d7e](https://github.com/jejjohnson/geotoolz/commit/5c46d7ebbfc09d6a059c6a63a7f30ab3bc5a7283))
+* **ops:** divergence, curl and Laplacian on the mask-aware stencil stack ([#604](https://github.com/jejjohnson/geotoolz/issues/604)) ([af72759](https://github.com/jejjohnson/geotoolz/commit/af72759ffb8156307ca82150e293bc537fd5a395))
+* **ops:** finite differences on unevenly spaced axes (coords=) ([#605](https://github.com/jejjohnson/geotoolz/issues/605)) ([0240f33](https://github.com/jejjohnson/geotoolz/commit/0240f33b6f258b0f705a5e2d09458cae2cb151aa))
+* **ops:** mask-aware per-band statistics for normalize on numpy, jax and dask ([#596](https://github.com/jejjohnson/geotoolz/issues/596)) ([5147673](https://github.com/jejjohnson/geotoolz/commit/51476731dc53e68d9e310e8fbf76c753fdebeba1))
+* **ops:** port CLAHE to numpy, jax and dask without scikit-image ([#601](https://github.com/jejjohnson/geotoolz/issues/601)) ([73a5314](https://github.com/jejjohnson/geotoolz/commit/73a53143d3df4ca360b1bff625170669339c3b47))
+* **ops:** port HistogramMatch to numpy, jax and dask ([#600](https://github.com/jejjohnson/geotoolz/issues/600)) ([0ba56dc](https://github.com/jejjohnson/geotoolz/commit/0ba56dcce07c6434806c883383d3a10ec06d2d2c))
+* **ops:** port PerBandStats to numpy, jax and dask ([#599](https://github.com/jejjohnson/geotoolz/issues/599)) ([c55059e](https://github.com/jejjohnson/geotoolz/commit/c55059e8f6e4c2779dcf240a15fd0a4aec9ff221))
+* **ops:** port StandardScaler, RobustScaler and MinMaxScaler to numpy, jax and dask ([#598](https://github.com/jejjohnson/geotoolz/issues/598)) ([0544335](https://github.com/jejjohnson/geotoolz/commit/0544335368811a2bdd265988995eefed1aed6a1e))
+* **ops:** port ZeroOne and HistogramStretch to numpy, jax and dask ([#597](https://github.com/jejjohnson/geotoolz/issues/597)) ([3715321](https://github.com/jejjohnson/geotoolz/commit/3715321c80671dc57003e0da1a96d652a7a4349f))
+
 ## [0.16.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.15.0...geotoolz-ops-v0.16.0) (2026-10-29)
 
 
