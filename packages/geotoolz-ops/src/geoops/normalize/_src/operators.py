@@ -51,6 +51,7 @@ from geoops._src.valid import (
     invalid_pixel_mask,
     invalid_values,
     mask_invalid_to_nan,
+    namespace_of,
     valid_pixels,
     wrap_filled,
 )
