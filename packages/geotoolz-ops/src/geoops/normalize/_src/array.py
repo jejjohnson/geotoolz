@@ -742,12 +742,23 @@ def _equalize_adapthist(
     as_uint = xp.round(unit * 65535.0)
     lo = xp.min(as_uint, axis=(-2, -1), keepdims=True)
     hi = xp.max(as_uint, axis=(-2, -1), keepdims=True)
-    grey = (as_uint - lo) / xp.where(hi > lo, hi - lo, 1.0) * (NR_OF_GRAY - 1)
+    grey = _rescale(as_uint, lo, hi, NR_OF_GRAY - 1, xp)
     grey = xp.round(grey).astype(xp.int64)
     result = _clahe_grey(grey, kernel, clip_limit, nbins, xp)
     lo = xp.min(result, axis=(-2, -1), keepdims=True)
     hi = xp.max(result, axis=(-2, -1), keepdims=True)
-    return (result - lo) / xp.where(hi > lo, hi - lo, 1.0)
+    return _rescale(result, lo, hi, 1.0, xp)
+
+
+def _rescale(image: Any, lo: Any, hi: Any, top: float, xp: Any) -> Any:
+    """scikit-image's ``rescale_intensity`` onto ``[0, top]``.
+
+    A constant image (``hi == lo``) is clipped to the range, not divided, as
+    scikit-image does: a ``window=1`` CLAHE maps every pixel to the top grey
+    level, which comes back as ``top``.
+    """
+    spread = (image - lo) / xp.where(hi > lo, hi - lo, 1.0) * top
+    return xp.where(hi > lo, spread, xp.clip(image, 0.0, top))
 
 
 def _clahe_grey(

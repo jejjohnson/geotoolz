@@ -552,6 +552,18 @@ def test_clahe_agrees_with_scikit_image_on_every_carrier(
         np.testing.assert_allclose(np.asarray(out), want, rtol=1e-12, equal_nan=True)
 
 
+@pytest.mark.parametrize("window", [1, None])
+def test_clahe_matches_scikit_image_when_the_equalized_range_collapses(
+    window: int | None,
+) -> None:
+    pytest.importorskip("skimage.exposure")
+    # one-pixel tiles: every pixel maps to the top grey level
+    g = toy_geoarray(np.array([[[0.0, 1.0], [2.0, 3.0]]]))
+    op = gn.CLAHE(window=window)
+    np.testing.assert_allclose(np.asarray(op(g)), _skimage_clahe(g, op), rtol=1e-12)
+    np.testing.assert_allclose(np.asarray(op(g)), 3.0)
+
+
 def test_clahe_needs_no_scikit_image(
     scene: GeoArray, monkeypatch: pytest.MonkeyPatch
 ) -> None:
