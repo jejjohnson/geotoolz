@@ -1214,8 +1214,8 @@ def gradient_3d(
 
     Example:
         >>> z, y, x = np.mgrid[0:3, 0:4, 0:5].astype(float)
-        >>> [float(d.max()) for d in gradient_3d(4.0 * z + 2.0 * y + x)]
-        [4.0, 2.0, 1.0]
+        >>> tuple(float(d.max()) for d in gradient_3d(4.0 * z + 2.0 * y + x))
+        (4.0, 2.0, 1.0)
     """
     reject_geotensor(f, "gradient_3d")
     xp = array_namespace(f)
