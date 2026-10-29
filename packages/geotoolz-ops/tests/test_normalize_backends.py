@@ -178,6 +178,16 @@ def test_band_stats_leave_infinities_out() -> None:
         np.testing.assert_array_equal(gn.band_quantiles(x, valid, q=(1.0,))[0], [1, 2])
 
 
+def test_band_stats_refuse_a_geotensor(scene: GeoArray) -> None:
+    pytest.importorskip("georeader")
+    from geoarray.interop.georeader import to_georeader
+
+    tensor = to_georeader(scene)
+    for call in (gn.band_stats, gn.band_quantiles, gn.carrier_band_stats):
+        with pytest.raises(TypeError, match="from_georeader"):
+            call(tensor)
+
+
 def test_band_stats_reject_bad_requests(scene: GeoArray) -> None:
     with pytest.raises(ValueError, match="unknown statistics"):
         gn.carrier_band_stats(scene, stats=("median",))
