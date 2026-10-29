@@ -72,13 +72,12 @@ Design rules:
 | Package | Role |
 |---------|------|
 | `numpy` / `scipy` | Array computation, interpolation, spectral, signal processing |
-| `scikit-learn` | Nearest-neighbor regridding, preprocessing utilities |
+| `scikit-learn` | The `[sklearn]` extra: `xrops.learn`, the decomposition presets, nearest-neighbour regridding and KDE (imported when used) |
 | `xarray` / `pandas` | Labeled N-dimensional data interface |
 | `rioxarray` / `pyproj` | CRS assignment, reprojection |
 | `regionmask` | Land/ocean/country masks |
 | `xrft` | Fourier transforms on xarray |
 | `xskillscore` | Verification metrics |
-| `einx` | Named-tensor backend for the einx-based kernels still in this package (`transforms.encoders.basis`, `metrics.instance`, `metrics.distributional`); the named-dims bridge itself is `pipekit_array.einx` |
 
 The finitediffx/JAX stack rides exclusively in `xrtoolz-grad`, so it still reaches a full `xrtoolz` install transitively (ocn/budgets/metrics call `xrgrad` eagerly) — but `xrtoolz-core` installs without it, and making `xrtoolz-grad` optional later is now a packaging decision, not a refactor. PyTorch and sklearn *models* remain non-dependencies — `ModelOp` uses duck typing so the user installs only what they need.
 

@@ -31,6 +31,7 @@ dependencies = [
 wavelets = ["xrtoolz-ops[wavelets]"]
 image = ["xrtoolz-ops[image]"]
 maps = ["xrtoolz-ops[maps]"]
+sklearn = ["xrtoolz-ops[sklearn]"]
 vector = ["xrtoolz-ops[vector]"]
 
 [project.urls]

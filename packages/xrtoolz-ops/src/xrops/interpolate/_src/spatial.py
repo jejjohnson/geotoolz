@@ -6,7 +6,8 @@ from typing import Any, Literal
 
 import numpy as np
 from jaxtyping import Float
-from sklearn.neighbors import BallTree, KDTree
+
+from xrops.utils._src.optional_imports import _require_optional
 
 
 Metric = Literal["euclidean", "haversine"]
@@ -15,9 +16,15 @@ BandwidthRule = Literal["scott", "silverman"]
 
 def _build_tree(src_xy: Float[np.ndarray, "n two"], metric: Metric) -> Any:
     """Build the sklearn neighbour tree appropriate for ``metric``."""
+    neighbors = _require_optional(
+        "sklearn.neighbors",
+        extra="sklearn",
+        feature="nearest-neighbour interpolation",
+        package="scikit-learn",
+    )
     if metric == "haversine":
-        return BallTree(src_xy, metric="haversine")
-    return KDTree(src_xy, metric="euclidean")
+        return neighbors.BallTree(src_xy, metric="haversine")
+    return neighbors.KDTree(src_xy, metric="euclidean")
 
 
 def _to_metric_xy(

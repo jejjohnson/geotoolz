@@ -9,11 +9,11 @@ import xarray as xr
 from jaxtyping import Float
 from scipy.interpolate import griddata
 from scipy.stats import binned_statistic_2d
-from sklearn.neighbors import KernelDensity
 
 from xrops.interpolate._src.binning import Grid
 from xrops.interpolate._src.spatial import _bandwidth_rule, _to_metric_xy
 from xrops.utils._src.finite import _finite_mask
+from xrops.utils._src.optional_imports import _require_optional
 
 
 BandwidthRule = Literal["scott", "silverman"]
@@ -246,7 +246,13 @@ def kde_to_grid(
         if bandwidth_value <= 0 or not np.isfinite(bandwidth_value):
             raise ValueError(f"bandwidth must be positive, got {bandwidth!r}")
 
-    kde = KernelDensity(
+    neighbors = _require_optional(
+        "sklearn.neighbors",
+        extra="sklearn",
+        feature="kernel density gridding",
+        package="scikit-learn",
+    )
+    kde = neighbors.KernelDensity(
         bandwidth=bandwidth_value,
         kernel=kernel,
         metric=metric,
