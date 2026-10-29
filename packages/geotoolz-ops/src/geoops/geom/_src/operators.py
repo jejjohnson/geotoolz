@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, cast
 
 import geoarray
 import numpy as np
@@ -59,9 +59,11 @@ from geoops._src.valid import (
 )
 from geoops._src.wrap import adopt_attrs, rewrap_attrs, rewrap_dims, wrap_like
 from geoops.geom._src.array import (
+    adaptive_difference,
     adaptive_gradient,
     bowtie_detector_positions,
     center_offsets,
+    difference,
     feather_weights,
     gradient,
     is_north_up,
@@ -2828,6 +2830,372 @@ class Gradient(Operator):
         return out
 
 
+_CALCULUS_POLICIES = ("propagate", "adaptive")
+
+
+class Divergence(Operator):
+    r"""Divergence of a gridded vector field in map axes, NaN- and mask-aware (#588).
+
+    .. math::
+
+        \nabla \cdot \mathbf{u} = \frac{\partial u}{\partial x}
+                                + \frac{\partial v}{\partial y}
+
+    ``u`` and ``v`` are two positional carriers on one grid, the components
+    along the CRS's ``x`` and ``y`` (eastward and northward on a geographic
+    CRS). The geometry, ``nan_policy`` and mask follow :class:`Gradient`:
+    pixel derivatives map to map axes through the transform's Jacobian, so
+    north-up, flipped and rotated grids are exact for a linear field. On a
+    geographic CRS the divergence uses the CRS ellipsoid's radii
+    :math:`M(\varphi)` and :math:`N(\varphi)`, as ``Gradient`` does,
+
+    .. math::
+
+        \nabla \cdot \mathbf{u} = \frac{1}{N \cos\varphi}
+            \frac{\partial u}{\partial \lambda}
+          + \frac{1}{M N \cos\varphi}
+            \frac{\partial (N \cos\varphi\, v)}{\partial \varphi},
+
+    which is the spherical form on a sphere (:math:`M = N = R`). A cell is
+    dropped where either component is nodata (non-finite, or its carrier's
+    fill) or ``mask`` is ``True``. The result is on the input grid, per CRS
+    unit (per metre on a geographic CRS), with ``fill_value=NaN``. A plain
+    array is differentiated in pixel units, rows then columns; a
+    ``DataArray`` is refused (lift it with ``xrops.lift``, or call
+    :func:`geoops.geom.divergence` with coordinate spacings).
+
+    Args:
+        accuracy: Accuracy order of the one-sided stencils.
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient`).
+        periodic_x: The columns wrap, for a global longitude grid.
+
+    Examples:
+        >>> import geoops as gz
+        >>> div = gz.Divergence()(u, v)                              # (y, x)
+        >>> div = gz.Divergence(nan_policy="adaptive")(u, v, land)   # keeps the coast
+        >>> div = gz.geom.adaptive_divergence(u, v, dy, dx, mask=land)  # arrays only
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def __init__(
+        self,
+        *,
+        accuracy: int = 1,
+        nan_policy: str = "propagate",
+        periodic_x: bool = False,
+    ) -> None:
+        _check_calculus(accuracy, nan_policy)
+        self.accuracy = accuracy
+        self.nan_policy = nan_policy
+        self.periodic_x = periodic_x
+
+    def _apply(self, u: Any, v: Any, mask: Any = None) -> Any:
+        prepared = _calculus_inputs("Divergence", (u, v), mask)
+        fu, fv = prepared.fields
+        if prepared.carrier is None:
+            out = self._d(prepared, fu, -1) + self._d(prepared, fv, -2)
+            return prepared.finish(out)
+        metric = _geographic_metric(prepared.carrier)
+        if metric is not None:
+            fv = fv * metric.parallel  # ∂(N cos φ v)/∂φ, the flux form
+        _, du_x = _jacobian_axes(
+            prepared.carrier, self._d(prepared, fu, -2), self._d(prepared, fu, -1)
+        )
+        dv_y, _ = _jacobian_axes(
+            prepared.carrier, self._d(prepared, fv, -2), self._d(prepared, fv, -1)
+        )
+        if metric is None:
+            return prepared.finish(du_x + dv_y)
+        east = du_x / (metric.parallel * metric.per_unit)
+        north = dv_y / (metric.parallel * metric.meridional * metric.per_unit)
+        return prepared.finish(east + north)
+
+    def _d(self, prepared: _CalculusInputs, field: Any, axis: int) -> Any:
+        return _pixel_derivative(prepared, field, axis, 1, self)
+
+
+class Curl(Operator):
+    r"""Curl (relative vorticity) of a gridded vector field in map axes (#588).
+
+    .. math::
+
+        \zeta = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}
+
+    Inputs, geometry, masks and outputs as :class:`Divergence`. On a
+    geographic CRS, with the CRS ellipsoid's radii,
+
+    .. math::
+
+        \zeta = \frac{1}{N \cos\varphi} \frac{\partial v}{\partial \lambda}
+              - \frac{1}{M N \cos\varphi}
+                \frac{\partial (N \cos\varphi\, u)}{\partial \varphi}.
+
+    Args:
+        accuracy: Accuracy order of the one-sided stencils.
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient`).
+        periodic_x: The columns wrap, for a global longitude grid.
+
+    Examples:
+        >>> import geoops as gz
+        >>> zeta = gz.Curl()(u, v)                               # (y, x)
+        >>> zeta = gz.Curl(nan_policy="adaptive")(u, v, land)    # up to the coast
+        >>> zeta = gz.geom.curl(u, v, dy, dx)                    # arrays only, jittable
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def __init__(
+        self,
+        *,
+        accuracy: int = 1,
+        nan_policy: str = "propagate",
+        periodic_x: bool = False,
+    ) -> None:
+        _check_calculus(accuracy, nan_policy)
+        self.accuracy = accuracy
+        self.nan_policy = nan_policy
+        self.periodic_x = periodic_x
+
+    def _apply(self, u: Any, v: Any, mask: Any = None) -> Any:
+        prepared = _calculus_inputs("Curl", (u, v), mask)
+        fu, fv = prepared.fields
+        if prepared.carrier is None:
+            out = self._d(prepared, fv, -1) - self._d(prepared, fu, -2)
+            return prepared.finish(out)
+        metric = _geographic_metric(prepared.carrier)
+        if metric is not None:
+            fu = fu * metric.parallel  # ∂(N cos φ u)/∂φ, the flux form
+        _, dv_x = _jacobian_axes(
+            prepared.carrier, self._d(prepared, fv, -2), self._d(prepared, fv, -1)
+        )
+        du_y, _ = _jacobian_axes(
+            prepared.carrier, self._d(prepared, fu, -2), self._d(prepared, fu, -1)
+        )
+        if metric is None:
+            return prepared.finish(dv_x - du_y)
+        east = dv_x / (metric.parallel * metric.per_unit)
+        north = du_y / (metric.parallel * metric.meridional * metric.per_unit)
+        return prepared.finish(east - north)
+
+    def _d(self, prepared: _CalculusInputs, field: Any, axis: int) -> Any:
+        return _pixel_derivative(prepared, field, axis, 1, self)
+
+
+class Laplacian(Operator):
+    r"""Laplacian of a gridded field in map axes, NaN- and mask-aware (#588).
+
+    .. math::
+
+        \nabla^2 f = \frac{\partial^2 f}{\partial x^2}
+                   + \frac{\partial^2 f}{\partial y^2}
+
+    Second-derivative stencils (``derivative=2``) along the pixel axes. The
+    Laplacian is rotation-invariant, so on a grid with perpendicular axes
+    (north-up, flipped or rotated) it is
+    :math:`f_{jj} / |\mathbf{a}_j|^2 + f_{ii} / |\mathbf{a}_i|^2`, with
+    :math:`\mathbf{a}_j = (a, d)` and :math:`\mathbf{a}_i = (b, e)` the
+    column and row steps; a quadratic stays exact up to the edges. On a
+    geographic CRS (rows and columns along latitude and longitude), with the
+    CRS ellipsoid's radii :math:`M(\varphi)` and :math:`N(\varphi)`,
+
+    .. math::
+
+        \nabla^2 f = \frac{1}{N^2 \cos^2\varphi}
+                     \frac{\partial^2 f}{\partial \lambda^2}
+                   + \frac{1}{M^2} \frac{\partial^2 f}{\partial \varphi^2}
+                   + \frac{1}{M N \cos\varphi}
+                     \frac{d}{d\varphi}\!\left(\frac{N \cos\varphi}{M}\right)
+                     \frac{\partial f}{\partial \varphi},
+
+    which on a sphere has the last term :math:`-\tan\varphi / R^2\,
+    \partial f / \partial \varphi`. A sheared grid (or a rotated geographic
+    one) raises, naming :class:`Reproject`; under ``jax.jit``, where the
+    transform is traced, such a grid gives ``NaN`` instead. Units per CRS
+    unit squared (per square metre on a geographic CRS); masks, nodata and
+    carriers as :class:`Gradient`.
+
+    Args:
+        accuracy: Accuracy order of the one-sided stencils.
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient`).
+        periodic_x: The columns wrap, for a global longitude grid.
+
+    Examples:
+        >>> import geoops as gz
+        >>> lap = gz.Laplacian()(ssh_map)                          # (y, x)
+        >>> lap = gz.Laplacian(nan_policy="adaptive")(ssh_map, land)
+        >>> lap = gz.geom.laplacian(ssh, dy, dx)                   # arrays only
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def __init__(
+        self,
+        *,
+        accuracy: int = 1,
+        nan_policy: str = "propagate",
+        periodic_x: bool = False,
+    ) -> None:
+        _check_calculus(accuracy, nan_policy)
+        self.accuracy = accuracy
+        self.nan_policy = nan_policy
+        self.periodic_x = periodic_x
+
+    def _apply(self, f: Any, mask: Any = None) -> Any:
+        prepared = _calculus_inputs("Laplacian", (f,), mask)
+        (field,) = prepared.fields
+        f_ii = _pixel_derivative(prepared, field, -2, 2, self)
+        f_jj = _pixel_derivative(prepared, field, -1, 2, self)
+        if prepared.carrier is None:
+            return prepared.finish(f_ii + f_jj)
+        gt = prepared.carrier
+        xp = prepared.xp
+        a, b, _, d, e, _ = (gt.transform[k] for k in range(6))
+        metric = _geographic_metric(gt)
+        if metric is None:
+            col2, row2 = a * a + d * d, b * b + e * e
+            bad = xp.abs(a * b + d * e) > 1e-12 * xp.sqrt(col2 * row2)
+            out = f_jj / col2 + f_ii / row2
+            why = "its pixel axes are not perpendicular (a sheared grid)"
+        else:
+            bad = (b != 0) | (d != 0)
+            f_i = _pixel_derivative(prepared, field, -2, 1, self)
+            pu = metric.per_unit
+            sin, cos = xp.sin(metric.lat), xp.cos(metric.lat)
+            w2 = 1.0 - metric.e2 * sin**2
+            # (1 / (M N cos φ)) d/dφ (N cos φ / M), from N = a / w and M = a (1 - e²) / w³
+            slope = (
+                -sin
+                * (w2 + 2.0 * metric.e2 * cos**2)
+                / ((1.0 - metric.e2) * metric.prime_vertical * metric.meridional * cos)
+            )
+            out = (
+                f_jj / (a * a * pu * pu * metric.parallel**2)
+                + f_ii / (e * e * pu * pu * metric.meridional**2)
+                + slope * f_i / (e * pu)
+            )
+            why = "its rows and columns do not follow latitude and longitude"
+        if isinstance(gt.transform, np.ndarray):
+            if bool(bad):
+                raise ValueError(
+                    f"Laplacian: the carrier's grid cannot be differentiated this "
+                    f"way: {why}. Resample it onto an axis-aligned grid with "
+                    "geoops.geom.Reproject first."
+                )
+        else:  # traced under jax.jit: the transform's values are unknown here
+            out = xp.where(bad, xp.nan, out)
+        return prepared.finish(out)
+
+
+def _check_calculus(accuracy: int, nan_policy: str) -> None:
+    """Validate the shared constructor arguments of the calculus operators."""
+    if nan_policy not in _CALCULUS_POLICIES:
+        raise ValueError(
+            f"nan_policy must be 'propagate' or 'adaptive'; got {nan_policy!r}"
+        )
+    if accuracy < 1:
+        raise ValueError(f"accuracy must be at least 1; got {accuracy}")
+
+
+class _CalculusInputs(NamedTuple):
+    """The fields of a calculus operator, NaN where dropped, and how to finish."""
+
+    xp: Any
+    fields: tuple[Any, ...]
+    dropped: Any  # True where a cell is dropped (any field's nodata, or the mask)
+    carrier: GeoArray | None  # None for plain arrays (pixel units)
+
+    def finish(self, out: Any) -> Any:
+        """``NaN`` on dropped cells; on the first carrier's grid, ``fill_value=NaN``."""
+        if self.dropped is not None:
+            out = self.xp.where(self.dropped, self.xp.nan, out)
+        if self.carrier is None:
+            return out
+        return rewrap_dims(self.carrier, out, self.carrier.dims, fill_value=np.nan)
+
+
+def _calculus_inputs(name: str, fields: tuple[Any, ...], mask: Any) -> _CalculusInputs:
+    """Check and prepare the carriers (and mask) of a calculus operator."""
+    for field in fields:
+        reject_geotensor(field, name)
+        if type(field).__module__.startswith("xarray."):
+            raise TypeError(
+                f"{name} is a geometry operator and takes a GeoArray: lift it over "
+                f"a DataArray cube with xrops.lift({name}(), dim=...), or call "
+                f"geoops.geom.{name.lower()} / adaptive_{name.lower()} with "
+                "coordinate spacings."
+            )
+    first = fields[0]
+    if len({isinstance(field, GeoArray) for field in fields}) > 1:
+        raise TypeError(f"{name}: pass all GeoArrays or all plain arrays")
+    if not isinstance(first, GeoArray):
+        data = [as_float(f if hasattr(f, "dtype") else np.asarray(f)) for f in fields]
+        if len({tuple(d.shape) for d in data}) > 1:
+            raise ValueError(
+                f"{name}: the inputs must share a shape; got {[d.shape for d in data]}"
+            )
+        xp = array_namespace(data[0])
+        dropped = _mask_data(mask, xp)
+        for values in data:
+            bad = ~xp.isfinite(values)
+            dropped = bad if dropped is None else dropped | bad
+        fields_out = tuple(xp.where(dropped, xp.nan, values) for values in data)
+        return _CalculusInputs(xp, fields_out, dropped, None)
+    others = [*fields[1:], *([mask] if isinstance(mask, GeoArray) else [])]
+    for other in others:
+        # geoarray's own grid check: exact, and deferred to run time under jit
+        try:
+            get_adapter(first).check_compatible(first, other)
+        except GridMismatchError as exc:
+            raise GridMismatchError(
+                f"{name}: the inputs are not on one pixel grid ({exc})"
+            ) from exc
+    for field in fields[1:]:
+        if field.dims != first.dims or tuple(field.shape) != tuple(first.shape):
+            raise ValueError(
+                f"{name}: the components must share dims and shape; got "
+                f"{first.dims} {tuple(first.shape)} and {field.dims} {tuple(field.shape)}"
+            )
+    if first.batch_dims:
+        raise ValueError(
+            f"{name}: the carrier is batched over {first.batch_dims} (one "
+            "transform per item); map it per item with "
+            f"geoarray.map_over(x, {name}(...), {first.batch_dims[0]!r})."
+        )
+    xp = first.xp
+    dropped = None
+    for field in fields:
+        # geoops' pixel nodata rule (any invalid band), on the carrier's backend
+        bad = invalid_pixel_mask(field, mask=_aligned_mask(mask, field, xp))
+        dropped = bad if dropped is None else dropped | bad
+    fields_out = tuple(xp.where(dropped, xp.nan, as_float(f.data)) for f in fields)
+    return _CalculusInputs(xp, fields_out, dropped, first)
+
+
+def _pixel_derivative(
+    prepared: _CalculusInputs, field: Any, axis: int, derivative: int, op: Any
+) -> Any:
+    """One pixel-step derivative of ``field`` under ``op``'s ``nan_policy``."""
+    periodic = op.periodic_x and axis == -1
+    if op.nan_policy == "adaptive":
+        return adaptive_difference(
+            field,
+            mask=prepared.dropped,
+            axis=axis,
+            derivative=derivative,
+            accuracy=op.accuracy,
+            periodic=periodic,
+        )
+    out = difference(
+        field, axis=axis, derivative=derivative, accuracy=op.accuracy, periodic=periodic
+    )
+    return (
+        out
+        if prepared.dropped is None
+        else prepared.xp.where(prepared.dropped, prepared.xp.nan, out)
+    )
+
+
 def _aligned_mask(mask: Any, gt: GeoArray, xp: Any) -> Any:
     """``mask`` as booleans aligned to ``gt``'s dims: by name for a carrier.
 
@@ -2865,7 +3233,18 @@ def _mask_data(mask: Any, xp: Any) -> Any:
 
 def _map_axes(gt: GeoArray, d_row: Any, d_col: Any) -> tuple[Any, Any]:
     """``(∂f/∂y, ∂f/∂x)`` in the CRS's axes (metres on a geographic CRS)."""
-    a, b, _, d, e, f0 = (gt.transform[k] for k in range(6))
+    d_y, d_x = _jacobian_axes(gt, d_row, d_col)
+    metric = _geographic_metric(gt)
+    if metric is None:
+        return d_y, d_x
+    return d_y / (metric.meridional * metric.per_unit), d_x / (
+        metric.parallel * metric.per_unit
+    )
+
+
+def _jacobian_axes(gt: GeoArray, d_row: Any, d_col: Any) -> tuple[Any, Any]:
+    """Pixel derivatives to ``(∂f/∂y, ∂f/∂x)`` per CRS unit, through the Jacobian."""
+    a, b, _, d, e, _ = (gt.transform[k] for k in range(6))
     xp = gt.xp
 
     def times(coeff: Any, value: Any) -> Any:
@@ -2875,9 +3254,27 @@ def _map_axes(gt: GeoArray, d_row: Any, d_col: Any) -> tuple[Any, Any]:
     det = a * e - b * d
     d_x = (times(e, d_col) - times(d, d_row)) / det
     d_y = (times(a, d_row) - times(b, d_col)) / det
+    return d_y, d_x
+
+
+class _Metric(NamedTuple):
+    """The ellipsoid's metric at each pixel centre of a geographic carrier."""
+
+    lat: Any  # radians, (H, W)
+    meridional: Any  # M(φ), metres per radian north
+    parallel: Any  # N(φ) cos φ, metres per radian east
+    prime_vertical: Any  # N(φ)
+    e2: float  # first eccentricity squared
+    per_unit: float  # radians per CRS angular unit
+
+
+def _geographic_metric(gt: GeoArray) -> _Metric | None:
+    """`_Metric` of a geographic ``gt`` (``None`` for a projected or CRS-less one)."""
     crs = None if gt.crs is None else CRS.from_user_input(gt.crs)
     if crs is None or not crs.is_geographic:
-        return d_y, d_x
+        return None
+    _, _, _, d, e, f0 = (gt.transform[k] for k in range(6))
+    xp = gt.xp
     # radians per CRS angular unit: degrees for EPSG:4326, grads for EPSG:4807
     per_unit = crs.axis_info[0].unit_conversion_factor
     height, width = gt.shape[-2:]
@@ -2888,8 +3285,12 @@ def _map_axes(gt: GeoArray, d_row: Any, d_col: Any) -> tuple[Any, Any]:
     semi_major = ellipsoid.semi_major_metre
     e2 = 1.0 - (ellipsoid.semi_minor_metre / semi_major) ** 2
     w = xp.sqrt(1.0 - e2 * xp.sin(lat) ** 2)
-    meridional = semi_major * (1.0 - e2) / w**3
     prime_vertical = semi_major / w
-    return d_y / (meridional * per_unit), d_x / (
-        prime_vertical * xp.cos(lat) * per_unit
+    return _Metric(
+        lat=lat,
+        meridional=semi_major * (1.0 - e2) / w**3,
+        parallel=prime_vertical * xp.cos(lat),
+        prime_vertical=prime_vertical,
+        e2=e2,
+        per_unit=per_unit,
     )

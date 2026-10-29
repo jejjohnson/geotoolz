@@ -448,7 +448,10 @@ def _perturbed(x: Any) -> Any:
 #: Optional carriers are included, so every input is exercised.
 MULTI_INPUTS: dict[str, Callable[[Any], tuple[Any, ...]]] = {
     "augment._src.operators.CutMix": lambda x: (_perturbed(x),),
+    "geom._src.operators.Curl": lambda x: (_perturbed(x), _mask_like(x)),
+    "geom._src.operators.Divergence": lambda x: (_perturbed(x), _mask_like(x)),
     "geom._src.operators.Gradient": lambda x: (_mask_like(x),),
+    "geom._src.operators.Laplacian": lambda x: (_mask_like(x),),
     "geom._src.operators.OpticalFlowILK": lambda x: (_perturbed(x),),
     "geom._src.operators.OpticalFlowTVL1": lambda x: (_perturbed(x),),
     "geom._src.operators.PhaseAlign": lambda x: (_perturbed(x),),
