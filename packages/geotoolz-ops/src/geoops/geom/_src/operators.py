@@ -49,10 +49,10 @@ from geoops._src.geo import (
     require_geoarray,
     require_grid_match,
 )
-from geoops._src.kernels import nodata_where
 from geoops._src.shape import BAND_AXIS, over_frames, require_ndim, single_band
 from geoops._src.valid import (
     carried_fill,
+    invalid_pixel_mask,
     mask_invalid_to_nan,
     valid_pixels,
     wrap_filled,
@@ -2803,15 +2803,8 @@ class Gradient(Operator):
             )
         xp = gt.xp
         data = as_float(gt.data)
-        invalid = ~xp.isfinite(nodata_where(data, data, fill_values=(gt.fill_value,)))
-        mask_data = _aligned_mask(mask, gt, xp)
-        if mask_data is not None:
-            invalid = invalid | mask_data
-        if "band" in gt.dims:
-            # geoops' pixel rule: a pixel with any invalid band is invalid in all
-            band = gt.dims.index("band")
-            pixel = xp.any(invalid, axis=band, keepdims=True)
-            invalid = xp.broadcast_to(pixel, data.shape)
+        # geoops' pixel nodata rule (any invalid band), on the carrier's backend
+        invalid = invalid_pixel_mask(gt, mask=_aligned_mask(mask, gt, xp))
         mask_data = invalid
         field = xp.where(invalid, xp.nan, data)
         d_row, d_col = self._pixel_gradient(field, xp, mask_data)

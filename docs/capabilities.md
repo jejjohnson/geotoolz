@@ -1565,7 +1565,7 @@ helper is added here, not inline in one caller.
 | `geoops._src.samples` | Shared pixel flattening: ``(c, h, w)`` cubes <-> ``(n, c)`` sample matrices. | `SampleLayout`, `cube_to_samples`, `samples_to_cube`, `sample_layout` |
 | `geoops._src.shape` | Shared shape-normalisation primitives. | `band_axis`, `band_dim`, `dim_axis`, `require_ndim`, `keep_band_axis`, `map_frames`, `over_frames`, `single_band`, `gather_inputs` |
 | `geoops._src.stretch` | Shared percentile clip-and-stretch core. | `percentile_stretch` |
-| `geoops._src.valid` | Shared notion of an *invalid* (nodata) pixel. | `carrier_fill_value`, `is_fill`, `invalid_values`, `valid_pixels`, `mask_invalid_to_nan`, `restore_fill`, `carried_fill`, `wrap_filled` |
+| `geoops._src.valid` | Shared notion of an *invalid* (nodata) pixel. | `carrier_fill_value`, `is_fill`, `invalid_values`, `valid_pixels`, `mask_invalid_to_nan`, `restore_fill`, `carried_fill`, `wrap_filled`, `invalid_elements`, `invalid_pixel_mask` |
 | `geoops._src.wrap` | Carrier rewrap discipline shared by every operator family. | `Inherit`, `rewrap_attrs`, `adopt_attrs`, `wrap_like`, `rewrap_dims` |
 
 ### `geocatalog._src.utils`

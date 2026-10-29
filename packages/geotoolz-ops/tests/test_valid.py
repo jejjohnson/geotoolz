@@ -189,3 +189,30 @@ def test_wrap_filled_writes_and_declares_the_fill():
     plain = wrap_filled(arr, np.zeros((3, 3)), fill_value=np.nan)
     assert type(plain) is np.ndarray
     assert np.isnan(plain[0, 0]) and plain[1, 1] == 0.0
+
+
+def test_invalid_elements_and_pixel_mask_on_numpy_and_jax() -> None:
+    """The backend-preserving pixel rule matches valid_pixels."""
+    jax = pytest.importorskip("jax")
+    from geoarray import GeoArray
+
+    from geoops._src.valid import invalid_elements, invalid_pixel_mask, valid_pixels
+
+    values = np.ones((2, 3, 4))
+    values[0, 1, 2] = -9.0
+    values[1, 0, 0] = np.nan
+    g = GeoArray(values, (1, 0, 0, 0, -1, 0), None, fill_value=-9.0, dims="band y x")
+    np.testing.assert_array_equal(
+        invalid_elements(values, -9.0), ~np.isfinite(values) | (values == -9.0)
+    )
+    want = np.broadcast_to(~valid_pixels(g), values.shape)
+    np.testing.assert_array_equal(invalid_pixel_mask(g), want)
+    x64 = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        on_jax = jax.jit(invalid_pixel_mask)(g.to_jax())
+    finally:
+        jax.config.update("jax_enable_x64", x64)
+    np.testing.assert_array_equal(np.asarray(on_jax), want)
+    single = GeoArray(values[0], (1, 0, 0, 0, -1, 0), None, fill_value=-9.0, dims="y x")
+    np.testing.assert_array_equal(invalid_pixel_mask(single), values[0] == -9.0)
