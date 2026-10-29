@@ -44,17 +44,21 @@ from pipekit import Operator, get_adapter
 from geoops._src.config import jsonable
 from geoops._src.fitted import fit_once
 from geoops._src.geo import reject_geotensor
-from geoops._src.kernels import pixel_kernel
+from geoops._src.kernels import named, pixel_kernel
 from geoops._src.shape import DIMS
 from geoops._src.stretch import percentile_stretch
 from geoops._src.valid import (
+    invalid_pixel_mask,
     invalid_values,
     mask_invalid_to_nan,
     valid_pixels,
     wrap_filled,
 )
 from geoops.normalize._src.array import (
+    BAND_STATS,
     asinh_scale,
+    band_quantiles,
+    band_stats,
     check_log_scale,
     check_positive,
     clahe,
@@ -108,6 +112,65 @@ def _check_per_band(stat: Any, gt: Any, dim: str = "band") -> None:
             f"{kept} of an input of shape {shape}; pass one value per band "
             "(or a scalar)"
         )
+
+
+def carrier_band_stats(
+    x: Any,
+    *,
+    dim: str = "band",
+    per_band: bool = True,
+    stats: tuple[str, ...] | list[str] = BAND_STATS,
+    quantiles: tuple[float, ...] | list[float] = (),
+) -> dict[str, Any]:
+    """Per-band statistics of a carrier's valid pixels, by dim name, on its backend.
+
+    The carrier form of `band_stats` and `band_quantiles`. The band dim is
+    found by name, so a ``(time, band, y, x)`` stack pools its frames into
+    one ``(C,)`` statistic per band. Nodata follows geoops' pixel rule
+    (`geoops._src.valid`): a pixel is invalid in every band when any of its
+    bands is non-finite or equals the carrier's fill, judged per frame.
+
+    Args:
+        x: A NumPy or JAX `GeoArray` (under ``jax.jit`` too), an
+            ``xr.DataArray`` (NumPy or dask), a `DimArray` or a plain 2-D to
+            4-D array in the layout ``("time", "band", "y", "x")[-ndim:]``.
+        dim: The band dim. A carrier without it gives scalar statistics.
+        per_band: ``False`` reduces over every dim, bands too, to scalars
+            (the pixel rule still uses ``dim``).
+        stats: Names for `band_stats`; ``()`` for none.
+        quantiles: Levels in ``[0, 1]`` for `band_quantiles`, returned under
+            ``"quantiles"`` as ``(len(quantiles), C)``; ``()`` for none.
+
+    Returns:
+        One array per statistic on the data's backend: NumPy, JAX (tracers
+        under ``jit``), or lazy dask arrays to compute together
+        (``dask.compute(*out.values())``).
+
+    Raises:
+        TypeError: ``x`` is a georeader ``GeoTensor``.
+        ValueError: An unknown statistic, or a level outside ``[0, 1]``.
+
+    Examples:
+        >>> scene = np.array([[[1.0, 3.0]], [[2.0, np.nan]]])  # (band, y, x)
+        >>> # the NaN in band 1 invalidates that pixel in band 0 too
+        >>> carrier_band_stats(scene, stats=("mean",))
+        {'mean': array([1., 2.])}
+        >>> out = carrier_band_stats(scene, stats=(), quantiles=(0.5,))
+        >>> out["quantiles"].shape  # (len(quantiles), C)
+        (1, 2)
+        >>> float(carrier_band_stats(scene, per_band=False, stats=("max",))["max"])
+        2.0
+    """
+    carrier, _ = named(x, name="carrier_band_stats")
+    adapter = get_adapter(carrier)
+    dims = tuple(adapter.dims(carrier))
+    data = adapter.data(carrier)
+    valid = ~invalid_pixel_mask(carrier, dim=dim)
+    axis = dims.index(dim) if per_band and dim in dims else None
+    out = dict(band_stats(data, valid, band_axis=axis, stats=stats))
+    if quantiles:
+        out["quantiles"] = band_quantiles(data, valid, band_axis=axis, q=quantiles)
+    return out
 
 
 def _array_or_none(value: Any) -> np.ndarray | None:

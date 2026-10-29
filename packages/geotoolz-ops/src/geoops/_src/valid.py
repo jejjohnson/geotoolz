@@ -38,7 +38,9 @@ import numbers
 from typing import Any
 
 import numpy as np
+from geoarray import GeoArray
 from jaxtyping import Bool, Float
+from pipekit import get_adapter
 from pipekit_array import array_namespace
 
 from geoops._src.geo import reject_geotensor
@@ -48,11 +50,13 @@ from geoops._src.wrap import INHERIT, FillValue, wrap_like
 __all__ = [
     "carried_fill",
     "carrier_fill_value",
+    "fill_of",
     "invalid_elements",
     "invalid_pixel_mask",
     "invalid_values",
     "is_fill",
     "mask_invalid_to_nan",
+    "namespace_of",
     "restore_fill",
     "valid_pixels",
     "wrap_filled",
@@ -335,13 +339,39 @@ def wrap_filled(
     return wrap_like(ref, filled, fill_value=fill_value, **wrap_kwargs)
 
 
+def namespace_of(values: Any) -> Any:
+    """The array namespace of ``values``; a raw dask array maps to ``dask.array``.
+
+    pipekit-array's ``array_namespace`` dispatches NumPy and JAX through
+    their Array API namespaces, but a dask array implements none, so a
+    reduction over a whole dask array (not over its blocks inside
+    ``KernelOp``) needs ``dask.array`` named here. ``dask.array`` provides
+    the same ``nan*`` reductions, ``where`` and ``isfinite`` as NumPy.
+
+    Args:
+        values: A NumPy, JAX or dask array.
+
+    Returns:
+        ``dask.array`` for a dask array, else ``array_namespace(values)``.
+
+    Example:
+        >>> namespace_of(np.zeros(2)).__name__
+        'numpy'
+    """
+    if type(values).__module__.startswith("dask."):
+        import dask.array
+
+        return dask.array
+    return array_namespace(values)
+
+
 def invalid_elements(values: Any, fill_value: Any) -> Any:
     """Where ``values`` is non-finite or equals ``fill_value``, on its own backend.
 
     The element rule of :func:`invalid_values`, written on the array
     namespace so it runs on NumPy, on JAX (under ``jax.jit`` too) and on dask
-    blocks without a host copy. A ``NaN`` fill is covered by the finiteness
-    test; ``None`` means no fill.
+    (its blocks or a whole array) without a host copy. A ``NaN`` fill is
+    covered by the finiteness test; ``None`` means no fill.
 
     Args:
         values: A NumPy, JAX or dask array.
@@ -354,10 +384,25 @@ def invalid_elements(values: Any, fill_value: Any) -> Any:
         >>> invalid_elements(np.array([1.0, np.nan, -9.0]), -9.0)
         array([False,  True,  True])
     """
-    bad = ~array_namespace(values).isfinite(values)
+    bad = ~namespace_of(values).isfinite(values)
     if fill_value is not None and not _is_nan_scalar(fill_value):
         bad = bad | (values == fill_value)
     return bad
+
+
+def fill_of(x: Any) -> Any:
+    """The fill that marks nodata in ``x``, or ``None``.
+
+    A `GeoArray` declares ``fill_value``. A ``DataArray`` declares it in
+    ``attrs["fill_value"]`` (written by `GeoArray.to_xarray`), else in an
+    undecoded ``attrs["_FillValue"]``; a file xarray decoded already holds
+    ``NaN`` there. Anything else declares none.
+    """
+    if isinstance(x, GeoArray):
+        return x.fill_value
+    if type(x).__module__.startswith("xarray."):
+        return x.attrs.get("fill_value", x.attrs.get("_FillValue"))
+    return None
 
 
 def invalid_pixel_mask(
@@ -365,15 +410,17 @@ def invalid_pixel_mask(
 ) -> Bool[np.ndarray, "*dims"]:
     """The pixel rule of :func:`valid_pixels` on a carrier's own backend, by dim name.
 
-    An element is invalid when it is non-finite, equals ``x.fill_value``, or
-    is ``True`` in ``mask``; a pixel with any invalid ``dim`` entry (any
-    band) is then invalid in every entry. The result keeps ``x``'s full
-    shape, so it can drop elements before a kernel and blank them after.
-    ``x`` without ``dim`` (a single-band map or series) is judged element by
-    element.
+    An element is invalid when it is non-finite, equals the carrier's fill
+    (`fill_of`), or is ``True`` in ``mask``; a pixel with any invalid ``dim``
+    entry (any band) is then invalid in every entry. The result keeps
+    ``x``'s full shape, so it can drop elements before a kernel and blank
+    them after. ``x`` without ``dim`` (a single-band map or series) is
+    judged element by element.
 
     Args:
-        x: A `GeoArray` (NumPy or JAX data; traced under ``jax.jit``).
+        x: A named carrier: a `GeoArray` (NumPy or JAX data; traced under
+            ``jax.jit``), an ``xr.DataArray`` (NumPy or dask, lazily) or a
+            pipekit-array ``DimArray``.
         dim: The dim the pixel rule reduces over.
         mask: An optional boolean array broadcasting to ``x``'s shape
             (``True`` drops), already aligned to ``x``'s dims.
@@ -382,20 +429,28 @@ def invalid_pixel_mask(
         A boolean array of ``x``'s shape on ``x``'s backend; ``True`` is
         invalid.
 
+    Raises:
+        TypeError: ``x`` is a georeader ``GeoTensor``, or not a named carrier.
+
     Example:
-        >>> from geoarray import GeoArray
         >>> g = GeoArray(np.array([[[1.0, -9.0]], [[2.0, 3.0]]]), (1, 0, 0, 0, -1, 0),
         ...              None, fill_value=-9.0, dims="band y x")
         >>> invalid_pixel_mask(g)[:, 0, 1].tolist()
         [True, True]
     """
     reject_geotensor(x, "invalid_pixel_mask")
-    data = x.data
-    xp = array_namespace(data)
-    bad = invalid_elements(data, x.fill_value)
+    adapter = get_adapter(x)
+    if adapter is None:
+        raise TypeError(
+            f"invalid_pixel_mask needs a named carrier; got {type(x).__name__}"
+        )
+    data = adapter.data(x)
+    dims = tuple(adapter.dims(x))
+    xp = namespace_of(data)
+    bad = invalid_elements(data, fill_of(x))
     if mask is not None:
         bad = bad | mask
-    if dim in x.dims:
-        pixel = xp.any(bad, axis=x.dims.index(dim), keepdims=True)
+    if dim in dims:
+        pixel = xp.any(bad, axis=dims.index(dim), keepdims=True)
         bad = xp.broadcast_to(pixel, data.shape)
     return bad

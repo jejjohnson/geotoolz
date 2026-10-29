@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from geoops.normalize._src.array import (
     asinh_scale,
+    band_quantiles,
+    band_stats,
     clahe,
     histogram_match,
     log_scale,
@@ -26,6 +28,7 @@ from geoops.normalize._src.operators import (
     RobustScaler,
     StandardScaler,
     ZeroOne,
+    carrier_band_stats,
 )
 
 
@@ -43,6 +46,9 @@ __all__ = [
     "StandardScaler",
     "ZeroOne",
     "asinh_scale",
+    "band_quantiles",
+    "band_stats",
+    "carrier_band_stats",
     "clahe",
     "histogram_match",
     "log_scale",

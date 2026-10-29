@@ -8,14 +8,16 @@ adaptive histogram equalization step.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from jaxtyping import Float, Shaped
 from pipekit_array import array_namespace
 
+from geoops._src.geo import reject_geotensor
 from geoops._src.optional import optional_name
 from geoops._src.shape import BAND_AXIS
+from geoops._src.valid import namespace_of
 
 
 if TYPE_CHECKING:
@@ -132,6 +134,139 @@ def per_band_stats(
         "max": np.nanmax(arr, axis=reduce_axes),
         "percentiles": np.nanpercentile(arr, percentiles, axis=reduce_axes),
     }
+
+
+#: The statistics `band_stats` computes by default, in its output order.
+BAND_STATS: tuple[str, ...] = ("mean", "std", "min", "max")
+
+
+def band_stats(
+    x: Float[np.ndarray, "*dims"],
+    valid: Shaped[np.ndarray, "*dims"] | None = None,
+    *,
+    band_axis: int | None = BAND_AXIS,
+    stats: tuple[str, ...] | list[str] = BAND_STATS,
+) -> dict[str, Float[np.ndarray, "*stat"]]:
+    r"""Per-band mean, std, min and max of the valid pixels, on any backend.
+
+    .. math::
+
+        \mu_c \;=\; \frac{1}{|V_c|} \sum_{i \in V_c} x_{c,i}
+
+    where :math:`V_c` is the set of valid elements of band :math:`c`, pooled
+    over every axis except ``band_axis`` (the frames of a ``(T, C, H, W)``
+    stack too), and likewise for ``std``, ``min`` and ``max``. Written on the
+    array namespace: NumPy, JAX (under ``jax.jit`` too, one trace per shape)
+    and dask, where each statistic is a lazy tree reduction.
+
+    Args:
+        x: Float array with the band axis at ``band_axis``.
+        valid: Boolean array broadcasting to ``x``; ``False`` leaves an
+            element out of every statistic. Non-finite elements are always
+            left out; ``None`` keeps every finite element.
+        band_axis: The axis kept, one statistic per entry; ``None`` reduces
+            globally to scalars.
+        stats: Which of ``"mean"``, ``"std"``, ``"min"``, ``"max"`` to compute.
+
+    Returns:
+        One array per requested statistic, ``(C,)`` (or scalar for
+        ``band_axis=None``), on ``x``'s backend; a band without valid
+        elements gives ``NaN``.
+
+    Raises:
+        TypeError: ``x`` is a georeader ``GeoTensor``.
+        ValueError: An unknown statistic name.
+
+    Examples:
+        >>> x = np.array([[[1.0, 3.0]], [[2.0, -9.0]]])  # (C=2, H=1, W=2)
+        >>> band_stats(x, x != -9.0, stats=("mean", "max"))
+        {'mean': array([2., 2.]), 'max': array([3., 2.])}
+        >>> # a (T, C, H, W) stack pools its frames: still one value per band
+        >>> band_stats(np.ones((4, 3, 2, 2)), stats=("min",))["min"].shape
+        (3,)
+        >>> float(band_stats(x, x != -9.0, band_axis=None, stats=("min",))["min"])
+        1.0
+    """
+    unknown = [name for name in stats if name not in BAND_STATS]
+    if unknown:
+        raise ValueError(f"unknown statistics {unknown}; choose from {BAND_STATS}")
+    xp, data, axes = _band_reduction(x, valid, band_axis, "band_stats")
+    reducers = {
+        "mean": xp.nanmean,
+        "std": xp.nanstd,
+        "min": xp.nanmin,
+        "max": xp.nanmax,
+    }
+    return {name: reducers[name](data, axis=axes) for name in stats}
+
+
+def band_quantiles(
+    x: Float[np.ndarray, "*dims"],
+    valid: Shaped[np.ndarray, "*dims"] | None = None,
+    *,
+    band_axis: int | None = BAND_AXIS,
+    q: tuple[float, ...] | list[float] = (0.25, 0.5, 0.75),
+) -> Float[np.ndarray, "levels ..."]:
+    r"""Per-band quantiles of the valid pixels, on any backend.
+
+    :math:`q_c(p)` is the :math:`p`-th quantile (linear interpolation, as
+    ``np.nanpercentile``) of the valid elements of band :math:`c`, pooled
+    over every axis except ``band_axis``.
+
+    On dask an exact quantile needs every pixel of a band in one block, so
+    ``dask.array.nanquantile`` rechunks the reduced axes to a single chunk
+    and the band axis to ``"auto"``: a task holds whole bands, as many as fit
+    dask's ``array.chunk-size`` (at least one), never the whole cube.
+
+    Args:
+        x: Float array with the band axis at ``band_axis``.
+        valid: Boolean array broadcasting to ``x``; ``False`` leaves an
+            element out. Non-finite elements are always left out; ``None``
+            keeps every finite element.
+        band_axis: The axis kept; ``None`` gives one quantile per level.
+        q: Quantile levels in ``[0, 1]``, static (they fix the output shape).
+
+    Returns:
+        ``(len(q), C)`` (or ``(len(q),)`` for ``band_axis=None``) on ``x``'s
+        backend; a band without valid elements gives ``NaN``.
+
+    Raises:
+        TypeError: ``x`` is a georeader ``GeoTensor``.
+        ValueError: A level outside ``[0, 1]``.
+
+    Examples:
+        >>> x = np.arange(8.0).reshape(2, 2, 2)  # (C=2, H=2, W=2)
+        >>> band_quantiles(x, q=(0.0, 0.5, 1.0))
+        array([[0. , 4. ],
+               [1.5, 5.5],
+               [3. , 7. ]])
+        >>> # IQR per band, nodata left out
+        >>> lo, hi = band_quantiles(x, x != 0.0, q=(0.25, 0.75))
+        >>> (hi - lo).tolist()
+        [1.0, 1.5]
+    """
+    levels = np.asarray(q, dtype=float)
+    if levels.ndim != 1 or np.any((levels < 0) | (levels > 1)):
+        raise ValueError(f"quantile levels must be a sequence in [0, 1]; got {q}")
+    xp, data, axes = _band_reduction(x, valid, band_axis, "band_quantiles")
+    return xp.nanquantile(data, xp.asarray(levels, dtype=data.dtype), axis=axes)
+
+
+def _band_reduction(
+    x: Any, valid: Any, band_axis: int | None, name: str
+) -> tuple[Any, Any, tuple[int, ...]]:
+    """Namespace, float data with invalid elements ``NaN``, and the reduced axes."""
+    reject_geotensor(x, name)
+    xp = namespace_of(x)
+    # float64, as the NumPy operators' masked copies, so a float32 cube's
+    # statistics do not depend on the backend (JAX needs x64 for this)
+    data = x if x.dtype == np.float64 else x.astype(np.float64)
+    # the nan* reducers skip NaN only: an infinity is left out as well
+    keep = xp.isfinite(data) if valid is None else valid & xp.isfinite(data)
+    data = xp.where(keep, data, xp.nan)
+    kept = None if band_axis is None else band_axis % data.ndim
+    # an explicit tuple, never None: dask.array.nanquantile rejects a global axis
+    return xp, data, tuple(axis for axis in range(data.ndim) if axis != kept)
 
 
 def standard_scale(
