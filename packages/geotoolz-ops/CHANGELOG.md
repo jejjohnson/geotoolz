@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.15.0...geotoolz-ops-v0.16.0) (2026-10-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ops:** the Tier-A index kernels in geoops.indices take one array per band (ndvi(nir, red, eps=...)) instead of a stack, band positions and axis.
+
+### Features
+
+* **ops:** diagnostic gradient kernel and geoops.geom.Gradient ([#585](https://github.com/jejjohnson/geotoolz/issues/585)) ([331c5b8](https://github.com/jejjohnson/geotoolz/commit/331c5b8104dea9528ed45d11f95715bfd983725e))
+* **ops:** indices as kernel operators on numpy, jax and xarray carriers ([#582](https://github.com/jejjohnson/geotoolz/issues/582)) ([c4a5943](https://github.com/jejjohnson/geotoolz/commit/c4a5943b2431a3e066263cd1609af66d87e9b6a9))
+* **ops:** QA masks as kernel operators on numpy, jax and xarray carriers ([#583](https://github.com/jejjohnson/geotoolz/issues/583)) ([3eb2dad](https://github.com/jejjohnson/geotoolz/commit/3eb2dadc1c63c0402002bc0b6b6e980e281b3dfb))
+* **ops:** value-wise normalizers as kernel operators on numpy, jax and xarray ([#584](https://github.com/jejjohnson/geotoolz/issues/584)) ([b59be80](https://github.com/jejjohnson/geotoolz/commit/b59be8076434e7e2ca2b3eace55306b920821677))
+
 ## [0.15.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.14.0...geotoolz-ops-v0.15.0) (2026-10-28)
 
 
