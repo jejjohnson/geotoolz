@@ -20,7 +20,12 @@ from pipekit_array import array_namespace
 from geoops._src.blending import triangular_weights
 from geoops._src.geotensor import reject_geotensor
 from geoops._src.optional import optional_name
-from geoops.geom._src.stencils import METHODS, Method, stencil_coeffs, stencil_offsets
+from geoops.geom._src.stencils import (
+    METHODS,
+    Method,
+    difference_coeffs,
+    difference_offsets,
+)
 
 
 if TYPE_CHECKING:
@@ -657,14 +662,14 @@ def _bounded(
 ) -> Any:
     """The stencils of ``method`` with one-sided ones where it would leave the axis."""
     size = f.shape[axis]
-    forward = stencil_offsets(
+    forward = difference_offsets(
         derivative=derivative, accuracy=accuracy, method="forward"
     )
-    backward = stencil_offsets(
+    backward = difference_offsets(
         derivative=derivative, accuracy=accuracy, method="backward"
     )
     if method == "central":
-        centre = stencil_offsets(
+        centre = difference_offsets(
             derivative=derivative, accuracy=accuracy, method="central"
         )
         if size < len(centre):
@@ -714,7 +719,7 @@ def _apply_stencil(
     f: Any, axis: int, start: int, stop: int, offsets: tuple[int, ...], derivative: int
 ) -> Any:
     """``Σ c_k f[i + s_k]`` for ``i`` in ``[start, stop)`` along ``axis``."""
-    coeffs = stencil_coeffs(offsets, derivative)
+    coeffs = difference_coeffs(offsets, derivative)
     out = None
     for offset, coeff in zip(offsets, coeffs, strict=True):
         index = [slice(None)] * f.ndim
@@ -728,13 +733,15 @@ def _periodic(
     xp: Any, f: Any, axis: int, derivative: int, accuracy: int, method: Method
 ) -> Any:
     """The ``method`` stencil at every point, reading across the seam."""
-    offsets = stencil_offsets(derivative=derivative, accuracy=accuracy, method=method)
+    offsets = difference_offsets(
+        derivative=derivative, accuracy=accuracy, method=method
+    )
     if f.shape[axis] < len(offsets):
         raise ValueError(
             f"a periodic axis of length {f.shape[axis]} is shorter than the "
             f"{len(offsets)}-point {method} stencil"
         )
-    coeffs = stencil_coeffs(offsets, derivative)
+    coeffs = difference_coeffs(offsets, derivative)
     out = None
     for offset, coeff in zip(offsets, coeffs, strict=True):
         term = coeff * xp.roll(f, -offset, axis=axis)

@@ -19,9 +19,9 @@ conditions :math:`\\sum_k c_k s_k^m = n!\\,\\delta_{mn}` for
 :math:`m = 0, \\dots, K - 1`.
 
 Example:
-    >>> stencil_offsets(derivative=1, accuracy=1, method="central")
+    >>> difference_offsets(derivative=1, accuracy=1, method="central")
     (-1, 0, 1)
-    >>> stencil_coeffs((-1, 0, 1), derivative=1)
+    >>> difference_coeffs((-1, 0, 1), derivative=1)
     (-0.5, 0.0, 0.5)
 """
 
@@ -34,7 +34,7 @@ from typing import Literal
 import numpy as np
 
 
-__all__ = ["METHODS", "Method", "stencil_coeffs", "stencil_offsets"]
+__all__ = ["METHODS", "Method", "difference_coeffs", "difference_offsets"]
 
 Method = Literal["central", "forward", "backward"]
 
@@ -43,7 +43,7 @@ METHODS: tuple[Method, ...] = ("central", "forward", "backward")
 
 
 @functools.lru_cache(maxsize=256)
-def stencil_offsets(
+def difference_offsets(
     *, derivative: int = 1, accuracy: int = 1, method: Method = "central"
 ) -> tuple[int, ...]:
     """The offsets of one stencil, finitediffx's rules.
@@ -61,9 +61,9 @@ def stencil_offsets(
         ValueError: An order below 1, or an unknown method.
 
     Examples:
-        >>> stencil_offsets(derivative=1, accuracy=2, method="forward")
+        >>> difference_offsets(derivative=1, accuracy=2, method="forward")
         (0, 1, 2)
-        >>> stencil_offsets(derivative=2, accuracy=1, method="central")
+        >>> difference_offsets(derivative=2, accuracy=1, method="central")
         (-1, 0, 1)
     """
     if derivative < 1 or accuracy < 1:
@@ -81,7 +81,9 @@ def stencil_offsets(
 
 
 @functools.lru_cache(maxsize=256)
-def stencil_coeffs(offsets: tuple[int, ...], derivative: int = 1) -> tuple[float, ...]:
+def difference_coeffs(
+    offsets: tuple[int, ...], derivative: int = 1
+) -> tuple[float, ...]:
     r"""The coefficients of a stencil on ``offsets``, from the Taylor conditions.
 
     Solves :math:`\sum_k c_k s_k^m = n!\,\delta_{mn}` for
@@ -100,9 +102,9 @@ def stencil_coeffs(offsets: tuple[int, ...], derivative: int = 1) -> tuple[float
         ValueError: Too few offsets for the derivative.
 
     Examples:
-        >>> stencil_coeffs((-1, 0, 1), derivative=2)
+        >>> difference_coeffs((-1, 0, 1), derivative=2)
         (1.0, -2.0, 1.0)
-        >>> [round(c, 6) for c in stencil_coeffs((0, 1, 2), derivative=1)]
+        >>> [round(c, 6) for c in difference_coeffs((0, 1, 2), derivative=1)]
         [-1.5, 2.0, -0.5]
     """
     n = len(offsets)

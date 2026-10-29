@@ -41,7 +41,7 @@ from geoops.geom._src.operators import (
     Tile,
     Vectorize,
 )
-from geoops.geom._src.stencils import stencil_coeffs, stencil_offsets
+from geoops.geom._src.stencils import difference_coeffs, difference_offsets
 
 
 __all__ = [
@@ -72,7 +72,7 @@ __all__ = [
     "adaptive_difference",
     "adaptive_gradient",
     "difference",
+    "difference_coeffs",
+    "difference_offsets",
     "gradient",
-    "stencil_coeffs",
-    "stencil_offsets",
 ]

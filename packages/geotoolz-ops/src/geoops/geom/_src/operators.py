@@ -2711,7 +2711,7 @@ class Gradient(Operator):
     available without a carrier: :func:`geoops.geom.gradient` /
     :func:`geoops.geom.adaptive_gradient` over :func:`geoops.geom.difference`
     / :func:`geoops.geom.adaptive_difference`, whose stencils come from
-    :func:`geoops.geom.stencil_offsets` and :func:`geoops.geom.stencil_coeffs`.
+    :func:`geoops.geom.difference_offsets` and :func:`geoops.geom.difference_coeffs`.
 
     **Geometry**, derived from the carrier. The row and column derivatives
     map to the CRS's ``x`` and ``y`` through the transform's Jacobian

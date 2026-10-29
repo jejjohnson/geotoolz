@@ -191,9 +191,9 @@ current).
 | `adaptive_difference` | function | Mask-aware finite difference: the widest stencil that fits on valid data. |
 | `adaptive_gradient` | function | Mask-aware ``(∂f/∂y, ∂f/∂x)``: :func:`adaptive_difference` on both axes. |
 | `difference` | function | Finite-difference derivative along one axis; a NaN propagates. |
+| `difference_coeffs` | function | The coefficients of a stencil on ``offsets``, from the Taylor conditions. |
+| `difference_offsets` | function | The offsets of one stencil, finitediffx's rules. |
 | `gradient` | function | ``(∂f/∂y, ∂f/∂x)`` over the last two axes; a NaN propagates. |
-| `stencil_coeffs` | function | The coefficients of a stencil on ``offsets``, from the Taylor conditions. |
-| `stencil_offsets` | function | The offsets of one stencil, finitediffx's rules. |
 
 ### `geoops.geom.coregister`
 

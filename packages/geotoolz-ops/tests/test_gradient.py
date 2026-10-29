@@ -2,7 +2,7 @@
 
 Three layers, each usable on its own:
 
-- L0 `stencil_offsets` / `stencil_coeffs`: finitediffx's stencils;
+- L0 `difference_offsets` / `difference_coeffs`: finitediffx's stencils;
 - L1 `difference` / `gradient` (NaN propagates) and the mask-aware
   `adaptive_difference` / `adaptive_gradient`, on any backend;
 - L2 `Gradient`: geometry from the carrier, ``nan_policy`` and a mask input.
@@ -27,9 +27,9 @@ from geoops.geom import (
     adaptive_difference,
     adaptive_gradient,
     difference,
+    difference_coeffs,
+    difference_offsets,
     gradient,
-    stencil_coeffs,
-    stencil_offsets,
 )
 
 
@@ -239,14 +239,14 @@ def test_difference_equals_finitediffx(
 
 
 def test_stencils_are_the_textbook_ones() -> None:
-    assert stencil_offsets(derivative=1, accuracy=1, method="central") == (-1, 0, 1)
-    assert stencil_coeffs((-1, 0, 1), 1) == (-0.5, 0.0, 0.5)
-    assert stencil_coeffs((-2, -1, 0, 1, 2), 1) == pytest.approx(
+    assert difference_offsets(derivative=1, accuracy=1, method="central") == (-1, 0, 1)
+    assert difference_coeffs((-1, 0, 1), 1) == (-0.5, 0.0, 0.5)
+    assert difference_coeffs((-2, -1, 0, 1, 2), 1) == pytest.approx(
         (1 / 12, -2 / 3, 0.0, 2 / 3, -1 / 12)
     )
-    assert stencil_coeffs((-1, 0, 1), 2) == (1.0, -2.0, 1.0)
+    assert difference_coeffs((-1, 0, 1), 2) == (1.0, -2.0, 1.0)
     with pytest.raises(ValueError, match="cannot resolve"):
-        stencil_coeffs((0, 1), 2)
+        difference_coeffs((0, 1), 2)
 
 
 def test_periodic_difference_reads_across_the_seam() -> None:
