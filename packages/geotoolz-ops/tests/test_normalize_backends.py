@@ -193,3 +193,70 @@ def test_band_stats_reject_bad_requests(scene: GeoArray) -> None:
         gn.carrier_band_stats(scene, stats=("median",))
     with pytest.raises(ValueError, match=r"in \[0, 1\]"):
         gn.carrier_band_stats(scene, quantiles=(25.0,))
+
+
+# --- per-scene stretches: ZeroOne and HistogramStretch (#591) --------------
+
+
+def _old_stretch(g: GeoArray, op: object) -> np.ndarray:
+    """The NumPy-only implementation before #591, as the reference."""
+    from geoops.normalize._src.array import stat_axes
+    from geoops.normalize._src.operators import _masked
+
+    arr, _ = _masked(g)
+    if isinstance(op, gn.ZeroOne):
+        axis = stat_axes(arr, per_band=op.per_band)
+        lo = np.nanmin(arr, axis=axis, keepdims=True)
+        hi = np.nanmax(arr, axis=axis, keepdims=True)
+        return (arr - lo) / np.where(hi > lo, hi - lo, 1.0)
+    axis = stat_axes(arr)
+    lo = np.nanpercentile(arr, op.lower, axis=axis, keepdims=True)
+    hi = np.nanpercentile(arr, op.upper, axis=axis, keepdims=True)
+    unit = np.clip((arr - lo) / np.where(hi > lo, hi - lo, 1.0), 0.0, 1.0)
+    out_min, out_max = op.out_range
+    return unit * (out_max - out_min) + out_min
+
+
+STRETCHES = [
+    pytest.param(gn.ZeroOne(), id="ZeroOne"),
+    pytest.param(gn.ZeroOne(per_band=False), id="ZeroOne-global"),
+    pytest.param(gn.HistogramStretch(), id="HistogramStretch"),
+    pytest.param(
+        gn.HistogramStretch(out_range=(0.0, 255.0), lower=5.0, upper=90.0),
+        id="HistogramStretch-255",
+    ),
+]
+
+
+@pytest.mark.parametrize("op", STRETCHES)
+def test_stretch_agrees_on_every_carrier(op: object, stats_scene: GeoArray) -> None:
+    want = _old_stretch(stats_scene, op)
+    got = op(stats_scene)
+    assert isinstance(got, GeoArray)
+    assert np.isnan(got.fill_value)
+    np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12, equal_nan=True)
+
+    jitted = jax.jit(lambda g: op(g))(stats_scene.to_jax())
+    da = stats_scene.to_xarray()
+    on_dask = op(da.chunk({"y": 2}))
+    assert jitted.backend == "jax"
+    assert hasattr(on_dask.data, "dask")
+    for out in (op(stats_scene.to_jax()), jitted, op(da), on_dask.compute()):
+        np.testing.assert_allclose(np.asarray(out), want, rtol=1e-12, equal_nan=True)
+
+
+def test_scale_kernels_promote_low_precision_statistics() -> None:
+    x = np.array([[[-40000.0, 40000.0]]], dtype=np.float32)
+    bounds = np.array([-40000.0, 40000.0], dtype=np.float16)  # span overflows float16
+    out = gn.minmax_scale(x, bounds[0], bounds[1], reduce_axes=None)
+    np.testing.assert_allclose(out, [[[0.0, 1.0]]])
+
+
+@pytest.mark.parametrize("op", STRETCHES)
+def test_stretch_maps_a_constant_band_to_its_low_end(op: object) -> None:
+    values = np.stack([np.full((4, 4), 0.3), np.linspace(0, 1, 16).reshape(4, 4)])
+    out = np.asarray(op(toy_geoarray(values)))
+    low = op.out_range[0] if isinstance(op, gn.HistogramStretch) else 0.0
+    if getattr(op, "per_band", True):
+        np.testing.assert_allclose(out[0], low)
+    np.testing.assert_allclose(out, _old_stretch(toy_geoarray(values), op))

@@ -46,7 +46,7 @@ from geoops._src.fitted import fit_once
 from geoops._src.geo import reject_geotensor
 from geoops._src.kernels import named, pixel_kernel
 from geoops._src.shape import DIMS
-from geoops._src.stretch import percentile_stretch
+from geoops._src.stretch import check_percentiles, stretch_between
 from geoops._src.valid import (
     invalid_pixel_mask,
     invalid_values,
@@ -171,6 +171,28 @@ def carrier_band_stats(
     if quantiles:
         out["quantiles"] = band_quantiles(data, valid, band_axis=axis, q=quantiles)
     return out
+
+
+def _scene_stats(x: Any, **kwargs: Any) -> dict[str, Any]:
+    """`carrier_band_stats` of ``x``, with lazy dask statistics computed in one pass.
+
+    A per-call statistic feeds an element-wise kernel as a constant, so on
+    dask the statistics (not the data) are computed here, together, and the
+    transform that uses them stays lazy. NumPy and JAX values (tracers under
+    ``jax.jit``) pass through.
+    """
+    stats = carrier_band_stats(x, **kwargs)
+    if any(type(v).__module__.startswith("dask.") for v in stats.values()):
+        import dask
+
+        stats = dict(zip(stats, dask.compute(*stats.values()), strict=True))
+    return stats
+
+
+def _stretch_kernel(x: Any, *, lo: Any, hi: Any, out_range: tuple[float, float]) -> Any:
+    """Clip to ``[lo, hi]`` per band and map into ``out_range`` (`HistogramStretch`)."""
+    out_min, out_max = out_range
+    return stretch_between(x, lo, hi) * (out_max - out_min) + out_min
 
 
 def _array_or_none(value: Any) -> np.ndarray | None:
@@ -662,7 +684,7 @@ class HistogramStretch(Operator):
         >>> display = op(reflectance_scene)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -675,13 +697,20 @@ class HistogramStretch(Operator):
         self.lower = lower
         self.upper = upper
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        arr, valid = _masked(gt)
-        clipped = percentile_stretch(
-            arr, self.lower, self.upper, reduce_axes=stat_axes(arr)
+    def _apply(self, gt: Any) -> Any:
+        check_percentiles(self.lower, self.upper)
+        q = (self.lower / 100.0, self.upper / 100.0)
+        lo, hi = _scene_stats(gt, stats=(), quantiles=q)["quantiles"]
+        # the band dim is last inside the kernel, so (C,) bounds broadcast as is
+        return pixel_kernel(
+            _stretch_kernel,
+            gt,
+            dim="band",
+            name="HistogramStretch",
+            lo=lo,
+            hi=hi,
+            out_range=self.out_range,
         )
-        out_min, out_max = self.out_range
-        return _rewrap(gt, clipped * (out_max - out_min) + out_min, valid)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -916,19 +945,20 @@ class ZeroOne(Operator):
         >>> display = ZeroOne(per_band=True)(scene)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(self, *, per_band: bool = True) -> None:
         self.per_band = per_band
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        arr, valid = _masked(gt)
-        axis = stat_axes(arr, per_band=self.per_band)
-        out = minmax_scale(
-            arr,
-            np.nanmin(arr, axis=axis),
-            np.nanmax(arr, axis=axis),
+    def _apply(self, gt: Any) -> Any:
+        stats = _scene_stats(gt, per_band=self.per_band, stats=("min", "max"))
+        return pixel_kernel(
+            minmax_scale,
+            gt,
+            dim="band",
+            name="ZeroOne",
+            vmin=stats["min"],
+            vmax=stats["max"],
             out_range=(0.0, 1.0),
-            reduce_axes=axis,
+            reduce_axes=None,
         )
-        return _rewrap(gt, out, valid)
