@@ -14,6 +14,7 @@ import numpy as np
 from jaxtyping import Float, Shaped
 from pipekit_array import array_namespace
 
+from geoops._src.geo import reject_geotensor
 from geoops._src.optional import optional_name
 from geoops._src.shape import BAND_AXIS
 from geoops._src.valid import namespace_of
@@ -85,7 +86,7 @@ def reshape_stat(
     """
     xp = namespace_of(arr) if hasattr(arr, "dtype") else np
     stat_arr = xp.asarray(stat)
-    if not np.issubdtype(stat_arr.dtype, np.floating):
+    if stat_arr.dtype != np.float64:  # float64 as before, so float16 cannot overflow
         stat_arr = stat_arr.astype(np.float64)
     if stat_arr.ndim == 0 or reduce_axes is None:
         return stat_arr
@@ -176,6 +177,7 @@ def band_stats(
         elements gives ``NaN``.
 
     Raises:
+        TypeError: ``x`` is a georeader ``GeoTensor``.
         ValueError: An unknown statistic name.
 
     Examples:
@@ -191,7 +193,7 @@ def band_stats(
     unknown = [name for name in stats if name not in BAND_STATS]
     if unknown:
         raise ValueError(f"unknown statistics {unknown}; choose from {BAND_STATS}")
-    xp, data, axes = _band_reduction(x, valid, band_axis)
+    xp, data, axes = _band_reduction(x, valid, band_axis, "band_stats")
     reducers = {
         "mean": xp.nanmean,
         "std": xp.nanstd,
@@ -232,6 +234,7 @@ def band_quantiles(
         backend; a band without valid elements gives ``NaN``.
 
     Raises:
+        TypeError: ``x`` is a georeader ``GeoTensor``.
         ValueError: A level outside ``[0, 1]``.
 
     Examples:
@@ -248,14 +251,15 @@ def band_quantiles(
     levels = np.asarray(q, dtype=float)
     if levels.ndim != 1 or np.any((levels < 0) | (levels > 1)):
         raise ValueError(f"quantile levels must be a sequence in [0, 1]; got {q}")
-    xp, data, axes = _band_reduction(x, valid, band_axis)
+    xp, data, axes = _band_reduction(x, valid, band_axis, "band_quantiles")
     return xp.nanquantile(data, xp.asarray(levels, dtype=data.dtype), axis=axes)
 
 
 def _band_reduction(
-    x: Any, valid: Any, band_axis: int | None
+    x: Any, valid: Any, band_axis: int | None, name: str
 ) -> tuple[Any, Any, tuple[int, ...]]:
     """Namespace, float data with invalid elements ``NaN``, and the reduced axes."""
+    reject_geotensor(x, name)
     xp = namespace_of(x)
     # float64, as the NumPy operators' masked copies, so a float32 cube's
     # statistics do not depend on the backend (JAX needs x64 for this)
