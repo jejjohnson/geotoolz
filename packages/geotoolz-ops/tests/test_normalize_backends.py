@@ -314,3 +314,49 @@ def test_scaler_statistics_must_match_the_band_dim_on_dask(scene: GeoArray) -> N
         gn.RobustScaler(median=[0.0, 0.0], iqr=[1.0, 1.0])(lazy)
     with pytest.raises(ValueError, match="does not match the kept axes"):
         gn.MinMaxScaler(vmin=[0.0, 0.0], vmax=[1.0, 1.0]).inverse(lazy)
+
+
+# --- PerBandStats (#593) -----------------------------------------------------
+
+
+def test_per_band_stats_agree_on_every_carrier(stats_scene: GeoArray) -> None:
+    from geoops.normalize._src.array import stat_axes
+    from geoops.normalize._src.operators import _masked
+
+    arr, _ = _masked(stats_scene)
+    want = gn.per_band_stats(arr, percentiles=(2.0, 50.0), reduce_axes=stat_axes(arr))
+    da = stats_scene.to_xarray()
+    for carrier in (stats_scene, stats_scene.to_jax(), da, da.chunk({"y": 2})):
+        op = gn.PerBandStats(percentiles=[2.0, 50.0])
+        assert op(carrier) is carrier
+        assert set(op.stats) == set(want)
+        for key, value in want.items():
+            assert isinstance(op.stats[key], list)
+            np.testing.assert_allclose(op.stats[key], value, rtol=1e-12)
+
+
+def test_per_band_stats_compute_a_dask_cube_once(scene: GeoArray) -> None:
+    computes = 0
+
+    def counting(dsk: object, keys: object, **kwargs: object) -> object:
+        nonlocal computes
+        computes += 1
+        return dask.get(dsk, keys, **kwargs)
+
+    lazy = scene.to_xarray().chunk({"y": 3})
+    op = gn.PerBandStats()
+    with dask.config.set(scheduler=counting):
+        out = op(lazy)
+    assert computes == 1
+    assert out is lazy
+    assert hasattr(out.data, "dask")
+
+
+def test_per_band_stats_refuse_a_jax_trace(scene: GeoArray) -> None:
+    op = gn.PerBandStats()
+    with pytest.raises(TypeError, match=r"PerBandStats cannot run under jax\.jit"):
+        jax.jit(lambda g: op(g))(scene.to_jax())
+    assert op.stats == {}
+    # the functional form runs inside the trace
+    stats = jax.jit(lambda g: gn.carrier_band_stats(g))(scene.to_jax())
+    np.testing.assert_allclose(stats["mean"], gn.carrier_band_stats(scene)["mean"])
