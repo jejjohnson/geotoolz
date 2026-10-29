@@ -685,10 +685,20 @@ def _bounded(
             regions = [(0, -backward[0], forward), (-backward[0], size, backward)]
     else:
         raise ValueError(f"method must be one of {METHODS}; got {method!r}")
+    regions = [
+        (start, stop, offsets) for start, stop, offsets in regions if stop > start
+    ]
+    for start, stop, offsets in regions:
+        # every point of a region must read inside the axis
+        if start + offsets[0] < 0 or stop - 1 + offsets[-1] > size - 1:
+            raise ValueError(
+                f"an axis of length {size} is too short for the {len(offsets)}-point "
+                f"boundary stencils of method {method!r} (derivative {derivative}, "
+                f"accuracy {accuracy}); lower the accuracy"
+            )
     parts = [
         _apply_stencil(f, axis, start, stop, offsets, derivative)
         for start, stop, offsets in regions
-        if stop > start
     ]
     return xp.concat(parts, axis=axis)
 

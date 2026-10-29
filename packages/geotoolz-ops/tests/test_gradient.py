@@ -402,3 +402,30 @@ def test_a_batched_carrier_is_refused_with_map_over() -> None:
     batch = geoarray.stack_items([a, b], dim="patch")
     with pytest.raises(ValueError, match="map_over"):
         Gradient()(batch)
+
+
+@pytest.mark.parametrize(
+    ("size", "accuracy", "method"),
+    [(3, 2, "forward"), (3, 2, "backward"), (5, 4, "central"), (2, 1, "central")],
+)
+def test_a_short_axis_raises_instead_of_reading_outside_it(
+    size: int, accuracy: int, method: str
+) -> None:
+    with pytest.raises(ValueError, match="short"):
+        difference(np.arange(float(size)), accuracy=accuracy, method=method)
+
+
+def test_adaptive_descends_on_a_short_axis() -> None:
+    got = adaptive_difference(np.arange(3.0), accuracy=4)
+    np.testing.assert_allclose(got, 1.0)
+
+
+def test_a_plain_jax_mask_under_jit() -> None:
+    field = _linear(UTM)
+    land = np.zeros(field.shape, bool)
+    land[3, 2:5] = True
+    want = np.asarray(Gradient(nan_policy="adaptive")(field, land))
+    got = jax.jit(lambda f, m: Gradient(nan_policy="adaptive")(f, m))(
+        field.to_jax(), jax.numpy.asarray(land)
+    )
+    np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12)
