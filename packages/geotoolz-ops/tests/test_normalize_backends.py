@@ -428,6 +428,15 @@ def test_histogram_match_agrees_on_every_carrier(
         np.testing.assert_allclose(np.asarray(out), want, rtol=1e-12, equal_nan=True)
 
 
+def test_histogram_match_takes_a_jax_reference_under_jit(
+    stats_scene: GeoArray, reference: GeoArray
+) -> None:
+    want = np.asarray(gn.HistogramMatch(reference=reference)(stats_scene))
+    op = gn.HistogramMatch(reference=reference.to_jax())
+    jitted = jax.jit(lambda g: op(g))(stats_scene.to_jax())
+    np.testing.assert_allclose(np.asarray(jitted), want, rtol=1e-12, equal_nan=True)
+
+
 def test_histogram_match_needs_no_scikit_image(
     scene: GeoArray, reference: GeoArray, monkeypatch: pytest.MonkeyPatch
 ) -> None:

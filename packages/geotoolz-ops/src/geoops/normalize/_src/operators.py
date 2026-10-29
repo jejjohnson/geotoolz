@@ -36,9 +36,10 @@ fixed-stats alias ``Normalize``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, Self
+from typing import Any, ClassVar, NamedTuple, Self
 
 import numpy as np
+from geoarray import GeoArray
 from pipekit import Operator, get_adapter
 
 from geoops._src.config import jsonable
@@ -73,10 +74,6 @@ from geoops.normalize._src.array import (
     standard_scale,
     validate_out_range,
 )
-
-
-if TYPE_CHECKING:
-    from geoarray import GeoArray
 
 
 def _valid_mask(x: Any) -> np.ndarray:
@@ -909,7 +906,11 @@ class HistogramMatch(Operator):
     def _apply(self, gt: Any) -> Any:
         reject_geotensor(self.reference, "HistogramMatch (reference)")
         source = _pixel_view(gt, "band", "HistogramMatch")
-        ref = _pixel_view(self.reference, "band", "HistogramMatch (reference)")
+        reference = self.reference
+        if isinstance(reference, GeoArray) and reference.backend == "jax":
+            # the table is a host constant: build it before any trace sees it
+            reference = reference.to_numpy()
+        ref = _pixel_view(reference, "band", "HistogramMatch (reference)")
         n_bands = (
             source.data.shape[source.band_axis] if source.band_axis is not None else 1
         )
