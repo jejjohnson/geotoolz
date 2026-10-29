@@ -81,13 +81,6 @@ def test_bad_parameters_fail_before_any_compute(scene: GeoArray) -> None:
         gn.Normalize(mean=[0.0, 0.0], std=[1.0, 1.0])(lazy)
 
 
-def test_fitting_scalers_stay_numpy_only(scene: GeoArray) -> None:
-    from pipekit import BackendError
-
-    with pytest.raises(BackendError, match="StandardScaler runs on numpy only"):
-        gn.StandardScaler(fit_on_call=True)(scene.to_jax())
-
-
 # --- mask-aware per-band statistics (#590) ---------------------------------
 
 
@@ -234,3 +227,90 @@ def test_stretch_maps_a_constant_band_to_its_low_end(op: object) -> None:
     if getattr(op, "per_band", True):
         np.testing.assert_allclose(out[0], low)
     np.testing.assert_allclose(out, _old_stretch(toy_geoarray(values), op))
+
+
+# --- fitted scalers: StandardScaler, RobustScaler, MinMaxScaler (#592) -----
+
+SCALERS = {
+    "StandardScaler": (gn.StandardScaler, ("mean_", "std_")),
+    "RobustScaler": (gn.RobustScaler, ("median_", "iqr_")),
+    "MinMaxScaler": (gn.MinMaxScaler, ("vmin_", "vmax_")),
+}
+
+
+def _old_fit(name: str, g: GeoArray) -> tuple[np.ndarray, np.ndarray]:
+    """The NumPy-only fit before #592, as the reference."""
+    from geoops.normalize._src.array import stat_axes
+    from geoops.normalize._src.operators import _masked
+
+    arr, _ = _masked(g)
+    axis = stat_axes(arr)
+    if name == "StandardScaler":
+        return np.nanmean(arr, axis=axis), np.nanstd(arr, axis=axis)
+    if name == "RobustScaler":
+        q25, q50, q75 = np.nanpercentile(arr, [25.0, 50.0, 75.0], axis=axis)
+        return q50, q75 - q25
+    return np.nanmin(arr, axis=axis), np.nanmax(arr, axis=axis)
+
+
+@pytest.mark.parametrize("name", SCALERS)
+def test_scaler_fit_stores_host_arrays_on_every_carrier(
+    name: str, stats_scene: GeoArray
+) -> None:
+    cls, attrs = SCALERS[name]
+    want = _old_fit(name, stats_scene)
+    da = stats_scene.to_xarray()
+    for carrier in (stats_scene, stats_scene.to_jax(), da, da.chunk({"y": 2})):
+        fitted = cls().fit(carrier)
+        for attr, value in zip(attrs, want, strict=True):
+            got = getattr(fitted, attr)
+            assert type(got) is np.ndarray
+            np.testing.assert_allclose(got, value, rtol=1e-12)
+
+
+@pytest.mark.parametrize("name", SCALERS)
+def test_fitted_scaler_transforms_and_inverts_on_every_carrier(
+    name: str, stats_scene: GeoArray
+) -> None:
+    import pickle
+
+    cls, _ = SCALERS[name]
+    scaler = pickle.loads(pickle.dumps(cls().fit(stats_scene)))
+    want = np.asarray(scaler(stats_scene))
+    da = stats_scene.to_xarray()
+    lazy = scaler(da.chunk({"y": 2}))
+    assert hasattr(lazy.data, "dask")
+    jitted = jax.jit(lambda g: scaler(g))(stats_scene.to_jax())
+    for got in (scaler(stats_scene.to_jax()), jitted, scaler(da), lazy.compute()):
+        np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12, equal_nan=True)
+
+    back = jax.jit(lambda g: scaler.inverse(g))(scaler(stats_scene.to_jax()))
+    lazy_back = scaler.inverse(lazy)
+    assert hasattr(lazy_back.data, "dask")
+    valid = np.isfinite(want)
+    original = np.asarray(stats_scene, dtype=float)
+    for got in (scaler.inverse(scaler(stats_scene)), back, lazy_back.compute()):
+        np.testing.assert_allclose(np.asarray(got)[valid], original[valid], rtol=1e-9)
+        assert np.isnan(np.asarray(got)[~valid]).all()
+
+
+@pytest.mark.parametrize("name", SCALERS)
+def test_scaler_fit_refuses_a_jax_trace(name: str, scene: GeoArray) -> None:
+    cls, attrs = SCALERS[name]
+    with pytest.raises(TypeError, match=rf"{name}.fit cannot run under jax.jit"):
+        jax.jit(lambda g: cls().fit(g).transform(g))(scene.to_jax())
+    lazy = cls(fit_on_call=True)
+    with pytest.raises(TypeError, match=r"Call .*fit\(x\) eagerly"):
+        jax.jit(lambda g: lazy(g))(scene.to_jax())
+    assert all(getattr(lazy, attr) is None for attr in attrs)  # nothing written
+    # fitted eagerly, the same operator then runs inside the trace
+    lazy(scene.to_jax())
+    jax.jit(lambda g: lazy(g))(scene.to_jax())
+
+
+def test_scaler_statistics_must_match_the_band_dim_on_dask(scene: GeoArray) -> None:
+    lazy = scene.to_xarray().chunk({"y": 3})
+    with pytest.raises(ValueError, match="does not match the kept axes"):
+        gn.RobustScaler(median=[0.0, 0.0], iqr=[1.0, 1.0])(lazy)
+    with pytest.raises(ValueError, match="does not match the kept axes"):
+        gn.MinMaxScaler(vmin=[0.0, 0.0], vmax=[1.0, 1.0]).inverse(lazy)

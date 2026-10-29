@@ -19,6 +19,7 @@ deterministic results.
 
 from __future__ import annotations
 
+import sys
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -65,3 +66,33 @@ def fit_once(op: Any, x: Any, is_fitted: Callable[[], bool]) -> None:
     with fit_lock(op):
         if not is_fitted():
             op.fit(x)
+
+
+def require_concrete(x: Any, name: str, *, alternative: str) -> None:
+    """Raise unless ``x`` holds concrete data, not a ``jax.jit`` tracer.
+
+    A statistic computed inside a trace is itself a tracer, so storing it on
+    an operator (fitted ``*_`` state, a tap's cache) would leak it out of the
+    trace. Fitting and side-effecting operators call this before computing
+    anything, so nothing is written.
+
+    Args:
+        x: A carrier (`GeoArray`, ``DataArray``, plain array, …).
+        name: The call, for the message (``"StandardScaler.fit"``).
+        alternative: What to do instead, named in the message.
+
+    Raises:
+        TypeError: ``x``'s data is a JAX tracer.
+
+    Example:
+        >>> require_concrete(np.zeros(2), "Op.fit", alternative="fit eagerly")
+    """
+    jax = sys.modules.get("jax")
+    if jax is None:
+        return
+    data = getattr(x, "data", x)
+    if isinstance(data, jax.core.Tracer):
+        raise TypeError(
+            f"{name} cannot run under jax.jit: it stores statistics on the "
+            f"operator, and inside a trace they are tracers. {alternative}"
+        )
