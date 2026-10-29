@@ -344,6 +344,13 @@ def test_per_band_stats_agree_on_every_carrier(stats_scene: GeoArray) -> None:
             np.testing.assert_allclose(op.stats[key], value, rtol=1e-12)
 
 
+def test_per_band_stats_without_percentiles(scene: GeoArray) -> None:
+    op = gn.PerBandStats(percentiles=[])
+    assert op(scene) is scene
+    assert op.stats["percentiles"] == []
+    assert len(op.stats["mean"]) == scene.shape[-3]
+
+
 def test_per_band_stats_compute_a_dask_cube_once(scene: GeoArray) -> None:
     computes = 0
 

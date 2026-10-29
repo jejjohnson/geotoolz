@@ -299,7 +299,8 @@ class PerBandStats(Operator):
             f"Call it eagerly, outside the trace; or use {_FUNCTIONAL}",
             quantiles=tuple(p / 100.0 for p in self.percentiles),
         )
-        stats["percentiles"] = stats.pop("quantiles")
+        # no levels gives no "quantiles" entry; keep the old empty list
+        stats["percentiles"] = stats.pop("quantiles", np.empty(0))
         self.stats = {key: jsonable(value) for key, value in stats.items()}
         return gt
 
