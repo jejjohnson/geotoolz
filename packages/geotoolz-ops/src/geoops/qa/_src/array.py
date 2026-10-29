@@ -1,4 +1,4 @@
-"""Tier-A primitives — pure-numpy QA / cloud-mask decoding.
+"""Tier-A kernels — element-wise QA / cloud-mask decoding on any backend.
 
 The canonical home for QA-band decoding:
 
@@ -10,6 +10,11 @@ The canonical home for QA-band decoding:
    test membership against a set of integer field-values. Different from
    ``mask_from_qa_bits`` because that helper OR-s individual bits, which
    is wrong when the bits form a single contiguous categorical field.
+
+Each decoder is element-wise and written against the array namespace of
+its input, so the QA operators run it through pipekit-array's ``KernelOp``
+on NumPy, on JAX (under ``jax.jit`` too, which needs ``jax_enable_x64``
+for the ``int64`` bit arithmetic) and on the NumPy blocks of a dask cube.
 
 Mask *application* lives in `geoops.mask` (`apply_mask` /
 `ApplyMask`).
@@ -31,6 +36,7 @@ from itertools import pairwise
 
 import numpy as np
 from jaxtyping import Bool, Int
+from pipekit_array import array_namespace
 
 
 def mask_from_qa_bits(
@@ -79,13 +85,12 @@ def mask_from_qa_bits(
         USGS, "Landsat 8-9 Collection 2 Level-2 Science Product
         Guide", LSDS-1619, 2022.
     """
-    qa_int = qa.astype(np.int64, copy=False)
     bitmask = 0
     for b in bits:
         if b < 0:
             raise ValueError(f"bit position must be non-negative; got {b}")
         bitmask |= 1 << int(b)
-    out = (qa_int & bitmask) != 0
+    out = (_as_int64(qa) & bitmask) != 0
     return ~out if invert else out
 
 
@@ -116,8 +121,7 @@ def mask_from_scl(
     """
     if len(classes) == 0:
         raise ValueError("mask_from_scl: `classes` must not be empty")
-    # `isin` is the vectorised any-of comparison.
-    out = np.isin(scl, np.asarray([int(c) for c in classes]))
+    out = _isin(scl, [int(c) for c in classes])
     return ~out if invert else out
 
 
@@ -171,9 +175,41 @@ def mask_from_bit_field(
     if not values_tuple:
         raise ValueError("mask_from_bit_field: `values` must not be empty")
 
-    qa_int = qa.astype(np.int64, copy=False)
     shift = bits_tuple[0]
     width = len(bits_tuple)
-    field = (qa_int >> shift) & ((1 << width) - 1)
-    out = np.isin(field, np.asarray(values_tuple))
+    field = (_as_int64(qa) >> shift) & ((1 << width) - 1)
+    out = _isin(field, values_tuple)
     return ~out if invert else out
+
+
+def _as_int64(qa: Int[np.ndarray, "*dims"]) -> Int[np.ndarray, "*dims"]:
+    """``qa`` as ``int64`` on its own backend, for bit arithmetic.
+
+    Example:
+        >>> _as_int64(np.array([3], dtype=np.uint8)).dtype
+        dtype('int64')
+    """
+    xp = array_namespace(qa)
+    return xp.astype(qa, xp.int64)
+
+
+def _isin(
+    x: Int[np.ndarray, "*dims"], values: Sequence[int]
+) -> Bool[np.ndarray, "*dims"]:
+    """Element-wise membership in a short list of integers, on any backend.
+
+    The Array API has no ``isin``; for the handful of QA classes or field
+    values a mask tests, an OR of equalities is as fast and runs under
+    ``jax.jit``.
+
+    Example:
+        >>> _isin(np.array([1, 2, 3]), [1, 3])
+        array([ True, False,  True])
+    """
+    out = None
+    for v in values:
+        hit = x == int(v)
+        out = hit if out is None else out | hit
+    if out is None:
+        raise ValueError("isin: `values` must not be empty")
+    return out

@@ -11,7 +11,7 @@ NumPy result on a JAX carrier and trace once under `jax.jit` for
 same-shape inputs on different grids (the contract test checks
 both).
 
-24 of 264 operators run on JAX today.
+33 of 264 operators run on JAX today.
 
 | Family | Operator | Backends |
 |---|---|---|
@@ -198,20 +198,20 @@ both).
 | `plume` | `WindAdvectionCone` | numpy |
 | `qa` | `CloudSEN12` | numpy |
 | `qa` | `DecodeBitmask` | numpy |
-| `qa` | `LandsatQA_PIXEL` | numpy |
-| `qa` | `MODISStateQA` | numpy |
-| `qa` | `MaskCirrus` | numpy |
-| `qa` | `MaskCloudShadow` | numpy |
-| `qa` | `MaskClouds` | numpy |
+| `qa` | `LandsatQA_PIXEL` | numpy, jax, dask |
+| `qa` | `MODISStateQA` | numpy, jax, dask |
+| `qa` | `MaskCirrus` | numpy, jax, dask |
+| `qa` | `MaskCloudShadow` | numpy, jax, dask |
+| `qa` | `MaskClouds` | numpy, jax, dask |
 | `qa` | `MaskInvalid` | numpy |
 | `qa` | `MaskNoData` | numpy |
 | `qa` | `MaskSaturated` | numpy |
-| `qa` | `MaskSnow` | numpy |
-| `qa` | `MaskWater` | numpy |
+| `qa` | `MaskSnow` | numpy, jax, dask |
+| `qa` | `MaskWater` | numpy, jax, dask |
 | `qa` | `OmniCloudMask` | numpy |
 | `qa` | `S2Cloudless` | numpy |
-| `qa` | `S2QA60` | numpy |
-| `qa` | `S2SCL` | numpy |
+| `qa` | `S2QA60` | numpy, jax, dask |
+| `qa` | `S2SCL` | numpy, jax, dask |
 | `radiometry` | `ApplySRF` | numpy |
 | `radiometry` | `BTFromRadiance` | numpy |
 | `radiometry` | `ComputeSZA` | numpy |
