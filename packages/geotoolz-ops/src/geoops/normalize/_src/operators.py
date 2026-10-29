@@ -44,14 +44,13 @@ from pipekit import Operator, get_adapter
 from geoops._src.config import jsonable
 from geoops._src.fitted import fit_once, require_concrete
 from geoops._src.geo import reject_geotensor
-from geoops._src.kernels import fill_of, named, pixel_kernel
+from geoops._src.kernels import named, pixel_kernel
 from geoops._src.shape import DIMS
 from geoops._src.stretch import check_percentiles, stretch_between
 from geoops._src.valid import (
-    invalid_elements,
+    invalid_pixel_mask,
     invalid_values,
     mask_invalid_to_nan,
-    namespace_of,
     valid_pixels,
     wrap_filled,
 )
@@ -164,14 +163,11 @@ def carrier_band_stats(
     adapter = get_adapter(carrier)
     dims = tuple(adapter.dims(carrier))
     data = adapter.data(carrier)
-    bad = invalid_elements(data, fill_of(carrier))
-    band_axis = dims.index(dim) if dim in dims else None
-    if band_axis is not None:
-        bad = namespace_of(data).any(bad, axis=band_axis, keepdims=True)
-    axis = band_axis if per_band else None
-    out = dict(band_stats(data, ~bad, band_axis=axis, stats=stats))
+    valid = ~invalid_pixel_mask(carrier, dim=dim)
+    axis = dims.index(dim) if per_band and dim in dims else None
+    out = dict(band_stats(data, valid, band_axis=axis, stats=stats))
     if quantiles:
-        out["quantiles"] = band_quantiles(data, ~bad, band_axis=axis, q=quantiles)
+        out["quantiles"] = band_quantiles(data, valid, band_axis=axis, q=quantiles)
     return out
 
 

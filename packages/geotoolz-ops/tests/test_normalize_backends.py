@@ -162,6 +162,15 @@ def test_band_stats_l1_takes_the_band_axis_by_position() -> None:
     np.testing.assert_allclose(q[0], np.nanmedian(np.where(x < 20, x, np.nan), (0, 1)))
 
 
+def test_band_stats_leave_infinities_out() -> None:
+    x = np.array([[[1.0, np.inf]], [[2.0, -np.inf]]])  # (C=2, H=1, W=2)
+    for valid in (None, np.ones(x.shape, dtype=bool)):
+        got = gn.band_stats(x, valid)
+        np.testing.assert_array_equal(got["mean"], [1.0, 2.0])
+        np.testing.assert_array_equal(got["std"], [0.0, 0.0])
+        np.testing.assert_array_equal(gn.band_quantiles(x, valid, q=(1.0,))[0], [1, 2])
+
+
 def test_band_stats_reject_bad_requests(scene: GeoArray) -> None:
     with pytest.raises(ValueError, match="unknown statistics"):
         gn.carrier_band_stats(scene, stats=("median",))
