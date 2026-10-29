@@ -83,7 +83,10 @@ def reshape_stat(
             kept axes (e.g. a 2-entry per-band statistic for a 3-band
             input); it would otherwise broadcast silently along ``x``.
     """
-    stat_arr = np.asarray(stat, dtype=float)
+    xp = namespace_of(arr) if hasattr(arr, "dtype") else np
+    stat_arr = xp.asarray(stat)
+    if not np.issubdtype(stat_arr.dtype, np.floating):
+        stat_arr = stat_arr.astype(np.float64)
     if stat_arr.ndim == 0 or reduce_axes is None:
         return stat_arr
 
@@ -291,7 +294,7 @@ def standard_scale(
     """
     mean_b = reshape_stat(mean, arr, reduce_axes)
     std_b = reshape_stat(std, arr, reduce_axes)
-    denom = np.where(std_b != 0, std_b, 1.0)
+    denom = namespace_of(arr).where(std_b != 0, std_b, 1.0)
     return (arr - mean_b) / denom
 
 
@@ -326,7 +329,7 @@ def robust_scale(
     """
     median_b = reshape_stat(median, arr, reduce_axes)
     iqr_b = reshape_stat(iqr, arr, reduce_axes)
-    denom = np.where(iqr_b != 0, iqr_b, 1.0)
+    denom = namespace_of(arr).where(iqr_b != 0, iqr_b, 1.0)
     return (arr - median_b) / denom
 
 
@@ -366,7 +369,7 @@ def minmax_scale(
     out_min, out_max = validate_out_range(out_range)
     vmin_b = reshape_stat(vmin, arr, reduce_axes)
     vmax_b = reshape_stat(vmax, arr, reduce_axes)
-    denom = np.where(vmax_b > vmin_b, vmax_b - vmin_b, 1.0)
+    denom = namespace_of(arr).where(vmax_b > vmin_b, vmax_b - vmin_b, 1.0)
     return (arr - vmin_b) / denom * (out_max - out_min) + out_min
 
 
