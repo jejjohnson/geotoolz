@@ -1,8 +1,10 @@
-"""Normalization primitives.
+"""Normalization primitives, on the array namespace where they can be.
 
-Mostly pure-numpy; :func:`clahe` additionally delegates to
-:func:`skimage.exposure.equalize_adapthist` for the contrast-limited
-adaptive histogram equalization step.
+Every primitive here runs on NumPy; the per-band statistics, the scale
+kernels, histogram matching and :func:`clahe` also run on JAX (under
+``jax.jit`` too) and on dask. None needs scikit-image: :func:`clahe`
+reproduces :func:`skimage.exposure.equalize_adapthist`, which the tests
+keep as an oracle.
 """
 
 from __future__ import annotations
@@ -15,7 +17,6 @@ from jaxtyping import Float, Shaped
 from pipekit_array import array_namespace
 
 from geoops._src.geo import reject_geotensor
-from geoops._src.optional import optional_name
 from geoops._src.shape import BAND_AXIS
 from geoops._src.valid import namespace_of
 
@@ -648,6 +649,10 @@ def match_cdf(
     return xp.where(valid & (count > 0) & ok, matched, x)
 
 
+#: scikit-image's grey levels for CLAHE (14-bit), which `clahe` reproduces.
+NR_OF_GRAY = 2**14
+
+
 def clahe(
     arr: Shaped[np.ndarray, "*dims"],
     *,
@@ -657,78 +662,235 @@ def clahe(
 ) -> Float[np.ndarray, "*dims"]:
     """Apply contrast-limited adaptive histogram equalization per image band.
 
-    Wraps :func:`skimage.exposure.equalize_adapthist`. Each ``(H, W)``
-    slice -- every band of a ``(C, H, W)`` cube, every band of every
-    frame of a ``(T, C, H, W)`` stack -- is equalized independently. Because skimage requires
-    inputs in ``[0, 1]``, every slice is rescaled to ``[0, 1]`` over its
-    finite range, equalized, then mapped back to its native units. NaN
-    pixels are preserved and excluded from the histograms.
+    The algorithm of :func:`skimage.exposure.equalize_adapthist`, written on
+    the array namespace so it runs on NumPy and on JAX (under ``jax.jit`` too,
+    one trace per shape) without scikit-image. Each ``(H, W)`` slice (every
+    band of a ``(C, H, W)`` cube, every band of every frame of a
+    ``(T, C, H, W)`` stack) is equalized independently:
+
+    1. rescale to ``[0, 1]`` over its finite range, quantise to 14-bit grey
+       levels and bin them into ``nbins``;
+    2. reflect-pad to whole tiles of ``window``, take each tile's histogram,
+       clip it at ``clip_limit`` times the tile size and redistribute the
+       excess as scikit-image does;
+    3. map each pixel through the cumulative histograms of its four nearest
+       tiles, blended bilinearly, and map the result back to native units.
+
+    NaN pixels are excluded (filled with the slice median before the
+    histograms, as before) and stay NaN. A constant or all-NaN slice is
+    returned unchanged.
 
     Args:
         arr: Input array; trailing axes are ``(H, W)``.
         window: Contextual-region shape for the local histograms.
-            ``None`` uses skimage's default (1/8 of the slice height /
+            ``None`` uses scikit-image's default (1/8 of the slice height /
             width).
         clip_limit: Contrast-limiting clip threshold in ``[0, 1]``.
             Default ``0.01``.
         nbins: Number of histogram bins. Default ``256``.
 
     Returns:
-        Float array of the same shape, equalized per band (constant
-        slices are returned unchanged).
+        Float array of the same shape, equalized per band.
+
+    Examples:
+        >>> ramp = np.linspace(0.0, 1.0, 64).reshape(8, 8) ** 2
+        >>> out = clahe(ramp, window=4)
+        >>> out.shape, float(out.min()), float(out.max())
+        ((8, 8), 0.0, 1.0)
+        >>> # a stack is equalized slice by slice
+        >>> clahe(np.stack([ramp, ramp]), window=4).shape
+        (2, 8, 8)
     """
-    values = np.asarray(arr, dtype=float)
-    out = np.empty_like(values)
-    for idx in np.ndindex(values.shape[:-2]):
-        out[idx] = _clahe_slice(
-            values[idx],
-            window=window,
-            clip_limit=clip_limit,
-            nbins=nbins,
+    xp = namespace_of(arr)
+    values = arr if arr.dtype == np.float64 else arr.astype(np.float64)
+    shape = values.shape
+    height, width = shape[-2:]
+    kernel = _clahe_kernel(window, (height, width))
+    v = xp.reshape(values, (-1, height, width))
+    valid = xp.isfinite(v)
+    vmin = xp.min(xp.where(valid, v, xp.inf), axis=(-2, -1), keepdims=True)
+    vmax = xp.max(xp.where(valid, v, -xp.inf), axis=(-2, -1), keepdims=True)
+    ok = vmax > vmin  # False for a constant or all-NaN slice
+    span = xp.where(ok, vmax - vmin, 1.0)
+    low = xp.where(ok, vmin, 0.0)
+    median = xp.nanmedian(xp.where(ok & valid, v, xp.nan), axis=(-2, -1), keepdims=True)
+    unit = xp.where(valid, (v - low) / span, (median - low) / span)
+    unit = xp.where(ok, xp.clip(unit, 0.0, 1.0), 0.0)
+    equalized = _equalize_adapthist(unit, kernel, clip_limit, nbins, xp)
+    out = xp.where(valid & ok, equalized * span + low, v)
+    return xp.reshape(out, shape)
+
+
+def _clahe_kernel(
+    window: int | tuple[int, int] | None, shape: tuple[int, int]
+) -> tuple[int, int]:
+    """scikit-image's ``kernel_size`` for a ``(H, W)`` slice."""
+    if window is None:
+        return (max(shape[0] // 8, 1), max(shape[1] // 8, 1))
+    if isinstance(window, int | np.integer):
+        return (int(window), int(window))
+    if len(window) != 2:
+        raise ValueError(f"window must be an int or (h, w); got {window}")
+    return (int(window[0]), int(window[1]))
+
+
+def _equalize_adapthist(
+    unit: Any, kernel: tuple[int, int], clip_limit: float, nbins: int, xp: Any
+) -> Any:
+    """``equalize_adapthist`` on ``(L, H, W)`` slices in ``[0, 1]``."""
+    # img_as_uint, then rescale_intensity onto the 14-bit grey levels
+    as_uint = xp.round(unit * 65535.0)
+    lo = xp.min(as_uint, axis=(-2, -1), keepdims=True)
+    hi = xp.max(as_uint, axis=(-2, -1), keepdims=True)
+    grey = _rescale(as_uint, lo, hi, NR_OF_GRAY - 1, xp)
+    grey = xp.round(grey).astype(xp.int64)
+    result = _clahe_grey(grey, kernel, clip_limit, nbins, xp)
+    lo = xp.min(result, axis=(-2, -1), keepdims=True)
+    hi = xp.max(result, axis=(-2, -1), keepdims=True)
+    return _rescale(result, lo, hi, 1.0, xp)
+
+
+def _rescale(image: Any, lo: Any, hi: Any, top: float, xp: Any) -> Any:
+    """scikit-image's ``rescale_intensity`` onto ``[0, top]``.
+
+    A constant image (``hi == lo``) is clipped to the range, not divided, as
+    scikit-image does: a ``window=1`` CLAHE maps every pixel to the top grey
+    level, which comes back as ``top``.
+    """
+    spread = (image - lo) / xp.where(hi > lo, hi - lo, 1.0) * top
+    return xp.where(hi > lo, spread, xp.clip(image, 0.0, top))
+
+
+def _clahe_grey(
+    grey: Any, kernel: tuple[int, int], clip_limit: float, nbins: int, xp: Any
+) -> Any:
+    """scikit-image's ``_clahe`` on ``(L, H, W)`` 14-bit grey levels, 2-D tiles."""
+    n_slices, height, width = grey.shape
+    (k0, k1) = kernel
+    pad_start = (k0 // 2, k1 // 2)
+    pad_end = tuple(
+        (k - s % k) % k + math.ceil(k / 2)
+        for k, s in zip(kernel, (height, width), strict=True)
+    )
+    image = xp.pad(
+        grey,
+        ((0, 0), (pad_start[0], pad_end[0]), (pad_start[1], pad_end[1])),
+        mode="reflect",
+    )
+    image = image // (1 + NR_OF_GRAY // nbins)
+    rows, cols = image.shape[-2:]
+
+    # one histogram per interior tile, offset by half a tile
+    n0, n1 = rows // k0 - 1, cols // k1 - 1
+    tiles = image[:, k0 // 2 : k0 // 2 + n0 * k0, k1 // 2 : k1 // 2 + n1 * k1]
+    tiles = xp.reshape(tiles, (n_slices, n0, k0, n1, k1))
+    tiles = xp.reshape(xp.transpose(tiles, (0, 1, 3, 2, 4)), (-1, k0 * k1))
+    elements = k0 * k1
+    clim = int(max(clip_limit * elements, 1)) if clip_limit > 0.0 else elements
+    hist = _clip_histogram(_bincount_rows(tiles, nbins, xp), clim, xp)
+    # map_histogram: the scaled cumulative histogram, truncated to integers
+    cdf = xp.cumsum(hist, axis=-1).astype(xp.float64) * ((NR_OF_GRAY - 1) / elements)
+    cdf = xp.minimum(cdf, NR_OF_GRAY - 1).astype(xp.int64)
+    cdf = xp.reshape(cdf, (n_slices, n0, n1, nbins))
+    maps = xp.pad(cdf, ((0, 0), (1, 1), (1, 1), (0, 0)), mode="edge")
+
+    # every pixel through its four nearest tiles' maps, blended bilinearly
+    p0, p1 = rows // k0, cols // k1
+    blocks = xp.reshape(image, (n_slices, p0, k0, p1, k1))
+    blocks = xp.reshape(
+        xp.transpose(blocks, (0, 1, 3, 2, 4)), (n_slices, p0 * p1, k0 * k1)
+    )
+    row_frac = xp.reshape(xp.broadcast_to((np.arange(k0) / k0)[:, None], kernel), (-1,))
+    col_frac = xp.reshape(xp.broadcast_to((np.arange(k1) / k1)[None, :], kernel), (-1,))
+    result = xp.zeros(blocks.shape, dtype=xp.float32)
+    for e0 in (0, 1):
+        for e1 in (0, 1):
+            edge = xp.reshape(
+                maps[:, e0 : e0 + p0, e1 : e1 + p1], (n_slices, p0 * p1, nbins)
+            )
+            mapped = xp.take_along_axis(edge, blocks, axis=-1)
+            weight = (col_frac if e1 else 1 - col_frac) * (
+                row_frac if e0 else 1 - row_frac
+            )
+            result = result + (mapped * xp.asarray(weight)).astype(xp.float32)
+    result = result.astype(xp.int64).astype(xp.float64)  # skimage casts back to uint16
+    result = xp.reshape(result, (n_slices, p0, p1, k0, k1))
+    result = xp.reshape(xp.transpose(result, (0, 1, 3, 2, 4)), (n_slices, rows, cols))
+    return result[:, pad_start[0] : rows - pad_end[0], pad_start[1] : cols - pad_end[1]]
+
+
+def _bincount_rows(idx: Any, nbins: int, xp: Any) -> Any:
+    """``(R, nbins)`` counts of each row of integer ``idx`` in ``[0, nbins)``."""
+    n_rows = idx.shape[0]
+    flat = xp.reshape(idx + xp.arange(n_rows)[:, None] * nbins, (-1,))
+    if xp.__name__ == "numpy":
+        counts = np.bincount(flat, minlength=n_rows * nbins)
+    else:  # jax.numpy: a static length keeps the shape known under jit
+        counts = xp.bincount(flat, length=n_rows * nbins)
+    return xp.reshape(counts, (n_rows, nbins))
+
+
+def _clip_histogram(hist: Any, clim: int, xp: Any) -> Any:
+    """scikit-image's ``clip_histogram`` on every row of ``hist`` at once."""
+    nbins = hist.shape[-1]
+    excess = xp.sum(xp.where(hist > clim, hist - clim, 0), axis=-1, keepdims=True)
+    hist = xp.minimum(hist, clim)
+    bin_incr = excess // nbins  # the average bin increment
+    upper = clim - bin_incr  # bins above this go straight to the limit
+    low = hist < upper
+    excess = excess - xp.sum(low, axis=-1, keepdims=True) * bin_incr
+    hist = xp.where(low, hist + bin_incr, hist)
+    mid = (hist >= upper) & (hist < clim)
+    excess = excess + xp.sum(xp.where(mid, hist - clim, 0), axis=-1, keepdims=True)
+    hist = xp.where(mid, clim, hist)
+    return _redistribute(hist, excess, clim, xp)
+
+
+def _redistribute_step(
+    index: Any, hist: Any, excess: Any, alive: Any, clim: int, xp: Any
+) -> tuple[Any, Any]:
+    """One ``index`` of scikit-image's loop that spreads the remaining excess."""
+    active = alive & (excess > 0)
+    under = hist < clim
+    n_under = xp.sum(under, axis=-1, keepdims=True)
+    step = xp.maximum(1, n_under // xp.where(active, excess, 1))
+    position = xp.arange(hist.shape[-1])
+    picked = (position >= index) & ((position - index) % step == 0) & under & active
+    return hist + picked, excess - xp.sum(picked, axis=-1, keepdims=True)
+
+
+def _redistribute(hist: Any, excess: Any, clim: int, xp: Any) -> Any:
+    """Spread the excess left after clipping, until none is left or none moves."""
+    nbins = hist.shape[-1]
+    alive = excess > 0
+    if xp.__name__ != "numpy":  # jax.numpy: the same loops as lax primitives
+        from jax import lax
+
+        def one_pass(state: tuple[Any, Any, Any]) -> tuple[Any, Any, Any]:
+            hist, excess, alive = state
+
+            def body(index: Any, carry: tuple[Any, Any]) -> tuple[Any, Any]:
+                return _redistribute_step(index, *carry, alive, clim, xp)
+
+            new_hist, new_excess = lax.fori_loop(0, nbins, body, (hist, excess))
+            return (
+                new_hist,
+                new_excess,
+                alive & (new_excess > 0) & (new_excess != excess),
+            )
+
+        hist, _, _ = lax.while_loop(
+            lambda state: xp.any(state[2]), one_pass, (hist, excess, alive)
         )
-    return out
-
-
-def _clahe_slice(
-    values: np.ndarray,
-    *,
-    window: int | tuple[int, int] | None,
-    clip_limit: float,
-    nbins: int,
-) -> np.ndarray:
-    equalize_adapthist = optional_name(
-        "skimage.exposure",
-        "equalize_adapthist",
-        "morph",
-        feature="geoops.normalize",
-    )
-    out = np.array(values, dtype=float, copy=True)
-    valid = np.isfinite(values)
-    if not np.any(valid):
-        return out
-    # skimage.exposure.equalize_adapthist requires inputs in [0, 1] (or unsigned
-    # int); arbitrary-range floats are silently rescaled by max, which mis-scales
-    # the output back into the wrong native units. Rescale per-slice to [0, 1]
-    # using the valid-finite range, apply CLAHE, and undo the scaling on the
-    # valid pixels. NaN pixels are left untouched.
-    finite_values = values[valid]
-    v_min = float(finite_values.min())
-    v_max = float(finite_values.max())
-    if v_max <= v_min:
-        # Degenerate slice (constant or near-constant); CLAHE is a no-op.
-        return out
-    span = v_max - v_min
-    fill = (float(np.median(finite_values)) - v_min) / span
-    normalised = np.where(valid, (values - v_min) / span, fill)
-    np.clip(normalised, 0.0, 1.0, out=normalised)
-    equalized = equalize_adapthist(
-        normalised,
-        kernel_size=window,
-        clip_limit=clip_limit,
-        nbins=nbins,
-    )
-    out[valid] = (equalized[valid] * span) + v_min
-    return out
+        return hist
+    while alive.any():
+        previous = excess
+        for index in range(nbins):
+            hist, excess = _redistribute_step(index, hist, excess, alive, clim, xp)
+            if not (alive & (excess > 0)).any():
+                break
+        alive = alive & (excess > 0) & (excess != previous)
+    return hist
 
 
 def log_scale(

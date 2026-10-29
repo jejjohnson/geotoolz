@@ -1994,14 +1994,16 @@ def test_a_numpy_operator_refuses_a_jax_carrier() -> None:
     jax = pytest.importorskip("jax")
     from pipekit import BackendError
 
-    from geoops.normalize import CLAHE
+    from geoops.restore import DespeckleLee
 
     x64 = jax.config.jax_enable_x64
     jax.config.update("jax_enable_x64", True)
     try:
         scene = _attributed_inputs()[1].to_jax()
-        with pytest.raises(BackendError, match=r"CLAHE runs on numpy only, not jax"):
-            CLAHE()(scene)
+        with pytest.raises(
+            BackendError, match=r"DespeckleLee runs on numpy only, not jax"
+        ):
+            DespeckleLee()(scene)
     finally:
         jax.config.update("jax_enable_x64", x64)
 
