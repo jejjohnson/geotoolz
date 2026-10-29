@@ -216,3 +216,25 @@ def test_invalid_elements_and_pixel_mask_on_numpy_and_jax() -> None:
     np.testing.assert_array_equal(np.asarray(on_jax), want)
     single = GeoArray(values[0], (1, 0, 0, 0, -1, 0), None, fill_value=-9.0, dims="y x")
     np.testing.assert_array_equal(invalid_pixel_mask(single), values[0] == -9.0)
+
+
+def test_invalid_pixel_mask_reads_any_named_carrier() -> None:
+    """The pixel rule on a DataArray (NumPy or dask) and a DimArray, by dim name."""
+    from geoarray import GeoArray
+    from pipekit_array import DimArray
+
+    from geoops._src.valid import invalid_pixel_mask
+
+    pytest.importorskip("dask")
+    values = np.array([[[1.0, -9.0], [np.inf, 2.0]], [[2.0, 3.0], [4.0, 5.0]]])
+    g = GeoArray(values, (1, 0, 0, 0, -1, 0), None, fill_value=-9.0, dims="band y x")
+    want = np.broadcast_to(np.array([[False, True], [True, False]]), values.shape)
+    da = g.to_xarray()
+    lazy = invalid_pixel_mask(da.chunk({"x": 1}))
+    assert hasattr(lazy, "dask")
+    for got in (invalid_pixel_mask(g), invalid_pixel_mask(da), lazy.compute()):
+        np.testing.assert_array_equal(got, want)
+    # a DimArray declares no fill: only the infinity counts
+    plain = invalid_pixel_mask(DimArray(values, ("band", "y", "x")))
+    np.testing.assert_array_equal(plain[:, 1, 0], [True, True])
+    assert not plain[:, 0, 1].any()
