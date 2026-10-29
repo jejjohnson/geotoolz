@@ -1557,7 +1557,8 @@ helper is added here, not inline in one caller.
 | `geoops._src.dtype` | Shared dtype primitives: float promotion and fills a dtype can hold. | `as_float`, `holds_fill`, `fill_for` |
 | `geoops._src.engine` | The georeader engine boundary: geotoolz carriers in, georeader out, and back. | `to_engine`, `from_engine` |
 | `geoops._src.fitted` | Shared plumbing for fitted operators (the ``fit`` / ``transform`` seam). | `PicklableLock`, `fit_lock`, `fit_once` |
-| `geoops._src.geo` | Shared georeferencing helpers. | `is_geotensor`, `reject_geotensor`, `is_georeader_object`, `reject_georeader`, `affine_of`, `as_pixel_window`, `require_geoarray`, `require_projected_crs`, `ground_pixel_size`, `grid_matches`, `require_grid_match`, `pixel_xy` |
+| `geoops._src.geo` | Shared georeferencing helpers. | `is_georeader_object`, `reject_georeader`, `affine_of`, `as_pixel_window`, `require_geoarray`, `require_projected_crs`, `ground_pixel_size`, `grid_matches`, `require_grid_match`, `pixel_xy` |
+| `geoops._src.geotensor` | Refusing a georeader ``GeoTensor``, without importing georeader or geoarray. | `is_geotensor`, `reject_geotensor` |
 | `geoops._src.kernels` | Kernel operators: one element-wise L1 kernel, run on every carrier. | `named`, `select_band`, `nodata_where`, `fill_of`, `band_kernel`, `carrier_kernel`, `mask_kernel`, `pixel_kernel` |
 | `geoops._src.labels` | Shared connected-component, hole, skeleton and region-property primitives. | `connectivity_structure`, `label_components`, `remove_small_holes`, `skeleton_length`, `regionprops_frame` |
 | `geoops._src.optional` | Lazy import of optional-extra dependencies with an actionable error. | `import_optional`, `optional_root`, `optional_name` |

@@ -18,6 +18,7 @@ from jaxtyping import Bool, Float, Shaped
 from pipekit_array import array_namespace
 
 from geoops._src.blending import triangular_weights
+from geoops._src.geotensor import reject_geotensor
 from geoops._src.optional import optional_name
 from geoops.geom._src.stencils import METHODS, Method, stencil_coeffs, stencil_offsets
 
@@ -484,6 +485,7 @@ def difference(
         >>> difference(f, derivative=2)
         array([2., 2., 2., 2., 2.])
     """
+    reject_geotensor(f, "difference")
     xp = array_namespace(f)
     axis = axis % f.ndim
     if periodic:
@@ -540,6 +542,8 @@ def adaptive_difference(
         >>> adaptive_difference(f)
         array([ 1.,  1.,  1., nan,  1.,  1.,  1.])
     """
+    reject_geotensor(f, "adaptive_difference")
+    reject_geotensor(mask, "adaptive_difference")
     xp = array_namespace(f)
     dropped = ~xp.isfinite(f)
     if mask is not None:
@@ -601,6 +605,7 @@ def gradient(
         >>> float(d_y.min()), float(d_y.max()), float(d_x.min()), float(d_x.max())
         (2.0, 2.0, 3.0, 3.0)
     """
+    reject_geotensor(f, "gradient")
     xp = array_namespace(f)
     d_y = difference(f, axis=-2, step=dy, accuracy=accuracy)
     d_x = difference(f, axis=-1, step=dx, accuracy=accuracy, periodic=periodic_x)
@@ -637,6 +642,8 @@ def adaptive_gradient(
         >>> int(np.isnan(d_x).sum()), float(np.nanmax(np.abs(d_x - 1.0)))
         (1, 0.0)
     """
+    reject_geotensor(f, "adaptive_gradient")
+    reject_geotensor(mask, "adaptive_gradient")
     xp = array_namespace(f)
     d_y = adaptive_difference(f, mask=mask, axis=-2, step=dy, accuracy=accuracy)
     d_x = adaptive_difference(

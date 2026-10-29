@@ -454,3 +454,23 @@ def test_a_time_mask_is_aligned_by_dim_name() -> None:
     with pytest.raises(ValueError, match="dims"):
         bad = GeoArray(land[None], UTM, "EPSG:32613", dims=("member", "time", "y", "x"))
         Gradient()(stack, bad)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda t: difference(t),
+        lambda t: adaptive_difference(t),
+        lambda t: gradient(t),
+        lambda t: adaptive_gradient(t),
+        lambda t: adaptive_gradient(np.ones((7, 9)), mask=t),
+    ],
+    ids=["difference", "adaptive_difference", "gradient", "adaptive_gradient", "mask"],
+)
+def test_the_primitives_refuse_a_geotensor(call) -> None:
+    pytest.importorskip("georeader")
+    from geoarray.interop.georeader import to_georeader
+
+    tensor = to_georeader(_linear(UTM))
+    with pytest.raises(TypeError, match="from_georeader"):
+        call(tensor)
