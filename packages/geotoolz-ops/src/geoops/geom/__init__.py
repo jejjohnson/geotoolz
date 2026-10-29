@@ -9,7 +9,12 @@ live in the ``coregister`` subnamespace (and at the top level) — see
 from __future__ import annotations
 
 from geoops.geom import coregister  # noqa: F401 — re-export subnamespace
-from geoops.geom._src.array import central_gradient
+from geoops.geom._src.array import (
+    adaptive_difference,
+    adaptive_gradient,
+    difference,
+    gradient,
+)
 from geoops.geom._src.operators import (
     AntimeridianSplit,
     BowtieCorrection,
@@ -36,6 +41,7 @@ from geoops.geom._src.operators import (
     Tile,
     Vectorize,
 )
+from geoops.geom._src.stencils import stencil_coeffs, stencil_offsets
 
 
 __all__ = [
@@ -63,5 +69,10 @@ __all__ = [
     "Stitch",
     "Tile",
     "Vectorize",
-    "central_gradient",
+    "adaptive_difference",
+    "adaptive_gradient",
+    "difference",
+    "gradient",
+    "stencil_coeffs",
+    "stencil_offsets",
 ]

@@ -71,6 +71,9 @@ dev = [
     # The carrier package with every extra, so its JAX tests run in the
     # fast tier instead of skipping.
     "geotoolz-array[jax,vector,georeader,xarray]",
+    # Test-only oracle for geoops.geom.difference (#539): the stencils must
+    # equal finitediffx's. Never a runtime dependency (it is JAX-only).
+    "finitediffx>=0.1",
 ]
 lint = [
     "import-linter>=2.1",

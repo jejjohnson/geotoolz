@@ -19,6 +19,7 @@ from pipekit_array import array_namespace
 
 from geoops._src.blending import triangular_weights
 from geoops._src.optional import optional_name
+from geoops.geom._src.stencils import METHODS, Method, stencil_coeffs, stencil_offsets
 
 
 if TYPE_CHECKING:
@@ -425,68 +426,300 @@ def bowtie_detector_positions(
     return k0, k1, step
 
 
-def central_gradient(
-    f: Float[np.ndarray, "*batch h w"],
-    dy: Float[np.ndarray, "h w"] | float,
-    dx: Float[np.ndarray, "h w"] | float,
-) -> Float[np.ndarray, "2 *batch h w"]:
-    r"""Centred finite-difference gradient along the last two axes.
+# ---------------------------------------------------------------------------
+# Finite differences (L1). The stencils come from `stencils.py` (L0); the
+# Gradient operator in `operators.py` (L2) derives the geometry from a carrier.
+# ---------------------------------------------------------------------------
 
-    Second-order centred differences in the interior and first-order
-    one-sided differences on the edges, for row index :math:`i` and column
-    index :math:`j`:
+
+def difference(
+    f: Float[np.ndarray, "*shape"],
+    *,
+    axis: int = -1,
+    step: Float[np.ndarray, "*shape"] | float = 1.0,
+    derivative: int = 1,
+    accuracy: int = 1,
+    method: Method = "central",
+    periodic: bool = False,
+) -> Float[np.ndarray, "*shape"]:
+    r"""Finite-difference derivative along one axis; a NaN propagates.
+
+    The plain stencil, finitediffx's ``difference`` on any backend: with
+    ``method="central"`` the centred stencil of order ``accuracy + 1`` inside
+    and forward / backward stencils of order ``accuracy`` on the edges,
+    nothing wrapping around (``accuracy=1`` is ``numpy.gradient``'s
+    scheme). ``"forward"`` / ``"backward"`` use that stencil everywhere it
+    fits and the other one-sided stencil where it does not.
+
+    A stencil that reads a NaN returns NaN, so a masked cell costs a halo of
+    about ``accuracy`` cells; :func:`adaptive_difference` recovers them.
 
     .. math::
 
-        \partial_y f_{ij} \approx \frac{f_{i+1,j} - f_{i-1,j}}{2\,\Delta y_{ij}},
-        \qquad
-        \partial_x f_{ij} \approx \frac{f_{i,j+1} - f_{i,j-1}}{2\,\Delta x_{ij}},
-
-    with :math:`(f_{1,j} - f_{0,j}) / \Delta y_{0j}` on the first row (and
-    likewise on the other three edges); nothing wraps around. A ``NaN``
-    propagates to its neighbours' derivatives. The gradient of a linear
-    field is exact everywhere, edges included.
-
-    A diagnostic, written once for every backend (the array namespace of
-    ``f``): model-grade calculus on staggered grids belongs in finitevolX.
+        \partial^n_s f(x_i) \approx h^{-n} \sum_k c_k\, f(x_{i + s_k})
 
     Args:
-        f: The field, rows and columns last; any leading axes are mapped.
-        dy: The signed step between row centres, a scalar or one per pixel.
-        dx: The signed step between column centres, a scalar or one per
-            pixel.
+        f: The field; any shape.
+        axis: The axis to differentiate.
+        step: The signed step :math:`h` between centres along ``axis``: a
+            scalar, or an array broadcasting against ``f``.
+        derivative: The derivative order :math:`n`.
+        accuracy: The accuracy order of the one-sided stencils.
+        method: ``"central"``, ``"forward"`` or ``"backward"``.
+        periodic: The axis wraps (a global longitude): every point uses the
+            ``method`` stencil, reading across the seam.
 
     Returns:
-        ``(∂f/∂y, ∂f/∂x)`` stacked on a new leading axis, floating point.
+        :math:`\partial^n f / \partial s^n`, ``f``'s shape.
 
     Raises:
-        ValueError: ``f`` has fewer than two rows or columns.
+        ValueError: The axis is shorter than the stencil needs.
+
+    Examples:
+        >>> f = np.array([0.0, 1.0, 4.0, 9.0, 16.0])  # x², x = 0…4
+        >>> difference(f)
+        array([1., 2., 4., 6., 7.])
+        >>> difference(f, accuracy=2)
+        array([0., 2., 4., 6., 8.])
+        >>> difference(f, derivative=2)
+        array([2., 2., 2., 2., 2.])
+    """
+    xp = array_namespace(f)
+    axis = axis % f.ndim
+    if periodic:
+        out = _periodic(xp, f, axis, derivative, accuracy, method)
+    else:
+        out = _bounded(xp, f, axis, derivative, accuracy, method)
+    return out / step**derivative
+
+
+def adaptive_difference(
+    f: Float[np.ndarray, "*shape"],
+    *,
+    mask: Bool[np.ndarray, "*shape"] | None = None,
+    axis: int = -1,
+    step: Float[np.ndarray, "*shape"] | float = 1.0,
+    derivative: int = 1,
+    accuracy: int = 1,
+    periodic: bool = False,
+) -> Float[np.ndarray, "*shape"]:
+    r"""Mask-aware finite difference: the widest stencil that fits on valid data.
+
+    Near a mask (land, a swath edge, a cloud) the centred stencil reads a
+    masked cell and :func:`difference` loses the valid cells next to it.
+    This keeps, per point, the first finite result among the central,
+    forward and backward stencils at ``accuracy``, then at each lower
+    accuracy down to 1, so a narrow channel still gets a first-order
+    estimate. Recovered cells carry one order less than the interior.
+
+    NaN is its own support detector: a stencil that reads a masked cell
+    returns NaN (``0 * nan`` is ``nan``), so the selection needs no mask
+    arithmetic (xrtoolz ``docs/design/xrgrad-nan-masks.md``, where it beat
+    fill-then-differentiate by ~90x at the coast). Every candidate is
+    computed, so the call costs ``3 * accuracy`` stencils and runs under
+    ``jax.jit``. Masked cells are ``NaN`` in the result.
+
+    Args:
+        f: The field; any shape.
+        mask: ``True`` drops the cell (geoops' mask convention), on ``f``'s
+            shape; ``None`` drops only non-finite cells.
+        axis: The axis to differentiate.
+        step: The signed step between centres along ``axis``.
+        derivative: The derivative order.
+        accuracy: The highest accuracy order to try.
+        periodic: The axis wraps.
+
+    Returns:
+        The derivative, ``f``'s shape, ``NaN`` where ``f`` is masked or no
+        stencil fits on valid data.
+
+    Example:
+        >>> f = np.array([0.0, 1.0, 2.0, np.nan, 4.0, 5.0, 6.0])  # f = x
+        >>> difference(f)
+        array([ 1.,  1., nan, nan, nan,  1.,  1.])
+        >>> adaptive_difference(f)
+        array([ 1.,  1.,  1., nan,  1.,  1.,  1.])
+    """
+    xp = array_namespace(f)
+    dropped = ~xp.isfinite(f)
+    if mask is not None:
+        dropped = dropped | mask
+    field = xp.where(dropped, xp.nan, f)
+    out = None
+    for acc in range(accuracy, 0, -1):
+        for method in METHODS:
+            try:
+                candidate = difference(
+                    field,
+                    axis=axis,
+                    step=step,
+                    derivative=derivative,
+                    accuracy=acc,
+                    method=method,
+                    periodic=periodic,
+                )
+            except ValueError:
+                continue  # a stencil wider than the axis: try a narrower one
+            out = (
+                candidate if out is None else xp.where(xp.isfinite(out), out, candidate)
+            )
+    if out is None:
+        raise ValueError(
+            f"axis of length {f.shape[axis]} is too short for derivative {derivative}"
+        )
+    return xp.where(dropped, xp.nan, out)
+
+
+def gradient(
+    f: Float[np.ndarray, "*batch h w"],
+    dy: Float[np.ndarray, "h w"] | float = 1.0,
+    dx: Float[np.ndarray, "h w"] | float = 1.0,
+    *,
+    accuracy: int = 1,
+    periodic_x: bool = False,
+) -> Float[np.ndarray, "2 *batch h w"]:
+    r"""``(∂f/∂y, ∂f/∂x)`` over the last two axes; a NaN propagates.
+
+    :func:`difference` along rows (``axis=-2``, step ``dy``) and columns
+    (``axis=-1``, step ``dx``). At ``accuracy=1``: second-order centred
+    differences inside, first-order one-sided on the edges, exact for a
+    linear field everywhere.
+
+    Args:
+        f: The field, rows and columns last; leading axes are mapped.
+        dy: The signed step between row centres, a scalar or ``(H, W)``.
+        dx: The signed step between column centres, a scalar or ``(H, W)``.
+        accuracy: The accuracy order (see :func:`difference`).
+        periodic_x: The columns wrap (a global longitude).
+
+    Returns:
+        ``(∂f/∂y, ∂f/∂x)`` stacked on a new leading axis.
 
     Example:
         >>> y, x = np.mgrid[0:3, 0:4].astype(float)
-        >>> grad = central_gradient(2.0 * y + 3.0 * x, 1.0, 1.0)
-        >>> grad[0].min(), grad[0].max(), grad[1].min(), grad[1].max()
+        >>> d_y, d_x = gradient(2.0 * y + 3.0 * x)
+        >>> float(d_y.min()), float(d_y.max()), float(d_x.min()), float(d_x.max())
         (2.0, 2.0, 3.0, 3.0)
     """
     xp = array_namespace(f)
-    if f.shape[-2] < 2 or f.shape[-1] < 2:
-        raise ValueError(
-            f"central_gradient needs at least 2 rows and 2 columns; got {f.shape[-2:]}"
+    d_y = difference(f, axis=-2, step=dy, accuracy=accuracy)
+    d_x = difference(f, axis=-1, step=dx, accuracy=accuracy, periodic=periodic_x)
+    return xp.stack([d_y, d_x])
+
+
+def adaptive_gradient(
+    f: Float[np.ndarray, "*batch h w"],
+    dy: Float[np.ndarray, "h w"] | float = 1.0,
+    dx: Float[np.ndarray, "h w"] | float = 1.0,
+    *,
+    mask: Bool[np.ndarray, "*batch h w"] | None = None,
+    accuracy: int = 1,
+    periodic_x: bool = False,
+) -> Float[np.ndarray, "2 *batch h w"]:
+    """Mask-aware ``(∂f/∂y, ∂f/∂x)``: :func:`adaptive_difference` on both axes.
+
+    Args:
+        f: The field, rows and columns last.
+        dy: The signed step between row centres.
+        dx: The signed step between column centres.
+        mask: ``True`` drops the cell; ``None`` drops only non-finite cells.
+        accuracy: The highest accuracy order to try.
+        periodic_x: The columns wrap.
+
+    Returns:
+        ``(∂f/∂y, ∂f/∂x)`` stacked on a new leading axis, ``NaN`` on masked
+        cells only (a linear field stays exact up to the coast).
+
+    Example:
+        >>> y, x = np.mgrid[0:4, 0:5].astype(float)
+        >>> land = (y == 1) & (x == 2)
+        >>> d_y, d_x = adaptive_gradient(y + x, mask=land)
+        >>> int(np.isnan(d_x).sum()), float(np.nanmax(np.abs(d_x - 1.0)))
+        (1, 0.0)
+    """
+    xp = array_namespace(f)
+    d_y = adaptive_difference(f, mask=mask, axis=-2, step=dy, accuracy=accuracy)
+    d_x = adaptive_difference(
+        f, mask=mask, axis=-1, step=dx, accuracy=accuracy, periodic=periodic_x
+    )
+    return xp.stack([d_y, d_x])
+
+
+def _bounded(
+    xp: Any, f: Any, axis: int, derivative: int, accuracy: int, method: Method
+) -> Any:
+    """The stencils of ``method`` with one-sided ones where it would leave the axis."""
+    size = f.shape[axis]
+    forward = stencil_offsets(
+        derivative=derivative, accuracy=accuracy, method="forward"
+    )
+    backward = stencil_offsets(
+        derivative=derivative, accuracy=accuracy, method="backward"
+    )
+    if method == "central":
+        centre = stencil_offsets(
+            derivative=derivative, accuracy=accuracy, method="central"
         )
-    d_row = _one_axis_difference(xp, f, axis=-2)
-    d_col = _one_axis_difference(xp, f, axis=-1)
-    return xp.stack([d_row / dy, d_col / dx])
+        if size < len(centre):
+            raise ValueError(
+                f"an axis of length {size} is shorter than the {len(centre)}-point "
+                f"central stencil (derivative {derivative}, accuracy {accuracy})"
+            )
+        regions = [
+            (0, -centre[0], forward),
+            (-centre[0], size - centre[-1], centre),
+            (size - centre[-1], size, backward),
+        ]
+    elif method in ("forward", "backward"):
+        if size < len(forward):
+            raise ValueError(
+                f"an axis of length {size} is shorter than the {len(forward)}-point "
+                f"{method} stencil (derivative {derivative}, accuracy {accuracy})"
+            )
+        if method == "forward":
+            regions = [
+                (0, size - forward[-1], forward),
+                (size - forward[-1], size, backward),
+            ]
+        else:
+            regions = [(0, -backward[0], forward), (-backward[0], size, backward)]
+    else:
+        raise ValueError(f"method must be one of {METHODS}; got {method!r}")
+    parts = [
+        _apply_stencil(f, axis, start, stop, offsets, derivative)
+        for start, stop, offsets in regions
+        if stop > start
+    ]
+    return xp.concat(parts, axis=axis)
 
 
-def _one_axis_difference(xp: Any, f: Any, *, axis: int) -> Any:
-    """The per-step difference along ``axis``: centred inside, one-sided at the ends."""
-
-    def take(start: int | None, stop: int | None) -> Any:
+def _apply_stencil(
+    f: Any, axis: int, start: int, stop: int, offsets: tuple[int, ...], derivative: int
+) -> Any:
+    """``Σ c_k f[i + s_k]`` for ``i`` in ``[start, stop)`` along ``axis``."""
+    coeffs = stencil_coeffs(offsets, derivative)
+    out = None
+    for offset, coeff in zip(offsets, coeffs, strict=True):
         index = [slice(None)] * f.ndim
-        index[axis] = slice(start, stop)
-        return f[tuple(index)]
+        index[axis] = slice(start + offset, stop + offset)
+        term = coeff * f[tuple(index)]  # zero coefficients too: 0 * nan is nan
+        out = term if out is None else out + term
+    return out
 
-    first = take(1, 2) - take(0, 1)
-    inner = (take(2, None) - take(None, -2)) / 2.0
-    last = take(-1, None) - take(-2, -1)
-    return xp.concat([first, inner, last], axis=axis)
+
+def _periodic(
+    xp: Any, f: Any, axis: int, derivative: int, accuracy: int, method: Method
+) -> Any:
+    """The ``method`` stencil at every point, reading across the seam."""
+    offsets = stencil_offsets(derivative=derivative, accuracy=accuracy, method=method)
+    if f.shape[axis] < len(offsets):
+        raise ValueError(
+            f"a periodic axis of length {f.shape[axis]} is shorter than the "
+            f"{len(offsets)}-point {method} stencil"
+        )
+    coeffs = stencil_coeffs(offsets, derivative)
+    out = None
+    for offset, coeff in zip(offsets, coeffs, strict=True):
+        term = coeff * xp.roll(f, -offset, axis=axis)
+        out = term if out is None else out + term
+    return out

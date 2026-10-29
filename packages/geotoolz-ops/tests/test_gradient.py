@@ -1,4 +1,11 @@
-"""`geoops.geom.central_gradient` and `geoops.geom.Gradient` (#539, OP-O7).
+"""The gradient stack (#539, OP-O7): stencils, array primitives, `Gradient`.
+
+Three layers, each usable on its own:
+
+- L0 `stencil_offsets` / `stencil_coeffs`: finitediffx's stencils;
+- L1 `difference` / `gradient` (NaN propagates) and the mask-aware
+  `adaptive_difference` / `adaptive_gradient`, on any backend;
+- L2 `Gradient`: geometry from the carrier, ``nan_policy`` and a mask input.
 
 The gates from the issue:
 
@@ -15,7 +22,15 @@ import pytest
 from geoarray import GeoArray
 
 import geoops as gz
-from geoops.geom import Gradient, central_gradient
+from geoops.geom import (
+    Gradient,
+    adaptive_difference,
+    adaptive_gradient,
+    difference,
+    gradient,
+    stencil_coeffs,
+    stencil_offsets,
+)
 
 
 jax = pytest.importorskip("jax")
@@ -49,7 +64,7 @@ def test_kernel_is_exact_on_a_linear_field(backend: str) -> None:
     f = 2.0 * rows - 0.5 * cols
     if backend == "jax":
         f = jax.numpy.asarray(f)
-    d_y, d_x = central_gradient(f, 4.0, -2.0)
+    d_y, d_x = gradient(f, 4.0, -2.0)
     np.testing.assert_allclose(np.asarray(d_y), 0.5)  # every row, edges too
     np.testing.assert_allclose(np.asarray(d_x), 0.25)
 
@@ -62,7 +77,7 @@ def test_kernel_converges_at_second_order_inside() -> None:
         h = 2.0 / n
         y, x = np.mgrid[0 : n + 1, 0 : n + 1] * h
         f = np.sin(k * x) * np.cos(ell * y)
-        d_y, d_x = central_gradient(f, h, h)
+        d_y, d_x = gradient(f, h, h)
         want_x = k * np.cos(k * x) * np.cos(ell * y)
         want_y = -ell * np.sin(k * x) * np.sin(ell * y)
         inner = (slice(1, -1), slice(1, -1))
@@ -75,8 +90,8 @@ def test_kernel_converges_at_second_order_inside() -> None:
 def test_kernel_propagates_nan_to_neighbours() -> None:
     f = np.zeros((5, 5))
     f[2, 2] = np.nan
-    d_y, d_x = central_gradient(f, 1.0, 1.0)
-    assert np.isnan(d_y[[1, 3], 2]).all() and np.isfinite(d_y[2, 2] * 0 + d_y[0, 0])
+    d_y, d_x = gradient(f, 1.0, 1.0)
+    assert np.isnan(d_y[[1, 3], 2]).all() and np.isfinite(d_y[0, 0])
     assert np.isnan(d_x[2, [1, 3]]).all()
 
 
@@ -175,4 +190,180 @@ def test_a_dataarray_is_refused_with_the_lift_hint() -> None:
 
 def test_exported_at_the_top_level() -> None:
     assert gz.Gradient is Gradient
-    assert Gradient().get_config() == {}
+    assert Gradient().get_config() == {
+        "accuracy": 1,
+        "nan_policy": "propagate",
+        "periodic_x": False,
+    }
+    with pytest.raises(ValueError, match="nan_policy"):
+        Gradient(nan_policy="fill")
+
+
+# ---------------------------------------------------------------------------
+# L0: stencils equal finitediffx's
+# ---------------------------------------------------------------------------
+
+CASES = [
+    (derivative, accuracy, method)
+    for derivative in (1, 2)
+    for accuracy in (1, 2, 3, 4)
+    for method in ("central", "forward", "backward")
+]
+
+
+@pytest.mark.parametrize(("derivative", "accuracy", "method"), CASES)
+def test_difference_equals_finitediffx(
+    derivative: int, accuracy: int, method: str
+) -> None:
+    fdx = pytest.importorskip("finitediffx")
+    rng = np.random.default_rng(derivative * 10 + accuracy)
+    f = rng.normal(size=(17, 13))
+    for axis, step in ((0, 0.3), (1, -2.0)):
+        want = fdx.difference(
+            jax.numpy.asarray(f),
+            axis=axis,
+            step_size=step,
+            derivative=derivative,
+            accuracy=accuracy,
+            method=method,
+        )
+        got = difference(
+            f,
+            axis=axis,
+            step=step,
+            derivative=derivative,
+            accuracy=accuracy,
+            method=method,
+        )
+        np.testing.assert_allclose(got, np.asarray(want), rtol=1e-9, atol=1e-9)
+
+
+def test_stencils_are_the_textbook_ones() -> None:
+    assert stencil_offsets(derivative=1, accuracy=1, method="central") == (-1, 0, 1)
+    assert stencil_coeffs((-1, 0, 1), 1) == (-0.5, 0.0, 0.5)
+    assert stencil_coeffs((-2, -1, 0, 1, 2), 1) == pytest.approx(
+        (1 / 12, -2 / 3, 0.0, 2 / 3, -1 / 12)
+    )
+    assert stencil_coeffs((-1, 0, 1), 2) == (1.0, -2.0, 1.0)
+    with pytest.raises(ValueError, match="cannot resolve"):
+        stencil_coeffs((0, 1), 2)
+
+
+def test_periodic_difference_reads_across_the_seam() -> None:
+    lon = np.arange(36) * 10.0
+    f = np.sin(np.deg2rad(lon))
+    got = difference(f, step=np.deg2rad(10.0), accuracy=3, periodic=True)
+    np.testing.assert_allclose(got, np.cos(np.deg2rad(lon)), atol=1e-4)
+    assert abs(got[0] - 1.0) < 1e-4  # the seam is a centred stencil too
+
+
+# ---------------------------------------------------------------------------
+# L1: mask-aware differences
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("accuracy", [1, 2, 3])
+def test_adaptive_is_exact_on_a_linear_field_up_to_the_mask(accuracy: int) -> None:
+    rows, cols = np.mgrid[0:12, 0:15].astype(float)
+    f = 2.0 * rows - 0.5 * cols
+    land = (rows - 6) ** 2 + (cols - 7) ** 2 < 6  # an island
+    land[:, 12] = True  # and a wall; every valid run is at least two cells
+    for backend in ("numpy", "jax"):
+        field = jax.numpy.asarray(f) if backend == "jax" else f
+        d_y, d_x = adaptive_gradient(field, mask=land, accuracy=accuracy)
+        for got, want in ((d_y, 2.0), (d_x, -0.5)):
+            got = np.asarray(got)
+            assert np.isnan(got[land]).all()
+            np.testing.assert_allclose(got[~land], want, rtol=1e-9)
+
+
+def test_propagate_spreads_one_halo_and_adaptive_none() -> None:
+    f = np.arange(9.0)
+    f[4] = np.nan
+    plain = difference(f, accuracy=2)
+    assert np.isnan(plain).sum() == 3  # the cell and both neighbours
+    recovered = adaptive_difference(f, accuracy=2)
+    assert np.isnan(recovered).sum() == 1
+    np.testing.assert_allclose(recovered[[3, 5]], 1.0)
+
+
+def test_adaptive_descends_accuracy_for_a_narrow_channel() -> None:
+    """A two-cell channel supports a first-order stencil and nothing wider."""
+    f = np.array([np.nan, np.nan, 3.0, 4.0, np.nan, np.nan])
+    got = adaptive_difference(f, accuracy=3)
+    np.testing.assert_allclose(got[2:4], 1.0)
+    assert np.isnan(got[[0, 1, 4, 5]]).all()
+
+
+def test_adaptive_jits_and_traces_once() -> None:
+    traces = []
+
+    @jax.jit
+    def step(f, mask):
+        traces.append(1)
+        return adaptive_difference(f, mask=mask, accuracy=2)
+
+    f = jax.numpy.arange(10.0)
+    step(f, jax.numpy.zeros(10, bool))
+    out = step(f, jax.numpy.arange(10) == 4)
+    assert len(traces) == 1
+    np.testing.assert_allclose(np.asarray(out)[[3, 5]], 1.0)
+
+
+def test_coastline_measurement() -> None:
+    """xrgrad's comparison: sin(2λ)cos(φ) on 121 x 91 with a synthetic coast.
+
+    Propagate loses the coastal strip; adaptive loses none of it and stays
+    within a small multiple of the interior error there.
+    """
+    lam = np.deg2rad(np.linspace(0.0, 120.0, 121))
+    phi = np.deg2rad(np.linspace(-45.0, 45.0, 91))
+    lam2, phi2 = np.meshgrid(lam, phi)
+    f = np.sin(2 * lam2) * np.cos(phi2)
+    want = 2 * np.cos(2 * lam2) * np.cos(phi2)
+    cols = np.arange(121)[None, :]
+    rows = np.arange(91)[:, None]
+    land = (cols < 10) | ((cols - 70) ** 2 + (rows - 45) ** 2 < 15**2)
+    step = lam[1] - lam[0]
+    padded = np.pad(land, ((0, 0), (1, 1)))
+    coast = ~land & (padded[:, :-2] | padded[:, 2:])  # water next to land along x
+    plain = difference(np.where(land, np.nan, f), step=step, accuracy=2)
+    adaptive = adaptive_difference(f, mask=land, step=step, accuracy=2)
+    assert np.isnan(plain[coast]).all()
+    assert np.isfinite(adaptive[~land]).all()
+    scale = np.abs(want[~land]).mean()
+    interior = ~land & ~coast
+    assert np.abs(adaptive - want)[coast].max() / scale < 1e-2
+    assert np.abs(adaptive - want)[interior].max() / scale < 1e-3
+
+
+# ---------------------------------------------------------------------------
+# L2: Gradient's mask input and policy
+# ---------------------------------------------------------------------------
+
+
+def test_gradient_operator_with_a_land_mask() -> None:
+    field = _linear(UTM)
+    land_values = np.zeros(field.shape, bool)
+    land_values[3, 2:5] = True
+    land = GeoArray(land_values, UTM, "EPSG:32613", dims=("y", "x"))
+
+    plain = np.asarray(Gradient()(field, land))
+    adaptive = np.asarray(Gradient(nan_policy="adaptive")(field, land))
+    assert np.isnan(plain[:, 2:5, 2:5]).any()  # the halo is lost
+    assert np.isnan(adaptive[:, land_values]).all()
+    np.testing.assert_allclose(adaptive[0][~land_values], 2.0, rtol=1e-8)
+    np.testing.assert_allclose(adaptive[1][~land_values], 3.0, rtol=1e-8)
+
+    jitted = jax.jit(lambda f, m: Gradient(nan_policy="adaptive")(f, m))(
+        field.to_jax(), land.to_jax()
+    )
+    np.testing.assert_allclose(np.asarray(jitted), adaptive, rtol=1e-12)
+
+
+def test_gradient_operator_refuses_a_mask_on_another_grid() -> None:
+    field = _linear(UTM)
+    shifted = (10.0, 0.0, 500_010.0, 0.0, -10.0, 4_000_000.0)
+    land = GeoArray(np.zeros(field.shape, bool), shifted, "EPSG:32613", dims=("y", "x"))
+    with pytest.raises(ValueError):
+        Gradient()(field, land)
