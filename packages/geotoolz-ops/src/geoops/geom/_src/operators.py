@@ -30,6 +30,7 @@ import numpy as np
 from affine import Affine
 from geoarray import DIMS, FrozenAttrs, GeoArray, GridMismatchError
 from pipekit import Operator, get_adapter
+from pipekit_array import array_namespace
 from pyproj import CRS
 from scipy.ndimage import shift as ndi_shift
 
@@ -56,7 +57,7 @@ from geoops._src.valid import (
     valid_pixels,
     wrap_filled,
 )
-from geoops._src.wrap import adopt_attrs, rewrap_attrs, wrap_like
+from geoops._src.wrap import adopt_attrs, rewrap_attrs, rewrap_dims, wrap_like
 from geoops.geom._src.array import (
     adaptive_gradient,
     bowtie_detector_positions,
@@ -2789,16 +2790,30 @@ class Gradient(Operator):
                     f"Gradient: the mask is not on the field's pixel grid ({exc})"
                 ) from exc
         if not isinstance(gt, GeoArray):
-            field = np.asarray(as_float(np.asarray(gt)))
-            grad = self._pixel_gradient(field, None, _mask_data(mask))
-            return np.moveaxis(grad, 0, -3)
+            # a plain array (NumPy or JAX): pixel units, on its own backend
+            field = as_float(gt if hasattr(gt, "dtype") else np.asarray(gt))
+            xp = array_namespace(field)
+            grad = self._pixel_gradient(field, xp, _mask_data(mask, xp))
+            return xp.moveaxis(grad, 0, -3)
+        if gt.batch_dims:
+            raise ValueError(
+                f"Gradient: the carrier is batched over {gt.batch_dims} (one "
+                "transform per item); map it per item with "
+                f"geoarray.map_over(x, Gradient(...), {gt.batch_dims[0]!r})."
+            )
+        xp = gt.xp
         data = as_float(gt.data)
-        field = nodata_where(data, data, fill_values=(gt.fill_value,))
-        d_row, d_col = self._pixel_gradient(field, gt.xp, _mask_data(mask))
+        invalid = ~xp.isfinite(nodata_where(data, data, fill_values=(gt.fill_value,)))
+        mask_data = _mask_data(mask, xp)
+        if mask_data is not None:
+            invalid = invalid | mask_data
+        field = xp.where(invalid, xp.nan, data)
+        d_row, d_col = self._pixel_gradient(field, xp, mask_data)
         d_y, d_x = _map_axes(gt, d_row, d_col)
-        grad = gt.xp.stack([d_y, d_x], axis=-3)
+        # an invalid input pixel has no derivative, whatever its neighbours hold
+        grad = xp.where(invalid[..., None, :, :], xp.nan, xp.stack([d_y, d_x], axis=-3))
         dims = (*gt.dims[:-2], "component", *gt.dims[-2:])
-        return gt.replace(data=grad, dims=dims, fill_value=np.nan)
+        return rewrap_dims(gt, grad, dims, fill_value=np.nan)
 
     def _pixel_gradient(self, field: Any, xp: Any, mask: Any) -> Any:
         """``(∂f/∂i, ∂f/∂j)`` per pixel step, through the L1 primitives."""
@@ -2807,17 +2822,21 @@ class Gradient(Operator):
                 field, mask=mask, accuracy=self.accuracy, periodic_x=self.periodic_x
             )
         if mask is not None:
-            field = (xp or np).where(mask, np.nan, field)
-        return gradient(field, accuracy=self.accuracy, periodic_x=self.periodic_x)
+            field = xp.where(mask, xp.nan, field)
+        out = gradient(field, accuracy=self.accuracy, periodic_x=self.periodic_x)
+        if mask is not None:
+            out = xp.where(mask, xp.nan, out)
+        return out
 
 
-def _mask_data(mask: Any) -> Any:
+def _mask_data(mask: Any, xp: Any) -> Any:
     """The boolean array of a mask carrier (``True`` drops), or ``None``."""
     if mask is None:
         return None
     reject_geotensor(mask, "Gradient")
-    data = mask.data if isinstance(mask, GeoArray) else np.asarray(mask)
-    return data.astype(bool) if data.dtype != bool else data
+    data = mask.data if isinstance(mask, GeoArray) else mask
+    data = data if hasattr(data, "dtype") else np.asarray(data)
+    return data if data.dtype == bool else xp.astype(data, xp.bool)
 
 
 def _map_axes(gt: GeoArray, d_row: Any, d_col: Any) -> tuple[Any, Any]:

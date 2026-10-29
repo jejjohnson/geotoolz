@@ -367,3 +367,38 @@ def test_gradient_operator_refuses_a_mask_on_another_grid() -> None:
     land = GeoArray(np.zeros(field.shape, bool), shifted, "EPSG:32613", dims=("y", "x"))
     with pytest.raises(ValueError):
         Gradient()(field, land)
+
+
+# ---------------------------------------------------------------------------
+# Review fixes (#585)
+# ---------------------------------------------------------------------------
+
+
+def test_an_isolated_nodata_pixel_has_no_derivative() -> None:
+    values = np.ones((5, 5))
+    values[2, 2] = -9999.0
+    field = GeoArray(values, UTM, "EPSG:32613", fill_value=-9999.0, dims=("y", "x"))
+    for policy in ("propagate", "adaptive"):
+        out = Gradient(nan_policy=policy)(field)
+        assert np.isnan(np.asarray(out)[:, 2, 2]).all()
+        assert not np.asarray(out.valid_mask())[2, 2]
+
+
+def test_a_plain_jax_array_stays_on_jax() -> None:
+    rows, cols = np.mgrid[0:4, 0:5].astype(float)
+    f = jax.numpy.asarray(rows + 2.0 * cols)
+    eager = Gradient()(f)
+    jitted = jax.jit(Gradient())(f)
+    for out in (eager, jitted):
+        assert isinstance(out, jax.Array)
+        np.testing.assert_allclose(np.asarray(out)[1], 2.0)
+
+
+def test_a_batched_carrier_is_refused_with_map_over() -> None:
+    import geoarray
+
+    a = _linear(UTM)
+    b = _linear((10.0, 0.0, 600_000.0, 0.0, -10.0, 4_000_000.0))
+    batch = geoarray.stack_items([a, b], dim="patch")
+    with pytest.raises(ValueError, match="map_over"):
+        Gradient()(batch)

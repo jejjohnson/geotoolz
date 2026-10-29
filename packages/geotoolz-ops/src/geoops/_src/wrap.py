@@ -25,7 +25,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import numpy as np
-from geoarray import DIMS, FrozenAttrs, GeoArray
+from geoarray import DIMS, FrozenAttrs, GeoArray, GeoArrayAdapter
 
 from geoops._src.bands import (
     BAND_NAME_KEYS,
@@ -41,7 +41,14 @@ from geoops._src.geo import reject_geotensor
 if TYPE_CHECKING:
     from affine import Affine
 
-__all__ = ["INHERIT", "Inherit", "adopt_attrs", "rewrap_attrs", "wrap_like"]
+__all__ = [
+    "INHERIT",
+    "Inherit",
+    "adopt_attrs",
+    "rewrap_attrs",
+    "rewrap_dims",
+    "wrap_like",
+]
 
 
 class Inherit(enum.Enum):
@@ -265,3 +272,44 @@ def wrap_like(
         dims=dims,
         **extra,
     )
+
+
+def rewrap_dims(
+    ref: GeoArray, data: Any, dims: tuple[str, ...], *, fill_value: Any
+) -> GeoArray:
+    """Rewrap ``data`` with new ``dims`` on ``ref``'s grid, on any backend.
+
+    The backend-safe sibling of :func:`wrap_like` for results that gain or
+    lose a non-spatial dim (a gradient's ``component``): it goes through
+    geoarray's own adapter ``rewrap``, which keeps ``ref``'s transform (a
+    traced leaf under ``jax.jit``), CRS, whole-carrier attrs, the coordinates
+    of dims that survive with their size, and per-band attrs only while the
+    ``band`` dim keeps its size. Nothing is converted to NumPy.
+
+    Args:
+        ref: The operator's input carrier.
+        data: The result: NumPy or JAX, ending in ``ref``'s ``(y, x)``.
+        dims: One name per axis of ``data``, ending in ``("y", "x")``.
+        fill_value: The output's fill value.
+
+    Returns:
+        A `GeoArray` on ``ref``'s grid.
+
+    Raises:
+        ValueError: ``data`` is not on ``ref``'s grid under ``dims``.
+
+    Example:
+        >>> ref = GeoArray(np.zeros((3, 4)), (1, 0, 0, 0, -1, 0), None, dims="y x")
+        >>> dims = ("component", "y", "x")
+        >>> out = rewrap_dims(ref, np.zeros((2, 3, 4)), dims, fill_value=np.nan)
+        >>> out.dims, out.shape
+        (('component', 'y', 'x'), (2, 3, 4))
+    """
+    reject_geotensor(ref, "rewrap_dims")
+    out = GeoArrayAdapter().rewrap(ref, data, tuple(dims))
+    if not isinstance(out, GeoArray):
+        raise ValueError(
+            f"rewrap_dims: data of shape {tuple(data.shape)} with dims {tuple(dims)} "
+            f"is not on the reference grid {ref.shape[-2:]}"
+        )
+    return out.replace(fill_value=fill_value)
