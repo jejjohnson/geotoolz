@@ -86,7 +86,7 @@ def reshape_stat(
     """
     xp = namespace_of(arr) if hasattr(arr, "dtype") else np
     stat_arr = xp.asarray(stat)
-    if not np.issubdtype(stat_arr.dtype, np.floating):
+    if stat_arr.dtype != np.float64:  # float64 as before, so float16 cannot overflow
         stat_arr = stat_arr.astype(np.float64)
     if stat_arr.ndim == 0 or reduce_axes is None:
         return stat_arr

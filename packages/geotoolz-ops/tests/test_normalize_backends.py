@@ -245,6 +245,13 @@ def test_stretch_agrees_on_every_carrier(op: object, stats_scene: GeoArray) -> N
         np.testing.assert_allclose(np.asarray(out), want, rtol=1e-12, equal_nan=True)
 
 
+def test_scale_kernels_promote_low_precision_statistics() -> None:
+    x = np.array([[[-40000.0, 40000.0]]], dtype=np.float32)
+    bounds = np.array([-40000.0, 40000.0], dtype=np.float16)  # span overflows float16
+    out = gn.minmax_scale(x, bounds[0], bounds[1], reduce_axes=None)
+    np.testing.assert_allclose(out, [[[0.0, 1.0]]])
+
+
 @pytest.mark.parametrize("op", STRETCHES)
 def test_stretch_maps_a_constant_band_to_its_low_end(op: object) -> None:
     values = np.stack([np.full((4, 4), 0.3), np.linspace(0, 1, 16).reshape(4, 4)])
