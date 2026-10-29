@@ -404,6 +404,9 @@ def inverse_standard_scale(
     Returns:
         Float array of the same shape as ``arr``.
 
+    Raises:
+        TypeError: ``arr`` is a georeader ``GeoTensor``.
+
     Examples:
         >>> x = np.array([[[1.0, 3.0]]])
         >>> inverse_standard_scale(standard_scale(x, 2.0, 0.5), 2.0, 0.5)
@@ -412,6 +415,7 @@ def inverse_standard_scale(
         >>> inverse_standard_scale(standard_scale(x, 1.0, 0.0), 1.0, 0.0)
         array([[[1., 3.]]])
     """
+    reject_geotensor(arr, "inverse_standard_scale")
     mean_b = reshape_stat(mean, arr, reduce_axes)
     std_b = reshape_stat(std, arr, reduce_axes)
     return arr * namespace_of(arr).where(std_b != 0, std_b, 1.0) + mean_b
@@ -441,6 +445,9 @@ def inverse_robust_scale(
     Returns:
         Float array of the same shape as ``arr``.
 
+    Raises:
+        TypeError: ``arr`` is a georeader ``GeoTensor``.
+
     Examples:
         >>> x = np.array([[[1.0, 3.0]]])
         >>> inverse_robust_scale(robust_scale(x, 2.0, 4.0), 2.0, 4.0)
@@ -450,6 +457,7 @@ def inverse_robust_scale(
         >>> inverse_robust_scale(cube, [0.0, 1.0], [2.0, 3.0])[:, 0, 0]
         array([2., 4.])
     """
+    reject_geotensor(arr, "inverse_robust_scale")
     median_b = reshape_stat(median, arr, reduce_axes)
     iqr_b = reshape_stat(iqr, arr, reduce_axes)
     return arr * namespace_of(arr).where(iqr_b != 0, iqr_b, 1.0) + median_b
@@ -484,6 +492,7 @@ def inverse_minmax_scale(
         Float array of the same shape as ``arr``.
 
     Raises:
+        TypeError: ``arr`` is a georeader ``GeoTensor``.
         ValueError: If ``out_range`` is not a two-element increasing tuple.
 
     Examples:
@@ -494,6 +503,7 @@ def inverse_minmax_scale(
         >>> inverse_minmax_scale(y, 1.0, 3.0, out_range=(0.0, 255.0))
         array([[[1., 3.]]])
     """
+    reject_geotensor(arr, "inverse_minmax_scale")
     out_min, out_max = validate_out_range(out_range)
     vmin_b = reshape_stat(vmin, arr, reduce_axes)
     vmax_b = reshape_stat(vmax, arr, reduce_axes)

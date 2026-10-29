@@ -346,6 +346,20 @@ def test_scaler_fit_refuses_a_jax_trace(name: str, scene: GeoArray) -> None:
     jax.jit(lambda g: lazy(g))(scene.to_jax())
 
 
+def test_inverse_primitives_refuse_a_geotensor(scene: GeoArray) -> None:
+    pytest.importorskip("georeader")
+    from geoarray.interop.georeader import to_georeader
+
+    tensor = to_georeader(scene)
+    for call in (
+        gn.inverse_standard_scale,
+        gn.inverse_robust_scale,
+        gn.inverse_minmax_scale,
+    ):
+        with pytest.raises(TypeError, match="from_georeader"):
+            call(tensor, 0.0, 1.0)
+
+
 def test_scaler_statistics_must_match_the_band_dim_on_dask(scene: GeoArray) -> None:
     lazy = scene.to_xarray().chunk({"y": 3})
     with pytest.raises(ValueError, match="does not match the kept axes"):
