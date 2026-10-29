@@ -35,13 +35,12 @@ from pipekit_array import DimArray, KernelOp, array_namespace, isel
 from geoops._src.bands import BandRef, resolve_band
 from geoops._src.geo import reject_geotensor
 from geoops._src.shape import DIMS
-from geoops._src.valid import invalid_elements
+from geoops._src.valid import fill_of, invalid_elements
 
 
 __all__ = [
     "band_kernel",
     "carrier_kernel",
-    "fill_of",
     "mask_kernel",
     "named",
     "nodata_where",
@@ -153,21 +152,6 @@ def _masked_kernel(
     params: dict[str, Any],
 ) -> Any:
     return nodata_where(kernel(*bands, **params), *bands, fill_values=fill_values)
-
-
-def fill_of(x: Any) -> Any:
-    """The fill that marks nodata in ``x``, or ``None``.
-
-    A `GeoArray` declares ``fill_value``. A ``DataArray`` declares it in
-    ``attrs["fill_value"]`` (written by `GeoArray.to_xarray`), else in an
-    undecoded ``attrs["_FillValue"]``; a file xarray decoded already holds
-    ``NaN`` there. Anything else declares none.
-    """
-    if isinstance(x, GeoArray):
-        return x.fill_value
-    if _is_dataarray(x):
-        return x.attrs.get("fill_value", x.attrs.get("_FillValue"))
-    return None
 
 
 def band_kernel(

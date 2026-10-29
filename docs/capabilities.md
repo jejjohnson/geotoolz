@@ -1564,13 +1564,13 @@ helper is added here, not inline in one caller.
 | `geoops._src.fitted` | Shared plumbing for fitted operators (the ``fit`` / ``transform`` seam). | `PicklableLock`, `fit_lock`, `fit_once`, `require_concrete` |
 | `geoops._src.geo` | Shared georeferencing helpers. | `is_georeader_object`, `reject_georeader`, `affine_of`, `as_pixel_window`, `require_geoarray`, `require_projected_crs`, `ground_pixel_size`, `grid_matches`, `require_grid_match`, `pixel_xy` |
 | `geoops._src.geotensor` | Refusing a georeader ``GeoTensor``, without importing georeader or geoarray. | `is_geotensor`, `reject_geotensor` |
-| `geoops._src.kernels` | Kernel operators: one element-wise L1 kernel, run on every carrier. | `named`, `select_band`, `nodata_where`, `fill_of`, `band_kernel`, `carrier_kernel`, `mask_kernel`, `pixel_kernel` |
+| `geoops._src.kernels` | Kernel operators: one element-wise L1 kernel, run on every carrier. | `named`, `select_band`, `nodata_where`, `band_kernel`, `carrier_kernel`, `mask_kernel`, `pixel_kernel` |
 | `geoops._src.labels` | Shared connected-component, hole, skeleton and region-property primitives. | `connectivity_structure`, `label_components`, `remove_small_holes`, `skeleton_length`, `regionprops_frame` |
 | `geoops._src.optional` | Lazy import of optional-extra dependencies with an actionable error. | `import_optional`, `optional_root`, `optional_name` |
 | `geoops._src.samples` | Shared pixel flattening: ``(c, h, w)`` cubes <-> ``(n, c)`` sample matrices. | `SampleLayout`, `cube_to_samples`, `samples_to_cube`, `sample_layout` |
 | `geoops._src.shape` | Shared shape-normalisation primitives. | `band_axis`, `band_dim`, `dim_axis`, `require_ndim`, `keep_band_axis`, `map_frames`, `over_frames`, `single_band`, `gather_inputs` |
 | `geoops._src.stretch` | Shared percentile clip-and-stretch core. | `check_percentiles`, `stretch_between`, `percentile_stretch` |
-| `geoops._src.valid` | Shared notion of an *invalid* (nodata) pixel. | `carrier_fill_value`, `is_fill`, `invalid_values`, `valid_pixels`, `mask_invalid_to_nan`, `restore_fill`, `carried_fill`, `wrap_filled`, `namespace_of`, `invalid_elements`, `invalid_pixel_mask` |
+| `geoops._src.valid` | Shared notion of an *invalid* (nodata) pixel. | `carrier_fill_value`, `is_fill`, `invalid_values`, `valid_pixels`, `mask_invalid_to_nan`, `restore_fill`, `carried_fill`, `wrap_filled`, `namespace_of`, `invalid_elements`, `fill_of`, `invalid_pixel_mask` |
 | `geoops._src.wrap` | Carrier rewrap discipline shared by every operator family. | `Inherit`, `rewrap_attrs`, `adopt_attrs`, `wrap_like`, `rewrap_dims` |
 
 ### `geocatalog._src.utils`

@@ -44,11 +44,11 @@ from pipekit import Operator, get_adapter
 from geoops._src.config import jsonable
 from geoops._src.fitted import fit_once, require_concrete
 from geoops._src.geo import reject_geotensor
-from geoops._src.kernels import _declare_fill, fill_of, named, pixel_kernel
+from geoops._src.kernels import _declare_fill, named, pixel_kernel
 from geoops._src.shape import DIMS
 from geoops._src.stretch import check_percentiles, stretch_between
 from geoops._src.valid import (
-    invalid_elements,
+    invalid_pixel_mask,
     invalid_values,
     mask_invalid_to_nan,
     namespace_of,
@@ -186,11 +186,9 @@ def _pixel_view(x: Any, dim: str, name: str) -> _PixelView:
     adapter = get_adapter(carrier)
     dims = tuple(adapter.dims(carrier))
     data = adapter.data(carrier)
-    bad = invalid_elements(data, fill_of(carrier))
     band_axis = dims.index(dim) if dim in dims else None
-    if band_axis is not None:
-        bad = namespace_of(data).any(bad, axis=band_axis, keepdims=True)
-    return _PixelView(carrier, unwrap, dims, data, ~bad, band_axis)
+    valid = ~invalid_pixel_mask(carrier, dim=dim)
+    return _PixelView(carrier, unwrap, dims, data, valid, band_axis)
 
 
 def _as_rows(view: _PixelView, per_band: bool) -> tuple[Any, Any, Any]:
@@ -352,7 +350,8 @@ class PerBandStats(Operator):
             f"Call it eagerly, outside the trace; or use {_FUNCTIONAL}",
             quantiles=tuple(p / 100.0 for p in self.percentiles),
         )
-        stats["percentiles"] = stats.pop("quantiles")
+        # no levels gives no "quantiles" entry; keep the old empty list
+        stats["percentiles"] = stats.pop("quantiles", np.empty(0))
         self.stats = {key: jsonable(value) for key, value in stats.items()}
         return gt
 
