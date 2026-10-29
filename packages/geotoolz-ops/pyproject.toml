@@ -1,6 +1,6 @@
 [project]
 name = "geotoolz-ops"
-version = "0.15.0"
+version = "0.16.0"
 description = "Composable Operator library for remote sensing on geoarray.GeoArray."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
