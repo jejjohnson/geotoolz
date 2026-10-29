@@ -171,6 +171,16 @@ def test_band_stats_leave_infinities_out() -> None:
         np.testing.assert_array_equal(gn.band_quantiles(x, valid, q=(1.0,))[0], [1, 2])
 
 
+def test_band_stats_refuse_a_geotensor(scene: GeoArray) -> None:
+    pytest.importorskip("georeader")
+    from geoarray.interop.georeader import to_georeader
+
+    tensor = to_georeader(scene)
+    for call in (gn.band_stats, gn.band_quantiles, gn.carrier_band_stats):
+        with pytest.raises(TypeError, match="from_georeader"):
+            call(tensor)
+
+
 def test_band_stats_reject_bad_requests(scene: GeoArray) -> None:
     with pytest.raises(ValueError, match="unknown statistics"):
         gn.carrier_band_stats(scene, stats=("median",))
@@ -226,6 +236,13 @@ def test_stretch_agrees_on_every_carrier(op: object, stats_scene: GeoArray) -> N
     assert hasattr(on_dask.data, "dask")
     for out in (op(stats_scene.to_jax()), jitted, op(da), on_dask.compute()):
         np.testing.assert_allclose(np.asarray(out), want, rtol=1e-12, equal_nan=True)
+
+
+def test_scale_kernels_promote_low_precision_statistics() -> None:
+    x = np.array([[[-40000.0, 40000.0]]], dtype=np.float32)
+    bounds = np.array([-40000.0, 40000.0], dtype=np.float16)  # span overflows float16
+    out = gn.minmax_scale(x, bounds[0], bounds[1], reduce_axes=None)
+    np.testing.assert_allclose(out, [[[0.0, 1.0]]])
 
 
 @pytest.mark.parametrize("op", STRETCHES)
