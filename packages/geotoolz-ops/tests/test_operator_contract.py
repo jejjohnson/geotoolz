@@ -443,15 +443,39 @@ def _perturbed(x: Any) -> Any:
     )
 
 
+def _rescaled(x: Any, *, seed: int) -> Any:
+    """A rescaled copy of ``x`` that keeps its dims and coordinates (``level``)."""
+    values = np.asarray(x)
+    factor = np.random.default_rng(seed).uniform(0.8, 1.2, values.shape[-2:])
+    if getattr(x, "transform", None) is None:
+        return values * factor
+    return x.replace(data=values * factor)
+
+
 #: The second (and further) positional carriers of every two-carrier operator
 #: (#141), built on the primary input's grid: ``op(x, *MULTI_INPUTS[key](x))``.
 #: Optional carriers are included, so every input is exercised.
 MULTI_INPUTS: dict[str, Callable[[Any], tuple[Any, ...]]] = {
     "augment._src.operators.CutMix": lambda x: (_perturbed(x),),
-    "geom._src.operators.Curl": lambda x: (_perturbed(x), _mask_like(x)),
-    "geom._src.operators.Divergence": lambda x: (_perturbed(x), _mask_like(x)),
-    "geom._src.operators.Gradient": lambda x: (_mask_like(x),),
-    "geom._src.operators.Laplacian": lambda x: (_mask_like(x),),
+    "geom._src.operators.Curl2D": lambda x: (_perturbed(x), _mask_like(x)),
+    "geom._src.operators.Curl3D": lambda x: (
+        _rescaled(x, seed=5),
+        _rescaled(x, seed=6),
+        _mask_like(x),
+    ),
+    "geom._src.operators.Divergence1D": lambda x: (_mask_like(x),),
+    "geom._src.operators.Divergence2D": lambda x: (_perturbed(x), _mask_like(x)),
+    "geom._src.operators.Divergence3D": lambda x: (
+        _rescaled(x, seed=5),
+        _rescaled(x, seed=6),
+        _mask_like(x),
+    ),
+    "geom._src.operators.Gradient1D": lambda x: (_mask_like(x),),
+    "geom._src.operators.Gradient2D": lambda x: (_mask_like(x),),
+    "geom._src.operators.Gradient3D": lambda x: (_mask_like(x),),
+    "geom._src.operators.Laplacian1D": lambda x: (_mask_like(x),),
+    "geom._src.operators.Laplacian2D": lambda x: (_mask_like(x),),
+    "geom._src.operators.Laplacian3D": lambda x: (_mask_like(x),),
     "geom._src.operators.OpticalFlowILK": lambda x: (_perturbed(x),),
     "geom._src.operators.OpticalFlowTVL1": lambda x: (_perturbed(x),),
     "geom._src.operators.PhaseAlign": lambda x: (_perturbed(x),),
@@ -829,6 +853,10 @@ def _multi_input_classes() -> list[Any]:
 #: not the 3-band ``_scene()``: label maps for the per-instance tables, a
 #: single-band field for the plume quantifiers and the 1-band segmenters.
 GRAPH_PRIMARY: dict[str, Callable[[], Any]] = {
+    "geom._src.operators.Curl3D": lambda: _levels(),
+    "geom._src.operators.Divergence3D": lambda: _levels(),
+    "geom._src.operators.Gradient3D": lambda: _levels(),
+    "geom._src.operators.Laplacian3D": lambda: _levels(),
     "measure._src.operators.RegionProps": lambda: _labels(),
     "plume._src.operators.CrossSectionalFlux": lambda: _band_like(_scene()),
     "plume._src.operators.IMEEstimate": lambda: _band_like(_scene()),
@@ -996,6 +1024,23 @@ def _scene() -> Any:
     return toy_geoarray(values, attrs={"band_names": ["b0", "b1", "b2"]})
 
 
+def _levels() -> Any:
+    """A ``(level, y, x)`` field on uneven depth levels, for the 3-D calculus."""
+    from geoarray import GeoArray
+    from geoarray.coords import Vertical, VerticalAxis
+
+    depth = Vertical(kind="depth", units="m", positive="down")
+    levels = VerticalAxis(values=(0.0, 5.0, 15.0, 30.0), vertical=depth)
+    values = np.random.default_rng(0).uniform(0.0, 1.0, (4, 16, 16))
+    return GeoArray(
+        values,
+        transform=(10.0, 0.0, 500_000.0, 0.0, -10.0, 4_000_000.0),
+        crs="EPSG:32629",
+        dims=("level", "y", "x"),
+        coords=(levels,),
+    )
+
+
 def _labels() -> Any:
     from _helpers import toy_geoarray
 
@@ -1157,7 +1202,13 @@ def test_every_operator_refuses_a_geotensor(
     op = build(cls, runtime=True)
     if not _single_carrier_in(op):
         pytest.skip("not a single-input operator")
-    candidates = [*_toy_inputs(), *_attributed_inputs()]
+    # an operator that needs a particular carrier (GRAPH_PRIMARY) tries it first
+    primary = GRAPH_PRIMARY.get(_key(cls))
+    candidates = [
+        *([primary()] if primary is not None else []),
+        *_toy_inputs(),
+        *_attributed_inputs(),
+    ]
     for scene in candidates:
         if not _is_carrier(scene) and not isinstance(scene, list):
             continue
@@ -1963,7 +2014,9 @@ def test_operators_declare_and_keep_their_backends(cls: type) -> None:
 
     if isinstance(op, SinkOperator) or not _single_carrier_in(op):
         return
-    for scene in _attributed_inputs():
+    primary = GRAPH_PRIMARY.get(_key(cls))
+    scenes = [*([primary()] if primary is not None else []), *_attributed_inputs()]
+    for scene in scenes:
         if not isinstance(scene, GeoArray):
             continue
         try:

@@ -12,7 +12,7 @@ multi-source matchups live in the `geom.coregister` subnamespace
 - **Swath / sensor geometry:** `Georeference` (GLT), `SegmentStitch`, `BowtieCorrection`,
   `AntimeridianSplit`, `GeostationaryParallaxCorrect`
 - **Registration:** `PhaseAlign` (phase cross-correlation), `OpticalFlowILK`, `OpticalFlowTVL1`
-- **Diagnostic calculus:** `Gradient`, `Divergence`, `Curl`, `Laplacian` (operators); `gradient`, `divergence`, `curl`, `laplacian` and their `adaptive_*` twins (arrays); `difference`, `adaptive_difference`, `difference_offsets`, `difference_coeffs` (stencils)
+- **Diagnostic calculus:** `Gradient1D` / `2D` / `3D`, `Divergence1D` / `2D` / `3D`, `Curl2D` / `3D`, `Laplacian1D` / `2D` / `3D` (operators); `gradient_1d`, `divergence_2d`, `curl_3d`, … and their `adaptive_*` twins (arrays); `difference`, `adaptive_difference`, `difference_offsets`, `difference_coeffs`, `nonuniform_coeffs` (stencils)
 
 ## Projection operator choices
 
@@ -24,9 +24,17 @@ multi-source matchups live in the `geom.coregister` subnamespace
 ## Diagnostic calculus
 
 The calculus family has three levels, and each level is built from the one below.
-The operators (`Gradient`, `Divergence`, `Curl`, `Laplacian`) read the geometry from the carrier: they map pixel derivatives to the CRS's axes through the transform, and on a geographic CRS they use the CRS ellipsoid's radii, so results are per CRS unit (per metre on a geographic CRS).
-The array primitives (`gradient`, `divergence`, `curl`, `laplacian` and their `adaptive_*` twins) take the row and column steps `dy`, `dx` instead, so the same maths runs on bare NumPy or JAX arrays inside a jitted cost.
-Both rest on `difference` and `adaptive_difference`, whose stencils come from `difference_offsets` and `difference_coeffs`.
+The operators read the geometry from the carrier: they map pixel derivatives to the CRS's axes through the transform, and on a geographic CRS they use the CRS ellipsoid's radii, so horizontal results are per CRS unit (per metre on a geographic CRS).
+The array primitives take the steps (`dz`, `dy`, `dx`) or the level positions (`z=`, `coords=`) instead, so the same maths runs on bare NumPy or JAX arrays inside a jitted cost.
+Both rest on `difference` and `adaptive_difference`, whose stencils come from `difference_offsets` and `difference_coeffs`, or from `nonuniform_coeffs` on an unevenly spaced axis.
+
+Each name carries its dimension:
+
+- the 2-D operators (`Gradient2D`, `Divergence2D`, `Curl2D`, `Laplacian2D`) work over `y x`;
+- the 3-D ones (`Gradient3D`, `Divergence3D`, `Curl3D`, `Laplacian3D`) add the `level` dim, spaced by its `VerticalAxis` (depths, heights or pressures, unevenly spaced or not); `Gradient3D` and `Curl3D` return a `component` dim holding `(z, y, x)`;
+- the 1-D ones (`Gradient1D`, `Divergence1D`, `Laplacian1D`) work along one dim named by `along`: `"x"` or `"y"` (on an axis-aligned grid), `"level"`, or `"time"` (per second, from the `TimeAxis`).
+
+A curl needs two dimensions, so there is no `Curl1D`.
 
 Pick `nan_policy="adaptive"` when the field has a mask that matters, such as a coastline: each derivative then uses the widest stencil that fits on valid data, so the cells next to land keep a value and only the masked cells are `NaN`.
 The default, `"propagate"`, uses the plain stencil, and a masked cell costs a halo of about `accuracy` cells.
@@ -45,9 +53,13 @@ v = GeoArray(x, transform, "EPSG:32613", dims=("y", "x"))   # (7, 9) float64
 land = np.zeros((7, 9), dtype=bool)                   # (7, 9) bool, True drops
 land[:, 4] = True
 
-zeta = gz.Curl(nan_policy="adaptive")(u, v, land)     # (7, 9), 2.0 off the wall
-div = gz.Divergence()(u, v)                           # (7, 9), 0.0 everywhere
-same = gz.geom.adaptive_curl(-y, x, -10.0, 10.0, mask=land)  # (7, 9) ndarray
+zeta = gz.Curl2D(nan_policy="adaptive")(u, v, land)     # (7, 9), 2.0 off the wall
+div = gz.Divergence2D()(u, v)                           # (7, 9), 0.0 everywhere
+same = gz.geom.adaptive_curl_2d(-y, x, -10.0, 10.0, mask=land)  # (7, 9) ndarray
+
+depth = np.array([0.0, 5.0, 15.0, 30.0])              # (4,) uneven levels, m
+dtdz = gz.geom.gradient_1d(depth**2, coords=depth)    # (4,) per metre
+lap = gz.geom.laplacian_3d(np.zeros((4, 7, 9)), z=depth)  # (4, 7, 9) float64
 ```
 
 ::: geoops.geom

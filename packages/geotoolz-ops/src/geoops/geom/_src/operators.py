@@ -60,12 +60,12 @@ from geoops._src.valid import (
 from geoops._src.wrap import adopt_attrs, rewrap_attrs, rewrap_dims, wrap_like
 from geoops.geom._src.array import (
     adaptive_difference,
-    adaptive_gradient,
+    adaptive_gradient_2d,
     bowtie_detector_positions,
     center_offsets,
     difference,
     feather_weights,
-    gradient,
+    gradient_2d,
     is_north_up,
     resolve_interpolation,
     resolve_resampling,
@@ -2696,7 +2696,7 @@ def _validate_segment_compatible(
         raise ValueError("All segments must share pixel size.")
 
 
-class Gradient(Operator):
+class Gradient2D(Operator):
     r"""Diagnostic gradient of a gridded field in map axes, NaN- and mask-aware (OP-O7).
 
     **Masks.** ``nan_policy`` decides what a masked cell costs:
@@ -2710,8 +2710,8 @@ class Gradient(Operator):
       masked cells are ``NaN``.
 
     The arithmetic is the public L1 primitives, so the same maths is
-    available without a carrier: :func:`geoops.geom.gradient` /
-    :func:`geoops.geom.adaptive_gradient` over :func:`geoops.geom.difference`
+    available without a carrier: :func:`geoops.geom.gradient_2d` /
+    :func:`geoops.geom.adaptive_gradient_2d` over :func:`geoops.geom.difference`
     / :func:`geoops.geom.adaptive_difference`, whose stencils come from
     :func:`geoops.geom.difference_offsets` and :func:`geoops.geom.difference_coeffs`.
 
@@ -2749,10 +2749,10 @@ class Gradient(Operator):
 
     Examples:
         >>> import geoops as gz
-        >>> grad = gz.Gradient()(ssh_map)                 # (component, y, x)
-        >>> grad = gz.Gradient(nan_policy="adaptive")(ssh_map, land)  # keeps the coast
-        >>> step = jax.jit(gz.Gradient())                 # one trace across transforms
-        >>> d_y, d_x = gz.geom.adaptive_gradient(ssh, dy, dx, mask=land)  # arrays only
+        >>> grad = gz.Gradient2D()(ssh_map)                 # (component, y, x)
+        >>> grad = gz.Gradient2D(nan_policy="adaptive")(ssh_map, land)  # keeps the coast
+        >>> step = jax.jit(gz.Gradient2D())                 # one trace across transforms
+        >>> d_y, d_x = gz.geom.adaptive_gradient_2d(ssh, dy, dx, mask=land)  # arrays only
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
@@ -2775,12 +2775,12 @@ class Gradient(Operator):
         self.periodic_x = periodic_x
 
     def _apply(self, gt: Any, mask: Any = None) -> Any:
-        reject_geotensor(gt, "Gradient")
+        reject_geotensor(gt, "Gradient2D")
         if type(gt).__module__.startswith("xarray."):
             raise TypeError(
-                "Gradient is a geometry operator and takes a GeoArray: lift it "
-                "over a DataArray cube with xrops.lift(Gradient(), dim=...), or "
-                "call geoops.geom.gradient / adaptive_gradient with coordinate "
+                "Gradient2D is a geometry operator and takes a GeoArray: lift it "
+                "over a DataArray cube with xrops.lift(Gradient2D(), dim=...), or "
+                "call geoops.geom.gradient_2d / adaptive_gradient with coordinate "
                 "spacings."
             )
         if mask is not None and isinstance(gt, GeoArray) and isinstance(mask, GeoArray):
@@ -2789,7 +2789,7 @@ class Gradient(Operator):
                 get_adapter(gt).check_compatible(gt, mask)
             except GridMismatchError as exc:
                 raise GridMismatchError(
-                    f"Gradient: the mask is not on the field's pixel grid ({exc})"
+                    f"Gradient2D: the mask is not on the field's pixel grid ({exc})"
                 ) from exc
         if not isinstance(gt, GeoArray):
             # a plain array (NumPy or JAX): pixel units, on its own backend
@@ -2799,9 +2799,9 @@ class Gradient(Operator):
             return xp.moveaxis(grad, 0, -3)
         if gt.batch_dims:
             raise ValueError(
-                f"Gradient: the carrier is batched over {gt.batch_dims} (one "
+                f"Gradient2D: the carrier is batched over {gt.batch_dims} (one "
                 "transform per item); map it per item with "
-                f"geoarray.map_over(x, Gradient(...), {gt.batch_dims[0]!r})."
+                f"geoarray.map_over(x, Gradient2D(...), {gt.batch_dims[0]!r})."
             )
         xp = gt.xp
         data = as_float(gt.data)
@@ -2819,12 +2819,12 @@ class Gradient(Operator):
     def _pixel_gradient(self, field: Any, xp: Any, mask: Any) -> Any:
         """``(∂f/∂i, ∂f/∂j)`` per pixel step, through the L1 primitives."""
         if self.nan_policy == "adaptive":
-            return adaptive_gradient(
+            return adaptive_gradient_2d(
                 field, mask=mask, accuracy=self.accuracy, periodic_x=self.periodic_x
             )
         if mask is not None:
             field = xp.where(mask, xp.nan, field)
-        out = gradient(field, accuracy=self.accuracy, periodic_x=self.periodic_x)
+        out = gradient_2d(field, accuracy=self.accuracy, periodic_x=self.periodic_x)
         if mask is not None:
             out = xp.where(mask, xp.nan, out)
         return out
@@ -2833,8 +2833,8 @@ class Gradient(Operator):
 _CALCULUS_POLICIES = ("propagate", "adaptive")
 
 
-class Divergence(Operator):
-    r"""Divergence of a gridded vector field in map axes, NaN- and mask-aware (#588).
+class Divergence2D(Operator):
+    r"""Divergence of a gridded 2-D vector field in map axes, NaN- and mask-aware.
 
     .. math::
 
@@ -2843,11 +2843,11 @@ class Divergence(Operator):
 
     ``u`` and ``v`` are two positional carriers on one grid, the components
     along the CRS's ``x`` and ``y`` (eastward and northward on a geographic
-    CRS). The geometry, ``nan_policy`` and mask follow :class:`Gradient`:
+    CRS). The geometry, ``nan_policy`` and mask follow :class:`Gradient2D`:
     pixel derivatives map to map axes through the transform's Jacobian, so
     north-up, flipped and rotated grids are exact for a linear field. On a
     geographic CRS the divergence uses the CRS ellipsoid's radii
-    :math:`M(\varphi)` and :math:`N(\varphi)`, as ``Gradient`` does,
+    :math:`M(\varphi)` and :math:`N(\varphi)`, as ``Gradient2D`` does,
 
     .. math::
 
@@ -2862,18 +2862,18 @@ class Divergence(Operator):
     unit (per metre on a geographic CRS), with ``fill_value=NaN``. A plain
     array is differentiated in pixel units, rows then columns; a
     ``DataArray`` is refused (lift it with ``xrops.lift``, or call
-    :func:`geoops.geom.divergence` with coordinate spacings).
+    :func:`geoops.geom.divergence_2d` with coordinate spacings).
 
     Args:
         accuracy: Accuracy order of the one-sided stencils.
-        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient`).
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient2D`).
         periodic_x: The columns wrap, for a global longitude grid.
 
     Examples:
         >>> import geoops as gz
-        >>> div = gz.Divergence()(u, v)                              # (y, x)
-        >>> div = gz.Divergence(nan_policy="adaptive")(u, v, land)   # keeps the coast
-        >>> div = gz.geom.adaptive_divergence(u, v, dy, dx, mask=land)  # arrays only
+        >>> div = gz.Divergence2D()(u, v)                              # (y, x)
+        >>> div = gz.Divergence2D(nan_policy="adaptive")(u, v, land)   # keeps the coast
+        >>> div = gz.geom.adaptive_divergence_2d(u, v, dy, dx, mask=land)  # arrays only
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
@@ -2891,38 +2891,18 @@ class Divergence(Operator):
         self.periodic_x = periodic_x
 
     def _apply(self, u: Any, v: Any, mask: Any = None) -> Any:
-        prepared = _calculus_inputs("Divergence", (u, v), mask)
-        fu, fv = prepared.fields
-        if prepared.carrier is None:
-            out = self._d(prepared, fu, -1) + self._d(prepared, fv, -2)
-            return prepared.finish(out)
-        metric = _geographic_metric(prepared.carrier)
-        if metric is not None:
-            fv = fv * metric.parallel  # ∂(N cos φ v)/∂φ, the flux form
-        _, du_x = _jacobian_axes(
-            prepared.carrier, self._d(prepared, fu, -2), self._d(prepared, fu, -1)
-        )
-        dv_y, _ = _jacobian_axes(
-            prepared.carrier, self._d(prepared, fv, -2), self._d(prepared, fv, -1)
-        )
-        if metric is None:
-            return prepared.finish(du_x + dv_y)
-        east = du_x / (metric.parallel * metric.per_unit)
-        north = dv_y / (metric.parallel * metric.meridional * metric.per_unit)
-        return prepared.finish(east + north)
-
-    def _d(self, prepared: _CalculusInputs, field: Any, axis: int) -> Any:
-        return _pixel_derivative(prepared, field, axis, 1, self)
+        prepared = _calculus_inputs("Divergence2D", (u, v), mask)
+        return prepared.finish(_horizontal_divergence(self, prepared, *prepared.fields))
 
 
-class Curl(Operator):
-    r"""Curl (relative vorticity) of a gridded vector field in map axes (#588).
+class Curl2D(Operator):
+    r"""Curl (relative vorticity) of a gridded 2-D vector field in map axes.
 
     .. math::
 
         \zeta = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}
 
-    Inputs, geometry, masks and outputs as :class:`Divergence`. On a
+    Inputs, geometry, masks and outputs as :class:`Divergence2D`. On a
     geographic CRS, with the CRS ellipsoid's radii,
 
     .. math::
@@ -2933,14 +2913,14 @@ class Curl(Operator):
 
     Args:
         accuracy: Accuracy order of the one-sided stencils.
-        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient`).
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient2D`).
         periodic_x: The columns wrap, for a global longitude grid.
 
     Examples:
         >>> import geoops as gz
-        >>> zeta = gz.Curl()(u, v)                               # (y, x)
-        >>> zeta = gz.Curl(nan_policy="adaptive")(u, v, land)    # up to the coast
-        >>> zeta = gz.geom.curl(u, v, dy, dx)                    # arrays only, jittable
+        >>> zeta = gz.Curl2D()(u, v)                               # (y, x)
+        >>> zeta = gz.Curl2D(nan_policy="adaptive")(u, v, land)    # up to the coast
+        >>> zeta = gz.geom.curl_2d(u, v, dy, dx)                   # arrays only, jittable
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
@@ -2958,32 +2938,12 @@ class Curl(Operator):
         self.periodic_x = periodic_x
 
     def _apply(self, u: Any, v: Any, mask: Any = None) -> Any:
-        prepared = _calculus_inputs("Curl", (u, v), mask)
-        fu, fv = prepared.fields
-        if prepared.carrier is None:
-            out = self._d(prepared, fv, -1) - self._d(prepared, fu, -2)
-            return prepared.finish(out)
-        metric = _geographic_metric(prepared.carrier)
-        if metric is not None:
-            fu = fu * metric.parallel  # ∂(N cos φ u)/∂φ, the flux form
-        _, dv_x = _jacobian_axes(
-            prepared.carrier, self._d(prepared, fv, -2), self._d(prepared, fv, -1)
-        )
-        du_y, _ = _jacobian_axes(
-            prepared.carrier, self._d(prepared, fu, -2), self._d(prepared, fu, -1)
-        )
-        if metric is None:
-            return prepared.finish(dv_x - du_y)
-        east = dv_x / (metric.parallel * metric.per_unit)
-        north = du_y / (metric.parallel * metric.meridional * metric.per_unit)
-        return prepared.finish(east - north)
-
-    def _d(self, prepared: _CalculusInputs, field: Any, axis: int) -> Any:
-        return _pixel_derivative(prepared, field, axis, 1, self)
+        prepared = _calculus_inputs("Curl2D", (u, v), mask)
+        return prepared.finish(_horizontal_curl(self, prepared, *prepared.fields))
 
 
-class Laplacian(Operator):
-    r"""Laplacian of a gridded field in map axes, NaN- and mask-aware (#588).
+class Laplacian2D(Operator):
+    r"""Laplacian of a gridded field in 2-D map axes, NaN- and mask-aware.
 
     .. math::
 
@@ -3013,18 +2973,18 @@ class Laplacian(Operator):
     one) raises, naming :class:`Reproject`; under ``jax.jit``, where the
     transform is traced, such a grid gives ``NaN`` instead. Units per CRS
     unit squared (per square metre on a geographic CRS); masks, nodata and
-    carriers as :class:`Gradient`.
+    carriers as :class:`Gradient2D`.
 
     Args:
         accuracy: Accuracy order of the one-sided stencils.
-        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient`).
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient2D`).
         periodic_x: The columns wrap, for a global longitude grid.
 
     Examples:
         >>> import geoops as gz
-        >>> lap = gz.Laplacian()(ssh_map)                          # (y, x)
-        >>> lap = gz.Laplacian(nan_policy="adaptive")(ssh_map, land)
-        >>> lap = gz.geom.laplacian(ssh, dy, dx)                   # arrays only
+        >>> lap = gz.Laplacian2D()(ssh_map)                          # (y, x)
+        >>> lap = gz.Laplacian2D(nan_policy="adaptive")(ssh_map, land)
+        >>> lap = gz.geom.laplacian_2d(ssh, dy, dx)                  # arrays only
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
@@ -3042,52 +3002,559 @@ class Laplacian(Operator):
         self.periodic_x = periodic_x
 
     def _apply(self, f: Any, mask: Any = None) -> Any:
-        prepared = _calculus_inputs("Laplacian", (f,), mask)
+        prepared = _calculus_inputs("Laplacian2D", (f,), mask)
         (field,) = prepared.fields
-        f_ii = _pixel_derivative(prepared, field, -2, 2, self)
-        f_jj = _pixel_derivative(prepared, field, -1, 2, self)
-        if prepared.carrier is None:
-            return prepared.finish(f_ii + f_jj)
-        gt = prepared.carrier
-        xp = prepared.xp
-        a, b, _, d, e, _ = (gt.transform[k] for k in range(6))
-        metric = _geographic_metric(gt)
-        if metric is None:
-            col2, row2 = a * a + d * d, b * b + e * e
-            bad = xp.abs(a * b + d * e) > 1e-12 * xp.sqrt(col2 * row2)
-            out = f_jj / col2 + f_ii / row2
-            why = "its pixel axes are not perpendicular (a sheared grid)"
-        else:
-            bad = (b != 0) | (d != 0)
-            f_i = _pixel_derivative(prepared, field, -2, 1, self)
-            pu = metric.per_unit
-            sin, cos = xp.sin(metric.lat), xp.cos(metric.lat)
-            w2 = 1.0 - metric.e2 * sin**2
-            # (1 / (M N cos φ)) d/dφ (N cos φ / M), from N = a / w and M = a (1 - e²) / w³
-            slope = (
-                -sin
-                * (w2 + 2.0 * metric.e2 * cos**2)
-                / ((1.0 - metric.e2) * metric.prime_vertical * metric.meridional * cos)
-            )
-            out = (
-                f_jj / (a * a * pu * pu * metric.parallel**2)
-                + f_ii / (e * e * pu * pu * metric.meridional**2)
-                + slope * f_i / (e * pu)
-            )
-            why = "its rows and columns do not follow latitude and longitude"
-        if isinstance(gt.transform, np.ndarray):
-            if bool(bad):
-                raise ValueError(
-                    f"Laplacian: the carrier's grid cannot be differentiated this "
-                    f"way: {why}. Resample it onto an axis-aligned grid with "
-                    "geoops.geom.Reproject first."
-                )
-        else:  # traced under jax.jit: the transform's values are unknown here
-            out = xp.where(bad, xp.nan, out)
-        return prepared.finish(out)
+        return prepared.finish(
+            _horizontal_laplacian(self, prepared, field, "Laplacian2D")
+        )
 
 
-def _check_calculus(accuracy: int, nan_policy: str) -> None:
+class Gradient1D(Operator):
+    r"""Derivative of a gridded field along one dim, NaN- and mask-aware.
+
+    ``along`` names the dim, and its spacing comes from the carrier:
+
+    - ``"x"`` or ``"y"``: the transform's column or row step, on a grid whose
+      rows and columns follow the CRS's axes (a rotated or sheared grid
+      raises, naming :class:`Reproject`; ``NaN`` under ``jax.jit``). On a
+      geographic CRS the derivative is per metre of arc on the CRS ellipsoid,
+      eastward along a parallel or northward along a meridian, as
+      :class:`Gradient2D`'s components are;
+    - ``"level"``: the ``VerticalAxis`` values on the ``level`` dim, unevenly
+      spaced or not (depth or height in metres, pressure in its units);
+    - ``"time"``: the ``TimeAxis`` stamps, per second.
+
+    Masks, nodata and outputs as :class:`Gradient2D`, on the input's dims; a
+    plain array is differentiated in pixel units along ``"x"`` (its last
+    axis) or ``"y"``.
+
+    Args:
+        along: ``"x"``, ``"y"``, ``"level"`` or ``"time"``.
+        accuracy: Accuracy order of the one-sided stencils.
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient2D`).
+        periodic: The dim wraps (``along="x"`` on a global longitude grid).
+
+    Examples:
+        >>> import geoops as gz
+        >>> dtdz = gz.Gradient1D(along="level")(temperature)   # (level, y, x), per metre
+        >>> dfdt = gz.Gradient1D(along="time")(ssh_series)     # per second
+        >>> dfdx = gz.geom.gradient_1d(f, dx)                  # arrays only
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def __init__(
+        self,
+        *,
+        along: str = "x",
+        accuracy: int = 1,
+        nan_policy: str = "propagate",
+        periodic: bool = False,
+    ) -> None:
+        _check_calculus(accuracy, nan_policy, along=along)
+        self.along = along
+        self.accuracy = accuracy
+        self.nan_policy = nan_policy
+        self.periodic = periodic
+
+    def _apply(self, f: Any, mask: Any = None) -> Any:
+        prepared = _calculus_inputs("Gradient1D", (f,), mask)
+        (field,) = prepared.fields
+        return prepared.finish(_along(self, prepared, field, 1, "Gradient1D"))
+
+
+class Divergence1D(Operator):
+    r"""Divergence of a flux along one dim, :math:`\partial u / \partial s`.
+
+    In one dimension the divergence of a flux is its derivative, so this is
+    :class:`Gradient1D` read as a conservation term: ``∂F/∂z`` of a vertical
+    flux on ``"level"``, ``∂q/∂x`` along a channel. ``along``, spacing, masks
+    and outputs as :class:`Gradient1D`.
+
+    Args:
+        along: ``"x"``, ``"y"``, ``"level"`` or ``"time"``.
+        accuracy: Accuracy order of the one-sided stencils.
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient2D`).
+        periodic: The dim wraps.
+
+    Examples:
+        >>> import geoops as gz
+        >>> heating = gz.Divergence1D(along="level")(heat_flux)  # (level, y, x)
+        >>> ddiv = gz.geom.divergence_1d(flux, coords=depth, axis=-3)  # arrays only
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def __init__(
+        self,
+        *,
+        along: str = "x",
+        accuracy: int = 1,
+        nan_policy: str = "propagate",
+        periodic: bool = False,
+    ) -> None:
+        _check_calculus(accuracy, nan_policy, along=along)
+        self.along = along
+        self.accuracy = accuracy
+        self.nan_policy = nan_policy
+        self.periodic = periodic
+
+    def _apply(self, u: Any, mask: Any = None) -> Any:
+        prepared = _calculus_inputs("Divergence1D", (u,), mask)
+        (field,) = prepared.fields
+        return prepared.finish(_along(self, prepared, field, 1, "Divergence1D"))
+
+
+class Laplacian1D(Operator):
+    r"""Second derivative of a gridded field along one dim, NaN- and mask-aware.
+
+    :math:`\partial^2 f / \partial s^2` with second-derivative stencils;
+    ``along``, spacing, masks and outputs as :class:`Gradient1D`. On a
+    geographic CRS it is per square metre of arc: along a parallel
+    :math:`f_{\lambda\lambda} / (N \cos\varphi)^2`, along a meridian
+    :math:`f_{\varphi\varphi} / M^2 - M' f_\varphi / M^3` (the meridian's
+    radius of curvature changes with latitude).
+
+    Args:
+        along: ``"x"``, ``"y"``, ``"level"`` or ``"time"``.
+        accuracy: Accuracy order of the one-sided stencils.
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient2D`).
+        periodic: The dim wraps.
+
+    Examples:
+        >>> import geoops as gz
+        >>> curvature = gz.Laplacian1D(along="level")(temperature)  # per m²
+        >>> d2f = gz.geom.laplacian_1d(f, coords=depth, axis=-3)    # arrays only
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def __init__(
+        self,
+        *,
+        along: str = "x",
+        accuracy: int = 1,
+        nan_policy: str = "propagate",
+        periodic: bool = False,
+    ) -> None:
+        _check_calculus(accuracy, nan_policy, along=along)
+        self.along = along
+        self.accuracy = accuracy
+        self.nan_policy = nan_policy
+        self.periodic = periodic
+
+    def _apply(self, f: Any, mask: Any = None) -> Any:
+        prepared = _calculus_inputs("Laplacian1D", (f,), mask)
+        (field,) = prepared.fields
+        return prepared.finish(_along(self, prepared, field, 2, "Laplacian1D"))
+
+
+class Gradient3D(Operator):
+    r"""Gradient of a gridded field on vertical levels, NaN- and mask-aware.
+
+    ``(∂f/∂z, ∂f/∂y, ∂f/∂x)``: the horizontal components as
+    :class:`Gradient2D` (map axes, the ellipsoid on a geographic CRS), and
+    the vertical one along the carrier's ``level`` dim with the spacing of its
+    ``VerticalAxis``, unevenly spaced levels included. ``z`` is the level
+    coordinate as stored (depth, height or pressure), so ``∂f/∂z`` is per
+    unit of it. On a geographic CRS this is the thin-shell form: the
+    horizontal metric does not change with height.
+
+    The result gains a ``component`` dim before ``y x`` holding
+    ``(∂f/∂z, ∂f/∂y, ∂f/∂x)``, with ``fill_value=NaN``. A plain array is
+    differentiated in pixel units over its last three axes.
+
+    Args:
+        accuracy: Accuracy order of the one-sided stencils.
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient2D`).
+        periodic_x: The columns wrap, for a global longitude grid.
+
+    Examples:
+        >>> import geoops as gz
+        >>> grad = gz.Gradient3D()(temperature)          # (level, component, y, x)
+        >>> grad = gz.Gradient3D(nan_policy="adaptive")(temperature, seabed)
+        >>> d_z, d_y, d_x = gz.geom.gradient_3d(t, dz, dy, dx, z=depth)  # arrays only
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def __init__(
+        self,
+        *,
+        accuracy: int = 1,
+        nan_policy: str = "propagate",
+        periodic_x: bool = False,
+    ) -> None:
+        _check_calculus(accuracy, nan_policy)
+        self.accuracy = accuracy
+        self.nan_policy = nan_policy
+        self.periodic_x = periodic_x
+
+    def _apply(self, f: Any, mask: Any = None) -> Any:
+        prepared = _calculus_inputs("Gradient3D", (f,), mask)
+        (field,) = prepared.fields
+        d_z = _vertical(self, prepared, field, 1, "Gradient3D")
+        d_y, d_x = _map_gradient(self, prepared, field)
+        return prepared.finish_components((d_z, d_y, d_x))
+
+
+class Divergence3D(Operator):
+    r"""Divergence of a gridded 3-D vector field on vertical levels.
+
+    .. math::
+
+        \nabla \cdot \mathbf{u} = \nabla_h \cdot \mathbf{u}_h
+                                + \frac{\partial w}{\partial z}
+
+    The horizontal part as :class:`Divergence2D` (the ellipsoid's flux form on
+    a geographic CRS, thin-shell), plus ``∂w/∂z`` along the ``level`` dim with
+    its ``VerticalAxis`` spacing. ``w`` is the component along increasing
+    level values, so on pressure levels this is the pressure-coordinate
+    divergence with :math:`\omega` in ``w``; on depth levels ``w`` points
+    down. ``u``, ``v`` and ``w`` are three positional carriers with one grid
+    and one ``level`` axis.
+
+    Args:
+        accuracy: Accuracy order of the one-sided stencils.
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient2D`).
+        periodic_x: The columns wrap, for a global longitude grid.
+
+    Examples:
+        >>> import geoops as gz
+        >>> div = gz.Divergence3D()(u, v, omega)       # (level, y, x)
+        >>> div = gz.geom.divergence_3d(u, v, w, dz, dy, dx, z=depth)  # arrays only
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def __init__(
+        self,
+        *,
+        accuracy: int = 1,
+        nan_policy: str = "propagate",
+        periodic_x: bool = False,
+    ) -> None:
+        _check_calculus(accuracy, nan_policy)
+        self.accuracy = accuracy
+        self.nan_policy = nan_policy
+        self.periodic_x = periodic_x
+
+    def _apply(self, u: Any, v: Any, w: Any, mask: Any = None) -> Any:
+        prepared = _calculus_inputs("Divergence3D", (u, v, w), mask)
+        fu, fv, fw = prepared.fields
+        horizontal = _horizontal_divergence(self, prepared, fu, fv)
+        return prepared.finish(
+            horizontal + _vertical(self, prepared, fw, 1, "Divergence3D")
+        )
+
+
+class Curl3D(Operator):
+    r"""Curl (vorticity vector) of a gridded 3-D vector field on vertical levels.
+
+    .. math::
+
+        \omega_z = \partial_x v - \partial_y u, \quad
+        \omega_y = \partial_z u - \partial_x w, \quad
+        \omega_x = \partial_y w - \partial_z v
+
+    :math:`\omega_z` is :class:`Curl2D`'s relative vorticity; the horizontal
+    derivatives of ``w`` are :class:`Gradient2D`'s (thin-shell on a
+    geographic CRS), and ``∂/∂z`` runs along the ``level`` dim with its
+    ``VerticalAxis`` spacing. ``z`` is the level coordinate as stored and
+    ``w`` its component: on a ``positive="down"`` axis (depth, pressure)
+    ``(x, y, z)`` is left-handed, so :math:`\omega_y` and :math:`\omega_x`
+    have the opposite sign of the curl in upward height. The result gains a
+    ``component`` dim before ``y x`` holding ``(ω_z, ω_y, ω_x)``, in axis
+    order as :class:`Gradient3D`.
+
+    Args:
+        accuracy: Accuracy order of the one-sided stencils.
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient2D`).
+        periodic_x: The columns wrap, for a global longitude grid.
+
+    Examples:
+        >>> import geoops as gz
+        >>> omega = gz.Curl3D()(u, v, w)               # (level, component, y, x)
+        >>> omega = gz.geom.curl_3d(u, v, w, dz, dy, dx, z=height)  # arrays only
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def __init__(
+        self,
+        *,
+        accuracy: int = 1,
+        nan_policy: str = "propagate",
+        periodic_x: bool = False,
+    ) -> None:
+        _check_calculus(accuracy, nan_policy)
+        self.accuracy = accuracy
+        self.nan_policy = nan_policy
+        self.periodic_x = periodic_x
+
+    def _apply(self, u: Any, v: Any, w: Any, mask: Any = None) -> Any:
+        prepared = _calculus_inputs("Curl3D", (u, v, w), mask)
+        fu, fv, fw = prepared.fields
+        omega_z = _horizontal_curl(self, prepared, fu, fv)
+        dw_y, dw_x = _map_gradient(self, prepared, fw)
+        du_z = _vertical(self, prepared, fu, 1, "Curl3D")
+        dv_z = _vertical(self, prepared, fv, 1, "Curl3D")
+        return prepared.finish_components((omega_z, du_z - dw_x, dw_y - dv_z))
+
+
+class Laplacian3D(Operator):
+    r"""Laplacian of a gridded field on vertical levels, NaN- and mask-aware.
+
+    .. math::
+
+        \nabla^2 f = \nabla_h^2 f + \frac{\partial^2 f}{\partial z^2}
+
+    The horizontal part as :class:`Laplacian2D` (its grid conditions and the
+    ellipsoid's metric, thin-shell), plus the second derivative along the
+    ``level`` dim with its ``VerticalAxis`` spacing, unevenly spaced levels
+    included. Units: the horizontal part per CRS unit squared (per square
+    metre on a geographic CRS), the vertical one per level unit squared, so
+    mix them only where those agree (heights or depths in metres).
+
+    Args:
+        accuracy: Accuracy order of the one-sided stencils.
+        nan_policy: ``"propagate"`` or ``"adaptive"`` (see :class:`Gradient2D`).
+        periodic_x: The columns wrap, for a global longitude grid.
+
+    Examples:
+        >>> import geoops as gz
+        >>> lap = gz.Laplacian3D()(temperature)                  # (level, y, x)
+        >>> lap = gz.geom.laplacian_3d(t, dz, dy, dx, z=depth)    # arrays only
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def __init__(
+        self,
+        *,
+        accuracy: int = 1,
+        nan_policy: str = "propagate",
+        periodic_x: bool = False,
+    ) -> None:
+        _check_calculus(accuracy, nan_policy)
+        self.accuracy = accuracy
+        self.nan_policy = nan_policy
+        self.periodic_x = periodic_x
+
+    def _apply(self, f: Any, mask: Any = None) -> Any:
+        prepared = _calculus_inputs("Laplacian3D", (f,), mask)
+        (field,) = prepared.fields
+        horizontal = _horizontal_laplacian(self, prepared, field, "Laplacian3D")
+        return prepared.finish(
+            horizontal + _vertical(self, prepared, field, 2, "Laplacian3D")
+        )
+
+
+# ---------------------------------------------------------------------------
+# The calculus operators' shared maths: horizontal parts in map axes, the
+# vertical derivative along `level`, and a derivative along one named dim.
+# ---------------------------------------------------------------------------
+
+_ALONG = ("x", "y", "level", "time")
+
+
+def _horizontal_divergence(op: Any, p: _CalculusInputs, fu: Any, fv: Any) -> Any:
+    """``∂u/∂x + ∂v/∂y`` in map axes (the ellipsoid's flux form on a geographic CRS)."""
+    if p.carrier is None:
+        return _pixel_derivative(p, fu, -1, 1, op) + _pixel_derivative(p, fv, -2, 1, op)
+    metric = _geographic_metric(p.carrier)
+    if metric is not None:
+        fv = fv * metric.parallel  # ∂(N cos φ v)/∂φ, the flux form
+    _, du_x = _jacobian_axes(p.carrier, *_pixel_pair(op, p, fu))
+    dv_y, _ = _jacobian_axes(p.carrier, *_pixel_pair(op, p, fv))
+    if metric is None:
+        return du_x + dv_y
+    east = du_x / (metric.parallel * metric.per_unit)
+    north = dv_y / (metric.parallel * metric.meridional * metric.per_unit)
+    return east + north
+
+
+def _horizontal_curl(op: Any, p: _CalculusInputs, fu: Any, fv: Any) -> Any:
+    """``∂v/∂x − ∂u/∂y`` in map axes (the ellipsoid's flux form on a geographic CRS)."""
+    if p.carrier is None:
+        return _pixel_derivative(p, fv, -1, 1, op) - _pixel_derivative(p, fu, -2, 1, op)
+    metric = _geographic_metric(p.carrier)
+    if metric is not None:
+        fu = fu * metric.parallel  # ∂(N cos φ u)/∂φ, the flux form
+    _, dv_x = _jacobian_axes(p.carrier, *_pixel_pair(op, p, fv))
+    du_y, _ = _jacobian_axes(p.carrier, *_pixel_pair(op, p, fu))
+    if metric is None:
+        return dv_x - du_y
+    east = dv_x / (metric.parallel * metric.per_unit)
+    north = du_y / (metric.parallel * metric.meridional * metric.per_unit)
+    return east - north
+
+
+def _horizontal_laplacian(op: Any, p: _CalculusInputs, field: Any, name: str) -> Any:
+    """``∂²f/∂x² + ∂²f/∂y²`` in map axes (see `Laplacian2D` for the conditions)."""
+    f_ii = _pixel_derivative(p, field, -2, 2, op)
+    f_jj = _pixel_derivative(p, field, -1, 2, op)
+    if p.carrier is None:
+        return f_ii + f_jj
+    gt = p.carrier
+    xp = p.xp
+    a, b, _, d, e, _ = (gt.transform[k] for k in range(6))
+    metric = _geographic_metric(gt)
+    if metric is None:
+        col2, row2 = a * a + d * d, b * b + e * e
+        bad = xp.abs(a * b + d * e) > 1e-12 * xp.sqrt(col2 * row2)
+        out = f_jj / col2 + f_ii / row2
+        return _require_grid(p, bad, out, name, "its pixel axes are not perpendicular")
+    f_i = _pixel_derivative(p, field, -2, 1, op)
+    pu = metric.per_unit
+    sin, cos = xp.sin(metric.lat), xp.cos(metric.lat)
+    w2 = 1.0 - metric.e2 * sin**2
+    # (1 / (M N cos φ)) d/dφ (N cos φ / M), from N = a / w and M = a (1 - e²) / w³
+    slope = (
+        -sin
+        * (w2 + 2.0 * metric.e2 * cos**2)
+        / ((1.0 - metric.e2) * metric.prime_vertical * metric.meridional * cos)
+    )
+    out = (
+        f_jj / (a * a * pu * pu * metric.parallel**2)
+        + f_ii / (e * e * pu * pu * metric.meridional**2)
+        + slope * f_i / (e * pu)
+    )
+    return _require_grid(p, (b != 0) | (d != 0), out, name, _NOT_LONLAT)
+
+
+def _map_gradient(op: Any, p: _CalculusInputs, field: Any) -> tuple[Any, Any]:
+    """``(∂f/∂y, ∂f/∂x)`` in map axes, per metre on a geographic CRS (`Gradient2D`)."""
+    d_row, d_col = _pixel_pair(op, p, field)
+    if p.carrier is None:
+        return d_row, d_col
+    return _map_axes(p.carrier, d_row, d_col)
+
+
+def _pixel_pair(op: Any, p: _CalculusInputs, field: Any) -> tuple[Any, Any]:
+    """``(∂f/∂i, ∂f/∂j)`` per pixel step."""
+    return _pixel_derivative(p, field, -2, 1, op), _pixel_derivative(
+        p, field, -1, 1, op
+    )
+
+
+def _vertical(
+    op: Any, p: _CalculusInputs, field: Any, derivative: int, name: str
+) -> Any:
+    """The derivative along the ``level`` dim, with its ``VerticalAxis`` spacing."""
+    if p.carrier is None:
+        if field.ndim < 3:
+            raise ValueError(
+                f"{name}: a plain array needs levels, rows and columns last (3-D or "
+                f"more); got {field.ndim}-D"
+            )
+        return _pixel_derivative(p, field, field.ndim - 3, derivative, op)
+    axis, coords = _level_coords(p, name)
+    return _pixel_derivative(p, field, axis, derivative, op, coords=coords)
+
+
+def _level_coords(p: _CalculusInputs, name: str) -> tuple[int, Any]:
+    """The ``level`` axis of ``p``'s carrier and its levels as positions."""
+    gt = p.carrier
+    if gt is None or "level" not in gt.dims:
+        dims = None if gt is None else gt.dims
+        raise ValueError(
+            f"{name}: the carrier needs a 'level' dim with a geoarray VerticalAxis; "
+            f"its dims are {dims}"
+        )
+    coord = gt.coord("level")
+    vertical = getattr(coord, "vertical", None)
+    if vertical is None:
+        raise ValueError(
+            f"{name}: the 'level' dim has no VerticalAxis to space it; attach one "
+            "(geoarray.coords.VerticalAxis) with the levels' depths, heights or "
+            "pressures"
+        )
+    if vertical.units == "1":
+        raise ValueError(
+            f"{name}: the levels are model levels in units '1', with no physical "
+            "spacing; attach a VerticalAxis in metres or pressure units"
+        )
+    return gt.dims.index("level"), p.xp.asarray(
+        np.asarray(coord.values, dtype=np.float64)
+    )
+
+
+def _along(op: Any, p: _CalculusInputs, field: Any, derivative: int, name: str) -> Any:
+    """The derivative along ``op.along``, with that dim's spacing (`Gradient1D`)."""
+    along = op.along
+    xp = p.xp
+    gt = p.carrier
+    if gt is None:
+        if along not in ("x", "y"):
+            raise ValueError(
+                f"{name}: a plain array is differentiated along 'x' or 'y' only; "
+                f"pass a GeoArray to differentiate along {along!r}"
+            )
+        return _pixel_derivative(
+            p, field, -1 if along == "x" else -2, derivative, op, periodic=op.periodic
+        )
+    if along == "level":
+        axis, coords = _level_coords(p, name)
+        return _pixel_derivative(p, field, axis, derivative, op, coords=coords)
+    if along == "time":
+        if "time" not in gt.dims or gt.coord("time") is None:
+            raise ValueError(
+                f"{name}: the carrier needs a 'time' dim with a geoarray TimeAxis; "
+                f"its dims are {gt.dims}"
+            )
+        stamps = gt.coord("time").stamps
+        if isinstance(stamps, np.ndarray) and stamps.dtype.kind == "M":
+            stamps = stamps.astype("datetime64[ns]").astype(np.int64)
+        seconds = xp.astype(stamps - stamps[0], xp.float64) * 1e-9
+        axis = gt.dims.index("time")
+        return _pixel_derivative(p, field, axis, derivative, op, coords=seconds)
+    axis = -1 if along == "x" else -2
+    pixel = _pixel_derivative(p, field, axis, derivative, op, periodic=op.periodic)
+    a, b, _, d, e, _ = (gt.transform[k] for k in range(6))
+    step = a if along == "x" else e
+    aligned = (b != 0) | (d != 0)
+    metric = _geographic_metric(gt)
+    if metric is None:
+        out = pixel / step**derivative
+        return _require_grid(p, aligned, out, name, "its rows and columns are rotated")
+    radians = step * metric.per_unit
+    if along == "x":  # arc along a parallel: N cos φ is constant on it
+        out = pixel / (radians * metric.parallel) ** derivative
+    elif derivative == 1:
+        out = pixel / (radians * metric.meridional)
+    else:  # arc along a meridian, whose radius M changes: f_φφ / M² − M' f_φ / M³
+        f_phi = _pixel_derivative(p, field, axis, 1, op) / radians
+        sin, cos = xp.sin(metric.lat), xp.cos(metric.lat)
+        dm_dphi = (
+            3.0 * metric.meridional * metric.e2 * sin * cos / (1.0 - metric.e2 * sin**2)
+        )
+        out = (pixel / radians**2) / metric.meridional**2 - dm_dphi * f_phi / (
+            metric.meridional**3
+        )
+    return _require_grid(p, aligned, out, name, _NOT_LONLAT)
+
+
+_NOT_LONLAT = "its rows and columns do not follow latitude and longitude"
+
+
+def _require_grid(p: _CalculusInputs, bad: Any, out: Any, name: str, why: str) -> Any:
+    """Raise on a grid the formula does not hold on; ``NaN`` when the transform is traced."""
+    if isinstance(p.carrier.transform, np.ndarray):
+        if bool(bad):
+            raise ValueError(
+                f"{name}: the carrier's grid cannot be differentiated this way: "
+                f"{why}. Resample it onto an axis-aligned grid with "
+                "geoops.geom.Reproject first."
+            )
+        return out
+    # traced under jax.jit: the transform's values are unknown here
+    return p.xp.where(bad, p.xp.nan, out)
+
+
+def _check_calculus(
+    accuracy: int, nan_policy: str, *, along: str | None = None
+) -> None:
     """Validate the shared constructor arguments of the calculus operators."""
     if nan_policy not in _CALCULUS_POLICIES:
         raise ValueError(
@@ -3095,6 +3562,8 @@ def _check_calculus(accuracy: int, nan_policy: str) -> None:
         )
     if accuracy < 1:
         raise ValueError(f"accuracy must be at least 1; got {accuracy}")
+    if along is not None and along not in _ALONG:
+        raise ValueError(f"along must be one of {_ALONG}; got {along!r}")
 
 
 class _CalculusInputs(NamedTuple):
@@ -3113,6 +3582,22 @@ class _CalculusInputs(NamedTuple):
             return out
         return rewrap_dims(self.carrier, out, self.carrier.dims, fill_value=np.nan)
 
+    def finish_components(self, components: tuple[Any, ...]) -> Any:
+        """Stack ``components`` on a ``component`` dim before ``y x`` and finish."""
+        xp = self.xp
+        out = xp.stack(components, axis=-3)
+        if self.dropped is not None:
+            out = xp.where(self.dropped[..., None, :, :], xp.nan, out)
+        if self.carrier is None:
+            return out
+        dims = (*self.carrier.dims[:-2], "component", *self.carrier.dims[-2:])
+        return rewrap_dims(self.carrier, out, dims, fill_value=np.nan)
+
+
+def _snake(name: str) -> str:
+    """``"Divergence2D"`` as its L1 primitive's name, ``"divergence_2d"``."""
+    return f"{name[:-2].lower()}_{name[-2:].lower()}"
+
 
 def _calculus_inputs(name: str, fields: tuple[Any, ...], mask: Any) -> _CalculusInputs:
     """Check and prepare the carriers (and mask) of a calculus operator."""
@@ -3122,7 +3607,7 @@ def _calculus_inputs(name: str, fields: tuple[Any, ...], mask: Any) -> _Calculus
             raise TypeError(
                 f"{name} is a geometry operator and takes a GeoArray: lift it over "
                 f"a DataArray cube with xrops.lift({name}(), dim=...), or call "
-                f"geoops.geom.{name.lower()} / adaptive_{name.lower()} with "
+                f"geoops.geom.{_snake(name)} / adaptive_{_snake(name)} with "
                 "coordinate spacings."
             )
     first = fields[0]
@@ -3173,22 +3658,32 @@ def _calculus_inputs(name: str, fields: tuple[Any, ...], mask: Any) -> _Calculus
 
 
 def _pixel_derivative(
-    prepared: _CalculusInputs, field: Any, axis: int, derivative: int, op: Any
+    prepared: _CalculusInputs,
+    field: Any,
+    axis: int,
+    derivative: int,
+    op: Any,
+    *,
+    coords: Any = None,
+    periodic: bool | None = None,
 ) -> Any:
-    """One pixel-step derivative of ``field`` under ``op``'s ``nan_policy``."""
-    periodic = op.periodic_x and axis == -1
+    """One derivative of ``field`` along ``axis`` under ``op``'s ``nan_policy``.
+
+    Per pixel step, or per unit of ``coords`` when given (uneven levels,
+    times). ``periodic`` defaults to ``op.periodic_x`` on the column axis.
+    """
+    if periodic is None:
+        periodic = getattr(op, "periodic_x", False) and axis == -1
+    kw = {
+        "axis": axis,
+        "coords": coords,
+        "derivative": derivative,
+        "accuracy": op.accuracy,
+        "periodic": periodic,
+    }
     if op.nan_policy == "adaptive":
-        return adaptive_difference(
-            field,
-            mask=prepared.dropped,
-            axis=axis,
-            derivative=derivative,
-            accuracy=op.accuracy,
-            periodic=periodic,
-        )
-    out = difference(
-        field, axis=axis, derivative=derivative, accuracy=op.accuracy, periodic=periodic
-    )
+        return adaptive_difference(field, mask=prepared.dropped, **kw)
+    out = difference(field, **kw)
     return (
         out
         if prepared.dropped is None
@@ -3210,7 +3705,7 @@ def _aligned_mask(mask: Any, gt: GeoArray, xp: Any) -> Any:
     extra = [d for d in mask.dims if d not in gt.dims]
     if extra:
         raise ValueError(
-            f"Gradient: the mask has dims {extra} the field lacks; its dims are "
+            f"the mask has dims {extra} the field lacks; its dims are "
             f"{mask.dims}, the field's {gt.dims}"
         )
     present = [d for d in gt.dims if d in mask.dims]
@@ -3225,7 +3720,7 @@ def _mask_data(mask: Any, xp: Any) -> Any:
     """The boolean array of a mask carrier (``True`` drops), or ``None``."""
     if mask is None:
         return None
-    reject_geotensor(mask, "Gradient")
+    reject_geotensor(mask, "Gradient2D")
     data = mask.data if isinstance(mask, GeoArray) else mask
     data = data if hasattr(data, "dtype") else np.asarray(data)
     return data if data.dtype == bool else xp.astype(data, xp.bool)

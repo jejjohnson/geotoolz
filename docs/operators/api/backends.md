@@ -11,7 +11,7 @@ NumPy result on a JAX carrier and trace once under `jax.jit` for
 same-shape inputs on different grids (the contract test checks
 both).
 
-49 of 268 operators run on JAX today.
+56 of 275 operators run on JAX today.
 
 | Family | Operator | Backends |
 |---|---|---|
@@ -56,12 +56,19 @@ both).
 | `geom` | `BowtieCorrection` | numpy |
 | `geom` | `CropTo` | numpy, jax |
 | `geom` | `CropToBounds` | numpy |
-| `geom` | `Curl` | numpy, jax |
-| `geom` | `Divergence` | numpy, jax |
+| `geom` | `Curl2D` | numpy, jax |
+| `geom` | `Curl3D` | numpy, jax |
+| `geom` | `Divergence1D` | numpy, jax |
+| `geom` | `Divergence2D` | numpy, jax |
+| `geom` | `Divergence3D` | numpy, jax |
 | `geom` | `Georeference` | numpy |
 | `geom` | `GeostationaryParallaxCorrect` | numpy |
-| `geom` | `Gradient` | numpy, jax |
-| `geom` | `Laplacian` | numpy, jax |
+| `geom` | `Gradient1D` | numpy, jax |
+| `geom` | `Gradient2D` | numpy, jax |
+| `geom` | `Gradient3D` | numpy, jax |
+| `geom` | `Laplacian1D` | numpy, jax |
+| `geom` | `Laplacian2D` | numpy, jax |
+| `geom` | `Laplacian3D` | numpy, jax |
 | `geom` | `Mosaic` | numpy |
 | `geom` | `OpticalFlowILK` | numpy |
 | `geom` | `OpticalFlowTVL1` | numpy |

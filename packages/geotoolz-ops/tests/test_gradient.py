@@ -1,11 +1,11 @@
-"""The gradient stack (#539, OP-O7): stencils, array primitives, `Gradient`.
+"""The gradient stack (#539, OP-O7): stencils, array primitives, `Gradient2D`.
 
 Three layers, each usable on its own:
 
 - L0 `difference_offsets` / `difference_coeffs`: finitediffx's stencils;
-- L1 `difference` / `gradient` (NaN propagates) and the mask-aware
-  `adaptive_difference` / `adaptive_gradient`, on any backend;
-- L2 `Gradient`: geometry from the carrier, ``nan_policy`` and a mask input.
+- L1 `difference` / `gradient_2d` (NaN propagates) and the mask-aware
+  `adaptive_difference` / `adaptive_gradient_2d`, on any backend;
+- L2 `Gradient2D`: geometry from the carrier, ``nan_policy`` and a mask input.
 
 The gates from the issue:
 
@@ -23,13 +23,13 @@ from geoarray import GeoArray
 
 import geoops as gz
 from geoops.geom import (
-    Gradient,
+    Gradient2D,
     adaptive_difference,
-    adaptive_gradient,
+    adaptive_gradient_2d,
     difference,
     difference_coeffs,
     difference_offsets,
-    gradient,
+    gradient_2d,
     nonuniform_coeffs,
 )
 
@@ -65,7 +65,7 @@ def test_kernel_is_exact_on_a_linear_field(backend: str) -> None:
     f = 2.0 * rows - 0.5 * cols
     if backend == "jax":
         f = jax.numpy.asarray(f)
-    d_y, d_x = gradient(f, 4.0, -2.0)
+    d_y, d_x = gradient_2d(f, 4.0, -2.0)
     np.testing.assert_allclose(np.asarray(d_y), 0.5)  # every row, edges too
     np.testing.assert_allclose(np.asarray(d_x), 0.25)
 
@@ -78,7 +78,7 @@ def test_kernel_converges_at_second_order_inside() -> None:
         h = 2.0 / n
         y, x = np.mgrid[0 : n + 1, 0 : n + 1] * h
         f = np.sin(k * x) * np.cos(ell * y)
-        d_y, d_x = gradient(f, h, h)
+        d_y, d_x = gradient_2d(f, h, h)
         want_x = k * np.cos(k * x) * np.cos(ell * y)
         want_y = -ell * np.sin(k * x) * np.sin(ell * y)
         inner = (slice(1, -1), slice(1, -1))
@@ -91,7 +91,7 @@ def test_kernel_converges_at_second_order_inside() -> None:
 def test_kernel_propagates_nan_to_neighbours() -> None:
     f = np.zeros((5, 5))
     f[2, 2] = np.nan
-    d_y, d_x = gradient(f, 1.0, 1.0)
+    d_y, d_x = gradient_2d(f, 1.0, 1.0)
     assert np.isnan(d_y[[1, 3], 2]).all() and np.isfinite(d_y[0, 0])
     assert np.isnan(d_x[2, [1, 3]]).all()
 
@@ -115,13 +115,13 @@ def test_kernel_propagates_nan_to_neighbours() -> None:
     ],
 )
 def test_operator_is_exact_in_map_axes(transform: tuple[float, ...]) -> None:
-    out = Gradient()(_linear(transform))
+    out = Gradient2D()(_linear(transform))
     assert out.dims == ("component", "y", "x")
     assert np.isnan(out.fill_value)
     d_y, d_x = np.asarray(out)
     np.testing.assert_allclose(d_y, 2.0, rtol=1e-8)
     np.testing.assert_allclose(d_x, 3.0, rtol=1e-8)
-    jitted = jax.jit(Gradient())(_linear(transform).to_jax())
+    jitted = jax.jit(Gradient2D())(_linear(transform).to_jax())
     np.testing.assert_allclose(np.asarray(jitted), np.asarray(out), rtol=1e-12)
 
 
@@ -137,8 +137,8 @@ def test_geographic_metric_matches_pyproj_geodesic() -> None:
     _, _, east = geod.inv(lon, lat, lon + step, lat)
     _, _, north = geod.inv(lon, lat, lon, lat + step)
 
-    d_lon = Gradient()(GeoArray(lon, transform, "EPSG:4326", dims=("y", "x")))
-    d_lat = Gradient()(GeoArray(lat, transform, "EPSG:4326", dims=("y", "x")))
+    d_lon = Gradient2D()(GeoArray(lon, transform, "EPSG:4326", dims=("y", "x")))
+    d_lat = Gradient2D()(GeoArray(lat, transform, "EPSG:4326", dims=("y", "x")))
     np.testing.assert_allclose(np.asarray(d_lon)[1], step / east, rtol=1e-6)
     np.testing.assert_allclose(np.asarray(d_lat)[0], step / north, rtol=1e-6)
     np.testing.assert_allclose(np.asarray(d_lon)[0], 0.0, atol=1e-18)
@@ -150,7 +150,7 @@ def test_jit_traces_once_across_transforms() -> None:
     @jax.jit
     def step(g: GeoArray) -> GeoArray:
         traces.append(1)
-        return Gradient()(g)
+        return Gradient2D()(g)
 
     first = _linear(UTM).to_jax()
     moved = (20.0, 0.0, 600_000.0, 0.0, -20.0, 4_100_000.0)
@@ -167,7 +167,7 @@ def test_nodata_and_stacks() -> None:
     stack = GeoArray(
         values, UTM, "EPSG:32613", fill_value=-9999.0, dims=("time", "band", "y", "x")
     )
-    out = Gradient()(stack)
+    out = Gradient2D()(stack)
     assert out.dims == ("time", "band", "component", "y", "x")
     grad = np.asarray(out)
     assert np.isnan(grad[0, 1, 0, [2, 4], 2]).all()  # rows next to the fill
@@ -176,7 +176,7 @@ def test_nodata_and_stacks() -> None:
 
 def test_plain_arrays_are_differentiated_in_pixel_units() -> None:
     rows, cols = np.mgrid[0:4, 0:5].astype(float)
-    out = Gradient()(rows + 2.0 * cols)
+    out = Gradient2D()(rows + 2.0 * cols)
     assert isinstance(out, np.ndarray)
     assert out.shape == (2, 4, 5)
     np.testing.assert_allclose(out[0], 1.0)
@@ -186,18 +186,18 @@ def test_plain_arrays_are_differentiated_in_pixel_units() -> None:
 def test_a_dataarray_is_refused_with_the_lift_hint() -> None:
     da = _linear(UTM).to_xarray()
     with pytest.raises(TypeError, match=r"xrops\.lift"):
-        Gradient()(da)
+        Gradient2D()(da)
 
 
 def test_exported_at_the_top_level() -> None:
-    assert gz.Gradient is Gradient
-    assert Gradient().get_config() == {
+    assert gz.Gradient2D is Gradient2D
+    assert Gradient2D().get_config() == {
         "accuracy": 1,
         "nan_policy": "propagate",
         "periodic_x": False,
     }
     with pytest.raises(ValueError, match="nan_policy"):
-        Gradient(nan_policy="fill")
+        Gradient2D(nan_policy="fill")
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +271,7 @@ def test_adaptive_is_exact_on_a_linear_field_up_to_the_mask(accuracy: int) -> No
     land[:, 12] = True  # and a wall; every valid run is at least two cells
     for backend in ("numpy", "jax"):
         field = jax.numpy.asarray(f) if backend == "jax" else f
-        d_y, d_x = adaptive_gradient(field, mask=land, accuracy=accuracy)
+        d_y, d_x = adaptive_gradient_2d(field, mask=land, accuracy=accuracy)
         for got, want in ((d_y, 2.0), (d_x, -0.5)):
             got = np.asarray(got)
             assert np.isnan(got[land]).all()
@@ -349,14 +349,14 @@ def test_gradient_operator_with_a_land_mask() -> None:
     land_values[3, 2:5] = True
     land = GeoArray(land_values, UTM, "EPSG:32613", dims=("y", "x"))
 
-    plain = np.asarray(Gradient()(field, land))
-    adaptive = np.asarray(Gradient(nan_policy="adaptive")(field, land))
+    plain = np.asarray(Gradient2D()(field, land))
+    adaptive = np.asarray(Gradient2D(nan_policy="adaptive")(field, land))
     assert np.isnan(plain[:, 2:5, 2:5]).any()  # the halo is lost
     assert np.isnan(adaptive[:, land_values]).all()
     np.testing.assert_allclose(adaptive[0][~land_values], 2.0, rtol=1e-8)
     np.testing.assert_allclose(adaptive[1][~land_values], 3.0, rtol=1e-8)
 
-    jitted = jax.jit(lambda f, m: Gradient(nan_policy="adaptive")(f, m))(
+    jitted = jax.jit(lambda f, m: Gradient2D(nan_policy="adaptive")(f, m))(
         field.to_jax(), land.to_jax()
     )
     np.testing.assert_allclose(np.asarray(jitted), adaptive, rtol=1e-12)
@@ -367,7 +367,7 @@ def test_gradient_operator_refuses_a_mask_on_another_grid() -> None:
     shifted = (10.0, 0.0, 500_010.0, 0.0, -10.0, 4_000_000.0)
     land = GeoArray(np.zeros(field.shape, bool), shifted, "EPSG:32613", dims=("y", "x"))
     with pytest.raises(ValueError):
-        Gradient()(field, land)
+        Gradient2D()(field, land)
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +380,7 @@ def test_an_isolated_nodata_pixel_has_no_derivative() -> None:
     values[2, 2] = -9999.0
     field = GeoArray(values, UTM, "EPSG:32613", fill_value=-9999.0, dims=("y", "x"))
     for policy in ("propagate", "adaptive"):
-        out = Gradient(nan_policy=policy)(field)
+        out = Gradient2D(nan_policy=policy)(field)
         assert np.isnan(np.asarray(out)[:, 2, 2]).all()
         assert not np.asarray(out.valid_mask())[2, 2]
 
@@ -388,8 +388,8 @@ def test_an_isolated_nodata_pixel_has_no_derivative() -> None:
 def test_a_plain_jax_array_stays_on_jax() -> None:
     rows, cols = np.mgrid[0:4, 0:5].astype(float)
     f = jax.numpy.asarray(rows + 2.0 * cols)
-    eager = Gradient()(f)
-    jitted = jax.jit(Gradient())(f)
+    eager = Gradient2D()(f)
+    jitted = jax.jit(Gradient2D())(f)
     for out in (eager, jitted):
         assert isinstance(out, jax.Array)
         np.testing.assert_allclose(np.asarray(out)[1], 2.0)
@@ -402,7 +402,7 @@ def test_a_batched_carrier_is_refused_with_map_over() -> None:
     b = _linear((10.0, 0.0, 600_000.0, 0.0, -10.0, 4_000_000.0))
     batch = geoarray.stack_items([a, b], dim="patch")
     with pytest.raises(ValueError, match="map_over"):
-        Gradient()(batch)
+        Gradient2D()(batch)
 
 
 @pytest.mark.parametrize(
@@ -425,8 +425,8 @@ def test_a_plain_jax_mask_under_jit() -> None:
     field = _linear(UTM)
     land = np.zeros(field.shape, bool)
     land[3, 2:5] = True
-    want = np.asarray(Gradient(nan_policy="adaptive")(field, land))
-    got = jax.jit(lambda f, m: Gradient(nan_policy="adaptive")(f, m))(
+    want = np.asarray(Gradient2D(nan_policy="adaptive")(field, land))
+    got = jax.jit(lambda f, m: Gradient2D(nan_policy="adaptive")(f, m))(
         field.to_jax(), jax.numpy.asarray(land)
     )
     np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12)
@@ -439,7 +439,7 @@ def test_nodata_in_one_band_drops_the_pixel_in_every_band() -> None:
         values, UTM, "EPSG:32613", fill_value=-9999.0, dims=("band", "y", "x")
     )
     for policy in ("propagate", "adaptive"):
-        out = np.asarray(Gradient(nan_policy=policy)(field))
+        out = np.asarray(Gradient2D(nan_policy=policy)(field))
         assert np.isnan(out[:, :, 2, 2]).all()  # both bands, both components
 
 
@@ -449,12 +449,12 @@ def test_a_time_mask_is_aligned_by_dim_name() -> None:
     land = np.zeros((3, 5, 6), bool)
     land[1, 2, 3] = True  # one pixel, in frame 1 only
     mask = GeoArray(land, UTM, "EPSG:32613", dims=("time", "y", "x"))
-    out = np.asarray(Gradient()(stack, mask))  # (time, band, component, y, x)
+    out = np.asarray(Gradient2D()(stack, mask))  # (time, band, component, y, x)
     assert np.isnan(out[1, :, :, 2, 3]).all()  # every band of frame 1
     assert np.isfinite(out[[0, 2], :, :, 2, 3]).all()  # other frames untouched
     with pytest.raises(ValueError, match="dims"):
         bad = GeoArray(land[None], UTM, "EPSG:32613", dims=("member", "time", "y", "x"))
-        Gradient()(stack, bad)
+        Gradient2D()(stack, bad)
 
 
 @pytest.mark.parametrize(
@@ -462,11 +462,17 @@ def test_a_time_mask_is_aligned_by_dim_name() -> None:
     [
         lambda t: difference(t),
         lambda t: adaptive_difference(t),
-        lambda t: gradient(t),
-        lambda t: adaptive_gradient(t),
-        lambda t: adaptive_gradient(np.ones((7, 9)), mask=t),
+        lambda t: gradient_2d(t),
+        lambda t: adaptive_gradient_2d(t),
+        lambda t: adaptive_gradient_2d(np.ones((7, 9)), mask=t),
     ],
-    ids=["difference", "adaptive_difference", "gradient", "adaptive_gradient", "mask"],
+    ids=[
+        "difference",
+        "adaptive_difference",
+        "gradient_2d",
+        "adaptive_gradient_2d",
+        "mask",
+    ],
 )
 def test_the_primitives_refuse_a_geotensor(call) -> None:
     pytest.importorskip("georeader")
@@ -483,8 +489,8 @@ def test_a_geographic_crs_in_grads_uses_its_own_unit() -> None:
     grad = tuple(v * 400.0 / 360.0 for v in deg)
     _, lat = _centres(deg, (12, 8))
     # the same field, f = latitude in degrees, on the same points in each unit
-    in_degrees = Gradient()(GeoArray(lat, deg, "EPSG:4275", dims=("y", "x")))
-    in_grads = Gradient()(GeoArray(lat, grad, "EPSG:4807", dims=("y", "x")))
+    in_degrees = Gradient2D()(GeoArray(lat, deg, "EPSG:4275", dims=("y", "x")))
+    in_grads = Gradient2D()(GeoArray(lat, grad, "EPSG:4807", dims=("y", "x")))
     np.testing.assert_allclose(np.asarray(in_grads), np.asarray(in_degrees), rtol=1e-9)
 
 
