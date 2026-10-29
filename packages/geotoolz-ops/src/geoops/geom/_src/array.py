@@ -25,6 +25,7 @@ from geoops.geom._src.stencils import (
     Method,
     difference_coeffs,
     difference_offsets,
+    nonuniform_coeffs,
 )
 
 
@@ -443,6 +444,7 @@ def difference(
     *,
     axis: int = -1,
     step: Float[np.ndarray, "*shape"] | float = 1.0,
+    coords: Float[np.ndarray, " n"] | None = None,
     derivative: int = 1,
     accuracy: int = 1,
     method: Method = "central",
@@ -469,17 +471,23 @@ def difference(
         axis: The axis to differentiate.
         step: The signed step :math:`h` between centres along ``axis``: a
             scalar, or an array broadcasting against ``f``.
+        coords: The positions of the centres along ``axis``, one per entry,
+            for an unevenly spaced axis (depth or pressure levels, irregular
+            times); replaces ``step``. Each point's stencil is then solved for
+            its actual distances (`nonuniform_coeffs`), exact for polynomials
+            of the stencil's degree.
         derivative: The derivative order :math:`n`.
         accuracy: The accuracy order of the one-sided stencils.
         method: ``"central"``, ``"forward"`` or ``"backward"``.
         periodic: The axis wraps (a global longitude): every point uses the
-            ``method`` stencil, reading across the seam.
+            ``method`` stencil, reading across the seam. Not with ``coords``.
 
     Returns:
         :math:`\partial^n f / \partial s^n`, ``f``'s shape.
 
     Raises:
-        ValueError: The axis is shorter than the stencil needs.
+        ValueError: The axis is shorter than the stencil needs, ``coords`` has
+            the wrong length, or ``coords`` meets ``periodic``.
 
     Examples:
         >>> f = np.array([0.0, 1.0, 4.0, 9.0, 16.0])  # x², x = 0…4
@@ -489,10 +497,22 @@ def difference(
         array([0., 2., 4., 6., 8.])
         >>> difference(f, derivative=2)
         array([2., 2., 2., 2., 2.])
+        >>> z = np.array([0.0, 1.0, 3.0, 7.0, 15.0])  # uneven levels
+        >>> difference(z**2, coords=z, derivative=2)  # exact for a quadratic
+        array([2., 2., 2., 2., 2.])
     """
     reject_geotensor(f, "difference")
     xp = array_namespace(f)
     axis = axis % f.ndim
+    if coords is not None:
+        if periodic:
+            raise ValueError("difference: coords= does not combine with periodic=True")
+        if coords.shape != (f.shape[axis],):
+            raise ValueError(
+                f"difference: coords has shape {tuple(coords.shape)}; the axis has "
+                f"{f.shape[axis]} entries"
+            )
+        return _bounded(xp, f, axis, derivative, accuracy, method, coords)
     if periodic:
         out = _periodic(xp, f, axis, derivative, accuracy, method)
     else:
@@ -506,6 +526,7 @@ def adaptive_difference(
     mask: Bool[np.ndarray, "*shape"] | None = None,
     axis: int = -1,
     step: Float[np.ndarray, "*shape"] | float = 1.0,
+    coords: Float[np.ndarray, " n"] | None = None,
     derivative: int = 1,
     accuracy: int = 1,
     periodic: bool = False,
@@ -532,6 +553,8 @@ def adaptive_difference(
             shape; ``None`` drops only non-finite cells.
         axis: The axis to differentiate.
         step: The signed step between centres along ``axis``.
+        coords: The centres' positions along ``axis``, for an unevenly spaced
+            axis (see :func:`difference`); replaces ``step``.
         derivative: The derivative order.
         accuracy: The highest accuracy order to try.
         periodic: The axis wraps.
@@ -562,6 +585,7 @@ def adaptive_difference(
                     field,
                     axis=axis,
                     step=step,
+                    coords=coords,
                     derivative=derivative,
                     accuracy=acc,
                     method=method,
@@ -916,7 +940,13 @@ def adaptive_laplacian(
 
 
 def _bounded(
-    xp: Any, f: Any, axis: int, derivative: int, accuracy: int, method: Method
+    xp: Any,
+    f: Any,
+    axis: int,
+    derivative: int,
+    accuracy: int,
+    method: Method,
+    coords: Any = None,
 ) -> Any:
     """The stencils of ``method`` with one-sided ones where it would leave the axis."""
     size = f.shape[axis]
@@ -967,17 +997,35 @@ def _bounded(
                 f"accuracy {accuracy}); lower the accuracy"
             )
     parts = [
-        _apply_stencil(f, axis, start, stop, offsets, derivative)
+        _apply_stencil(f, axis, start, stop, offsets, derivative, coords)
         for start, stop, offsets in regions
     ]
     return xp.concat(parts, axis=axis)
 
 
 def _apply_stencil(
-    f: Any, axis: int, start: int, stop: int, offsets: tuple[int, ...], derivative: int
+    f: Any,
+    axis: int,
+    start: int,
+    stop: int,
+    offsets: tuple[int, ...],
+    derivative: int,
+    coords: Any = None,
 ) -> Any:
     """``Σ c_k f[i + s_k]`` for ``i`` in ``[start, stop)`` along ``axis``."""
-    coeffs = difference_coeffs(offsets, derivative)
+    if coords is None:
+        coeffs: Any = difference_coeffs(offsets, derivative)
+    else:
+        xp = array_namespace(coords)
+        centres = coords[start:stop]
+        dz = xp.stack(
+            [coords[start + o : stop + o] - centres for o in offsets], axis=-1
+        )
+        # one coefficient per point, laid along `axis` to broadcast against f
+        shape = [1] * f.ndim
+        shape[axis] = stop - start
+        weights = nonuniform_coeffs(xp.astype(dz, xp.float64), derivative)
+        coeffs = [xp.reshape(weights[:, k], shape) for k in range(len(offsets))]
     out = None
     for offset, coeff in zip(offsets, coeffs, strict=True):
         index = [slice(None)] * f.ndim
