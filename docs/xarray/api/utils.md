@@ -1,9 +1,7 @@
 # Utilities
 
-Cross-cutting helpers. `XarrayEstimator` is the scikit-learn ↔ xarray
-bridge: it wraps any scikit-learn estimator so that `fit` / `transform` /
-`predict` accept and return xarray objects, preserving coordinates and
-dimension names. It backs the decomposition helpers in
-[Transforms](transforms.md).
+Cross-cutting helpers. `pack_dataset` stacks a Dataset's variables along a `variable` dim, so a carrier-agnostic operator (`pipekit_array.einx`, a `KernelOp`) can take them as one `DataArray`; `unpack_dataset` splits them back. scikit-learn on xarray is [`xrops.learn`](learn.md).
 
-::: xrsklearn.XarrayEstimator
+::: xrops.utils.pack_dataset
+
+::: xrops.utils.unpack_dataset

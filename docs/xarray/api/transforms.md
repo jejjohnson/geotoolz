@@ -74,8 +74,7 @@ These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dat
 
 ## Matrix decompositions
 
-These return `XarrayEstimator` instances (the scikit-learn ↔ xarray
-bridge) configured for the named decomposition.
+These return `xrops.learn.XarrayEstimator` instances configured for the named decomposition (see [scikit-learn on xarray](learn.md)).
 
 ::: xrops.transforms.pca
 
@@ -86,8 +85,6 @@ bridge) configured for the named decomposition.
 ::: xrops.transforms.nmf
 
 ::: xrops.transforms.kmeans
-
-::: xrsklearn.SklearnOp
 
 ## Mask morphology
 

@@ -11,8 +11,7 @@ live in sibling packages and are installed automatically with it:
 |---|---|---|
 | `xrtoolz-core` | `xrcore` | xarray-aware `Operator` (DataTree dispatch) + `Signature` |
 | `xrtoolz-grad` | `xrgrad` | Finite-difference calculus on labeled grids |
-| `xrtoolz-einx` | `xreinx` | xarray ↔ einx named-tensor bridge |
-| `xrtoolz-sklearn` | `xrsklearn` | scikit-learn ↔ xarray bridge (`XarrayEstimator`, `SklearnOp`) |
+| `pipekit-array` | `pipekit_array` | The shared bridges: `to_rows` / `from_rows`, `Estimator`, and the `[einx]` bridge |
 
 ```bash
 pip install xrtoolz

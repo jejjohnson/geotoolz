@@ -28,15 +28,18 @@ def da_3d() -> xr.DataArray:
 
 
 def test_pca_fit_transform_returns_components(da_3d):
-    est = pca(sample_dim="time", n_components=3)
+    est = pca(sample_dims="time", n_components=3)
     scores = est.fit_transform(da_3d)
     assert scores.dims == ("time", "component")
     assert scores.sizes["component"] == 3
-    assert est.components_.shape == (3, da_3d.sizes["lat"] * da_3d.sizes["lon"])
+    assert est.estimator_.components_.shape == (
+        3,
+        da_3d.sizes["lat"] * da_3d.sizes["lon"],
+    )
 
 
 def test_pca_inverse_transform_returns_grid(da_3d):
-    est = pca(sample_dim="time", n_components=3)
+    est = pca(sample_dims="time", n_components=3)
     scores = est.fit_transform(da_3d)
     recon = est.inverse_transform(scores)
     assert set(recon.dims) == {"time", "lat", "lon"}
@@ -44,15 +47,15 @@ def test_pca_inverse_transform_returns_grid(da_3d):
 
 
 def test_eof_uses_mode_axis_name(da_3d):
-    """EOF is just PCA with new_feature_dim='mode' (geophysics convention)."""
-    est = eof(sample_dim="time", n_modes=2)
+    """EOF is just PCA with feature_dim='mode' (geophysics convention)."""
+    est = eof(sample_dims="time", n_modes=2)
     scores = est.fit_transform(da_3d)
     assert scores.dims == ("time", "mode")
     assert scores.sizes["mode"] == 2
 
 
 def test_ica_fits_and_transforms(da_3d):
-    est = ica(sample_dim="time", n_components=2, random_state=0)
+    est = ica(sample_dims="time", n_components=2, random_state=0)
     scores = est.fit_transform(da_3d)
     assert scores.dims == ("time", "component")
     assert scores.sizes["component"] == 2
@@ -61,14 +64,14 @@ def test_ica_fits_and_transforms(da_3d):
 def test_nmf_requires_nonnegative_input(da_3d):
     """Sanity check that NMF actually runs on a non-negative version."""
     da_pos = da_3d - da_3d.min() + 1e-6
-    est = nmf(sample_dim="time", n_components=2, init="random", random_state=0)
+    est = nmf(sample_dims="time", n_components=2, init="random", random_state=0)
     scores = est.fit_transform(da_pos)
     assert scores.dims == ("time", "component")
     assert (scores.values >= 0).all()
 
 
 def test_kmeans_predicts_labels(da_3d):
-    est = kmeans(sample_dim="time", n_clusters=3, n_init=4, random_state=0)
+    est = kmeans(sample_dims="time", n_clusters=3, n_init=4, random_state=0)
     est.fit(da_3d)
     labels = est.predict(da_3d)
     assert labels.dims == ("time",)

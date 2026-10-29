@@ -51,16 +51,15 @@ dependencies = [
     # the xrtoolz-einx workspace member (import name `xreinx`). einx
     # pulls only numpy by default. Requires 0.4+ for `einx.dot`/`einx.id`.
     "einx>=0.4",
-    # Split-out workspace members. Depending on all four keeps
-    # `pip install xrtoolz-ops` behaviour identical to the pre-split package:
-    # xrcore supplies the xarray-aware Operator + Signature, xrgrad the
-    # finite-difference calculus (sole carrier of the finitediffx/JAX
-    # stack), xreinx the einx bridge, xrsklearn the sklearn bridge (and
-    # the `.sklearn` accessor registration re-exported via xrops.utils).
+    # Split-out workspace members: xrcore supplies the xarray-aware
+    # Operator + Signature, xrgrad the finite-difference calculus (sole
+    # carrier of the finitediffx/JAX stack).
     "xrtoolz-core>=0.0.1",
     "xrtoolz-grad>=0.0.1",
-    "xrtoolz-einx>=0.0.1",
-    "xrtoolz-sklearn>=0.0.1",
+    # The shared bridges (geostack OP-O2, OP-O3): to_rows / from_rows and
+    # the DataArray adapter. xrops.learn builds on pipekit_array.Estimator;
+    # its scikit-learn is the [sklearn] extra.
+    "pipekit-array[xarray]>=0.0.8",
     "matplotlib>=3.8",
     # The Operator / Sequential / Graph composition layer lives in pipekit
     # (formerly xrops.core). Every per-domain operator subclasses
@@ -111,6 +110,14 @@ vector = [
     "geopandas>=1.1.3",
     "shapely>=2.0",
     "rasterio>=1.3",
+]
+
+# ``pip install xrtoolz-ops[sklearn]`` — scikit-learn for :mod:`xrops.learn`
+# and the decomposition presets in :mod:`xrops.transforms` (PCA, EOF, ICA,
+# NMF, KMeans). Imported when an estimator is built or fitted.
+sklearn = [
+    "pipekit-array[sklearn]>=0.0.8",
+    "scikit-learn>=1.4",
 ]
 
 [project.urls]

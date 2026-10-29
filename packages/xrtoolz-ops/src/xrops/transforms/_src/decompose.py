@@ -1,36 +1,38 @@
 """Linear and matrix-factorisation decompositions.
 
-These are thin presets over :class:`xrsklearn.XarrayEstimator` that
+These are thin presets over :class:`xrops.learn.XarrayEstimator` that
 wrap the corresponding :mod:`sklearn` estimators. The wrappers preserve
 the sklearn API (``fit / transform / fit_transform / inverse_transform``)
-on N-D xarray inputs by stacking non-sample dims into a feature axis,
-delegating to sklearn, and unstacking the result.
+on N-D xarray inputs by flattening the non-sample dims into features,
+delegating to sklearn, and rebuilding the result. scikit-learn is imported
+when a preset is built: install the ``xrtoolz-ops[sklearn]`` extra.
 
 Naming convention:
 
-- ``new_feature_dim="component"`` for PCA / ICA / NMF / KMeans
-- ``new_feature_dim="mode"`` for EOF (Empirical Orthogonal Functions —
+- ``feature_dim="component"`` for PCA / ICA / NMF / KMeans
+- ``feature_dim="mode"`` for EOF (Empirical Orthogonal Functions —
   the geophysics dialect of PCA, where the convention is "modes" not
   "components")
 """
 
 from __future__ import annotations
 
-from collections.abc import Hashable
+from collections.abc import Hashable, Sequence
 from typing import Any
 
-from sklearn.cluster import KMeans as _SkKMeans
-from sklearn.decomposition import (
-    NMF as _SkNMF,
-    PCA as _SkPCA,
-    FastICA as _SkICA,
-)
+from xrops.learn import XarrayEstimator
+from xrops.utils._src.optional_imports import _require_optional
 
-from xrsklearn import XarrayEstimator
+
+def _sklearn(module: str, name: str) -> Any:
+    mod = _require_optional(
+        f"sklearn.{module}", extra="sklearn", feature=name, package="scikit-learn"
+    )
+    return getattr(mod, name)
 
 
 def pca(
-    sample_dim: Hashable | None = None,
+    sample_dims: Hashable | Sequence[Hashable],
     n_components: int | float | str | None = None,
     *,
     whiten: bool = False,
@@ -47,19 +49,19 @@ def pca(
         object — inputs and outputs are :class:`xr.DataArray`.
     """
     return XarrayEstimator(
-        _SkPCA(
+        _sklearn("decomposition", "PCA")(
             n_components=n_components,
             whiten=whiten,
             random_state=random_state,
             **kwargs,
         ),
-        sample_dim=sample_dim,
-        new_feature_dim="component",
+        sample_dims=sample_dims,
+        feature_dim="component",
     )
 
 
 def eof(
-    sample_dim: Hashable | None = None,
+    sample_dims: Hashable | Sequence[Hashable],
     n_modes: int | None = None,
     *,
     whiten: bool = False,
@@ -73,19 +75,19 @@ def eof(
     geosciences convention.
     """
     return XarrayEstimator(
-        _SkPCA(
+        _sklearn("decomposition", "PCA")(
             n_components=n_modes,
             whiten=whiten,
             random_state=random_state,
             **kwargs,
         ),
-        sample_dim=sample_dim,
-        new_feature_dim="mode",
+        sample_dims=sample_dims,
+        feature_dim="mode",
     )
 
 
 def ica(
-    sample_dim: Hashable | None = None,
+    sample_dims: Hashable | Sequence[Hashable],
     n_components: int | None = None,
     *,
     random_state: int | None = None,
@@ -93,14 +95,16 @@ def ica(
 ) -> XarrayEstimator:
     """Independent Component Analysis (FastICA)."""
     return XarrayEstimator(
-        _SkICA(n_components=n_components, random_state=random_state, **kwargs),
-        sample_dim=sample_dim,
-        new_feature_dim="component",
+        _sklearn("decomposition", "FastICA")(
+            n_components=n_components, random_state=random_state, **kwargs
+        ),
+        sample_dims=sample_dims,
+        feature_dim="component",
     )
 
 
 def nmf(
-    sample_dim: Hashable | None = None,
+    sample_dims: Hashable | Sequence[Hashable],
     n_components: int | None = None,
     *,
     init: str | None = None,
@@ -109,19 +113,19 @@ def nmf(
 ) -> XarrayEstimator:
     """Non-negative Matrix Factorisation. Input must be non-negative."""
     return XarrayEstimator(
-        _SkNMF(
+        _sklearn("decomposition", "NMF")(
             n_components=n_components,
             init=init,
             random_state=random_state,
             **kwargs,
         ),
-        sample_dim=sample_dim,
-        new_feature_dim="component",
+        sample_dims=sample_dims,
+        feature_dim="component",
     )
 
 
 def kmeans(
-    sample_dim: Hashable | None = None,
+    sample_dims: Hashable | Sequence[Hashable],
     n_clusters: int = 8,
     *,
     n_init: int | str = "auto",
@@ -129,14 +133,14 @@ def kmeans(
     **kwargs: Any,
 ) -> XarrayEstimator:
     """K-Means clustering. ``predict(da)`` returns 1-D labels along
-    ``sample_dim``."""
+    ``sample_dims``."""
     return XarrayEstimator(
-        _SkKMeans(
+        _sklearn("cluster", "KMeans")(
             n_clusters=n_clusters,
             n_init=n_init,
             random_state=random_state,
             **kwargs,
         ),
-        sample_dim=sample_dim,
-        new_feature_dim="component",
+        sample_dims=sample_dims,
+        feature_dim="component",
     )

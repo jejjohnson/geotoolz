@@ -7,10 +7,11 @@ returns a ``DataArray``. Layer-1 ``Operator`` wrappers are in
 inputs for pipeline composition.
 
 Stateful estimators (PCA, EOF, ICA, NMF, KMeans) are returned as
-:class:`xrsklearn.XarrayEstimator` instances — they expose
+:class:`xrops.learn.XarrayEstimator` instances — they expose
 ``fit / transform / fit_transform / inverse_transform`` directly,
-matching the sklearn API on N-D xarray inputs. To wrap any sklearn-style
-estimator as a Layer-1 operator, use :class:`xrsklearn.SklearnOp`.
+matching the sklearn API on N-D xarray inputs, and are operators
+themselves. Any other sklearn-style estimator goes through
+:class:`xrops.learn.XarrayEstimator` (or `pipekit_array.Estimator`).
 """
 
 from xrops.transforms._src.coord_remap import remap_axis, to_phase

@@ -47,6 +47,7 @@ from xrops.interpolate.operators import (
     MovingAverage,
     RegridLike,
 )
+from xrops.learn import XarrayEstimator
 from xrops.metrics.operators import MAE, RMSE, Bias, Correlation
 from xrops.ocn.operators import (
     Divergence,
@@ -58,7 +59,6 @@ from xrops.ocn.operators import (
     VelocityMagnitude,
 )
 from xrops.transforms.operators import PowerSpectrum
-from xrsklearn import XarrayEstimator
 
 
 pytestmark = pytest.mark.dask
@@ -206,10 +206,10 @@ CASES: list[Case] = [
         chunks={"obs": 50},
     ),
     Case(
-        "utils.XarrayEstimator(PCA)",
-        lambda d: XarrayEstimator(PCA(n_components=2), sample_dim="time").fit_transform(
-            d["ssh"]
-        ),
+        "learn.XarrayEstimator(PCA)",
+        lambda d: XarrayEstimator(
+            PCA(n_components=2), sample_dims="time", feature_dim="component"
+        ).fit_transform(d["ssh"]),
     ),
 ]
 
