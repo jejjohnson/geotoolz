@@ -68,11 +68,9 @@ from geoops.normalize._src.array import (
     inverse_standard_scale,
     log_scale,
     minmax_scale,
-    per_band_stats,
     power_scale,
     robust_scale,
     standard_scale,
-    stat_axes,
     validate_out_range,
 )
 
@@ -191,27 +189,34 @@ def _scene_stats(x: Any, **kwargs: Any) -> dict[str, Any]:
     return stats
 
 
-def _fit_stats(op: Any, x: Any, **kwargs: Any) -> dict[str, np.ndarray]:
-    """Per-band statistics of ``x`` for ``op.fit``, as host float arrays.
+_FUNCTIONAL = (
+    "geoops.normalize.carrier_band_stats, which returns the statistics as "
+    "arrays inside the trace."
+)
 
-    Fitted statistics are stored on the operator, so they are always
-    concrete NumPy arrays: computed on dask in one pass, copied off a JAX
-    device, and refused inside a ``jax.jit`` trace before anything is
-    computed. They stay strict JSON in ``get_config`` and pickle to workers.
+
+def _host_stats(
+    x: Any, call: str, alternative: str, **kwargs: Any
+) -> dict[str, np.ndarray]:
+    """Per-band statistics of ``x`` to store on an operator, as host float arrays.
+
+    Stored statistics are always concrete NumPy arrays: computed on dask in
+    one pass, copied off a JAX device, and refused inside a ``jax.jit`` trace
+    before anything is computed. They stay strict JSON and pickle to workers.
     """
-    name = type(op).__name__
-    require_concrete(
-        x,
-        f"{name}.fit",
-        alternative=(
-            f"Call {name}().fit(x) eagerly, outside the trace, and apply the "
-            "fitted operator inside it; or use "
-            "geoops.normalize.carrier_band_stats, which returns the statistics "
-            "as arrays inside the trace."
-        ),
-    )
+    require_concrete(x, call, alternative=alternative)
     stats = _scene_stats(x, **kwargs)
     return {key: np.asarray(value, dtype=float) for key, value in stats.items()}
+
+
+def _fit_stats(op: Any, x: Any, **kwargs: Any) -> dict[str, np.ndarray]:
+    """`_host_stats` for ``op.fit``."""
+    name = type(op).__name__
+    alternative = (
+        f"Call {name}().fit(x) eagerly, outside the trace, and apply the fitted "
+        f"operator inside it; or use {_FUNCTIONAL}"
+    )
+    return _host_stats(x, f"{name}.fit", alternative, **kwargs)
 
 
 def _stretch_kernel(x: Any, *, lo: Any, hi: Any, out_range: tuple[float, float]) -> Any:
@@ -236,6 +241,11 @@ class PerBandStats(Operator):
     downstream normaliser. Nodata (fill / non-finite) pixels are
     excluded from every statistic.
 
+    Backends: NumPy, eager JAX and dask, where one compute of the
+    statistics (not of the data) runs and the input passes through still
+    lazy. Under ``jax.jit`` writing ``self.stats`` would leak tracers, so it
+    raises; use `carrier_band_stats` inside a trace instead.
+
     Args:
         percentiles: Percentiles (in ``[0, 100]``) to cache alongside
             mean/std/min/max. Default ``[1.0, 99.0]``.
@@ -248,21 +258,24 @@ class PerBandStats(Operator):
         [...]
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # writes self.stats: eager on JAX, refused under jax.jit (the contract checks)
+    traceable: ClassVar[bool] = False
 
     def __init__(self, *, percentiles: list[float] | None = None) -> None:
         self.percentiles = [1.0, 99.0] if percentiles is None else list(percentiles)
         self.stats: dict[str, Any] = {}
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        arr, _ = _masked(gt)
-        stats = per_band_stats(
-            arr, percentiles=self.percentiles, reduce_axes=stat_axes(arr)
+    def _apply(self, gt: Any) -> Any:
+        stats = _host_stats(
+            gt,
+            "PerBandStats",
+            f"Call it eagerly, outside the trace; or use {_FUNCTIONAL}",
+            quantiles=tuple(p / 100.0 for p in self.percentiles),
         )
-        self.stats = {
-            key: jsonable(np.asarray(value, dtype=float))
-            for key, value in stats.items()
-        }
+        # no levels gives no "quantiles" entry; keep the old empty list
+        stats["percentiles"] = stats.pop("quantiles", np.empty(0))
+        self.stats = {key: jsonable(value) for key, value in stats.items()}
         return gt
 
 

@@ -350,6 +350,9 @@ def assert_backends(op: Any, sample: Any, *others: Any) -> None:
       that lists it matches its NumPy result on JAX carriers, returns JAX
       data, and traces once under ``jax.jit`` for two same-shape inputs
       on different grids (the transform is a leaf, never static).
+    - An operator that sets ``traceable = False`` (it stores what it
+      computes on itself, as a tap does) runs eagerly on JAX and must
+      refuse ``jax.jit`` with a ``TypeError`` naming itself instead.
 
     Each call uses a fresh copy of ``op``. 64-bit JAX is switched on for the
     check and restored after (a carrier's transform is float64).
@@ -401,6 +404,16 @@ def assert_backends(op: Any, sample: Any, *others: Any) -> None:
                 equal_nan=True,
                 err_msg=f"{name} on JAX does not match its NumPy result",
             )
+        if not getattr(op, "traceable", True):
+            try:
+                jax.jit(lambda *xs: copy.deepcopy(op)(*xs))(*jaxed)
+            except TypeError as exc:
+                assert name in str(exc), f"jit refusal does not name {name}: {exc}"
+            else:
+                raise AssertionError(
+                    f"{name} sets traceable = False but ran under jax.jit"
+                )
+            return
         traces = 0
 
         def run(*xs: Any) -> Any:

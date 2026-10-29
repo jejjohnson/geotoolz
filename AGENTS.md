@@ -141,7 +141,10 @@ hard rules. The long form, with examples, is
   `("numpy", "jax")` when `_apply` runs on JAX carriers and under
   `jax.jit`. pipekit then refuses a carrier on another backend before
   `_apply` runs; never convert silently. The table is
-  `docs/operators/api/backends.md` (`make capabilities`).
+  `docs/operators/api/backends.md` (`make capabilities`). An operator
+  that stores what it computes on itself (a tap such as `PerBandStats`)
+  sets `traceable = False`: it runs eagerly on JAX and raises a
+  `TypeError` under `jax.jit` (`geoops._src.fitted.require_concrete`).
 - **Learned state uses fit / transform.** `fit(x) -> self` writes
   trailing-underscore attributes (`mean_`), and `transform` is read-only.
   `_apply` never overwrites constructor attributes. Use
