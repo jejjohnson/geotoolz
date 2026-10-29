@@ -2725,7 +2725,7 @@ class Gradient(Operator):
           \begin{pmatrix} \partial_j f \\ \partial_i f \end{pmatrix},
 
     exact for a linear field on north-up, flipped and rotated grids. On a
-    geographic CRS degrees become metres on the CRS's ellipsoid at each
+    geographic CRS its angular unit (degrees, grads) becomes metres on the CRS's ellipsoid at each
     pixel's latitude :math:`\varphi`:
     :math:`\partial_{\mathrm{north}} f = \partial_\varphi f / (M(\varphi)\,\pi/180)`,
     :math:`\partial_{\mathrm{east}} f = \partial_\lambda f / (N(\varphi)\cos\varphi\,\pi/180)`,
@@ -2875,20 +2875,21 @@ def _map_axes(gt: GeoArray, d_row: Any, d_col: Any) -> tuple[Any, Any]:
     det = a * e - b * d
     d_x = (times(e, d_col) - times(d, d_row)) / det
     d_y = (times(a, d_row) - times(b, d_col)) / det
-    crs = gt.crs
-    if crs is None or not CRS.from_user_input(crs).is_geographic:
+    crs = None if gt.crs is None else CRS.from_user_input(gt.crs)
+    if crs is None or not crs.is_geographic:
         return d_y, d_x
+    # radians per CRS angular unit: degrees for EPSG:4326, grads for EPSG:4807
+    per_unit = crs.axis_info[0].unit_conversion_factor
     height, width = gt.shape[-2:]
     rows = xp.arange(height, dtype=xp.float64)[:, None] + 0.5
     cols = xp.arange(width, dtype=xp.float64)[None, :] + 0.5
-    lat = xp.deg2rad(d * cols + e * rows + f0)
-    ellipsoid = CRS.from_user_input(crs).ellipsoid
+    lat = (d * cols + e * rows + f0) * per_unit
+    ellipsoid = crs.ellipsoid
     semi_major = ellipsoid.semi_major_metre
     e2 = 1.0 - (ellipsoid.semi_minor_metre / semi_major) ** 2
     w = xp.sqrt(1.0 - e2 * xp.sin(lat) ** 2)
     meridional = semi_major * (1.0 - e2) / w**3
     prime_vertical = semi_major / w
-    per_degree = np.pi / 180.0
-    return d_y / (meridional * per_degree), d_x / (
-        prime_vertical * xp.cos(lat) * per_degree
+    return d_y / (meridional * per_unit), d_x / (
+        prime_vertical * xp.cos(lat) * per_unit
     )

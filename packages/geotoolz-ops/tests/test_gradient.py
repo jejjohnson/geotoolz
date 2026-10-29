@@ -474,3 +474,14 @@ def test_the_primitives_refuse_a_geotensor(call) -> None:
     tensor = to_georeader(_linear(UTM))
     with pytest.raises(TypeError, match="from_georeader"):
         call(tensor)
+
+
+def test_a_geographic_crs_in_grads_uses_its_own_unit() -> None:
+    """NTF Paris (EPSG:4807, grads) and NTF (EPSG:4275, degrees) share an ellipsoid."""
+    deg = (0.25, 0.0, 2.0, 0.0, -0.25, 50.0)
+    grad = tuple(v * 400.0 / 360.0 for v in deg)
+    _, lat = _centres(deg, (12, 8))
+    # the same field, f = latitude in degrees, on the same points in each unit
+    in_degrees = Gradient()(GeoArray(lat, deg, "EPSG:4275", dims=("y", "x")))
+    in_grads = Gradient()(GeoArray(lat, grad, "EPSG:4807", dims=("y", "x")))
+    np.testing.assert_allclose(np.asarray(in_grads), np.asarray(in_degrees), rtol=1e-9)
