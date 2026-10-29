@@ -9,9 +9,11 @@ from geoops.normalize._src.array import (
     clahe,
     histogram_match,
     log_scale,
+    match_cdf,
     minmax_scale,
     per_band_stats,
     power_scale,
+    reference_cdf,
     robust_scale,
     standard_scale,
 )
@@ -52,9 +54,11 @@ __all__ = [
     "clahe",
     "histogram_match",
     "log_scale",
+    "match_cdf",
     "minmax_scale",
     "per_band_stats",
     "power_scale",
+    "reference_cdf",
     "robust_scale",
     "standard_scale",
 ]

@@ -36,7 +36,7 @@ fixed-stats alias ``Normalize``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, Self
 
 import numpy as np
 from pipekit import Operator, get_adapter
@@ -44,7 +44,7 @@ from pipekit import Operator, get_adapter
 from geoops._src.config import jsonable
 from geoops._src.fitted import fit_once, require_concrete
 from geoops._src.geo import reject_geotensor
-from geoops._src.kernels import fill_of, named, pixel_kernel
+from geoops._src.kernels import _declare_fill, fill_of, named, pixel_kernel
 from geoops._src.shape import DIMS
 from geoops._src.stretch import check_percentiles, stretch_between
 from geoops._src.valid import (
@@ -63,10 +63,11 @@ from geoops.normalize._src.array import (
     check_log_scale,
     check_positive,
     clahe,
-    histogram_match,
     log_scale,
+    match_cdf,
     minmax_scale,
     power_scale,
+    reference_cdf,
     reshape_stat,
     robust_scale,
     standard_scale,
@@ -160,7 +161,28 @@ def carrier_band_stats(
         >>> float(carrier_band_stats(scene, per_band=False, stats=("max",))["max"])
         2.0
     """
-    carrier, _ = named(x, name="carrier_band_stats")
+    view = _pixel_view(x, dim, "carrier_band_stats")
+    axis = view.band_axis if per_band else None
+    out = dict(band_stats(view.data, view.valid, band_axis=axis, stats=stats))
+    if quantiles:
+        out["quantiles"] = band_quantiles(
+            view.data, view.valid, band_axis=axis, q=quantiles
+        )
+    return out
+
+
+class _PixelView(NamedTuple):
+    carrier: Any
+    unwrap: Any
+    dims: tuple[str, ...]
+    data: Any
+    valid: Any  # broadcasts to data; False where any band of the pixel is invalid
+    band_axis: int | None
+
+
+def _pixel_view(x: Any, dim: str, name: str) -> _PixelView:
+    """``x``'s data, dims and pixel validity on its own backend (lazy on dask)."""
+    carrier, unwrap = named(x, name=name)
     adapter = get_adapter(carrier)
     dims = tuple(adapter.dims(carrier))
     data = adapter.data(carrier)
@@ -168,11 +190,39 @@ def carrier_band_stats(
     band_axis = dims.index(dim) if dim in dims else None
     if band_axis is not None:
         bad = namespace_of(data).any(bad, axis=band_axis, keepdims=True)
-    axis = band_axis if per_band else None
-    out = dict(band_stats(data, ~bad, band_axis=axis, stats=stats))
-    if quantiles:
-        out["quantiles"] = band_quantiles(data, ~bad, band_axis=axis, q=quantiles)
-    return out
+    return _PixelView(carrier, unwrap, dims, data, ~bad, band_axis)
+
+
+def _as_rows(view: _PixelView, per_band: bool) -> tuple[Any, Any, Any]:
+    """``(C, N)`` float64 values and validity (one row per band, or one row)."""
+    xp = namespace_of(view.data)
+    data = view.data
+    if data.dtype != np.float64:
+        data = data.astype(np.float64)
+    valid = xp.broadcast_to(view.valid, data.shape)
+    if view.band_axis is not None:
+        data = xp.moveaxis(data, view.band_axis, 0)
+        valid = xp.moveaxis(valid, view.band_axis, 0)
+    n_rows = data.shape[0] if per_band and view.band_axis is not None else 1
+    return xp, xp.reshape(data, (n_rows, -1)), xp.reshape(valid, (n_rows, -1))
+
+
+def _from_rows(view: _PixelView, rows: Any) -> Any:
+    """Undo `_as_rows` and put ``rows`` back on ``view``'s carrier, NaN fill."""
+    xp = namespace_of(rows)
+    shape = tuple(view.data.shape)
+    if view.band_axis is not None:
+        moved = (
+            shape[view.band_axis],
+            *shape[: view.band_axis],
+            *shape[view.band_axis + 1 :],
+        )
+        out = xp.moveaxis(xp.reshape(rows, moved), 0, view.band_axis)
+    else:
+        out = xp.reshape(rows, shape)
+    adapter = get_adapter(view.carrier)
+    out = adapter.rewrap(view.carrier, out, view.dims)
+    return view.unwrap(_declare_fill(out, np.nan))
 
 
 def _scene_stats(x: Any, **kwargs: Any) -> dict[str, Any]:
@@ -832,6 +882,12 @@ class HistogramMatch(Operator):
     The reference is a live GeoArray — not JSON / YAML serialisable —
     so ``forbid_in_yaml = True``.
 
+    Backends: exact rank matching (`reference_cdf`, then `match_cdf`: a sort
+    and ``searchsorted``, the same result as scikit-image's
+    ``match_histograms``) with static shapes, so it runs on NumPy, on JAX
+    under ``jax.jit`` (the reference's table is a constant), and lazily on
+    dask, where each band of the source is gathered into one block.
+
     Args:
         reference: Reference GeoArray whose per-band CDF the input
             will be matched against.
@@ -842,7 +898,7 @@ class HistogramMatch(Operator):
         >>> matched = op(source_scene)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     # Holds a live GeoArray reference, which is not JSON/YAML
     # serialisable.
@@ -851,22 +907,33 @@ class HistogramMatch(Operator):
     def __init__(self, *, reference: GeoArray | np.ndarray) -> None:
         self.reference = reference
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+    def _apply(self, gt: Any) -> Any:
         reject_geotensor(self.reference, "HistogramMatch (reference)")
-        arr, valid = _masked(gt)
-        reference, _ = _masked(self.reference)
-        # The primitive matches along a leading band axis: put the band
-        # axis of a (T, C, H, W) stack (or reference) first, so each band
-        # pools its frames instead of a frame being taken for a band.
-        if reference.ndim == 4:
-            reference = np.moveaxis(reference, 1, 0)
-        if arr.ndim == 4:
-            matched = np.moveaxis(
-                histogram_match(np.moveaxis(arr, 1, 0), reference), 0, 1
-            )
+        source = _pixel_view(gt, "band", "HistogramMatch")
+        ref = _pixel_view(self.reference, "band", "HistogramMatch (reference)")
+        n_bands = (
+            source.data.shape[source.band_axis] if source.band_axis is not None else 1
+        )
+        ref_bands = ref.data.shape[ref.band_axis] if ref.band_axis is not None else 1
+        # per band when the reference has the source's bands or is one 2-D map;
+        # otherwise one CDF pooled over every band of each, as before
+        per_band = source.band_axis is not None and (
+            ref.band_axis is None or ref_bands == n_bands
+        )
+        _, ref_rows, ref_valid = _as_rows(ref, per_band and ref.band_axis is not None)
+        table = reference_cdf(np.asarray(ref_rows), np.asarray(ref_valid))
+        if table[0].shape[0] == 1 and per_band:  # one 2-D map for every band
+            table = tuple(np.repeat(t, n_bands, axis=0) for t in table)
+        xp, rows, valid = _as_rows(source, per_band)
+        if xp.__name__ == "dask.array":
+            # every pixel of a band in one block, as band_quantiles does
+            rows = rows.rechunk({0: 1, 1: -1})
+            valid = valid.rechunk({0: 1, 1: -1})
+            parts = [xp.from_array(t, chunks=(1, -1)) for t in table]
+            matched = xp.map_blocks(match_cdf, rows, valid, *parts, dtype=float)
         else:
-            matched = histogram_match(arr, reference)
-        return _rewrap(gt, matched, valid)
+            matched = match_cdf(rows, valid, *table)
+        return _from_rows(source, xp.where(valid, matched, xp.nan))
 
     def get_config(self) -> dict[str, Any]:
         # Debug payload: the reference is a runtime raster (forbid_in_yaml).
