@@ -517,9 +517,9 @@ def histogram_match(
     """Match source values to the empirical CDF of ``reference``.
 
     Per-band monotone remapping: each source value is replaced by the
-    reference value at the same empirical quantile. NaN pixels in the
-    source are left untouched; NaNs in the reference are excluded from
-    its CDF.
+    reference value at the same empirical quantile (`reference_cdf` then
+    `match_cdf`). NaN pixels in the source are left untouched; NaNs in the
+    reference are excluded from its CDF.
 
     Args:
         source: Array to remap. If 3-D+ (``(C, H, W)``), bands are
@@ -531,21 +531,121 @@ def histogram_match(
     Returns:
         Float array of the same shape as ``source`` with its per-band
         histograms reshaped to the reference.
+
+    Example:
+        >>> histogram_match(np.array([[0.0, 1.0, 2.0]]), np.array([[10.0, 20.0, 30.0]]))
+        array([[10., 20., 30.]])
     """
-    out = np.array(source, dtype=float, copy=True)
-    if (
-        source.ndim >= 3
-        and reference.ndim >= 3
-        and source.shape[0] == reference.shape[0]
-    ):
-        for band in range(source.shape[0]):
-            out[band] = _match_slice(source[band], reference[band])
-        return out
-    if source.ndim >= 3 and reference.ndim == 2:
-        for band in range(source.shape[0]):
-            out[band] = _match_slice(source[band], reference)
-        return out
-    return _match_slice(source, reference)
+    source = np.asarray(source, dtype=float)
+    reference = np.asarray(reference, dtype=float)
+    banded = source.ndim >= 3 and (
+        reference.ndim == 2
+        or (reference.ndim >= 3 and source.shape[0] == reference.shape[0])
+    )
+    n_bands = source.shape[0] if banded else 1
+    flat = source.reshape(n_bands, -1)
+    ref = reference.reshape(1 if reference.ndim == 2 or not banded else n_bands, -1)
+    table = reference_cdf(ref, np.isfinite(ref))
+    if table[0].shape[0] != n_bands:  # one 2-D map for every band
+        table = tuple(np.repeat(t, n_bands, axis=0) for t in table)
+    return match_cdf(flat, np.isfinite(flat), *table).reshape(source.shape)
+
+
+def reference_cdf(
+    reference: Float[np.ndarray, "C N"], valid: Shaped[np.ndarray, "C N"]
+) -> tuple[
+    Float[np.ndarray, "C M"], Float[np.ndarray, "C M"], Shaped[np.ndarray, "C 1"]
+]:
+    r"""The per-band empirical CDF of ``reference``, as a padded table for `match_cdf`.
+
+    For each band, the distinct valid values :math:`v_1 < \dots < v_m` and
+    their cumulative fractions :math:`G(v_k) = \#\{x \le v_k\} / n`, the
+    points that scikit-image's ``match_histograms`` interpolates through.
+    Bands have different numbers of distinct values, so each row is padded to
+    the longest with levels above ``1`` and its maximum, which an
+    interpolation at a fraction in ``[0, 1]`` never reaches. Host NumPy only:
+    a reference is concrete, and its table is a constant for `match_cdf`.
+
+    Args:
+        reference: ``(C, N)`` values, one band per row.
+        valid: ``(C, N)`` booleans; ``False`` leaves a value out.
+
+    Returns:
+        ``(levels, values, ok)``: ``(C, M)`` fractions, ``(C, M)`` values, and
+        ``(C, 1)`` whether the band has any valid value.
+
+    Example:
+        >>> levels, values, ok = reference_cdf(np.array([[1.0, 1.0, 3.0]]), None)
+        >>> levels.tolist(), values.tolist(), ok.tolist()
+        ([[0.6666666666666666, 1.0]], [[1.0, 3.0]], [[True]])
+    """
+    reference = np.asarray(reference, dtype=float)
+    if valid is None:
+        valid = np.isfinite(reference)
+    rows = []
+    for band, keep in zip(reference, np.asarray(valid, dtype=bool), strict=True):
+        values, counts = np.unique(band[keep], return_counts=True)
+        rows.append((np.cumsum(counts) / max(int(keep.sum()), 1), values))
+    width = max(1, *(values.size for _, values in rows))
+    levels = np.empty((len(rows), width))
+    table = np.empty((len(rows), width))
+    for row, (fractions, values) in enumerate(rows):
+        m = values.size
+        levels[row, :m] = fractions
+        levels[row, m:] = 2.0 + np.arange(width - m)
+        table[row, :m] = values
+        table[row, m:] = values[-1] if m else np.nan
+    ok = np.array([[values.size > 0] for _, values in rows], dtype=bool)
+    return levels, table, ok
+
+
+def match_cdf(
+    x: Float[np.ndarray, "C N"],
+    valid: Shaped[np.ndarray, "C N"],
+    levels: Float[np.ndarray, "C M"],
+    values: Float[np.ndarray, "C M"],
+    ok: Shaped[np.ndarray, "C 1"],
+) -> Float[np.ndarray, "C N"]:
+    r"""Map each band of ``x`` through its CDF onto a `reference_cdf` table.
+
+    .. math::
+
+        y \;=\; G_c^{-1}\big(F_c(x)\big), \qquad
+        F_c(x) \;=\; \frac{\#\{\text{valid } x' \le x\}}{n_c}
+
+    :math:`F_c` comes from a sort and ``searchsorted`` (invalid values sort
+    last as ``+inf``), and :math:`G_c^{-1}` is a linear interpolation through
+    the table, so this is exact rank matching with static shapes: it runs on
+    NumPy and JAX, under ``jax.jit`` too (one trace per shape), and on a
+    dask block holding whole bands.
+
+    Args:
+        x: ``(C, N)`` float values, one band per row.
+        valid: ``(C, N)`` booleans; ``False`` leaves a value out of the CDF.
+        levels: ``(C, M)`` fractions from `reference_cdf`.
+        values: ``(C, M)`` values from `reference_cdf`.
+        ok: ``(C, 1)`` from `reference_cdf`; a band whose reference has no
+            valid value keeps ``x``.
+
+    Returns:
+        ``(C, N)`` on ``x``'s backend; invalid entries keep ``x``'s value.
+
+    Example:
+        >>> table = reference_cdf(np.array([[10.0, 20.0, 30.0]]), None)
+        >>> x = np.array([[2.0, 0.0, 1.0]])
+        >>> match_cdf(x, np.isfinite(x), *table)
+        array([[30., 10., 20.]])
+    """
+    xp = namespace_of(x)
+    count = xp.sum(valid, axis=-1, keepdims=True)
+    ordered = xp.sort(xp.where(valid, x, xp.inf), axis=-1)
+    rows = []
+    for band in range(x.shape[0]):
+        rank = xp.searchsorted(ordered[band], x[band], side="right")
+        fraction = rank / xp.maximum(count[band], 1)
+        rows.append(xp.interp(fraction, levels[band], values[band]))
+    matched = xp.stack(rows)
+    return xp.where(valid & (count > 0) & ok, matched, x)
 
 
 def clahe(
@@ -628,25 +728,6 @@ def _clahe_slice(
         nbins=nbins,
     )
     out[valid] = (equalized[valid] * span) + v_min
-    return out
-
-
-def _match_slice(source: np.ndarray, reference: np.ndarray) -> np.ndarray:
-    out = np.array(source, dtype=float, copy=True)
-    valid = np.isfinite(source)
-    source_valid = source[valid]
-    reference_valid = reference[np.isfinite(reference)]
-    if source_valid.size == 0 or reference_valid.size == 0:
-        return out
-
-    _src_values, bin_idx, src_counts = np.unique(
-        source_valid, return_inverse=True, return_counts=True
-    )
-    ref_values, ref_counts = np.unique(reference_valid, return_counts=True)
-    src_quantiles = np.cumsum(src_counts).astype(float) / source_valid.size
-    ref_quantiles = np.cumsum(ref_counts).astype(float) / reference_valid.size
-    interp_values = np.interp(src_quantiles, ref_quantiles, ref_values)
-    out[valid] = interp_values[bin_idx]
     return out
 
 

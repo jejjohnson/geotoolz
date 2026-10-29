@@ -407,3 +407,82 @@ def test_per_band_stats_refuse_a_jax_trace(scene: GeoArray) -> None:
     # the functional form runs inside the trace
     stats = jax.jit(lambda g: gn.carrier_band_stats(g))(scene.to_jax())
     np.testing.assert_allclose(stats["mean"], gn.carrier_band_stats(scene)["mean"])
+
+
+# --- HistogramMatch (#594) ---------------------------------------------------
+
+
+def _old_match(g: GeoArray, reference: GeoArray) -> np.ndarray:
+    """The NumPy-only operator before #594 (exact rank matching), as the reference."""
+    from geoops.normalize._src.operators import _masked
+
+    arr, _ = _masked(g)
+    ref, _ = _masked(reference)
+    if ref.ndim == 4:
+        ref = np.moveaxis(ref, 1, 0)
+    if arr.ndim == 4:
+        return np.moveaxis(gn.histogram_match(np.moveaxis(arr, 1, 0), ref), 0, 1)
+    return gn.histogram_match(arr, ref)
+
+
+@pytest.fixture
+def reference() -> GeoArray:
+    rng = np.random.default_rng(21)
+    values = np.round(rng.normal(0.5, 0.2, size=(3, 7, 4)), 2)  # ties
+    values[2, 1, 1] = np.nan
+    return toy_geoarray(values, with_fill_pixels=True)
+
+
+@pytest.mark.parametrize("ref_kind", ["bands", "one-map", "other-bands", "stack"])
+def test_histogram_match_agrees_on_every_carrier(
+    ref_kind: str, stats_scene: GeoArray, reference: GeoArray
+) -> None:
+    ref = {
+        "bands": reference,
+        "one-map": reference.isel(band=0),
+        "other-bands": reference.isel(band=[0, 1]),
+        "stack": toy_geoarray(np.stack([np.asarray(reference)] * 2) + 0.1),
+    }[ref_kind]
+    op = gn.HistogramMatch(reference=ref)
+    want = _old_match(stats_scene, ref)
+    got = op(stats_scene)
+    assert isinstance(got, GeoArray)
+    assert np.isnan(got.fill_value)
+    np.testing.assert_array_equal(np.asarray(got), want)  # exact, as before
+
+    da = stats_scene.to_xarray()
+    lazy = op(da.chunk({"y": 2, "x": 2}))
+    assert hasattr(lazy.data, "dask")
+    jitted = jax.jit(lambda g: op(g))(stats_scene.to_jax())
+    assert jitted.backend == "jax"
+    for out in (op(stats_scene.to_jax()), jitted, op(da), lazy.compute()):
+        np.testing.assert_allclose(np.asarray(out), want, rtol=1e-12, equal_nan=True)
+
+
+def test_histogram_match_takes_a_jax_reference_under_jit(
+    stats_scene: GeoArray, reference: GeoArray
+) -> None:
+    want = np.asarray(gn.HistogramMatch(reference=reference)(stats_scene))
+    op = gn.HistogramMatch(reference=reference.to_jax())
+    jitted = jax.jit(lambda g: op(g))(stats_scene.to_jax())
+    np.testing.assert_allclose(np.asarray(jitted), want, rtol=1e-12, equal_nan=True)
+
+
+def test_histogram_match_needs_no_scikit_image(
+    scene: GeoArray, reference: GeoArray, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "skimage", None)
+    monkeypatch.setitem(sys.modules, "skimage.exposure", None)
+    gn.HistogramMatch(reference=reference)(scene)
+
+
+def test_histogram_match_agrees_with_scikit_image(scene: GeoArray) -> None:
+    exposure = pytest.importorskip("skimage.exposure")
+    rng = np.random.default_rng(5)
+    source = rng.gamma(2.0, 0.1, size=(3, 32, 32))
+    target = rng.normal(0.5, 0.2, size=(3, 32, 32))
+    got = gn.HistogramMatch(reference=toy_geoarray(target))(toy_geoarray(source))
+    want = exposure.match_histograms(source, target, channel_axis=0)
+    np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12)

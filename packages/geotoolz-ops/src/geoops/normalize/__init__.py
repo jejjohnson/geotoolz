@@ -12,9 +12,11 @@ from geoops.normalize._src.array import (
     inverse_robust_scale,
     inverse_standard_scale,
     log_scale,
+    match_cdf,
     minmax_scale,
     per_band_stats,
     power_scale,
+    reference_cdf,
     robust_scale,
     standard_scale,
 )
@@ -58,9 +60,11 @@ __all__ = [
     "inverse_robust_scale",
     "inverse_standard_scale",
     "log_scale",
+    "match_cdf",
     "minmax_scale",
     "per_band_stats",
     "power_scale",
+    "reference_cdf",
     "robust_scale",
     "standard_scale",
 ]
