@@ -36,6 +36,11 @@ Each name carries its dimension:
 
 A curl needs two dimensions, so there is no `Curl1D`.
 
+The calculus operators expect collocated fields, all on one grid of cell centres.
+Ocean and atmosphere models often write staggered (Arakawa C-grid) output, with `u` on x-faces and `v` on y-faces.
+Collocate such output in the model library before calling an operator here, for example with finitevolX's `Interpolation2D`, or use finitevolX's own C-grid operators when you need model-grade differences.
+xrtoolz follows the same rule (its decision D14).
+
 Pick `nan_policy="adaptive"` when the field has a mask that matters, such as a coastline: each derivative then uses the widest stencil that fits on valid data, so the cells next to land keep a value and only the masked cells are `NaN`.
 The default, `"propagate"`, uses the plain stencil, and a masked cell costs a halo of about `accuracy` cells.
 
