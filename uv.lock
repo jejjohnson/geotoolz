@@ -233,8 +233,8 @@ name = "array-record"
 version = "0.8.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "absl-py" },
-    { name = "etils", extra = ["epath"] },
+    { name = "absl-py", marker = "sys_platform != 'win32'" },
+    { name = "etils", extra = ["epath"], marker = "sys_platform != 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9f/cf/82d6e2ab9b5fc0e73d8cb9c7db6d5359fcc72bfdac7862002dcc19ed5698/array_record-0.8.4-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:ffc9749979f84bc021af339dbf5fbc6d15f07e8af4db12b3164dd20edf974ec2", size = 3213779, upload-time = "2026-10-08T15:30:46.941Z" },
@@ -1722,6 +1722,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "pipekit" },
+    { name = "pipekit-array" },
     { name = "pyproj" },
     { name = "scipy" },
 ]
@@ -1836,6 +1837,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.1" },
     { name = "pipekit", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit&rev=132d76d18e70c582578fad449236337b8f970cb4" },
+    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&rev=132d76d18e70c582578fad449236337b8f970cb4" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "rasterio", marker = "extra == 'raster'", specifier = ">=1.3" },
     { name = "scikit-image", marker = "extra == 'morph'", specifier = ">=0.25" },
@@ -3952,7 +3954,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess" },
+    { name = "ptyprocess", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [

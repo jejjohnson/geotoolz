@@ -4,10 +4,13 @@ The classics — NDVI, NDWI, NDBI, NBR, SAVI, EVI — plus the generic
 ``NormalizedDifference`` they all specialise, and ``AppendIndex`` for
 stacking an index back as a new channel of the carrier.
 
-Each Operator wraps a pure-numpy primitive in
-:mod:`geoops.indices._src.array` so users who want the math without
-the carrier can call the primitives directly. The Operators round-trip
-``get_config()`` for Hydra-zen ``builds()``.
+Each Operator runs an element-wise kernel from
+:mod:`geoops.indices._src.array` through pipekit-array's ``KernelOp``,
+so the same operator works on a NumPy or JAX ``GeoArray`` (under
+``jax.jit`` too), on a lazy dask-backed ``xr.DataArray`` and on a plain
+array. Users who want the maths without a carrier call the kernels
+directly, one array per band. The Operators round-trip ``get_config()``
+for Hydra-zen ``builds()``.
 
 Examples:
     Eager mode::
@@ -24,6 +27,13 @@ Examples:
         )
         v = pipeline(dn_geoarray)
 
+    The same operator on a lazy cube and under ``jax.jit``::
+
+        cube = xr.open_zarr(store)["reflectance"]  # (time, band, y, x), dask
+        ndvi = gz.indices.NDVI(nir="B8", red="B4")(cube)  # lazy (time, y, x)
+        step = jax.jit(gz.indices.NDVI(nir=7, red=3))
+        v = step(reflectance_geoarray.to_jax())   # GeoArray (H, W), JAX
+
     Stack the index back as an extra channel::
 
         op = gz.indices.AppendIndex(index_op=gz.indices.NDVI())
@@ -38,6 +48,7 @@ from geoops.indices._src.array import (
     bsi,
     ciri,
     clay_minerals,
+    dnbr,
     evi,
     evi2,
     gci,
@@ -107,6 +118,7 @@ __all__ = [
     "ciri",
     "clay_minerals",
     "dNBR",
+    "dnbr",
     "evi",
     "evi2",
     "gci",

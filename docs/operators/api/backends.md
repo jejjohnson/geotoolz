@@ -11,7 +11,7 @@ NumPy result on a JAX carrier and trace once under `jax.jit` for
 same-shape inputs on different grids (the contract test checks
 both).
 
-3 of 264 operators run on JAX today.
+24 of 264 operators run on JAX today.
 
 | Family | Operator | Backends |
 |---|---|---|
@@ -81,28 +81,28 @@ both).
 | `geom` | `Tile` | numpy |
 | `geom` | `VectorToRasterAgg` | numpy |
 | `geom` | `Vectorize` | numpy |
-| `indices` | `ARVI` | numpy |
+| `indices` | `ARVI` | numpy, jax, dask |
 | `indices` | `AppendIndex` | numpy |
-| `indices` | `BAIS2` | numpy |
-| `indices` | `BSI` | numpy |
-| `indices` | `CIRI` | numpy |
-| `indices` | `ClayMinerals` | numpy |
-| `indices` | `EVI` | numpy |
-| `indices` | `EVI2` | numpy |
-| `indices` | `GCI` | numpy |
-| `indices` | `IronOxide` | numpy |
-| `indices` | `MNDWI` | numpy |
-| `indices` | `NBR` | numpy |
-| `indices` | `NBR2` | numpy |
-| `indices` | `NDBI` | numpy |
-| `indices` | `NDMI` | numpy |
-| `indices` | `NDSI` | numpy |
-| `indices` | `NDVI` | numpy |
-| `indices` | `NDWI` | numpy |
-| `indices` | `NormalizedDifference` | numpy |
-| `indices` | `SAVI` | numpy |
-| `indices` | `dNBR` | numpy |
-| `indices` | `kNDVI` | numpy |
+| `indices` | `BAIS2` | numpy, jax, dask |
+| `indices` | `BSI` | numpy, jax, dask |
+| `indices` | `CIRI` | numpy, jax, dask |
+| `indices` | `ClayMinerals` | numpy, jax, dask |
+| `indices` | `EVI` | numpy, jax, dask |
+| `indices` | `EVI2` | numpy, jax, dask |
+| `indices` | `GCI` | numpy, jax, dask |
+| `indices` | `IronOxide` | numpy, jax, dask |
+| `indices` | `MNDWI` | numpy, jax, dask |
+| `indices` | `NBR` | numpy, jax, dask |
+| `indices` | `NBR2` | numpy, jax, dask |
+| `indices` | `NDBI` | numpy, jax, dask |
+| `indices` | `NDMI` | numpy, jax, dask |
+| `indices` | `NDSI` | numpy, jax, dask |
+| `indices` | `NDVI` | numpy, jax, dask |
+| `indices` | `NDWI` | numpy, jax, dask |
+| `indices` | `NormalizedDifference` | numpy, jax, dask |
+| `indices` | `SAVI` | numpy, jax, dask |
+| `indices` | `dNBR` | numpy, jax, dask |
+| `indices` | `kNDVI` | numpy, jax, dask |
 | `io` | `LoadFromEE` | numpy |
 | `io` | `LoadFromSTAC` | numpy |
 | `io` | `ReadBounds` | numpy |

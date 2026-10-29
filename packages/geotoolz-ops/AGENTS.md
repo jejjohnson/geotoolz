@@ -64,6 +64,7 @@ Anything two or more families need lives in `geoops/_src/`:
 |---|---|
 | `wrap.py` | `wrap_like` / `rewrap_attrs` / `adopt_attrs` — the one way to turn a result back into a `GeoArray` with the input's georeferencing (and the place a georeader `GeoTensor` is refused) |
 | `engine.py` | `to_engine` / `from_engine` — the one boundary to georeader's functions (reprojection, mosaics, rasterize / vectorize, windowed reads, solar geometry); no `GeoTensor` crosses into or out of an operator |
+| `kernels.py` | `band_kernel` / `carrier_kernel`: run an element-wise Tier-A kernel through pipekit-array's `KernelOp` on a NumPy or JAX `GeoArray`, an `xr.DataArray` (lazily on dask) or a plain array, with bands selected by dim name and nodata written as `NaN` |
 | `valid.py` | the nodata model: `invalid_values`, `valid_pixels`, `mask_invalid_to_nan`, `restore_fill`, `wrap_filled` |
 | `bands.py` | `resolve_band` / `resolve_bands` (index or name), `band_names`, `resolve_wavelengths`, band-attr bookkeeping |
 | `shape.py` | `band_axis`, `band_dim` / `dim_axis` (an operator's `dim=` and its position), `require_ndim`, `map_frames` / `over_frames` (split a time series by its `time` dim) |

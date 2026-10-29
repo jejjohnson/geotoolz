@@ -352,7 +352,11 @@ class MaxNDVIComposite(Operator):
                 f"nir={self.nir!r})."
             )
         with np.errstate(invalid="ignore", divide="ignore"):
-            ndvi_map = ndvi(stack, nir_idx, red_idx, axis=1, eps=self.eps)
+            ndvi_map = ndvi(
+                np.take(stack, nir_idx, axis=1),
+                np.take(stack, red_idx, axis=1),
+                eps=self.eps,
+            )
         # A nodata frame (e.g. -9999 in both bands -> NDVI 0) must never win.
         frame_valid = _frame_validity(frames)
         scores = np.where(np.isnan(ndvi_map) | ~frame_valid, -np.inf, ndvi_map)

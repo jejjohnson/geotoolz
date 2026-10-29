@@ -3,9 +3,9 @@
 Three layers:
 
 1. **Tier-A math** — analytic ground truth on toy ndarrays. The
-   primitives in ``geoops.indices._src.array`` are pure functions of
-   numpy arrays; they should agree with hand-computed formulas to
-   floating-point precision.
+   kernels in ``geoops.indices._src.array`` are element-wise functions
+   of one array per band; they should agree with hand-computed formulas
+   to floating-point precision.
 2. **Tier-B carrier round-trip** — ``transform``, ``crs`` and
    ``fill_value`` survive ``op(gt)``.
 3. **Hydra-zen ``builds()`` round-trip** — every Operator's
@@ -91,6 +91,11 @@ def reflectance_7band() -> GeoArray:
 # ---------------------------------------------------------------------------
 
 
+def _bands(arr: np.ndarray, *idx: int, axis: int = -3) -> tuple[np.ndarray, ...]:
+    """The kernels take one array per band: slice them off ``axis``."""
+    return tuple(np.take(arr, i, axis=axis) for i in idx)
+
+
 def test_normalized_difference_matches_formula() -> None:
     arr = np.array(
         [
@@ -99,7 +104,7 @@ def test_normalized_difference_matches_formula() -> None:
         ],
         dtype=np.float32,
     )  # (2, 1, 2): band0=high, band1=low
-    out = normalized_difference(arr, 0, 1, axis=0, eps=0.0)
+    out = normalized_difference(*_bands(arr, 0, 1, axis=0), eps=0.0)
     expected = np.array([[0.6, -0.2]], dtype=np.float32)
     np.testing.assert_allclose(out, expected, rtol=1e-6)
 
@@ -107,7 +112,7 @@ def test_normalized_difference_matches_formula() -> None:
 def test_normalized_difference_eps_shadows_zero_division() -> None:
     arr = np.zeros((2, 1, 1), dtype=np.float32)
     # With eps=0 we'd hit 0/0 -> nan; the default eps shadows it to 0.
-    out = normalized_difference(arr, 0, 1, eps=1e-10)
+    out = normalized_difference(*_bands(arr, 0, 1), eps=1e-10)
     assert np.isfinite(out).all()
     np.testing.assert_allclose(out, 0.0, atol=1e-9)
 
@@ -115,7 +120,7 @@ def test_normalized_difference_eps_shadows_zero_division() -> None:
 def test_normalized_difference_zero_eps_gives_inf_or_nan() -> None:
     arr = np.zeros((2, 1, 1), dtype=np.float32)
     with np.errstate(divide="ignore", invalid="ignore"):
-        out = normalized_difference(arr, 0, 1, eps=0.0)
+        out = normalized_difference(*_bands(arr, 0, 1), eps=0.0)
     assert not np.isfinite(out).all()  # the user opted in to the singularity
 
 
@@ -132,15 +137,17 @@ def test_ndvi_savi_evi_match_hand_computed() -> None:
         dtype=np.float32,
     )
     # NDVI = (0.6 - 0.2) / (0.6 + 0.2) = 0.5
-    np.testing.assert_allclose(ndvi(arr, 3, 2, eps=0.0), [[0.5]], rtol=1e-6)
+    np.testing.assert_allclose(ndvi(*_bands(arr, 3, 2), eps=0.0), [[0.5]], rtol=1e-6)
 
     # SAVI (L=0.5) = (0.6 - 0.2)/(0.6 + 0.2 + 0.5) * 1.5 = 0.4/1.3 * 1.5
-    np.testing.assert_allclose(savi(arr, 3, 2, L=0.5), [[0.4 / 1.3 * 1.5]], rtol=1e-6)
+    np.testing.assert_allclose(
+        savi(*_bands(arr, 3, 2), L=0.5), [[0.4 / 1.3 * 1.5]], rtol=1e-6
+    )
 
     # EVI = 2.5 * (0.6 - 0.2) / (0.6 + 6*0.2 - 7.5*0.05 + 1)
     #     = 2.5 * 0.4 / (0.6 + 1.2 - 0.375 + 1)
     #     = 1.0 / 2.425
-    np.testing.assert_allclose(evi(arr, 3, 2, 0), [[1.0 / 2.425]], rtol=1e-6)
+    np.testing.assert_allclose(evi(*_bands(arr, 3, 2, 0)), [[1.0 / 2.425]], rtol=1e-6)
 
 
 def test_ndwi_ndbi_nbr_match_normalized_difference() -> None:
@@ -159,18 +166,18 @@ def test_ndwi_ndbi_nbr_match_normalized_difference() -> None:
     )
     # NDWI (Green - NIR) / (Green + NIR)
     np.testing.assert_allclose(
-        ndwi_mcfeeters(arr, 1, 3, eps=0.0),
-        normalized_difference(arr, 1, 3, eps=0.0),
+        ndwi_mcfeeters(*_bands(arr, 1, 3), eps=0.0),
+        normalized_difference(*_bands(arr, 1, 3), eps=0.0),
     )
     # NDBI (SWIR - NIR) / (SWIR + NIR)
     np.testing.assert_allclose(
-        ndbi(arr, 5, 3, eps=0.0),
-        normalized_difference(arr, 5, 3, eps=0.0),
+        ndbi(*_bands(arr, 5, 3), eps=0.0),
+        normalized_difference(*_bands(arr, 5, 3), eps=0.0),
     )
     # NBR (NIR - SWIR2) / (NIR + SWIR2)
     np.testing.assert_allclose(
-        nbr(arr, 3, 6, eps=0.0),
-        normalized_difference(arr, 3, 6, eps=0.0),
+        nbr(*_bands(arr, 3, 6), eps=0.0),
+        normalized_difference(*_bands(arr, 3, 6), eps=0.0),
     )
 
 
@@ -188,43 +195,47 @@ def test_new_spectral_indices_match_expected_formulas() -> None:
         dtype=np.float32,
     )
     expected_evi2 = 2.5 * (0.60 - 0.20) / (0.60 + 2.4 * 0.20 + 1.0)
-    np.testing.assert_allclose(evi2(arr, 3, 2, eps=0.0), [[expected_evi2]], rtol=1e-6)
-    np.testing.assert_allclose(arvi(arr, 3, 2, 0, eps=0.0), [[0.25 / 0.95]])
-    np.testing.assert_allclose(gci(arr, 3, 1, eps=0.0), [[5.0]])
     np.testing.assert_allclose(
-        kndvi(arr, 3, 2, eps=0.0), np.tanh([[0.5**2]]), rtol=1e-6
+        evi2(*_bands(arr, 3, 2), eps=0.0), [[expected_evi2]], rtol=1e-6
+    )
+    np.testing.assert_allclose(arvi(*_bands(arr, 3, 2, 0), eps=0.0), [[0.25 / 0.95]])
+    np.testing.assert_allclose(gci(*_bands(arr, 3, 1), eps=0.0), [[5.0]])
+    np.testing.assert_allclose(
+        kndvi(*_bands(arr, 3, 2), eps=0.0), np.tanh([[0.5**2]]), rtol=1e-6
     )
     np.testing.assert_allclose(
-        mndwi(arr, 1, 5, eps=0.0),
-        normalized_difference(arr, 1, 5, eps=0.0),
+        mndwi(*_bands(arr, 1, 5), eps=0.0),
+        normalized_difference(*_bands(arr, 1, 5), eps=0.0),
     )
     np.testing.assert_allclose(
-        ndmi(arr, 3, 5, eps=0.0),
-        normalized_difference(arr, 3, 5, eps=0.0),
+        ndmi(*_bands(arr, 3, 5), eps=0.0),
+        normalized_difference(*_bands(arr, 3, 5), eps=0.0),
     )
     np.testing.assert_allclose(
-        ndsi(arr, 1, 5, eps=0.0),
-        normalized_difference(arr, 1, 5, eps=0.0),
+        ndsi(*_bands(arr, 1, 5), eps=0.0),
+        normalized_difference(*_bands(arr, 1, 5), eps=0.0),
     )
     np.testing.assert_allclose(
-        nbr2(arr, 5, 6, eps=0.0),
-        normalized_difference(arr, 5, 6, eps=0.0),
+        nbr2(*_bands(arr, 5, 6), eps=0.0),
+        normalized_difference(*_bands(arr, 5, 6), eps=0.0),
     )
     np.testing.assert_allclose(
-        bsi(arr, 0, 2, 3, 5, eps=0.0),
+        bsi(*_bands(arr, 0, 2, 3, 5), eps=0.0),
         [[((0.4 + 0.2) - (0.6 + 0.05)) / ((0.4 + 0.2) + (0.6 + 0.05))]],
         rtol=1e-6,
     )
-    np.testing.assert_allclose(iron_oxide(arr, 2, 0, eps=0.0), [[4.0]])
-    np.testing.assert_allclose(clay_minerals(arr, 5, 6, eps=0.0), [[0.4 / 0.35]])
-    np.testing.assert_allclose(ciri(arr, 6), [[0.35]])
+    np.testing.assert_allclose(iron_oxide(*_bands(arr, 2, 0), eps=0.0), [[4.0]])
+    np.testing.assert_allclose(
+        clay_minerals(*_bands(arr, 5, 6), eps=0.0), [[0.4 / 0.35]]
+    )
+    np.testing.assert_allclose(ciri(*_bands(arr, 6)), [[0.35]])
     # red_edge1=0.30 (idx 4), red_edge2=0.40 (idx 5), nir=0.60 (idx 3),
     # red=0.20 (idx 2), swir2=0.35 (idx 6)
     expected_bais2 = (1.0 - np.sqrt((0.30 * 0.40 * 0.60) / 0.20)) * (
         (0.35 - 0.60) / np.sqrt(0.35 + 0.60) + 1.0
     )
     np.testing.assert_allclose(
-        bais2(arr, 2, 4, 5, 3, 6, eps=0.0), [[expected_bais2]], rtol=1e-6
+        bais2(*_bands(arr, 2, 4, 5, 3, 6), eps=0.0), [[expected_bais2]], rtol=1e-6
     )
 
 
@@ -232,8 +243,8 @@ def test_savi_l0_equals_ndvi() -> None:
     rng = np.random.default_rng(7)
     arr = rng.uniform(0.05, 0.6, size=(4, 5, 5)).astype(np.float32)
     np.testing.assert_allclose(
-        savi(arr, 3, 2, L=0.0),
-        ndvi(arr, 3, 2, eps=0.0),
+        savi(*_bands(arr, 3, 2), L=0.0),
+        ndvi(*_bands(arr, 3, 2), eps=0.0),
         rtol=1e-5,
     )
 
@@ -243,7 +254,7 @@ def test_ndvi_uint16_dn() -> None:
     # (NDVI came out as 15.884 instead of -0.5).
     cube = np.array([[[1000]], [[3000]]], dtype=np.uint16)
 
-    np.testing.assert_allclose(normalized_difference(cube, 0, 1), [[-0.5]])
+    np.testing.assert_allclose(normalized_difference(*_bands(cube, 0, 1)), [[-0.5]])
     np.testing.assert_allclose(np.asarray(NDVI(nir=0, red=1)(cube)), -0.5)
     out = NDVI(nir=0, red=1)(toy_geoarray(cube))
     np.testing.assert_allclose(np.asarray(out), -0.5)
@@ -276,8 +287,8 @@ _UINT16_PRIMITIVE_CASES = [
 def test_index_primitives_uint16_match_float(fn, idx) -> None:
     cube = uint16_dn_cube(5)
 
-    got = fn(cube, *idx)
-    expected = fn(cube.astype(np.float64), *idx)
+    got = fn(*_bands(cube, *idx))
+    expected = fn(*_bands(cube.astype(np.float64), *idx))
 
     assert np.issubdtype(got.dtype, np.floating)
     np.testing.assert_allclose(got, expected, rtol=1e-5)

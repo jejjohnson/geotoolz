@@ -577,7 +577,7 @@ def test_band_ratio_eps_matches_indices_ratio_primitives() -> None:
     arr = np.array([[[0.3]], [[0.0]]], dtype=np.float64)  # zero denominator
 
     np.testing.assert_array_equal(
-        spectral.band_ratio(arr, 0, 1), indices.iron_oxide(arr, 0, 1)
+        spectral.band_ratio(arr, 0, 1), indices.iron_oxide(arr[0], arr[1])
     )
     assert spectral.BandRatio(numerator=0, denominator=1).eps == 1e-10
     assert indices.NormalizedDifference(a=0, b=1).eps == 1e-10
