@@ -16,6 +16,7 @@ import numpy as np
 from jaxtyping import Float, Shaped
 from pipekit_array import array_namespace
 
+from geoops._src.geo import reject_geotensor
 from geoops._src.shape import BAND_AXIS
 from geoops._src.valid import namespace_of
 
@@ -86,7 +87,7 @@ def reshape_stat(
     """
     xp = namespace_of(arr) if hasattr(arr, "dtype") else np
     stat_arr = xp.asarray(stat)
-    if not np.issubdtype(stat_arr.dtype, np.floating):
+    if stat_arr.dtype != np.float64:  # float64 as before, so float16 cannot overflow
         stat_arr = stat_arr.astype(np.float64)
     if stat_arr.ndim == 0 or reduce_axes is None:
         return stat_arr
@@ -177,6 +178,7 @@ def band_stats(
         elements gives ``NaN``.
 
     Raises:
+        TypeError: ``x`` is a georeader ``GeoTensor``.
         ValueError: An unknown statistic name.
 
     Examples:
@@ -192,7 +194,7 @@ def band_stats(
     unknown = [name for name in stats if name not in BAND_STATS]
     if unknown:
         raise ValueError(f"unknown statistics {unknown}; choose from {BAND_STATS}")
-    xp, data, axes = _band_reduction(x, valid, band_axis)
+    xp, data, axes = _band_reduction(x, valid, band_axis, "band_stats")
     reducers = {
         "mean": xp.nanmean,
         "std": xp.nanstd,
@@ -233,6 +235,7 @@ def band_quantiles(
         backend; a band without valid elements gives ``NaN``.
 
     Raises:
+        TypeError: ``x`` is a georeader ``GeoTensor``.
         ValueError: A level outside ``[0, 1]``.
 
     Examples:
@@ -249,14 +252,15 @@ def band_quantiles(
     levels = np.asarray(q, dtype=float)
     if levels.ndim != 1 or np.any((levels < 0) | (levels > 1)):
         raise ValueError(f"quantile levels must be a sequence in [0, 1]; got {q}")
-    xp, data, axes = _band_reduction(x, valid, band_axis)
+    xp, data, axes = _band_reduction(x, valid, band_axis, "band_quantiles")
     return xp.nanquantile(data, xp.asarray(levels, dtype=data.dtype), axis=axes)
 
 
 def _band_reduction(
-    x: Any, valid: Any, band_axis: int | None
+    x: Any, valid: Any, band_axis: int | None, name: str
 ) -> tuple[Any, Any, tuple[int, ...]]:
     """Namespace, float data with invalid elements ``NaN``, and the reduced axes."""
+    reject_geotensor(x, name)
     xp = namespace_of(x)
     # float64, as the NumPy operators' masked copies, so a float32 cube's
     # statistics do not depend on the backend (JAX needs x64 for this)
@@ -374,6 +378,127 @@ def minmax_scale(
     vmax_b = reshape_stat(vmax, arr, reduce_axes)
     denom = namespace_of(arr).where(vmax_b > vmin_b, vmax_b - vmin_b, 1.0)
     return (arr - vmin_b) / denom * (out_max - out_min) + out_min
+
+
+def inverse_standard_scale(
+    arr: Float[np.ndarray, "*dims"],
+    mean: Float[np.ndarray, "*stat"] | float,
+    std: Float[np.ndarray, "*stat"] | float,
+    *,
+    reduce_axes: tuple[int, ...] | None = (-2, -1),
+) -> Float[np.ndarray, "*dims"]:
+    r"""Undo :func:`standard_scale`.
+
+    .. math::
+
+        x \;=\; y \cdot \sigma + \mu
+
+    Args:
+        arr: Scaled float array. NaN pixels propagate through untouched.
+        mean: Scalar or per-band mean :math:`\mu`, as for `standard_scale`.
+        std: Scalar or per-band standard deviation :math:`\sigma`; a zero
+            ``std`` is read as ``1``, as `standard_scale` divides by it.
+        reduce_axes: Axes the statistics were reduced over. Default
+            ``(-2, -1)``; ``None`` for global statistics.
+
+    Returns:
+        Float array of the same shape as ``arr``.
+
+    Examples:
+        >>> x = np.array([[[1.0, 3.0]]])
+        >>> inverse_standard_scale(standard_scale(x, 2.0, 0.5), 2.0, 0.5)
+        array([[[1., 3.]]])
+        >>> # a constant band (std 0) round-trips too
+        >>> inverse_standard_scale(standard_scale(x, 1.0, 0.0), 1.0, 0.0)
+        array([[[1., 3.]]])
+    """
+    mean_b = reshape_stat(mean, arr, reduce_axes)
+    std_b = reshape_stat(std, arr, reduce_axes)
+    return arr * namespace_of(arr).where(std_b != 0, std_b, 1.0) + mean_b
+
+
+def inverse_robust_scale(
+    arr: Float[np.ndarray, "*dims"],
+    median: Float[np.ndarray, "*stat"] | float,
+    iqr: Float[np.ndarray, "*stat"] | float,
+    *,
+    reduce_axes: tuple[int, ...] | None = (-2, -1),
+) -> Float[np.ndarray, "*dims"]:
+    r"""Undo :func:`robust_scale`.
+
+    .. math::
+
+        x \;=\; y \cdot (Q_{3} - Q_{1}) + \mathrm{median}
+
+    Args:
+        arr: Scaled float array. NaN pixels propagate through untouched.
+        median: Scalar or per-band median, as for `robust_scale`.
+        iqr: Scalar or per-band interquartile range; a zero ``iqr`` is
+            read as ``1``.
+        reduce_axes: Axes the statistics were reduced over. Default
+            ``(-2, -1)``; ``None`` for global statistics.
+
+    Returns:
+        Float array of the same shape as ``arr``.
+
+    Examples:
+        >>> x = np.array([[[1.0, 3.0]]])
+        >>> inverse_robust_scale(robust_scale(x, 2.0, 4.0), 2.0, 4.0)
+        array([[[1., 3.]]])
+        >>> # per-band statistics for a (C, H, W) cube
+        >>> cube = np.ones((2, 1, 2))
+        >>> inverse_robust_scale(cube, [0.0, 1.0], [2.0, 3.0])[:, 0, 0]
+        array([2., 4.])
+    """
+    median_b = reshape_stat(median, arr, reduce_axes)
+    iqr_b = reshape_stat(iqr, arr, reduce_axes)
+    return arr * namespace_of(arr).where(iqr_b != 0, iqr_b, 1.0) + median_b
+
+
+def inverse_minmax_scale(
+    arr: Float[np.ndarray, "*dims"],
+    vmin: Float[np.ndarray, "*stat"] | float,
+    vmax: Float[np.ndarray, "*stat"] | float,
+    *,
+    out_range: tuple[float, float] = (0.0, 1.0),
+    reduce_axes: tuple[int, ...] | None = (-2, -1),
+) -> Float[np.ndarray, "*dims"]:
+    r"""Undo :func:`minmax_scale`: map ``out_range`` back onto ``[vmin, vmax]``.
+
+    .. math::
+
+        x \;=\; \frac{y - o_{\min}}{o_{\max} - o_{\min}}
+                \cdot (v_{\max} - v_{\min}) + v_{\min}
+
+    Args:
+        arr: Scaled float array. NaN pixels propagate through untouched.
+        vmin: Scalar or per-band lower bound, as for `minmax_scale`.
+        vmax: Scalar or per-band upper bound; ``vmax <= vmin`` reads the
+            span as ``1``.
+        out_range: The ``(out_min, out_max)`` range `minmax_scale` mapped
+            into. Default ``(0.0, 1.0)``.
+        reduce_axes: Axes the bounds were reduced over. Default
+            ``(-2, -1)``; ``None`` for global bounds.
+
+    Returns:
+        Float array of the same shape as ``arr``.
+
+    Raises:
+        ValueError: If ``out_range`` is not a two-element increasing tuple.
+
+    Examples:
+        >>> x = np.array([[[1.0, 3.0]]])
+        >>> inverse_minmax_scale(minmax_scale(x, 1.0, 3.0), 1.0, 3.0)
+        array([[[1., 3.]]])
+        >>> y = minmax_scale(x, 1.0, 3.0, out_range=(0.0, 255.0))
+        >>> inverse_minmax_scale(y, 1.0, 3.0, out_range=(0.0, 255.0))
+        array([[[1., 3.]]])
+    """
+    out_min, out_max = validate_out_range(out_range)
+    vmin_b = reshape_stat(vmin, arr, reduce_axes)
+    vmax_b = reshape_stat(vmax, arr, reduce_axes)
+    span = namespace_of(arr).where(vmax_b > vmin_b, vmax_b - vmin_b, 1.0)
+    return (arr - out_min) / (out_max - out_min) * span + vmin_b
 
 
 def histogram_match(
@@ -638,7 +763,7 @@ def _clahe_grey(
     n0, n1 = rows // k0 - 1, cols // k1 - 1
     tiles = image[:, k0 // 2 : k0 // 2 + n0 * k0, k1 // 2 : k1 // 2 + n1 * k1]
     tiles = xp.reshape(tiles, (n_slices, n0, k0, n1, k1))
-    tiles = xp.reshape(xp.permute_dims(tiles, (0, 1, 3, 2, 4)), (-1, k0 * k1))
+    tiles = xp.reshape(xp.transpose(tiles, (0, 1, 3, 2, 4)), (-1, k0 * k1))
     elements = k0 * k1
     clim = int(max(clip_limit * elements, 1)) if clip_limit > 0.0 else elements
     hist = _clip_histogram(_bincount_rows(tiles, nbins, xp), clim, xp)
@@ -652,7 +777,7 @@ def _clahe_grey(
     p0, p1 = rows // k0, cols // k1
     blocks = xp.reshape(image, (n_slices, p0, k0, p1, k1))
     blocks = xp.reshape(
-        xp.permute_dims(blocks, (0, 1, 3, 2, 4)), (n_slices, p0 * p1, k0 * k1)
+        xp.transpose(blocks, (0, 1, 3, 2, 4)), (n_slices, p0 * p1, k0 * k1)
     )
     row_frac = xp.reshape(xp.broadcast_to((np.arange(k0) / k0)[:, None], kernel), (-1,))
     col_frac = xp.reshape(xp.broadcast_to((np.arange(k1) / k1)[None, :], kernel), (-1,))
@@ -669,9 +794,7 @@ def _clahe_grey(
             result = result + (mapped * xp.asarray(weight)).astype(xp.float32)
     result = result.astype(xp.int64).astype(xp.float64)  # skimage casts back to uint16
     result = xp.reshape(result, (n_slices, p0, p1, k0, k1))
-    result = xp.reshape(
-        xp.permute_dims(result, (0, 1, 3, 2, 4)), (n_slices, rows, cols)
-    )
+    result = xp.reshape(xp.transpose(result, (0, 1, 3, 2, 4)), (n_slices, rows, cols))
     return result[:, pad_start[0] : rows - pad_end[0], pad_start[1] : cols - pad_end[1]]
 
 

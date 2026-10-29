@@ -8,7 +8,7 @@ Per-band scaling and contrast operators for model inputs and display.
   (compute and cache NaN-aware per-band statistics)
 - **Non-linear scaling:** `LogScale`, `AsinhScale`, `PowerScale`
 - **Contrast / histogram:** `HistogramStretch`, `HistogramMatch`, `CLAHE`
-- **Tier-A primitives:** `standard_scale`, `robust_scale`, `minmax_scale`, `log_scale`,
+- **Tier-A primitives:** `standard_scale`, `robust_scale`, `minmax_scale` (and their inverses `inverse_standard_scale`, `inverse_robust_scale`, `inverse_minmax_scale`), `log_scale`,
   `asinh_scale`, `power_scale`, `histogram_match`, `reference_cdf`, `match_cdf`, `clahe`, `per_band_stats`
 - **Per-band statistics on every backend:** `band_stats`, `band_quantiles` (arrays, band axis by position) and `carrier_band_stats` (a carrier, band dim by name), mask-aware on NumPy, JAX (under `jax.jit` too) and dask
 
