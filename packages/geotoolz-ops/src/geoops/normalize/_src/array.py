@@ -161,8 +161,8 @@ def band_stats(
     Args:
         x: Float array with the band axis at ``band_axis``.
         valid: Boolean array broadcasting to ``x``; ``False`` leaves an
-            element out of every statistic. ``None`` keeps every finite
-            element (``NaN`` is always left out).
+            element out of every statistic. Non-finite elements are always
+            left out; ``None`` keeps every finite element.
         band_axis: The axis kept, one statistic per entry; ``None`` reduces
             globally to scalars.
         stats: Which of ``"mean"``, ``"std"``, ``"min"``, ``"max"`` to compute.
@@ -219,7 +219,8 @@ def band_quantiles(
     Args:
         x: Float array with the band axis at ``band_axis``.
         valid: Boolean array broadcasting to ``x``; ``False`` leaves an
-            element out. ``None`` keeps every finite element.
+            element out. Non-finite elements are always left out; ``None``
+            keeps every finite element.
         band_axis: The axis kept; ``None`` gives one quantile per level.
         q: Quantile levels in ``[0, 1]``, static (they fix the output shape).
 
@@ -256,8 +257,9 @@ def _band_reduction(
     # float64, as the NumPy operators' masked copies, so a float32 cube's
     # statistics do not depend on the backend (JAX needs x64 for this)
     data = x if x.dtype == np.float64 else x.astype(np.float64)
-    if valid is not None:
-        data = xp.where(valid, data, xp.nan)
+    # the nan* reducers skip NaN only: an infinity is left out as well
+    keep = xp.isfinite(data) if valid is None else valid & xp.isfinite(data)
+    data = xp.where(keep, data, xp.nan)
     kept = None if band_axis is None else band_axis % data.ndim
     # an explicit tuple, never None: dask.array.nanquantile rejects a global axis
     return xp, data, tuple(axis for axis in range(data.ndim) if axis != kept)
