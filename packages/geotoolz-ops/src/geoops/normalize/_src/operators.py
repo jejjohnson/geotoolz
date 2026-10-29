@@ -42,7 +42,7 @@ import numpy as np
 from pipekit import Operator, get_adapter
 
 from geoops._src.config import jsonable
-from geoops._src.fitted import fit_once
+from geoops._src.fitted import fit_once, require_concrete
 from geoops._src.geo import reject_geotensor
 from geoops._src.kernels import named, pixel_kernel
 from geoops._src.shape import DIMS
@@ -63,11 +63,13 @@ from geoops.normalize._src.array import (
     check_positive,
     clahe,
     histogram_match,
+    inverse_minmax_scale,
+    inverse_robust_scale,
+    inverse_standard_scale,
     log_scale,
     minmax_scale,
     per_band_stats,
     power_scale,
-    reshape_stat,
     robust_scale,
     standard_scale,
     stat_axes,
@@ -187,6 +189,29 @@ def _scene_stats(x: Any, **kwargs: Any) -> dict[str, Any]:
 
         stats = dict(zip(stats, dask.compute(*stats.values()), strict=True))
     return stats
+
+
+def _fit_stats(op: Any, x: Any, **kwargs: Any) -> dict[str, np.ndarray]:
+    """Per-band statistics of ``x`` for ``op.fit``, as host float arrays.
+
+    Fitted statistics are stored on the operator, so they are always
+    concrete NumPy arrays: computed on dask in one pass, copied off a JAX
+    device, and refused inside a ``jax.jit`` trace before anything is
+    computed. They stay strict JSON in ``get_config`` and pickle to workers.
+    """
+    name = type(op).__name__
+    require_concrete(
+        x,
+        f"{name}.fit",
+        alternative=(
+            f"Call {name}().fit(x) eagerly, outside the trace, and apply the "
+            "fitted operator inside it; or use "
+            "geoops.normalize.carrier_band_stats, which returns the statistics "
+            "as arrays inside the trace."
+        ),
+    )
+    stats = _scene_stats(x, **kwargs)
+    return {key: np.asarray(value, dtype=float) for key, value in stats.items()}
 
 
 def _stretch_kernel(x: Any, *, lo: Any, hi: Any, out_range: tuple[float, float]) -> Any:
@@ -327,12 +352,19 @@ class StandardScaler(Operator):
     scaling. Learned statistics are never part of ``get_config()``; to
     persist them, build ``StandardScaler(mean=op.mean_, std=op.std_)``.
 
+    Backends: :meth:`fit` runs on NumPy, eager JAX and dask (one compute of
+    the statistics, not of the data) and always stores host NumPy arrays.
+    Under ``jax.jit`` it raises, and so does a first ``fit_on_call``
+    call: fit eagerly, then apply the fitted operator inside the trace,
+    where its statistics are constants. :meth:`transform` and
+    :meth:`inverse` run everywhere, lazily on dask.
+
     Args:
         mean: Per-band mean (scalar, list, or ndarray) or ``None``.
         std: Per-band std (scalar, list, or ndarray) or ``None``.
         fit_on_call: If ``True`` and the operator is not fitted yet,
-            fit ``mean_`` / ``std_`` on the first call (``np.nanmean`` /
-            ``np.nanstd``) and reuse them for every later call. The fit
+            fit ``mean_`` / ``std_`` on the first call and reuse them for
+            every later call. The fit
             runs once even under concurrent calls (``pipekit.ThreadMap``),
             but which scene it sees is then the first to arrive -- call
             :meth:`fit` before parallel use for a deterministic fit.
@@ -353,7 +385,7 @@ class StandardScaler(Operator):
         >>> fit.mean_  # fitted per-band ndarray
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -374,11 +406,9 @@ class StandardScaler(Operator):
         Returns:
             This operator, for chaining.
         """
-        arr, _ = _masked(gt)
-        axis = stat_axes(arr)
-        mean, std = np.nanmean(arr, axis=axis), np.nanstd(arr, axis=axis)
-        self.std_ = std
-        self.mean_ = mean  # published last: fit_once checks ``mean_``
+        stats = _fit_stats(self, gt, stats=("mean", "std"))
+        self.std_ = stats["std"]
+        self.mean_ = stats["mean"]  # published last: fit_once checks ``mean_``
         return self
 
     def _stats(self) -> tuple[np.ndarray, np.ndarray]:
@@ -428,12 +458,17 @@ class StandardScaler(Operator):
             ValueError: If the scaler has no statistics yet.
         """
         mean, std = self._stats()
-        arr, valid = _masked(gt)
-        axis = stat_axes(arr)
-        mean_b = reshape_stat(mean, arr, axis)
-        std_b = reshape_stat(std, arr, axis)
-        scale = np.where(std_b != 0, std_b, 1.0)
-        return _rewrap(gt, arr * scale + mean_b, valid)
+        _check_per_band(mean, gt)
+        _check_per_band(std, gt)
+        return pixel_kernel(
+            inverse_standard_scale,
+            gt,
+            dim="band",
+            name=f"{type(self).__name__}.inverse",
+            mean=mean,
+            std=std,
+            reduce_axes=None,
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -464,8 +499,8 @@ class RobustScaler(Operator):
         median: Per-band median (scalar, list, or ndarray) or ``None``.
         iqr: Per-band IQR (``Q3 - Q1``).
         fit_on_call: If ``True`` and the operator is not fitted yet, fit
-            on the first call using ``np.nanpercentile`` at
-            ``[25, 50, 75]`` and reuse the statistics afterwards.
+            on the first call (the 25th, 50th and 75th percentiles) and
+            reuse the statistics afterwards.
 
     Attributes:
         median_: Fitted per-band median, or ``None`` before :meth:`fit`.
@@ -477,7 +512,7 @@ class RobustScaler(Operator):
         >>> op.median_, op.iqr_
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -498,8 +533,8 @@ class RobustScaler(Operator):
         Returns:
             This operator, for chaining.
         """
-        arr, _ = _masked(gt)
-        q25, q50, q75 = np.nanpercentile(arr, [25.0, 50.0, 75.0], axis=stat_axes(arr))
+        quantiles = (0.25, 0.5, 0.75)
+        q25, q50, q75 = _fit_stats(self, gt, stats=(), quantiles=quantiles)["quantiles"]
         self.iqr_ = q75 - q25
         self.median_ = q50  # published last: fit_once checks ``median_``
         return self
@@ -514,9 +549,17 @@ class RobustScaler(Operator):
     def transform(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Scale ``gt`` with the fitted (or constructor) median / IQR."""
         median, iqr = self._stats()
-        arr, valid = _masked(gt)
-        axis = stat_axes(arr)
-        return _rewrap(gt, robust_scale(arr, median, iqr, reduce_axes=axis), valid)
+        _check_per_band(median, gt)
+        _check_per_band(iqr, gt)
+        return pixel_kernel(
+            robust_scale,
+            gt,
+            dim="band",
+            name="RobustScaler",
+            median=median,
+            iqr=iqr,
+            reduce_axes=None,
+        )
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         if self.fit_on_call:
@@ -526,12 +569,17 @@ class RobustScaler(Operator):
     def inverse(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Invert a previously applied robust scaling (``x = y * iqr + median``)."""
         median, iqr = self._stats()
-        arr, valid = _masked(gt)
-        axis = stat_axes(arr)
-        median_b = reshape_stat(median, arr, axis)
-        iqr_b = reshape_stat(iqr, arr, axis)
-        scale = np.where(iqr_b != 0, iqr_b, 1.0)
-        return _rewrap(gt, arr * scale + median_b, valid)
+        _check_per_band(median, gt)
+        _check_per_band(iqr, gt)
+        return pixel_kernel(
+            inverse_robust_scale,
+            gt,
+            dim="band",
+            name="RobustScaler.inverse",
+            median=median,
+            iqr=iqr,
+            reduce_axes=None,
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -569,8 +617,7 @@ class MinMaxScaler(Operator):
         out_range: ``(out_min, out_max)`` range to map into. Default
             ``(0.0, 1.0)``.
         fit_on_call: If ``True`` and the operator is not fitted yet, fit
-            the bounds on the first call using ``np.nanmin`` /
-            ``np.nanmax`` and reuse them afterwards.
+            the bounds on the first call and reuse them afterwards.
 
     Attributes:
         vmin_: Fitted per-band lower bound, or ``None`` before :meth:`fit`.
@@ -587,7 +634,7 @@ class MinMaxScaler(Operator):
         >>> display = op(scene)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,
@@ -610,11 +657,9 @@ class MinMaxScaler(Operator):
         Returns:
             This operator, for chaining.
         """
-        arr, _ = _masked(gt)
-        axis = stat_axes(arr)
-        vmin, vmax = np.nanmin(arr, axis=axis), np.nanmax(arr, axis=axis)
-        self.vmax_ = vmax
-        self.vmin_ = vmin  # published last: fit_once checks ``vmin_``
+        stats = _fit_stats(self, gt, stats=("min", "max"))
+        self.vmax_ = stats["max"]
+        self.vmin_ = stats["min"]  # published last: fit_once checks ``vmin_``
         return self
 
     def _stats(self) -> tuple[np.ndarray, np.ndarray]:
@@ -627,10 +672,18 @@ class MinMaxScaler(Operator):
     def transform(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Map ``gt`` from the fitted (or constructor) bounds into ``out_range``."""
         vmin, vmax = self._stats()
-        arr, valid = _masked(gt)
-        axis = stat_axes(arr)
-        out = minmax_scale(arr, vmin, vmax, out_range=self.out_range, reduce_axes=axis)
-        return _rewrap(gt, out, valid)
+        _check_per_band(vmin, gt)
+        _check_per_band(vmax, gt)
+        return pixel_kernel(
+            minmax_scale,
+            gt,
+            dim="band",
+            name="MinMaxScaler",
+            vmin=vmin,
+            vmax=vmax,
+            out_range=self.out_range,
+            reduce_axes=None,
+        )
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         if self.fit_on_call:
@@ -640,14 +693,18 @@ class MinMaxScaler(Operator):
     def inverse(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         """Map ``out_range`` values back to the ``[vmin, vmax]`` input scale."""
         vmin, vmax = self._stats()
-        arr, valid = _masked(gt)
-        axis = stat_axes(arr)
-        vmin_b = reshape_stat(vmin, arr, axis)
-        vmax_b = reshape_stat(vmax, arr, axis)
-        span = np.where(vmax_b > vmin_b, vmax_b - vmin_b, 1.0)
-        out_min, out_max = self.out_range
-        out = (arr - out_min) / (out_max - out_min) * span + vmin_b
-        return _rewrap(gt, out, valid)
+        _check_per_band(vmin, gt)
+        _check_per_band(vmax, gt)
+        return pixel_kernel(
+            inverse_minmax_scale,
+            gt,
+            dim="band",
+            name="MinMaxScaler.inverse",
+            vmin=vmin,
+            vmax=vmax,
+            out_range=self.out_range,
+            reduce_axes=None,
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {

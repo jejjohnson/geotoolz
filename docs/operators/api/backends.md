@@ -11,7 +11,7 @@ NumPy result on a JAX carrier and trace once under `jax.jit` for
 same-shape inputs on different grids (the contract test checks
 both).
 
-40 of 265 operators run on JAX today.
+43 of 265 operators run on JAX today.
 
 | Family | Operator | Backends |
 |---|---|---|
@@ -179,12 +179,12 @@ both).
 | `normalize` | `HistogramMatch` | numpy |
 | `normalize` | `HistogramStretch` | numpy, jax, dask |
 | `normalize` | `LogScale` | numpy, jax, dask |
-| `normalize` | `MinMaxScaler` | numpy |
+| `normalize` | `MinMaxScaler` | numpy, jax, dask |
 | `normalize` | `Normalize` | numpy, jax, dask |
 | `normalize` | `PerBandStats` | numpy |
 | `normalize` | `PowerScale` | numpy, jax, dask |
-| `normalize` | `RobustScaler` | numpy |
-| `normalize` | `StandardScaler` | numpy |
+| `normalize` | `RobustScaler` | numpy, jax, dask |
+| `normalize` | `StandardScaler` | numpy, jax, dask |
 | `normalize` | `ZeroOne` | numpy, jax, dask |
 | `plume` | `ColumnToMass` | numpy |
 | `plume` | `CrossSectionalFlux` | numpy |

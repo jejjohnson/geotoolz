@@ -379,6 +379,137 @@ def minmax_scale(
     return (arr - vmin_b) / denom * (out_max - out_min) + out_min
 
 
+def inverse_standard_scale(
+    arr: Float[np.ndarray, "*dims"],
+    mean: Float[np.ndarray, "*stat"] | float,
+    std: Float[np.ndarray, "*stat"] | float,
+    *,
+    reduce_axes: tuple[int, ...] | None = (-2, -1),
+) -> Float[np.ndarray, "*dims"]:
+    r"""Undo :func:`standard_scale`.
+
+    .. math::
+
+        x \;=\; y \cdot \sigma + \mu
+
+    Args:
+        arr: Scaled float array. NaN pixels propagate through untouched.
+        mean: Scalar or per-band mean :math:`\mu`, as for `standard_scale`.
+        std: Scalar or per-band standard deviation :math:`\sigma`; a zero
+            ``std`` is read as ``1``, as `standard_scale` divides by it.
+        reduce_axes: Axes the statistics were reduced over. Default
+            ``(-2, -1)``; ``None`` for global statistics.
+
+    Returns:
+        Float array of the same shape as ``arr``.
+
+    Raises:
+        TypeError: ``arr`` is a georeader ``GeoTensor``.
+
+    Examples:
+        >>> x = np.array([[[1.0, 3.0]]])
+        >>> inverse_standard_scale(standard_scale(x, 2.0, 0.5), 2.0, 0.5)
+        array([[[1., 3.]]])
+        >>> # a constant band (std 0) round-trips too
+        >>> inverse_standard_scale(standard_scale(x, 1.0, 0.0), 1.0, 0.0)
+        array([[[1., 3.]]])
+    """
+    reject_geotensor(arr, "inverse_standard_scale")
+    mean_b = reshape_stat(mean, arr, reduce_axes)
+    std_b = reshape_stat(std, arr, reduce_axes)
+    return arr * namespace_of(arr).where(std_b != 0, std_b, 1.0) + mean_b
+
+
+def inverse_robust_scale(
+    arr: Float[np.ndarray, "*dims"],
+    median: Float[np.ndarray, "*stat"] | float,
+    iqr: Float[np.ndarray, "*stat"] | float,
+    *,
+    reduce_axes: tuple[int, ...] | None = (-2, -1),
+) -> Float[np.ndarray, "*dims"]:
+    r"""Undo :func:`robust_scale`.
+
+    .. math::
+
+        x \;=\; y \cdot (Q_{3} - Q_{1}) + \mathrm{median}
+
+    Args:
+        arr: Scaled float array. NaN pixels propagate through untouched.
+        median: Scalar or per-band median, as for `robust_scale`.
+        iqr: Scalar or per-band interquartile range; a zero ``iqr`` is
+            read as ``1``.
+        reduce_axes: Axes the statistics were reduced over. Default
+            ``(-2, -1)``; ``None`` for global statistics.
+
+    Returns:
+        Float array of the same shape as ``arr``.
+
+    Raises:
+        TypeError: ``arr`` is a georeader ``GeoTensor``.
+
+    Examples:
+        >>> x = np.array([[[1.0, 3.0]]])
+        >>> inverse_robust_scale(robust_scale(x, 2.0, 4.0), 2.0, 4.0)
+        array([[[1., 3.]]])
+        >>> # per-band statistics for a (C, H, W) cube
+        >>> cube = np.ones((2, 1, 2))
+        >>> inverse_robust_scale(cube, [0.0, 1.0], [2.0, 3.0])[:, 0, 0]
+        array([2., 4.])
+    """
+    reject_geotensor(arr, "inverse_robust_scale")
+    median_b = reshape_stat(median, arr, reduce_axes)
+    iqr_b = reshape_stat(iqr, arr, reduce_axes)
+    return arr * namespace_of(arr).where(iqr_b != 0, iqr_b, 1.0) + median_b
+
+
+def inverse_minmax_scale(
+    arr: Float[np.ndarray, "*dims"],
+    vmin: Float[np.ndarray, "*stat"] | float,
+    vmax: Float[np.ndarray, "*stat"] | float,
+    *,
+    out_range: tuple[float, float] = (0.0, 1.0),
+    reduce_axes: tuple[int, ...] | None = (-2, -1),
+) -> Float[np.ndarray, "*dims"]:
+    r"""Undo :func:`minmax_scale`: map ``out_range`` back onto ``[vmin, vmax]``.
+
+    .. math::
+
+        x \;=\; \frac{y - o_{\min}}{o_{\max} - o_{\min}}
+                \cdot (v_{\max} - v_{\min}) + v_{\min}
+
+    Args:
+        arr: Scaled float array. NaN pixels propagate through untouched.
+        vmin: Scalar or per-band lower bound, as for `minmax_scale`.
+        vmax: Scalar or per-band upper bound; ``vmax <= vmin`` reads the
+            span as ``1``.
+        out_range: The ``(out_min, out_max)`` range `minmax_scale` mapped
+            into. Default ``(0.0, 1.0)``.
+        reduce_axes: Axes the bounds were reduced over. Default
+            ``(-2, -1)``; ``None`` for global bounds.
+
+    Returns:
+        Float array of the same shape as ``arr``.
+
+    Raises:
+        TypeError: ``arr`` is a georeader ``GeoTensor``.
+        ValueError: If ``out_range`` is not a two-element increasing tuple.
+
+    Examples:
+        >>> x = np.array([[[1.0, 3.0]]])
+        >>> inverse_minmax_scale(minmax_scale(x, 1.0, 3.0), 1.0, 3.0)
+        array([[[1., 3.]]])
+        >>> y = minmax_scale(x, 1.0, 3.0, out_range=(0.0, 255.0))
+        >>> inverse_minmax_scale(y, 1.0, 3.0, out_range=(0.0, 255.0))
+        array([[[1., 3.]]])
+    """
+    reject_geotensor(arr, "inverse_minmax_scale")
+    out_min, out_max = validate_out_range(out_range)
+    vmin_b = reshape_stat(vmin, arr, reduce_axes)
+    vmax_b = reshape_stat(vmax, arr, reduce_axes)
+    span = namespace_of(arr).where(vmax_b > vmin_b, vmax_b - vmin_b, 1.0)
+    return (arr - out_min) / (out_max - out_min) * span + vmin_b
+
+
 def histogram_match(
     source: Float[np.ndarray, "*dims"],
     reference: Float[np.ndarray, "*ref"],
