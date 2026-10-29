@@ -30,6 +30,7 @@ from geoops.geom import (
     difference_coeffs,
     difference_offsets,
     gradient,
+    nonuniform_coeffs,
 )
 
 
@@ -485,3 +486,70 @@ def test_a_geographic_crs_in_grads_uses_its_own_unit() -> None:
     in_degrees = Gradient()(GeoArray(lat, deg, "EPSG:4275", dims=("y", "x")))
     in_grads = Gradient()(GeoArray(lat, grad, "EPSG:4807", dims=("y", "x")))
     np.testing.assert_allclose(np.asarray(in_grads), np.asarray(in_degrees), rtol=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Unevenly spaced axes: `coords=` and `nonuniform_coeffs`
+# ---------------------------------------------------------------------------
+
+LEVELS = np.array([0.0, 5.0, 15.0, 30.0, 50.0, 75.0, 105.0, 140.0, 180.0])
+
+
+@pytest.mark.parametrize(("derivative", "accuracy", "method"), CASES)
+def test_nonuniform_coeffs_reduce_to_the_uniform_stencil(
+    derivative: int, accuracy: int, method: str
+) -> None:
+    offsets = difference_offsets(
+        derivative=derivative, accuracy=accuracy, method=method
+    )
+    got = nonuniform_coeffs(2.5 * np.asarray(offsets, dtype=float), derivative)
+    want = np.asarray(difference_coeffs(offsets, derivative)) / 2.5**derivative
+    np.testing.assert_allclose(got, want, rtol=1e-9, atol=1e-12)
+
+
+@pytest.mark.parametrize(("derivative", "accuracy", "method"), CASES)
+def test_evenly_spaced_coords_equal_the_step(
+    derivative: int, accuracy: int, method: str
+) -> None:
+    f = np.random.default_rng(accuracy).normal(size=(4, 17))
+    coords = -1.5 * np.arange(17.0)
+    got = difference(
+        f, coords=coords, derivative=derivative, accuracy=accuracy, method=method
+    )
+    want = difference(
+        f, step=-1.5, derivative=derivative, accuracy=accuracy, method=method
+    )
+    np.testing.assert_allclose(got, want, rtol=1e-9, atol=1e-9)
+
+
+@pytest.mark.parametrize("accuracy", [1, 2, 3])
+def test_uneven_levels_are_exact_for_the_stencils_degree(accuracy: int) -> None:
+    """A K-point stencil on uneven levels is exact for polynomials of degree K - 1."""
+    for derivative in (1, 2):
+        degree = derivative + accuracy - 1  # the one-sided stencils' degree
+        f = LEVELS**degree
+        want = np.polyval(np.polyder(np.eye(degree + 1)[0], derivative), LEVELS)
+        got = difference(f, coords=LEVELS, derivative=derivative, accuracy=accuracy)
+        np.testing.assert_allclose(got, want, rtol=1e-9, atol=1e-9)
+
+
+def test_uneven_levels_run_under_jit_with_traced_coords() -> None:
+    want = difference(LEVELS**2, coords=LEVELS)
+    jitted = jax.jit(lambda f, z: difference(f, coords=z))
+    got = jitted(jax.numpy.asarray(LEVELS**2), jax.numpy.asarray(LEVELS))
+    np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12)
+
+
+def test_adaptive_difference_on_uneven_levels_keeps_the_cells_next_to_a_gap() -> None:
+    f = LEVELS.copy()  # f = z: every stencil is exact
+    f[4] = np.nan
+    got = adaptive_difference(f, coords=LEVELS)
+    assert np.isnan(got[4]) and np.isfinite(np.delete(got, 4)).all()
+    np.testing.assert_allclose(np.delete(got, 4), 1.0, rtol=1e-12)
+
+
+def test_coords_must_fit_the_axis_and_not_wrap() -> None:
+    with pytest.raises(ValueError, match="entries"):
+        difference(np.zeros((3, 9)), coords=LEVELS[:5])
+    with pytest.raises(ValueError, match="periodic"):
+        difference(np.zeros((3, 9)), coords=LEVELS, periodic=True)

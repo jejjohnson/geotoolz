@@ -50,7 +50,11 @@ from geoops.geom._src.operators import (
     Tile,
     Vectorize,
 )
-from geoops.geom._src.stencils import difference_coeffs, difference_offsets
+from geoops.geom._src.stencils import (
+    difference_coeffs,
+    difference_offsets,
+    nonuniform_coeffs,
+)
 
 
 __all__ = [
@@ -93,4 +97,5 @@ __all__ = [
     "divergence",
     "gradient",
     "laplacian",
+    "nonuniform_coeffs",
 ]

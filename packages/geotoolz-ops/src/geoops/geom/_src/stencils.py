@@ -29,12 +29,18 @@ from __future__ import annotations
 
 import functools
 import math
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 
 
-__all__ = ["METHODS", "Method", "difference_coeffs", "difference_offsets"]
+__all__ = [
+    "METHODS",
+    "Method",
+    "difference_coeffs",
+    "difference_offsets",
+    "nonuniform_coeffs",
+]
 
 Method = Literal["central", "forward", "backward"]
 
@@ -119,3 +125,53 @@ def difference_coeffs(
     coeffs = np.linalg.solve(powers, rhs)
     # round off solver noise so exact stencils stay exact (0.5, not 0.4999…)
     return tuple(float(c) for c in np.round(coeffs, 12) + 0.0)
+
+
+def nonuniform_coeffs(dz: Any, derivative: int = 1) -> Any:
+    r"""Stencil coefficients for points at arbitrary distances, on any backend.
+
+    The non-uniform form of :func:`difference_coeffs`: for each point, the
+    weights :math:`c_k` with :math:`f^{(n)}(z) \approx \sum_k c_k f(z + \delta_k)`
+    solve the Taylor conditions :math:`\sum_k c_k \delta_k^m / m! = \delta_{mn}`
+    for :math:`m = 0, \dots, K - 1`, so the stencil is exact for polynomials of
+    degree :math:`K - 1`. Each row is solved in units of its own widest
+    distance, which keeps the system well conditioned for coordinates in
+    metres or pascals. Written on the array namespace, so traced distances
+    (a ``TimeAxis`` under ``jax.jit``) work too.
+
+    Args:
+        dz: ``(..., K)`` signed distances :math:`\delta_k` from each point to
+            its stencil's points; one of them is ``0``.
+        derivative: The derivative order :math:`n`, below ``K``.
+
+    Returns:
+        ``(..., K)`` coefficients, in units of ``dz`` to the power ``-n``.
+
+    Raises:
+        ValueError: Too few points for the derivative.
+
+    Examples:
+        >>> nonuniform_coeffs(np.array([-1.0, 0.0, 1.0]))  # the uniform stencil
+        array([-0.5,  0. ,  0.5])
+        >>> # uneven levels at 0, 1 and 3 m: still exact for a quadratic
+        >>> c = nonuniform_coeffs(np.array([-1.0, 0.0, 2.0]), derivative=2)
+        >>> float(c @ np.array([-1.0, 0.0, 2.0]) ** 2)
+        2.0
+    """
+    from pipekit_array import array_namespace
+
+    xp = array_namespace(dz)
+    n_points = dz.shape[-1]
+    if derivative >= n_points:
+        raise ValueError(
+            f"{n_points} points cannot resolve derivative {derivative}; need at "
+            f"least {derivative + 1}"
+        )
+    scale = xp.max(xp.abs(dz), axis=-1, keepdims=True)
+    unit = dz / scale
+    # A[..., m, k] = δ_k^m / m!, in units of the row's widest distance
+    powers = xp.stack([unit**m / math.factorial(m) for m in range(n_points)], axis=-2)
+    rhs = xp.zeros((*dz.shape[:-1], n_points), dtype=unit.dtype)
+    rhs = xp.where(xp.arange(n_points) == derivative, 1.0, rhs)
+    coeffs = xp.linalg.solve(powers, rhs[..., None])[..., 0]
+    return coeffs / scale**derivative
