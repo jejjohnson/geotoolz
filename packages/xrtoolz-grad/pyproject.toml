@@ -1,6 +1,6 @@
 [project]
 name = "xrtoolz-grad"
-version = "0.1.0"
+version = "0.2.0"
 description = "Finite-difference calculus on labeled xarray grids — gradient, curl, divergence, laplacian with cartesian/rectilinear/spherical geometry dispatch."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

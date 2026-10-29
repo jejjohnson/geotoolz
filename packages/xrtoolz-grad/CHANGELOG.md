@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-grad-v0.1.0...xrtoolz-grad-v0.2.0) (2026-10-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* the xrtoolz-einx (xreinx) and xrtoolz-sklearn (xrsklearn) distributions are gone, with no shim (PL-Q5).
+
+### Code Refactoring
+
+* delete xrtoolz-einx and xrtoolz-sklearn ([#376](https://github.com/jejjohnson/xrtoolz/issues/376)) ([6b51221](https://github.com/jejjohnson/xrtoolz/commit/6b51221771b2975cdeb019e5637e5f5ef4922539))
+
 ## [0.1.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-grad-v0.0.3...xrtoolz-grad-v0.1.0) (2026-10-29)
 
 

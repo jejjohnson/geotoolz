@@ -28,6 +28,19 @@
 
 * `xrtoolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xrtoolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.3.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.2.0...xrtoolz-v0.3.0) (2026-10-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **xrops:** knn regridding, kde_to_grid, xrops.learn and the decomposition presets need pip install 'xrtoolz-ops[sklearn]'.
+* the xrtoolz-einx (xreinx) and xrtoolz-sklearn (xrsklearn) distributions are gone, with no shim (PL-Q5).
+
+### Code Refactoring
+
+* delete xrtoolz-einx and xrtoolz-sklearn ([#376](https://github.com/jejjohnson/xrtoolz/issues/376)) ([6b51221](https://github.com/jejjohnson/xrtoolz/commit/6b51221771b2975cdeb019e5637e5f5ef4922539))
+* **xrops:** a light base install without einx or scikit-learn ([#377](https://github.com/jejjohnson/xrtoolz/issues/377)) ([2b9bd37](https://github.com/jejjohnson/xrtoolz/commit/2b9bd37f7d7e2edb4b9d451b9e20ae6e4aa271a2))
+
 ## [0.2.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.1.0...xrtoolz-v0.2.0) (2026-10-29)
 
 
