@@ -39,11 +39,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import numpy as np
-from pipekit import Operator
+from pipekit import Operator, get_adapter
 
 from geoops._src.config import jsonable
 from geoops._src.fitted import fit_once
 from geoops._src.geo import reject_geotensor
+from geoops._src.kernels import pixel_kernel
+from geoops._src.shape import DIMS
 from geoops._src.stretch import percentile_stretch
 from geoops._src.valid import (
     invalid_values,
@@ -53,6 +55,8 @@ from geoops._src.valid import (
 )
 from geoops.normalize._src.array import (
     asinh_scale,
+    check_log_scale,
+    check_positive,
     clahe,
     histogram_match,
     log_scale,
@@ -87,6 +91,23 @@ def _masked(x: Any) -> tuple[np.ndarray, np.ndarray]:
 def _rewrap(gt: Any, out: np.ndarray, valid: np.ndarray) -> Any:
     """Write ``NaN`` into invalid pixels and rewrap like ``gt`` with a NaN fill."""
     return wrap_filled(gt, out, fill_value=np.nan, valid=valid)
+
+
+def _check_per_band(stat: Any, gt: Any, dim: str = "band") -> None:
+    """Raise unless ``stat`` is a scalar or one value per band of ``gt``."""
+    stat_arr = np.asarray(stat, dtype=float)
+    if stat_arr.size == 1:
+        return
+    adapter = get_adapter(gt)
+    dims = adapter.dims(gt) if adapter is not None else DIMS[-np.ndim(gt) :]
+    shape = tuple(gt.shape)
+    kept = (shape[dims.index(dim)],) if dim in dims else ()
+    if stat_arr.shape != kept:
+        raise ValueError(
+            f"statistic of shape {stat_arr.shape} does not match the kept axes "
+            f"{kept} of an input of shape {shape}; pass one value per band "
+            "(or a scalar)"
+        )
 
 
 def _array_or_none(value: Any) -> np.ndarray | None:
@@ -290,9 +311,18 @@ class StandardScaler(Operator):
                 statistics.
         """
         mean, std = self._stats()
-        arr, valid = _masked(gt)
-        axis = stat_axes(arr)
-        return _rewrap(gt, standard_scale(arr, mean, std, reduce_axes=axis), valid)
+        _check_per_band(mean, gt)
+        _check_per_band(std, gt)
+        # the band dim is last inside the kernel, so (C,) stats broadcast as is
+        return pixel_kernel(
+            standard_scale,
+            gt,
+            dim="band",
+            name=type(self).__name__,
+            mean=mean,
+            std=std,
+            reduce_axes=None,
+        )
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         if self.fit_on_call:
@@ -685,15 +715,17 @@ class LogScale(Operator):
         >>> log_sar = LogScale(base=10.0, eps=1e-6)(sar_backscatter)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(self, *, base: float = 10.0, eps: float = 1e-6) -> None:
         self.base = base
         self.eps = eps
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        arr, valid = _masked(gt)
-        return _rewrap(gt, log_scale(arr, base=self.base, eps=self.eps), valid)
+    def _apply(self, gt: Any) -> Any:
+        check_log_scale(self.base, self.eps)
+        return pixel_kernel(
+            log_scale, gt, dim="band", name="LogScale", base=self.base, eps=self.eps
+        )
 
 
 class AsinhScale(Operator):
@@ -717,14 +749,14 @@ class AsinhScale(Operator):
         >>> out = AsinhScale(a=0.1)(scene)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(self, *, a: float = 1.0) -> None:
         self.a = a
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        arr, valid = _masked(gt)
-        return _rewrap(gt, asinh_scale(arr, a=self.a), valid)
+    def _apply(self, gt: Any) -> Any:
+        check_positive("a", self.a)
+        return pixel_kernel(asinh_scale, gt, dim="band", name="AsinhScale", a=self.a)
 
 
 class PowerScale(Operator):
@@ -749,14 +781,16 @@ class PowerScale(Operator):
         >>> out = PowerScale(gamma=0.5)(scene)
     """
 
-    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(self, *, gamma: float = 0.5) -> None:
         self.gamma = gamma
 
-    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        arr, valid = _masked(gt)
-        return _rewrap(gt, power_scale(arr, gamma=self.gamma), valid)
+    def _apply(self, gt: Any) -> Any:
+        check_positive("gamma", self.gamma)
+        return pixel_kernel(
+            power_scale, gt, dim="band", name="PowerScale", gamma=self.gamma
+        )
 
 
 class Normalize(StandardScaler):
@@ -780,6 +814,9 @@ class Normalize(StandardScaler):
         ... )
         >>> normed = op(scene)
     """
+
+    # fixed statistics: _apply never fits, so the transform runs anywhere
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
 
     def __init__(
         self,

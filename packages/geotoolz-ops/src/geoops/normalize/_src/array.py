@@ -7,10 +7,12 @@ adaptive histogram equalization step.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
 from jaxtyping import Float, Shaped
+from pipekit_array import array_namespace
 
 from geoops._src.optional import optional_name
 from geoops._src.shape import BAND_AXIS
@@ -405,11 +407,9 @@ def log_scale(
     Raises:
         ValueError: If ``base`` or ``eps`` is out of range.
     """
-    if base <= 0 or base == 1.0:
-        raise ValueError(f"base must be positive and not equal to 1; got {base}")
-    if eps <= 0:
-        raise ValueError(f"eps must be positive; got {eps}")
-    return np.log(np.maximum(arr, 0.0) + eps) / np.log(base)
+    check_log_scale(base, eps)
+    xp = array_namespace(arr)
+    return xp.log(xp.maximum(arr, 0.0) + eps) / math.log(base)
 
 
 def asinh_scale(
@@ -435,9 +435,8 @@ def asinh_scale(
     Raises:
         ValueError: If ``a <= 0``.
     """
-    if a <= 0:
-        raise ValueError(f"a must be positive; got {a}")
-    return np.arcsinh(arr / a)
+    check_positive("a", a)
+    return array_namespace(arr).asinh(arr / a)
 
 
 def power_scale(
@@ -463,9 +462,29 @@ def power_scale(
     Raises:
         ValueError: If ``gamma <= 0``.
     """
-    if gamma <= 0:
-        raise ValueError(f"gamma must be positive; got {gamma}")
-    return np.maximum(arr, 0.0) ** gamma
+    check_positive("gamma", gamma)
+    return array_namespace(arr).maximum(arr, 0.0) ** gamma
+
+
+def check_log_scale(base: float, eps: float) -> None:
+    """Raise unless ``base > 0``, ``base != 1`` and ``eps > 0`` (`log_scale`).
+
+    Example:
+        >>> check_log_scale(10.0, 1e-6)
+    """
+    if base <= 0 or base == 1.0:
+        raise ValueError(f"base must be positive and not equal to 1; got {base}")
+    check_positive("eps", eps)
+
+
+def check_positive(name: str, value: float) -> None:
+    """Raise ``ValueError`` naming ``name`` unless ``value > 0``.
+
+    Example:
+        >>> check_positive("gamma", 0.5)
+    """
+    if value <= 0:
+        raise ValueError(f"{name} must be positive; got {value}")
 
 
 def validate_out_range(out_range: tuple[float, ...]) -> tuple[float, float]:

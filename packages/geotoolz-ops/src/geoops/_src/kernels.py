@@ -44,6 +44,7 @@ __all__ = [
     "mask_kernel",
     "named",
     "nodata_where",
+    "pixel_kernel",
     "select_band",
 ]
 
@@ -132,13 +133,19 @@ def nodata_where(value: Any, *bands: Any, fill_values: Sequence[Any]) -> Any:
     xp = array_namespace(value)
     valid = None
     for band, fill in zip(bands, fill_values, strict=True):
-        ok = xp.isfinite(band)
-        if fill is not None and not (isinstance(fill, float) and np.isnan(fill)):
-            ok = ok & (band != fill)
+        ok = _valid(band, fill)
         valid = ok if valid is None else valid & ok
     if valid is None:
         return value
     return xp.where(valid, value, xp.nan)
+
+
+def _valid(band: Any, fill: Any) -> Any:
+    """Where ``band`` is finite and not ``fill`` (a ``NaN`` fill: finite only)."""
+    ok = array_namespace(band).isfinite(band)
+    if fill is not None and not (isinstance(fill, float) and np.isnan(fill)):
+        ok = ok & (band != fill)
+    return ok
 
 
 def _masked_kernel(
@@ -312,6 +319,73 @@ def mask_kernel(
     ):
         out = _expand(out, dims.index(dim), dim)
     return unwrap(_declare_fill(out, False))
+
+
+def pixel_kernel(
+    kernel: Callable[..., Any], x: Any, *, dim: str, name: str, **params: Any
+) -> Any:
+    """Run a value-wise kernel on every band of ``x``; invalid pixels become ``NaN``.
+
+    The pixel validity of `geoops._src.valid.valid_pixels`: a pixel is
+    invalid when *any* of its bands is non-finite or equals the carrier's
+    fill, and then every band of it holds ``NaN``. The kernel sees the data
+    as ``float64`` with ``dim`` last (signature ``"(c)->(c)"``), so a
+    per-band statistic of shape ``(C,)`` broadcasts against it; a carrier
+    without ``dim`` (a 2-D map) is judged element by element.
+
+    Args:
+        kernel: The Tier-A kernel: one ``float64`` array, then ``**params``;
+            returns an array of its shape.
+        x: The carrier: a `GeoArray`, a ``DataArray``, a `DimArray` or a
+            plain 2-D to 4-D array.
+        dim: The band dim.
+        name: The operator's name, for messages.
+        **params: Keyword parameters of the kernel.
+
+    Returns:
+        The result on ``x``'s carrier with ``x``'s dims, ``float64``, a
+        `GeoArray` declaring ``fill_value=NaN``.
+
+    Raises:
+        TypeError: ``x`` is a georeader ``GeoTensor``.
+
+    Example:
+        >>> scene = np.array([[[1.0, 4.0]], [[9.0, np.nan]]])  # (band, y, x)
+        >>> pixel_kernel(lambda v: v**0.5, scene, dim="band", name="Sqrt")
+        array([[[ 1., nan]],
+        <BLANKLINE>
+               [[ 3., nan]]])
+    """
+    carrier, unwrap = named(x, name=name)
+    banded = dim in _dims(carrier)
+    op = KernelOp(
+        _pixel_masked,
+        "(c)->(c)" if banded else "()->()",
+        core={"c": dim} if banded else {},
+        params={
+            "kernel": kernel,
+            "fill": fill_of(carrier),
+            "banded": banded,
+            "params": params,
+        },
+    )
+    return unwrap(_declare_fill(op(carrier), np.nan))
+
+
+def _pixel_masked(
+    x: Any,
+    *,
+    kernel: Callable[..., Any],
+    fill: Any,
+    banded: bool,
+    params: dict[str, Any],
+) -> Any:
+    xp = array_namespace(x)
+    valid = _valid(x, fill)
+    if banded:
+        valid = xp.all(valid, axis=-1, keepdims=True)
+    value = kernel(xp.astype(x, xp.float64), **params)
+    return xp.where(valid, value, xp.nan)
 
 
 def _run(
