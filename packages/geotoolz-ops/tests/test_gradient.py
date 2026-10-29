@@ -429,3 +429,28 @@ def test_a_plain_jax_mask_under_jit() -> None:
         field.to_jax(), jax.numpy.asarray(land)
     )
     np.testing.assert_allclose(np.asarray(got), want, rtol=1e-12)
+
+
+def test_nodata_in_one_band_drops_the_pixel_in_every_band() -> None:
+    values = np.ones((2, 5, 5))
+    values[0, 2, 2] = -9999.0
+    field = GeoArray(
+        values, UTM, "EPSG:32613", fill_value=-9999.0, dims=("band", "y", "x")
+    )
+    for policy in ("propagate", "adaptive"):
+        out = np.asarray(Gradient(nan_policy=policy)(field))
+        assert np.isnan(out[:, :, 2, 2]).all()  # both bands, both components
+
+
+def test_a_time_mask_is_aligned_by_dim_name() -> None:
+    values = np.ones((3, 3, 5, 6))  # T == C, the case positional broadcast gets wrong
+    stack = GeoArray(values, UTM, "EPSG:32613", dims=("time", "band", "y", "x"))
+    land = np.zeros((3, 5, 6), bool)
+    land[1, 2, 3] = True  # one pixel, in frame 1 only
+    mask = GeoArray(land, UTM, "EPSG:32613", dims=("time", "y", "x"))
+    out = np.asarray(Gradient()(stack, mask))  # (time, band, component, y, x)
+    assert np.isnan(out[1, :, :, 2, 3]).all()  # every band of frame 1
+    assert np.isfinite(out[[0, 2], :, :, 2, 3]).all()  # other frames untouched
+    with pytest.raises(ValueError, match="dims"):
+        bad = GeoArray(land[None], UTM, "EPSG:32613", dims=("member", "time", "y", "x"))
+        Gradient()(stack, bad)

@@ -2804,9 +2804,15 @@ class Gradient(Operator):
         xp = gt.xp
         data = as_float(gt.data)
         invalid = ~xp.isfinite(nodata_where(data, data, fill_values=(gt.fill_value,)))
-        mask_data = _mask_data(mask, xp)
+        mask_data = _aligned_mask(mask, gt, xp)
         if mask_data is not None:
             invalid = invalid | mask_data
+        if "band" in gt.dims:
+            # geoops' pixel rule: a pixel with any invalid band is invalid in all
+            band = gt.dims.index("band")
+            pixel = xp.any(invalid, axis=band, keepdims=True)
+            invalid = xp.broadcast_to(pixel, data.shape)
+        mask_data = invalid
         field = xp.where(invalid, xp.nan, data)
         d_row, d_col = self._pixel_gradient(field, xp, mask_data)
         d_y, d_x = _map_axes(gt, d_row, d_col)
@@ -2827,6 +2833,31 @@ class Gradient(Operator):
         if mask is not None:
             out = xp.where(mask, xp.nan, out)
         return out
+
+
+def _aligned_mask(mask: Any, gt: GeoArray, xp: Any) -> Any:
+    """``mask`` as booleans aligned to ``gt``'s dims: by name for a carrier.
+
+    A `GeoArray` mask's dims must be among the field's; each missing dim
+    becomes a size-1 axis, so a ``(time, y, x)`` mask drops whole pixels of
+    a ``(time, band, y, x)`` field frame by frame. A plain array broadcasts
+    from the right, as NumPy does (an ``(H, W)`` mask on any field).
+    """
+    data = _mask_data(mask, xp)
+    if data is None or not isinstance(mask, GeoArray):
+        return data
+    extra = [d for d in mask.dims if d not in gt.dims]
+    if extra:
+        raise ValueError(
+            f"Gradient: the mask has dims {extra} the field lacks; its dims are "
+            f"{mask.dims}, the field's {gt.dims}"
+        )
+    present = [d for d in gt.dims if d in mask.dims]
+    data = xp.permute_dims(data, tuple(mask.dims.index(d) for d in present))
+    for axis, dim in enumerate(gt.dims):
+        if dim not in mask.dims:
+            data = xp.expand_dims(data, axis=axis)
+    return data
 
 
 def _mask_data(mask: Any, xp: Any) -> Any:
