@@ -9,6 +9,7 @@ live in the ``coregister`` subnamespace (and at the top level) — see
 from __future__ import annotations
 
 from geoops.geom import coregister  # noqa: F401 — re-export subnamespace
+from geoops.geom._src.array import central_gradient
 from geoops.geom._src.operators import (
     AntimeridianSplit,
     BowtieCorrection,
@@ -16,6 +17,7 @@ from geoops.geom._src.operators import (
     CropToBounds,
     Georeference,
     GeostationaryParallaxCorrect,
+    Gradient,
     Mosaic,
     OpticalFlowILK,
     OpticalFlowTVL1,
@@ -43,6 +45,7 @@ __all__ = [
     "CropToBounds",
     "Georeference",
     "GeostationaryParallaxCorrect",
+    "Gradient",
     "Mosaic",
     "OpticalFlowILK",
     "OpticalFlowTVL1",
@@ -60,4 +63,5 @@ __all__ = [
     "Stitch",
     "Tile",
     "Vectorize",
+    "central_gradient",
 ]

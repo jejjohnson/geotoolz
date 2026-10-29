@@ -48,6 +48,7 @@ from geoops._src.geo import (
     require_geoarray,
     require_grid_match,
 )
+from geoops._src.kernels import nodata_where
 from geoops._src.shape import BAND_AXIS, over_frames, require_ndim, single_band
 from geoops._src.valid import (
     carried_fill,
@@ -59,6 +60,7 @@ from geoops._src.wrap import adopt_attrs, rewrap_attrs, wrap_like
 from geoops.geom._src.array import (
     bowtie_detector_positions,
     center_offsets,
+    central_gradient,
     feather_weights,
     is_north_up,
     resolve_interpolation,
@@ -2688,3 +2690,106 @@ def _validate_segment_compatible(
         first_transform.e,
     ):
         raise ValueError("All segments must share pixel size.")
+
+
+class Gradient(Operator):
+    r"""Diagnostic gradient of a gridded field, in map axes (OP-O7).
+
+    The derivatives along rows and columns come from the one L1 kernel,
+    :func:`geoops.geom.central_gradient` (centred inside, one-sided on the
+    edges, NaN-propagating). The geometry is derived from the carrier: the
+    transform :math:`x = a\,j + b\,i + c,\; y = d\,j + e\,i + f` maps them
+    to map axes through its Jacobian,
+
+    .. math::
+
+        \begin{pmatrix} \partial_x f \\ \partial_y f \end{pmatrix}
+        = \frac{1}{ae - bd}
+          \begin{pmatrix} e & -d \\ -b & a \end{pmatrix}
+          \begin{pmatrix} \partial_j f \\ \partial_i f \end{pmatrix},
+
+    so north-up, flipped and rotated grids all give the gradient along the
+    CRS's own ``x`` and ``y``, exactly for a linear field. On a geographic
+    CRS the degrees are turned into metres on the CRS's ellipsoid, at each
+    pixel's latitude :math:`\varphi`:
+
+    .. math::
+
+        \partial_{\mathrm{north}} f = \frac{\partial_\varphi f}{M(\varphi)\,\pi/180},
+        \qquad
+        \partial_{\mathrm{east}} f = \frac{\partial_\lambda f}{N(\varphi)\cos\varphi\,\pi/180},
+
+    with :math:`M` and :math:`N` the meridional and prime-vertical radii of
+    curvature. Units are the field's per CRS unit (per metre on a
+    geographic CRS).
+
+    The result gains a ``component`` dim just before ``y x``, holding
+    ``(∂f/∂y, ∂f/∂x)`` in that order, so a ``(time, band, y, x)`` stack
+    gives ``(time, band, component, y, x)``. Nodata (non-finite or the
+    carrier's fill) becomes ``NaN`` and spreads to its neighbours'
+    derivatives; the output declares ``fill_value=NaN``. A plain array has
+    no transform, so it is differentiated in pixel units, rows then
+    columns.
+
+    A diagnostic for SSH maps, plume maps and similar fields: model-grade
+    calculus on staggered grids stays in finitevolX. A geometry operator,
+    so it takes carriers, not a ``DataArray``: lift it over a cube with
+    ``xrops.lift``, or call ``central_gradient`` with coordinate spacings.
+
+    Examples:
+        >>> import geoops as gz
+        >>> grad = gz.geom.Gradient()(ssh_map)   # GeoArray (component, y, x)
+        >>> dssh_dx = grad.isel(component=1)     # per metre on a UTM grid
+        >>> step = jax.jit(gz.geom.Gradient())   # one trace across transforms
+        >>> grad = step(ssh_map.to_jax())
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+
+    def _apply(self, gt: Any) -> Any:
+        reject_geotensor(gt, "Gradient")
+        if type(gt).__module__.startswith("xarray."):
+            raise TypeError(
+                "Gradient is a geometry operator and takes a GeoArray: lift it "
+                "over a DataArray cube with xrops.lift(Gradient(), dim=...), or "
+                "call geoops.geom.central_gradient with coordinate spacings."
+            )
+        if not isinstance(gt, GeoArray):
+            field = np.asarray(as_float(np.asarray(gt)))
+            grad = central_gradient(field, 1.0, 1.0)
+            return np.moveaxis(grad, 0, -3)
+        fill = gt.fill_value
+        data = as_float(gt.data)
+        field = nodata_where(data, data, fill_values=(fill,))
+        d_row, d_col = central_gradient(field, 1.0, 1.0)
+        d_y, d_x = _map_axes(gt, d_row, d_col)
+        xp = gt.xp
+        grad = xp.stack([d_y, d_x], axis=-3)
+        dims = (*gt.dims[:-2], "component", *gt.dims[-2:])
+        return gt.replace(data=grad, dims=dims, fill_value=np.nan)
+
+
+def _map_axes(gt: GeoArray, d_row: Any, d_col: Any) -> tuple[Any, Any]:
+    """``(∂f/∂y, ∂f/∂x)`` in the CRS's axes (metres on a geographic CRS)."""
+    a, b, _, d, e, f0 = (gt.transform[k] for k in range(6))
+    det = a * e - b * d
+    d_x = (e * d_col - d * d_row) / det
+    d_y = (a * d_row - b * d_col) / det
+    crs = gt.crs
+    if crs is None or not CRS.from_user_input(crs).is_geographic:
+        return d_y, d_x
+    xp = gt.xp
+    height, width = gt.shape[-2:]
+    rows = xp.arange(height, dtype=xp.float64)[:, None] + 0.5
+    cols = xp.arange(width, dtype=xp.float64)[None, :] + 0.5
+    lat = xp.deg2rad(d * cols + e * rows + f0)
+    ellipsoid = CRS.from_user_input(crs).ellipsoid
+    semi_major = ellipsoid.semi_major_metre
+    e2 = 1.0 - (ellipsoid.semi_minor_metre / semi_major) ** 2
+    w = xp.sqrt(1.0 - e2 * xp.sin(lat) ** 2)
+    meridional = semi_major * (1.0 - e2) / w**3
+    prime_vertical = semi_major / w
+    per_degree = np.pi / 180.0
+    return d_y / (meridional * per_degree), d_x / (
+        prime_vertical * xp.cos(lat) * per_degree
+    )

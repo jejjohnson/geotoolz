@@ -10,11 +10,12 @@ a ``GeoArray``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from affine import Affine
 from jaxtyping import Bool, Float, Shaped
+from pipekit_array import array_namespace
 
 from geoops._src.blending import triangular_weights
 from geoops._src.optional import optional_name
@@ -422,3 +423,70 @@ def bowtie_detector_positions(
     k0 = centre + offset[:, None] / g
     k1 = centre + (offset - step * n)[:, None] / g
     return k0, k1, step
+
+
+def central_gradient(
+    f: Float[np.ndarray, "*batch h w"],
+    dy: Float[np.ndarray, "h w"] | float,
+    dx: Float[np.ndarray, "h w"] | float,
+) -> Float[np.ndarray, "2 *batch h w"]:
+    r"""Centred finite-difference gradient along the last two axes.
+
+    Second-order centred differences in the interior and first-order
+    one-sided differences on the edges, for row index :math:`i` and column
+    index :math:`j`:
+
+    .. math::
+
+        \partial_y f_{ij} \approx \frac{f_{i+1,j} - f_{i-1,j}}{2\,\Delta y_{ij}},
+        \qquad
+        \partial_x f_{ij} \approx \frac{f_{i,j+1} - f_{i,j-1}}{2\,\Delta x_{ij}},
+
+    with :math:`(f_{1,j} - f_{0,j}) / \Delta y_{0j}` on the first row (and
+    likewise on the other three edges); nothing wraps around. A ``NaN``
+    propagates to its neighbours' derivatives. The gradient of a linear
+    field is exact everywhere, edges included.
+
+    A diagnostic, written once for every backend (the array namespace of
+    ``f``): model-grade calculus on staggered grids belongs in finitevolX.
+
+    Args:
+        f: The field, rows and columns last; any leading axes are mapped.
+        dy: The signed step between row centres, a scalar or one per pixel.
+        dx: The signed step between column centres, a scalar or one per
+            pixel.
+
+    Returns:
+        ``(∂f/∂y, ∂f/∂x)`` stacked on a new leading axis, floating point.
+
+    Raises:
+        ValueError: ``f`` has fewer than two rows or columns.
+
+    Example:
+        >>> y, x = np.mgrid[0:3, 0:4].astype(float)
+        >>> grad = central_gradient(2.0 * y + 3.0 * x, 1.0, 1.0)
+        >>> grad[0].min(), grad[0].max(), grad[1].min(), grad[1].max()
+        (2.0, 2.0, 3.0, 3.0)
+    """
+    xp = array_namespace(f)
+    if f.shape[-2] < 2 or f.shape[-1] < 2:
+        raise ValueError(
+            f"central_gradient needs at least 2 rows and 2 columns; got {f.shape[-2:]}"
+        )
+    d_row = _one_axis_difference(xp, f, axis=-2)
+    d_col = _one_axis_difference(xp, f, axis=-1)
+    return xp.stack([d_row / dy, d_col / dx])
+
+
+def _one_axis_difference(xp: Any, f: Any, *, axis: int) -> Any:
+    """The per-step difference along ``axis``: centred inside, one-sided at the ends."""
+
+    def take(start: int | None, stop: int | None) -> Any:
+        index = [slice(None)] * f.ndim
+        index[axis] = slice(start, stop)
+        return f[tuple(index)]
+
+    first = take(1, 2) - take(0, 1)
+    inner = (take(2, None) - take(None, -2)) / 2.0
+    last = take(-1, None) - take(-2, -1)
+    return xp.concat([first, inner, last], axis=axis)
