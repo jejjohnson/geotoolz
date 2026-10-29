@@ -1,6 +1,6 @@
 [project]
 name = "xrtoolz"
-version = "0.1.0"
+version = "0.2.0"
 description = "The xarray side of the geostack in one install: xrtoolz-ops, -reader, -core, -grad, -einx and -sklearn."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
