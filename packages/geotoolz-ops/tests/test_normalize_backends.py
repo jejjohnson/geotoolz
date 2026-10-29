@@ -176,6 +176,15 @@ def test_band_stats_l1_takes_the_band_axis_by_position() -> None:
     np.testing.assert_allclose(q[0], np.nanmedian(np.where(x < 20, x, np.nan), (0, 1)))
 
 
+def test_band_stats_leave_infinities_out() -> None:
+    x = np.array([[[1.0, np.inf]], [[2.0, -np.inf]]])  # (C=2, H=1, W=2)
+    for valid in (None, np.ones(x.shape, dtype=bool)):
+        got = gn.band_stats(x, valid)
+        np.testing.assert_array_equal(got["mean"], [1.0, 2.0])
+        np.testing.assert_array_equal(got["std"], [0.0, 0.0])
+        np.testing.assert_array_equal(gn.band_quantiles(x, valid, q=(1.0,))[0], [1, 2])
+
+
 def test_band_stats_reject_bad_requests(scene: GeoArray) -> None:
     with pytest.raises(ValueError, match="unknown statistics"):
         gn.carrier_band_stats(scene, stats=("median",))
@@ -346,6 +355,13 @@ def test_per_band_stats_agree_on_every_carrier(stats_scene: GeoArray) -> None:
             np.testing.assert_allclose(op.stats[key], value, rtol=1e-12)
 
 
+def test_per_band_stats_without_percentiles(scene: GeoArray) -> None:
+    op = gn.PerBandStats(percentiles=[])
+    assert op(scene) is scene
+    assert op.stats["percentiles"] == []
+    assert len(op.stats["mean"]) == scene.shape[-3]
+
+
 def test_per_band_stats_compute_a_dask_cube_once(scene: GeoArray) -> None:
     computes = 0
 
@@ -419,6 +435,15 @@ def test_histogram_match_agrees_on_every_carrier(
     assert jitted.backend == "jax"
     for out in (op(stats_scene.to_jax()), jitted, op(da), lazy.compute()):
         np.testing.assert_allclose(np.asarray(out), want, rtol=1e-12, equal_nan=True)
+
+
+def test_histogram_match_takes_a_jax_reference_under_jit(
+    stats_scene: GeoArray, reference: GeoArray
+) -> None:
+    want = np.asarray(gn.HistogramMatch(reference=reference)(stats_scene))
+    op = gn.HistogramMatch(reference=reference.to_jax())
+    jitted = jax.jit(lambda g: op(g))(stats_scene.to_jax())
+    np.testing.assert_allclose(np.asarray(jitted), want, rtol=1e-12, equal_nan=True)
 
 
 def test_histogram_match_needs_no_scikit_image(

@@ -36,20 +36,23 @@ fixed-stats alias ``Normalize``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, Self
+from typing import Any, ClassVar, NamedTuple, Self
 
 import numpy as np
+from geoarray import GeoArray
 from pipekit import Operator, get_adapter
 from pipekit_array import KernelOp
 
 from geoops._src.config import jsonable
 from geoops._src.fitted import fit_once, require_concrete
 from geoops._src.geo import reject_geotensor
-from geoops._src.kernels import _declare_fill, fill_of, named, pixel_kernel
+from geoops._src.kernels import _declare_fill, named, pixel_kernel
 from geoops._src.shape import DIMS
 from geoops._src.stretch import check_percentiles, stretch_between
 from geoops._src.valid import (
+    fill_of,
     invalid_elements,
+    invalid_pixel_mask,
     namespace_of,
 )
 from geoops.normalize._src.array import (
@@ -70,10 +73,6 @@ from geoops.normalize._src.array import (
     standard_scale,
     validate_out_range,
 )
-
-
-if TYPE_CHECKING:
-    from geoarray import GeoArray
 
 
 def _check_per_band(stat: Any, gt: Any, dim: str = "band") -> None:
@@ -165,11 +164,9 @@ def _pixel_view(x: Any, dim: str, name: str) -> _PixelView:
     adapter = get_adapter(carrier)
     dims = tuple(adapter.dims(carrier))
     data = adapter.data(carrier)
-    bad = invalid_elements(data, fill_of(carrier))
     band_axis = dims.index(dim) if dim in dims else None
-    if band_axis is not None:
-        bad = namespace_of(data).any(bad, axis=band_axis, keepdims=True)
-    return _PixelView(carrier, unwrap, dims, data, ~bad, band_axis)
+    valid = ~invalid_pixel_mask(carrier, dim=dim)
+    return _PixelView(carrier, unwrap, dims, data, valid, band_axis)
 
 
 def _as_rows(view: _PixelView, per_band: bool) -> tuple[Any, Any, Any]:
@@ -350,7 +347,8 @@ class PerBandStats(Operator):
             f"Call it eagerly, outside the trace; or use {_FUNCTIONAL}",
             quantiles=tuple(p / 100.0 for p in self.percentiles),
         )
-        stats["percentiles"] = stats.pop("quantiles")
+        # no levels gives no "quantiles" entry; keep the old empty list
+        stats["percentiles"] = stats.pop("quantiles", np.empty(0))
         self.stats = {key: jsonable(value) for key, value in stats.items()}
         return gt
 
@@ -922,7 +920,11 @@ class HistogramMatch(Operator):
     def _apply(self, gt: Any) -> Any:
         reject_geotensor(self.reference, "HistogramMatch (reference)")
         source = _pixel_view(gt, "band", "HistogramMatch")
-        ref = _pixel_view(self.reference, "band", "HistogramMatch (reference)")
+        reference = self.reference
+        if isinstance(reference, GeoArray) and reference.backend == "jax":
+            # the table is a host constant: build it before any trace sees it
+            reference = reference.to_numpy()
+        ref = _pixel_view(reference, "band", "HistogramMatch (reference)")
         n_bands = (
             source.data.shape[source.band_axis] if source.band_axis is not None else 1
         )
