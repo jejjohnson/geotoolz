@@ -2,8 +2,8 @@
 
 Centralises the ``_coord_spacing`` logic that was previously copied into
 the Fourier (:mod:`xrops.transforms._src.fourier`) and wavelet
-(:mod:`xrops.geo._src.wavelet_utils`,
-:mod:`xrops.geo._src.wavelet1d`) modules. The three copies differed
+(:mod:`xrops.wavelets._src.wavelet_utils`,
+:mod:`xrops.wavelets._src.wavelet1d`) modules. The three copies differed
 only in how strict they were about missing, singleton, and non-uniform
 coordinates; those differences are now expressed as flags.
 """

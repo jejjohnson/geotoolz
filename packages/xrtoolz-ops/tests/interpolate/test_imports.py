@@ -2,7 +2,7 @@
 
 Pins the canonical re-export surface, the deep-import paths into
 ``_src.<sub>``, identity equivalence between the two, and verifies that
-the legacy ``xrops.geo`` re-exports for these names are gone (no
+the legacy geo re-exports for these names are gone (no
 deprecation shim — the package is pre-1.0 and has no external users).
 """
 
@@ -111,13 +111,13 @@ def test_canonical_operator_surface(name: str) -> None:
 
 @pytest.mark.parametrize("name", REMOVED_FROM_GEO)
 def test_legacy_geo_names_are_gone(name: str) -> None:
-    geo = importlib.import_module("xrops.geo")
+    geo = importlib.import_module("xrops.geom")
     with pytest.raises(AttributeError):
         getattr(geo, name)
 
 
 def test_legacy_geo_operator_names_are_gone() -> None:
-    ops = importlib.import_module("xrops.geo.operators")
+    ops = importlib.import_module("xrops.geom.operators")
     for name in ("FillNaNSpatial", "FillNaNTemporal", "ResampleTime"):
         with pytest.raises(AttributeError):
             getattr(ops, name)

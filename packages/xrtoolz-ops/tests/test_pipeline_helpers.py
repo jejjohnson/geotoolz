@@ -13,13 +13,11 @@ import pytest
 import xarray as xr
 from pipekit import Sequential
 
-from xrops.geo import remove_mean, rename_variables
-from xrops.geo.operators import (
-    RemoveMean,
-    RenameVariables,
-    SelectVariables,
-    ValidateCoords,
-)
+from xrops.anomaly import remove_mean
+from xrops.anomaly.operators import RemoveMean
+from xrops.cf import rename_variables
+from xrops.cf.operators import RenameVariables, ValidateCoords
+from xrops.geom.operators import SelectVariables
 from xrops.interpolate import regrid_like
 from xrops.interpolate.operators import RegridLike
 

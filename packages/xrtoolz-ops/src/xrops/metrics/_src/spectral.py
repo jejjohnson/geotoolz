@@ -30,13 +30,13 @@ from jaxtyping import Float
 from scipy.interpolate import interp1d
 
 from xrops._src.operator import Operator
-from xrops.geo._src.wavelet import wvlt_power_spectrum
-from xrops.geo._src.wavelet_utils import scale_to_wavenumber
 from xrops.transforms._src.fourier import (
     drop_negative_frequencies,
     power_spectrum,
 )
 from xrops.utils._src.optional_imports import _require_optional
+from xrops.wavelets._src.wavelet import wvlt_power_spectrum
+from xrops.wavelets._src.wavelet_utils import scale_to_wavenumber
 
 
 _KM_PER_DEGREE = 111.0
@@ -618,7 +618,7 @@ def _physical_spacing(
             raise ValueError(
                 f"coord {d!r} is missing a `units` attribute; bands must be "
                 "in physical coord units, so attach one (e.g. with "
-                "`xrops.geo.ValidateCoords()`) or pass `coord_spacing=` "
+                "`xrops.cf.ValidateCoords()`) or pass `coord_spacing=` "
                 "per dim."
             )
         vals = np.asarray(coord.values, dtype=float)

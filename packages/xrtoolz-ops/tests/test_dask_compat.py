@@ -26,13 +26,8 @@ import xarray as xr
 from sklearn.decomposition import PCA
 
 from xrops import grad as calc
-from xrops.geo.operators import (
-    AddLandMask,
-    AddOceanMask,
-    CalculateClimatology,
-    RemoveMean,
-    ValidateLongitude,
-)
+from xrops.anomaly.operators import CalculateClimatology, RemoveMean
+from xrops.cf.operators import ValidateLongitude
 from xrops.interpolate import Grid
 from xrops.interpolate.operators import (
     Bin2D,
@@ -48,6 +43,7 @@ from xrops.interpolate.operators import (
     RegridLike,
 )
 from xrops.learn import XarrayEstimator
+from xrops.mask.operators import AddLandMask, AddOceanMask
 from xrops.metrics.operators import MAE, RMSE, Bias, Correlation
 from xrops.ocn.operators import (
     Divergence,

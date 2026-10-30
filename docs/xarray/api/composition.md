@@ -18,7 +18,7 @@ live in `xrops.combinators`.
 !!! example "Linear and DAG composition, same operators"
     ```python
     from pipekit import Sequential, Graph, Input
-    from xrops.geo import RemoveMean
+    from xrops.anomaly import RemoveMean
     from xrops.ocn import Streamfunction, GeostrophicVelocities
 
     # Linear pipeline

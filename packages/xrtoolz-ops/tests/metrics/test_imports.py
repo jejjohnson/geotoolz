@@ -314,13 +314,13 @@ def test_metrics_object_reserved_class_raises_notimplementederror(name):
 
 def test_metrics_are_not_reexported_from_geo():
     """Metrics live only in :mod:`xrops.metrics`."""
-    import xrops.geo as geo
-    import xrops.geo.operators as geo_ops
+    import xrops.geom as geo
+    import xrops.geom.operators as geo_ops
 
     for name in ("rmse", "mse", "psd_score"):
         assert not hasattr(geo, name)
     for name in ("RMSE", "MSE", "PSDScore"):
         assert not hasattr(geo_ops, name)
-    for module in ("xrops.geo._src.metrics", "xrops.geo.plot"):
+    for module in ("xrops.geom._src.metrics", "xrops.geom.plot"):
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module(module)

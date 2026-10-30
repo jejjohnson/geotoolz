@@ -10,7 +10,7 @@ The packages (distribution name → import name):
 
 | Package | Import | Purpose |
 |---|---|---|
-| `xrtoolz-ops` | `xrops` | Main operator families (geo, ocn, budgets, interpolate, transforms, metrics, viz, …) |
+| `xrtoolz-ops` | `xrops` | Main operator families (geom, mask, anomaly, wavelets, cf, ocn, budgets, interpolate, transforms, metrics, viz, …) |
 | `xrtoolz` | `xrtoolz` | The umbrella: no code; installs the other two |
 | `xrtoolz-products` | `xrproducts` | Authenticated archive readers (CMEMS, CDS, AEMET) + the typed request vocabulary / CF `Variable` registry |
 
@@ -35,22 +35,27 @@ Each package lives in `packages/<distribution>/src/<import name>/` with its own 
 | Path | Scope |
 |------|-------|
 | `xrops.combinators` | `Augment`, `ApplyToEach` — xarray-Dataset-specific combinators built on `pipekit.Operator` |
-| `xrops.geo` | Generic xarray geoprocessing — coordinate validation/CF renaming, subset, masks, detrend/climatology, CRS, regions, regimes, extremes, along-track, 1-D/2-D wavelet spectra |
+| `xrops.geom` | Geometry — subsetting (bbox, time, region, variables), CRS and reprojection, local frames, mosaics, vector↔raster bridge, footprints, region registry |
+| `xrops.mask` | Land/ocean/country masks, mask application, canonical regimes |
+| `xrops.anomaly` | Climatologies, anomalies, mean removal |
+| `xrops.extremes` | Block maxima/minima, peaks-over-threshold, point-process statistics |
+| `xrops.wavelets` | Along-track band-pass, 1-D/2-D wavelet spectra, scalograms, significance |
+| `xrops.cf` | CF conventions — coordinate validation, time decoding, coordinate/variable renaming |
 | `xrops.ocn` | Oceanography physics — kinematics (vorticity, divergence, strain, Okubo–Weiss, streamfunction, geostrophic velocities, KE), SSH diagnostics, CF metadata validation |
 | `xrops.budgets` | Conservation budgets — heat/salt/volume/KE residuals, control-volume integrals, boundary fluxes |
-| `xrops.interpolate` | Gap-filling (`FillNaN*`), regridding, KNN, binning, smoothing, coarsen/refine, downscaling, resampling, points↔grid, vertical coordinate remapping |
+| `xrops.interpolate` | Gap-filling (`FillNaN`, `FillNaN*`), regridding, KNN, binning, smoothing, coarsen/refine, downscaling, resampling, points↔grid, vertical coordinate remapping |
 | `xrops.metrics` | Verification metrics — pixel, spectral (PSD, resolved scale), distributional, probabilistic, structural, object-based, physical, forecast, masked, multiscale, Diebold–Mariano, region/leadtime composites, leaderboard |
 | `xrops.transforms` | Fourier/DCT/wavelet transforms, signal decompositions, morphology, coordinate remapping, space/time/basis encoders |
 | `xrops.grad` | Finite-difference calculus on labeled grids (`partial`, `gradient`, `divergence`, `curl`, `laplacian`; `Gradient` and `Difference` operators) over geoops's difference kernels; cartesian, rectilinear and spherical (sphere by default, `ellipsoid=` for an ellipsoidal metric) |
 | `xrops.learn` | scikit-learn on xarray over `pipekit_array.Estimator`: `XarrayEstimator` (Dataset variables as one feature table, DataTree per node or pooled) and the `.sklearn` accessor |
 | `xrops.inference` | `ModelOp` inference wrappers (duck-typed; sklearn/JAX adapters). Not re-exported at top level — import explicitly |
-| `xrops.utils` | Shared helpers — finite-mask utilities, grid spacing/resolution, validation guards |
+| `xrops.utils` | Shared helpers — finite-mask utilities, grid spacing/resolution, validation guards, `ReduceDims` |
 | `xrops.viz` | Colormaps, norms, projections, and `viz.validation` panel Operators (spatial maps, PSD, rotary, budgets, events, regime bars) |
 | `xrops.atm` / `xrops.atm.gas.ch4` | Atmospheric physics — `open_wrfout` (WRF → CF Dataset), wind speed/direction/components, column integral, hypsometric height, bulk-Richardson PBL height; methane columns under `gas.ch4` (column averaging kernel, dry-air column, mixing ratio ↔ column). Potential temperature still planned |
 
 Design rules:
 
-- Anything domain-agnostic lives in `geo`/`interpolate`/`transforms`/`utils` (the einx and scikit-learn bridges are pipekit-array's, with `xrops.learn` on top); only true physics lives in the domain submodules (`ocn`, `budgets`, `atm`, …). The composition primitives themselves live in `pipekit`; their xarray-aware base is `xrops.Operator`.
+- Anything domain-agnostic lives in `geom`/`mask`/`anomaly`/`extremes`/`wavelets`/`cf`/`interpolate`/`transforms`/`utils` (the einx and scikit-learn bridges are pipekit-array's, with `xrops.learn` on top); only true physics lives in the domain submodules (`ocn`, `budgets`, `atm`, …). The composition primitives themselves live in `pipekit`; their xarray-aware base is `xrops.Operator`.
 - Implementation lives in each submodule's `_src/` directory; public names are re-exported through the submodule `__init__.py` (and, for `metrics`, per-family facade modules like `metrics.pixel`). **Every** public Operator class is importable from its domain package (`xrops.ocn.Streamfunction`, not just `xrops.ocn.operators.Streamfunction`).
 - Operator constructor conventions: `variable=` (not `var=`) for a single variable name, `variables=` for lists; singular `dim=` (accepting `str | Sequence[str]`) for reduce-style "dimension(s) to act over" parameters, plural `dims=` only when the value is inherently a fixed collection of axes (image-plane pairs, FFT axes).
 

@@ -7,45 +7,45 @@ GeoJSON polygons.
 
 ## Subsetting
 
-::: xrops.geo.operators.SubsetBBox
+::: xrops.geom.operators.SubsetBBox
 
-::: xrops.geo.operators.SubsetTime
+::: xrops.geom.operators.SubsetTime
 
-::: xrops.geo.operators.SubsetToRegion
+::: xrops.geom.operators.SubsetToRegion
 
-::: xrops.geo.operators.SelectVariables
+::: xrops.geom.operators.SelectVariables
 
 ## Masks
 
-::: xrops.geo.operators.AddLandMask
+::: xrops.mask.operators.AddLandMask
 
-::: xrops.geo.operators.AddOceanMask
+::: xrops.mask.operators.AddOceanMask
 
-::: xrops.geo.operators.AddCountryMask
+::: xrops.mask.operators.AddCountryMask
 
-::: xrops.geo.operators.ApplyMask
+::: xrops.mask.operators.ApplyMask
 
 ## Functional primitives (Layer 0)
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrops.geo.subset_bbox
+::: xrops.geom.subset_bbox
 
-::: xrops.geo.subset_time
+::: xrops.geom.subset_time
 
-::: xrops.geo.subset_to_region
+::: xrops.geom.subset_to_region
 
-::: xrops.geo.subset_where
+::: xrops.geom.subset_where
 
-::: xrops.geo.select_variables
+::: xrops.geom.select_variables
 
-::: xrops.geo.add_land_mask
+::: xrops.mask.add_land_mask
 
-::: xrops.geo.add_ocean_mask
+::: xrops.mask.add_ocean_mask
 
-::: xrops.geo.add_country_mask
+::: xrops.mask.add_country_mask
 
-::: xrops.geo.apply_mask
+::: xrops.mask.apply_mask
 
 ## Region registry
 
@@ -53,20 +53,20 @@ These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dat
 bounding-box descriptor. The helpers below resolve a region from a name, a
 dict, or a GeoJSON polygon.
 
-::: xrops.geo.REGIONS
+::: xrops.geom.REGIONS
 
-::: xrops.geo.RegionSpec
+::: xrops.geom.RegionSpec
 
-::: xrops.geo.bbox_region
+::: xrops.geom.bbox_region
 
-::: xrops.geo.custom_region
+::: xrops.geom.custom_region
 
-::: xrops.geo.resolve_region
+::: xrops.geom.resolve_region
 
-::: xrops.geo.region_from_dict
+::: xrops.geom.region_from_dict
 
-::: xrops.geo.region_to_dict
+::: xrops.geom.region_to_dict
 
-::: xrops.geo.load_region_file
+::: xrops.geom.load_region_file
 
-::: xrops.geo.polygon_from_geojson
+::: xrops.geom.polygon_from_geojson

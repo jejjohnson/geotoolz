@@ -1,7 +1,7 @@
 """Import-surface tests for :mod:`xrops.transforms.encoders` (D8).
 
 Guards against regressions in the encoder taxonomy after the move from
-``xrops.geo.encoders`` to ``xrops.transforms.encoders``.
+the old geo package to ``xrops.transforms.encoders``.
 """
 
 from __future__ import annotations
@@ -121,8 +121,8 @@ def test_root_and_submodule_paths_resolve_to_same_object():
 )
 def test_encoders_are_not_reexported_from_geo(name):
     """Encoders live only in :mod:`xrops.transforms.encoders`."""
-    import xrops.geo as geo
+    import xrops.geom as geo
 
     assert not hasattr(geo, name)
     with pytest.raises(ModuleNotFoundError):
-        importlib.import_module("xrops.geo._src.encoders")
+        importlib.import_module("xrops.geom._src.encoders")

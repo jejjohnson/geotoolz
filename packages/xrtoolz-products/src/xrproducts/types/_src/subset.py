@@ -2,7 +2,7 @@
 
 These are the pure-xarray subsetting helpers that both the archive readers
 (which screen a freshly opened product by bounding box, time window or
-quality flag) and :mod:`xrops.geo` (which re-exports them) rely on. They
+quality flag) and :mod:`xrops.geom` (which re-exports them) rely on. They
 live here rather than in ``xrops`` because the dependency runs
 ``xrops -> xrproducts``, never the other way round.
 """

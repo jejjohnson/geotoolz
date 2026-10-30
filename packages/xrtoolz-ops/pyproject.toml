@@ -60,7 +60,7 @@ dependencies = [
     # The data-acquisition layer (CMEMS/CDS/AEMET readers) and the shared
     # typed request vocabulary + CF Variable registry live in the
     # `xrtoolz-products` workspace member, which imports as `xrproducts`.
-    # `xrops.geo` / `xrops.viz` import the registry from `xrproducts.types`;
+    # `xrops.geom` / `xrops.viz` import the registry from `xrproducts.types`;
     # the reader's core is light (numpy/pandas/xarray) and its heavy service
     # clients are optional extras, so this stays a lightweight dependency.
     "xrtoolz-products>=0.0.2",
@@ -94,7 +94,7 @@ maps = [
 ]
 
 # ``pip install xrtoolz-ops[vector]`` — the vector ↔ raster bridge in
-# :mod:`xrops.geo` (``vectorize``, ``rasterize``, ``rasterize_like``,
+# :mod:`xrops.geom` (``vectorize``, ``rasterize``, ``rasterize_like``,
 # ``footprint``, ``valid_footprint``, ``transform_polygon``). Imported
 # lazily; rasterio already arrives with rioxarray.
 vector = [

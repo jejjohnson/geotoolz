@@ -12,56 +12,56 @@ or from CF standard names, and measure grid resolution.
 
 ## Coordinate validation
 
-::: xrops.geo.operators.ValidateLongitude
+::: xrops.cf.operators.ValidateLongitude
 
-::: xrops.geo.operators.ValidateLatitude
+::: xrops.cf.operators.ValidateLatitude
 
-::: xrops.geo.operators.ValidateCoords
+::: xrops.cf.operators.ValidateCoords
 
-::: xrops.geo.operators.ValidateTime
+::: xrops.cf.operators.ValidateTime
 
-::: xrops.geo.operators.DecodeCFTime
+::: xrops.cf.operators.DecodeCFTime
 
 ## Renaming & CF standard names
 
-::: xrops.geo.operators.RenameCoords
+::: xrops.cf.operators.RenameCoords
 
-::: xrops.geo.operators.RenameVariables
+::: xrops.cf.operators.RenameVariables
 
-::: xrops.geo.operators.RenameToCFStandardNames
+::: xrops.cf.operators.RenameToCFStandardNames
 
-::: xrops.geo.operators.RenameFromCFStandardNames
+::: xrops.cf.operators.RenameFromCFStandardNames
 
 ## Functional primitives (Layer 0)
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrops.geo.check_dataset_coords
+::: xrops.cf.check_dataset_coords
 
-::: xrops.geo.validate_longitude
+::: xrops.cf.validate_longitude
 
-::: xrops.geo.validate_latitude
+::: xrops.cf.validate_latitude
 
-::: xrops.geo.validate_time
+::: xrops.cf.validate_time
 
-::: xrops.geo.decode_cf_time
+::: xrops.cf.decode_cf_time
 
-::: xrops.geo.rename_coords
+::: xrops.cf.rename_coords
 
-::: xrops.geo.rename_variables
+::: xrops.cf.rename_variables
 
-::: xrops.geo.rename_to_cf_standard_names
+::: xrops.cf.rename_to_cf_standard_names
 
-::: xrops.geo.rename_from_cf_standard_names
+::: xrops.cf.rename_from_cf_standard_names
 
-::: xrops.geo.calc_latlon
+::: xrops.geom.calc_latlon
 
-::: xrops.geo.get_dataset_resolution
+::: xrops.geom.get_dataset_resolution
 
-::: xrops.geo.median_dx_km
+::: xrops.wavelets.median_dx_km
 
-::: xrops.geo.geometric_scales
+::: xrops.wavelets.geometric_scales
 
-::: xrops.geo.scale_to_wavenumber
+::: xrops.wavelets.scale_to_wavenumber
 
-::: xrops.geo.wavenumber_to_scale
+::: xrops.wavelets.wavenumber_to_scale

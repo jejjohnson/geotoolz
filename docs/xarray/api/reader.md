@@ -81,7 +81,7 @@ the antimeridian afterwards raises), `time` as a per-scanline mask on
 `paths=[a, b]` concatenates granules along `time` in the order given.
 `subset_bbox`, `subset_where` and `subset_time` now live in
 `xrproducts.types` (pure xarray) and are re-exported unchanged by
-`xrops.geo`, so the reader can screen without importing `xrtoolz`. See the
+`xrops.geom`, so the reader can screen without importing `xrtoolz`. See the
 [TROPOMI recipe](../recipes/tropomi_ch4_screen.md) for a worked example.
 
 **Emission inventories.** `open_ch4_inventory(path, variable=None, units=None,

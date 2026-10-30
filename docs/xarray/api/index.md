@@ -19,7 +19,7 @@ pure functions — `(xr.Dataset, …) → xr.Dataset` — with the Layer-1
 |------|-------|
 | [Composition](composition.md) | `Operator`, `Sequential`, `Graph`, `Input`, `Node`, `Tap`, `Augment`, `ApplyToEach`, `Signature` |
 
-## Geoprocessing — `geo`
+## Geoprocessing
 
 Domain-agnostic xarray geoprocessing. Anything that is *not* domain
 physics lives here.

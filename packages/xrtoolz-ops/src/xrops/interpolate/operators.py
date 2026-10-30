@@ -1869,12 +1869,36 @@ Downscale = _downscale.Downscale
 Upscale = _downscale.Upscale
 
 
+class FillNaN(Operator):
+    """Replace NaN values with a constant.
+
+    Promotes the inline op used in the V1.5 PSD demo to a library
+    primitive. ``xrops.interpolate._src`` provides
+    *interpolating* NaN fillers (``FillNaNSpatial`` / ``FillNaNTemporal``);
+    this op is the constant-fill counterpart — useful for zeroing land
+    cells before PSD scoring so they contribute no spectral energy.
+
+    Args:
+        value: Constant to substitute for NaN. Default ``0.0``.
+    """
+
+    def __init__(self, value: float = 0.0) -> None:
+        self.value = float(value)
+
+    def _apply(self, ds):
+        return ds.fillna(self.value)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"value": self.value}
+
+
 __all__ = [
     "AlongTrack",
     "Bin2D",
     "CleanMask",
     "Coarsen",
     "Downscale",
+    "FillNaN",
     "FillNaNBiharmonic",
     "FillNaNClimatology",
     "FillNaNIDW",

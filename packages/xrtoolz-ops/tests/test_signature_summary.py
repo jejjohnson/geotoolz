@@ -8,17 +8,12 @@ import xarray as xr
 from pipekit import Operator
 
 from xrops._src.signature import make
-from xrops.geo.operators import (
-    CalculateClimatology,
-    Reduce,
-    RenameCoords,
-    RenameVariables,
-    SelectVariables,
-    SubsetBBox,
-    SubsetTime,
-)
+from xrops.anomaly.operators import CalculateClimatology
+from xrops.cf.operators import RenameCoords, RenameVariables
+from xrops.geom.operators import SelectVariables, SubsetBBox, SubsetTime
 from xrops.interpolate.operators import Coarsen, Refine, RegridLike, ResampleTime
 from xrops.metrics.operators import RMSE
+from xrops.utils.operators import ReduceDims
 
 
 def test_signature_renders_unknown_dimensions() -> None:
@@ -54,7 +49,7 @@ def test_geo_shape_changing_operator_signatures() -> None:
     )
     assert time_subset == make({"time": None, "lat": 181, "lon": 360}, "float32")
 
-    reduced = Reduce(dim=("time", "lat")).compute_output_signature(signature)
+    reduced = ReduceDims(dim=("time", "lat")).compute_output_signature(signature)
     assert reduced == make({"lon": 360}, "float32")
 
     assert SelectVariables("tas").compute_output_signature(signature) == signature
@@ -142,8 +137,8 @@ def test_calculate_climatology_smoothed_uses_canonical_dim() -> None:
     # The override pulls the dim name from CLIMATOLOGY_DIMS rather than
     # hardcoding "dayofyear", so this test catches divergence between
     # the runtime and the inferred signature.
-    from xrops.geo._src import detrend
-    from xrops.geo.operators import CalculateClimatologySmoothed
+    from xrops.anomaly._src import detrend
+    from xrops.anomaly.operators import CalculateClimatologySmoothed
 
     signature = make({"time": 365, "lat": 4}, dtype="float32")
     smoothed = CalculateClimatologySmoothed().compute_output_signature(signature)
@@ -160,7 +155,7 @@ def test_an_unknown_input_signature_passes_through_every_operator() -> None:
     for op in (
         SubsetBBox(lon_bnds=(0, 30), lat_bnds=(-30, 30)),
         ResampleTime("1D"),
-        Reduce(op="mean", dim=("lat", "lon")),
+        ReduceDims(op="mean", dim=("lat", "lon")),
         Coarsen({"lat": 2}),
         RenameCoords({"longitude": "lon"}),
     ):
@@ -172,7 +167,9 @@ def test_an_unknown_input_signature_passes_through_every_operator() -> None:
         outputs={"out": SubsetTime("2010", "2011")(inner_in)},
     )
     outer_in = Input("ds")
-    out = Reduce(op="mean", dim=("lat", "lon"))(ResampleTime("1ME")(inner(outer_in)))
+    out = ReduceDims(op="mean", dim=("lat", "lon"))(
+        ResampleTime("1ME")(inner(outer_in))
+    )
     outer = Graph(inputs={"ds": outer_in}, outputs={"mean": out})
     sig = make({"time": 3650, "lat": 181, "lon": 360}, dtype="float32")
     assert outer.output_signatures(sig) == {"mean": None}

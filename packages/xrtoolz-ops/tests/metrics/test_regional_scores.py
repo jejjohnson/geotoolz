@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xrops.geo.regimes import coastal_regions, eddy_regions, equatorial_regions
+from xrops.mask.regimes import coastal_regions, eddy_regions, equatorial_regions
 from xrops.metrics import (
     BinnedResiduals2D,
     DieboldMariano,

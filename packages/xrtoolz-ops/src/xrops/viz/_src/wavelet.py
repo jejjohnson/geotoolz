@@ -271,7 +271,7 @@ def plot_dominant_period_map(
 
     Args:
         pmap: Two-dimensional dominant-period field, typically produced by
-            :func:`xrops.geo.dominant_period_map` after averaging rectified
+            :func:`xrops.wavelets.dominant_period_map` after averaging rectified
             wavelet power over time and selecting the peak period.
         ax: Existing axes to draw on. A new axes is created when omitted.
         cmap: Matplotlib colormap name.

@@ -8,14 +8,14 @@ exceedances, and Poisson-process counts and statistics.
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrops.geo.block_maxima
+::: xrops.extremes.block_maxima
 
-::: xrops.geo.block_minima
+::: xrops.extremes.block_minima
 
-::: xrops.geo.pot_threshold
+::: xrops.extremes.pot_threshold
 
-::: xrops.geo.pot_exceedances
+::: xrops.extremes.pot_exceedances
 
-::: xrops.geo.pp_counts
+::: xrops.extremes.pp_counts
 
-::: xrops.geo.pp_stats
+::: xrops.extremes.pp_stats

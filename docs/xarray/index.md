@@ -65,7 +65,7 @@ Compute geostrophic surface currents from sea-surface height, then map them
 
 ```python
 from pipekit import Sequential
-from xrops.geo import RemoveMean
+from xrops.anomaly import RemoveMean
 from xrops.ocn import Streamfunction, GeostrophicVelocities
 from xrops.viz.validation import SpatialMapPanel
 

@@ -21,7 +21,7 @@ from typing import Any
 import matplotlib.figure as mpl_figure
 import matplotlib.pyplot as plt
 
-from xrops.geo.regions import REGIONS
+from xrops.geom.regions import REGIONS
 
 
 # Each preset: cartopy CRS class name + optional (lon_min, lon_max,

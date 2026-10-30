@@ -2,7 +2,7 @@
 
 Atmospheric physics on CF datasets. The design rule still holds: only
 true physics lives here; anything domain-agnostic belongs in
-[`geo`](geo/coords.md). Trace-gas (methane) physics sits under
+[`cf`](geo/coords.md). Trace-gas (methane) physics sits under
 `xrops.atm.gas.ch4`.
 
 ## WRF

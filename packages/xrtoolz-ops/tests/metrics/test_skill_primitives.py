@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xrops.geo import get_dataset_resolution
+from xrops.geom import get_dataset_resolution
 from xrops.metrics import NRMSEScore, nrmse, nrmse_score
 from xrops.metrics._src._pixel_kernels import nrmse_score as array_nrmse_score
 

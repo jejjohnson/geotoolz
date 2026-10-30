@@ -305,7 +305,7 @@ def regrid_like(
     other dims pass through.
 
     Assumes ``ds`` and ``target`` share a coordinate space — if they are
-    in different CRSs, use :func:`xrops.geo.reproject_match` instead,
+    in different CRSs, use :func:`xrops.geom.reproject_match` instead,
     which is CRS-aware and matches ``target``'s pixel grid exactly.
     Interpolation does not preserve integrals; for fluxes, inventories
     and other fields whose area integral must survive the regrid use
