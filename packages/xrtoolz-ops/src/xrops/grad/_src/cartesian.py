@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable, Hashable
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import xarray as xr
-from geoops.geom import difference as _geoops_difference
+from geoops.geom import difference as _geoops_difference, difference_offsets
 from jaxtyping import Float
 
 
@@ -49,6 +49,90 @@ def _difference(
         method=cast("Literal['central', 'forward', 'backward']", method),
     )
     return np.asarray(out, dtype=np.result_type(arr.dtype, np.float32))
+
+
+def _is_dask(x: Any) -> bool:
+    return hasattr(x, "dask") and hasattr(x, "map_overlap")
+
+
+def _reach(*, derivative: int, accuracy: int) -> int:
+    """The widest stencil reach of any method at ``accuracy`` and below.
+
+    The adaptive policy may fall back to a one-sided stencil (and lower
+    accuracies), which reaches further than the centred one, so a chunk
+    halo of this width gives every kept point the stencil it would get on
+    the whole array.
+    """
+    return max(
+        abs(offset)
+        for method in ("central", "forward", "backward")
+        for offset in difference_offsets(
+            derivative=derivative,
+            accuracy=accuracy,
+            method=method,  # type: ignore[arg-type]
+        )
+    )
+
+
+def _blockwise(
+    kernel: Callable[..., Any],
+    *arrays: Any,
+    axis: int,
+    depth: int,
+    periodic: bool = False,
+    whole_axis: Callable[..., Any] | None = None,
+    dtype: Any = None,
+) -> Any:
+    """``kernel(*arrays)``, per chunk with a ``depth``-cell halo on ``axis`` for dask.
+
+    NumPy input runs the kernel once. Dask input runs it per chunk through
+    ``map_overlap``: each chunk sees ``depth`` neighbouring cells across its
+    edges (wrapped for a ``periodic`` axis), so a stencil at a chunk seam
+    reads the same values as on the whole array, and one-sided stencils
+    appear only at the array's own edges. The result stays lazy.
+
+    An axis no longer than ``depth`` cannot carry a halo: it becomes one
+    chunk and ``whole_axis`` (``kernel`` by default) runs on each block as
+    on the whole array, so a short axis keeps its in-memory behaviour (the
+    adaptive descent to a stencil that fits, a periodic wrap).
+
+    ``dtype`` is the kernel's output dtype, for a kernel that promotes past
+    its first input's (``result_type(first, float32)`` by default).
+    """
+    if not _is_dask(arrays[0]):
+        return kernel(*(np.asarray(a) for a in arrays))
+    import dask.array as dsa
+
+    first = arrays[0]
+    dtype = (
+        np.result_type(first.dtype, np.float32) if dtype is None else np.dtype(dtype)
+    )
+    if first.shape[axis] <= depth:
+        arrays = tuple(a.rechunk({axis: -1}) for a in arrays)
+        return dsa.map_blocks(
+            whole_axis or kernel,
+            *arrays,
+            dtype=dtype,
+            meta=np.empty((0,) * first.ndim, dtype=dtype),
+        )
+    if min(first.chunks[axis]) < depth:
+        # every chunk must hold its neighbour's halo
+        size = max(depth, max(first.chunks[axis]))
+        arrays = tuple(a.rechunk({axis: size}) for a in arrays)
+        first = arrays[0]
+    depths = {i: depth if i == axis else 0 for i in range(first.ndim)}
+    boundary = {
+        i: "periodic" if (periodic and i == axis) else "none" for i in range(first.ndim)
+    }
+    return dsa.map_overlap(
+        kernel,
+        *arrays,
+        depth=depths,
+        boundary=boundary,
+        trim=True,
+        dtype=dtype,
+        meta=np.empty((0,) * first.ndim, dtype=dtype),
+    )
 
 
 def _stencil_halo(*, derivative: int, accuracy: int) -> int:
@@ -350,7 +434,31 @@ def _difference_dispatch(
     periodic: bool = False,
     nan_policy: str = "propagate",
 ) -> Float[np.ndarray, "*shape"]:
-    """Route to the plain, periodic, or NaN-adaptive stencil."""
+    """Route to the plain, periodic, or NaN-adaptive stencil (lazily on dask)."""
+    if _is_dask(values):
+        # per chunk with a halo; the wrap of a periodic axis is the halo's
+        def kernel(
+            block: Float[np.ndarray, "*shape"], wrap: bool = False
+        ) -> Float[np.ndarray, "*shape"]:
+            return _difference_dispatch(
+                block,
+                axis=axis,
+                step_size=step_size,
+                accuracy=accuracy,
+                method=method,
+                derivative=derivative,
+                periodic=wrap,
+                nan_policy=nan_policy,
+            )
+
+        return _blockwise(
+            kernel,
+            values,
+            axis=axis,
+            depth=_reach(derivative=derivative, accuracy=accuracy),
+            periodic=periodic,
+            whole_axis=lambda block: kernel(block, wrap=periodic),
+        )
     if nan_policy == "adaptive":
         return _difference_adaptive(
             values,
@@ -635,13 +743,14 @@ def cartesian_partial(
     _require_coord(da, dim)
     axis = da.get_axis_num(dim)
     step = _uniform_step(da[dim], rtol=uniform_rtol)
-    if periodic:
+    if periodic and not _is_dask(da.data):
         # The spherical backend has a hard check of its own (the grid must
         # span a full 360°), so this advisory only covers the cartesian and
-        # uniform-rectilinear paths, where the period is implicit.
+        # uniform-rectilinear paths, where the period is implicit. It is
+        # skipped on dask, where reading the field would compute it.
         _warn_duplicate_endpoint(da.values, axis=axis, dim=dim)
     raw = _difference_dispatch(
-        da.values,
+        da.data,
         axis=axis,
         step_size=step,
         accuracy=accuracy,

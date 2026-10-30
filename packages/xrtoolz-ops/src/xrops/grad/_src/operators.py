@@ -498,7 +498,7 @@ def divergence(
         v = ds[components[dims.index(lat)]]
         phi = np.deg2rad(np.asarray(v[lat].values))
         tan_phi = _broadcast_lat_factor(np.tan(phi), ref=v, lat=lat)
-        curvature = -(v.values * tan_phi) / radius
+        curvature = -(v.data * tan_phi) / radius  # lazy on dask
         total = total + xr.DataArray(
             curvature,
             dims=v.dims,
@@ -607,7 +607,7 @@ def curl(
         u = ds[u_name]
         phi = np.deg2rad(np.asarray(u[lat].values))
         tan_phi = _broadcast_lat_factor(np.tan(phi), ref=u, lat=lat)
-        curvature = (u.values * tan_phi) / radius
+        curvature = (u.data * tan_phi) / radius  # lazy on dask
         out = out + xr.DataArray(
             curvature,
             dims=u.dims,

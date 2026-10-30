@@ -30,6 +30,12 @@ name, steps from coordinates, the three geometries). Physical constants used by
 the spherical metric and downstream physics are exported as
 :data:`EARTH_RADIUS`, :data:`GRAVITY`, and :data:`OMEGA`.
 
+**Dask.** A dask-backed input stays lazy: each stencil runs per chunk
+through ``map_overlap`` with a halo as wide as the widest stencil it may
+use (one-sided ones included, for ``nan_policy="adaptive"``), wrapped on a
+``periodic`` axis, so the result equals the in-memory one; chunks
+narrower than the halo are merged along that axis first.
+
 **NaN and land masks.** By default a stencil that reads a NaN returns
 NaN, so every masked cell costs a halo of roughly ``accuracy`` valid
 cells in each differentiated direction — on an ocean field that is a

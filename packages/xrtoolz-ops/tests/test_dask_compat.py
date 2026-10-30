@@ -151,10 +151,10 @@ CASES: list[Case] = [
     Case("ocn.KineticEnergy", KineticEnergy(), lazy=True),
     Case("ocn.VelocityMagnitude", VelocityMagnitude(), lazy=True),
     Case("ocn.Streamfunction", Streamfunction(), lazy=True),
-    Case("ocn.RelativeVorticity", RelativeVorticity()),
-    Case("ocn.Divergence", Divergence()),
-    Case("ocn.GeostrophicVelocities", GeostrophicVelocities()),
-    Case("ocn.OkuboWeiss", OkuboWeiss()),
+    Case("ocn.RelativeVorticity", RelativeVorticity(), lazy=True),
+    Case("ocn.Divergence", Divergence(), lazy=True),
+    Case("ocn.GeostrophicVelocities", GeostrophicVelocities(), lazy=True),
+    Case("ocn.OkuboWeiss", OkuboWeiss(), lazy=True),
     # -- transforms: lazy -------------------------------------------------------
     Case("transforms.PowerSpectrum", PowerSpectrum("ssh", ("lat", "lon")), lazy=True),
     # -- interpolate: smoothing works (eager); coarsen lazy --------------------

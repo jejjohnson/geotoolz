@@ -184,7 +184,7 @@ def spherical_partial(
     axis = da.get_axis_num(dim)
     step_rad = _radian_step(da[dim], rtol=uniform_rtol)
     raw = cartesian._difference_dispatch(
-        da.values,
+        da.data,
         axis=axis,
         step_size=step_rad,
         accuracy=accuracy,

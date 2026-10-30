@@ -13,9 +13,11 @@ cartesian fast path.
 from __future__ import annotations
 
 from collections.abc import Hashable
+from typing import Any
 
 import numpy as np
 import xarray as xr
+from jaxtyping import Float
 
 from xrops.grad._src import cartesian
 
@@ -25,6 +27,43 @@ def _is_uniform(values: np.ndarray, *, rtol: float) -> bool:
         return False
     diffs = np.diff(values)
     return bool(np.allclose(diffs, diffs[0], rtol=rtol, atol=0.0))
+
+
+def _adaptive_chain(
+    data: Any, coord_values: Float[np.ndarray, " n"], *, axis: int, accuracy: int
+) -> Any:
+    """The adaptive ``df/dx`` chain, per chunk with its coordinate on dask."""
+    if not cartesian._is_dask(data):
+        return cartesian._difference_adaptive_chain(
+            np.asarray(data), coord_values, axis=axis, accuracy=accuracy
+        )
+    import dask.array as dsa
+
+    shape = [1] * data.ndim
+    shape[axis] = coord_values.size
+    chunks = tuple(data.chunks[i] if i == axis else (1,) for i in range(data.ndim))
+    coord = dsa.broadcast_to(
+        dsa.from_array(coord_values.reshape(shape), chunks=chunks),
+        data.shape,
+        chunks=data.chunks,
+    )
+
+    def kernel(block: Any, coord_block: Any) -> Any:
+        index = [0] * coord_block.ndim
+        index[axis] = slice(None)
+        return cartesian._difference_adaptive_chain(
+            block, coord_block[tuple(index)], axis=axis, accuracy=accuracy
+        )
+
+    return cartesian._blockwise(
+        kernel,
+        data,
+        coord,
+        axis=axis,
+        depth=cartesian._reach(derivative=1, accuracy=accuracy),
+        # the quotient by the (float64) coordinate's derivative promotes
+        dtype=np.result_type(data.dtype, coord_values.dtype, np.float32),
+    )
 
 
 def rectilinear_partial(
@@ -122,12 +161,15 @@ def rectilinear_partial(
     if nan_policy == "adaptive":
         # The stencil varies per point here, so ``dx/di`` has to follow it;
         # see ``cartesian._difference_adaptive_chain``.
-        out = cartesian._difference_adaptive_chain(
-            da.values, coord_values, axis=axis, accuracy=accuracy
-        )
+        out = _adaptive_chain(da.data, coord_values, axis=axis, accuracy=accuracy)
     else:
-        df_di = cartesian._difference(
-            da.values, axis=axis, step_size=1.0, accuracy=accuracy, method=method
+        df_di = cartesian._blockwise(
+            lambda block: cartesian._difference(
+                block, axis=axis, step_size=1.0, accuracy=accuracy, method=method
+            ),
+            da.data,
+            axis=axis,
+            depth=cartesian._reach(derivative=1, accuracy=accuracy),
         )
         dxdi = cartesian._difference(
             coord_values, axis=0, step_size=1.0, accuracy=accuracy, method=method

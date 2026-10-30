@@ -53,8 +53,8 @@ sweep asserts numpy/dask **result parity** for all of them, and asserts
 
 | Tier | Behaviour | Operators |
 |------|-----------|-----------|
-| **Lazy** | stays a dask graph | `calc`-driven `ocn` (KE, streamfunction, velocity magnitude); `geo` (`RemoveMean`, climatology, validators, masks); `transforms.PowerSpectrum`; `Coarsen`; `RegridLike`; all pixel/spectral **metrics**; the gap-fillers (`FillNaN{Laplacian,Spatial,RBF,Biharmonic,IDW}`); the smoothers (`GaussianSmooth`, `MovingAverage`, `fir_filter`, `lowpass_filter`); morphology |
-| **Eager (dask-safe)** | accepts dask, computes internally, identical result | `calc.gradient`/`laplacian` and the `ocn` diagnostics built on them (`RelativeVorticity`, `Divergence`, `GeostrophicVelocities`, `OkuboWeiss`); binning (`Bin2D`, `Histogram2D`); the sklearn bridge (`XarrayEstimator`, decompositions, `SklearnModelOp`) |
+| **Lazy** | stays a dask graph | `xrops.grad` (`partial`, `gradient`, `divergence`, `curl`, `laplacian`, `Gradient`, `Difference`; stencils run per chunk with a halo, so the result equals the in-memory one) and the `ocn` diagnostics on it (KE, streamfunction, velocity magnitude, `RelativeVorticity`, `Divergence`, `GeostrophicVelocities`, `OkuboWeiss`); `geo` (`RemoveMean`, climatology, validators, masks); `transforms.PowerSpectrum`; `Coarsen`; `RegridLike`; all pixel/spectral **metrics**; the gap-fillers (`FillNaN{Laplacian,Spatial,RBF,Biharmonic,IDW}`); the smoothers (`GaussianSmooth`, `MovingAverage`, `fir_filter`, `lowpass_filter`); morphology |
+| **Eager (dask-safe)** | accepts dask, computes internally, identical result | binning (`Bin2D`, `Histogram2D`); the sklearn bridge (`XarrayEstimator`, decompositions, `SklearnModelOp`) |
 | **N/A** | numpy-array primitives — no xarray, so no dask | `points_to_grid`, `idw_to_grid`, `kde_to_grid` (use the `*ToGrid` operators for the xarray surface) |
 
 !!! note "Why some operators can't be fully lazy"
