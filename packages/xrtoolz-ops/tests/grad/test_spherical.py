@@ -1,4 +1,4 @@
-"""Tests for :mod:`xrgrad` on spherical (lon/lat) geometries."""
+"""Tests for :mod:`xrops.grad` on spherical (lon/lat) geometries."""
 
 from __future__ import annotations
 

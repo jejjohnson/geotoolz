@@ -1,18 +1,6 @@
-# xrtoolz-grad — finite-difference calculus
+# xrops.grad — finite-difference calculus
 
-```bash
-# Pre-PyPI, install from the workspace via git — xrgrad has no internal
-# deps, so this resolves on its own; once published this becomes a
-# plain `pip install xrtoolz-grad`.
-uv pip install "xrtoolz-grad @ git+https://github.com/jejjohnson/xrtoolz@main#subdirectory=packages/xrtoolz-grad"
-```
-
-`xrgrad` provides partial derivatives and vector-calculus operators
-(`∇`, `∇·`, `∇×`, `Δ`) on labeled xarray grids. It is a pure-function
-package — no pipekit, no other xrtoolz dependencies — and the only
-member of the workspace that carries the
-[finitediffx](https://github.com/ASEM000/finitediffx) (JAX-backed)
-stencil engine.
+`xrops.grad` provides partial derivatives and vector-calculus operators (`∇`, `∇·`, `∇×`, `Δ`) on labeled xarray grids, and the `Gradient` and `Difference` operators over them. The stencils are geoops's diagnostic difference kernel (`geoops.geom.difference`, geostack OP-O7), which follows [finitediffx](https://github.com/ASEM000/finitediffx)'s rules on NumPy; `xrops.grad` adds the xarray layer. It replaces the former `xrtoolz-grad` (`xrgrad`) distribution, with the same functions and numbers.
 
 ## Geometry dispatch
 
@@ -37,7 +25,7 @@ $$
 $$
 
 with $\lambda$ longitude, $\varphi$ latitude, and $R$ the Earth radius
-(`xrgrad.EARTH_RADIUS`, 6 371 000 m).
+(`grad.EARTH_RADIUS`, 6 371 000 m).
 
 ### Mixed geometry
 
@@ -46,7 +34,7 @@ entry in `dims`. The common case is a 3-D ocean budget: spherical
 horizontal, rectilinear vertical.
 
 ```python
-div = xrgrad.divergence(
+div = grad.divergence(
     ds,
     ("flux_e", "flux_n", "flux_w"),
     dims=("lon", "lat", "depth"),
@@ -84,7 +72,7 @@ still works after `da.sel(lon=...)`).
 ## Curvature corrections
 
 On the sphere, divergence and curl are not plain sums of partials —
-the unit vectors themselves rotate with longitude. `xrgrad` adds the
+the unit vectors themselves rotate with longitude. `xrops.grad` adds the
 curvature terms so results match the equivalent `metpy.calc` operators
 on lon/lat fields:
 
@@ -143,7 +131,7 @@ usual case — that leaves a visible seam at the dateline. Pass
 the opposite edge and are as accurate as the interior:
 
 ```python
-zeta = xrgrad.curl(
+zeta = grad.curl(
     ds, ("u", "v"), dims=("lon", "lat"),
     geometry="spherical", periodic="lon",
 )
@@ -181,7 +169,7 @@ Further restrictions:
 ```python
 import numpy as np
 import xarray as xr
-import xrgrad
+from xrops import grad
 
 x = np.linspace(0.0, 3.0, 4)
 X, Y = np.meshgrid(x, x, indexing="xy")
@@ -193,8 +181,8 @@ ds = xr.Dataset(
     }
 )
 
-zeta = xrgrad.curl(ds, ("u", "v"), dims=("x", "y"))       # rigid rotation → 2
-div = xrgrad.divergence(ds, ("v", "u"), dims=("x", "y"))  # ∇·(x, -y) → 0
+zeta = grad.curl(ds, ("u", "v"), dims=("x", "y"))       # rigid rotation → 2
+div = grad.divergence(ds, ("v", "u"), dims=("x", "y"))  # ∇·(x, -y) → 0
 ```
 
 For a worked spherical example (geostrophic currents and vorticity from
@@ -213,7 +201,7 @@ wholly on finite data: centred where the full support is valid, then
 forward, then backward. Masked cells stay NaN.
 
 ```python
-zeta = xrgrad.curl(
+zeta = grad.curl(
     ds, ("u", "v"), dims=("lon", "lat"),
     geometry="spherical", nan_policy="adaptive",
 )

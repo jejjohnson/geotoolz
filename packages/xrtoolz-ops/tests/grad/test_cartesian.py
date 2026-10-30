@@ -1,4 +1,4 @@
-"""Tests for :mod:`xrgrad` on uniform Cartesian grids."""
+"""Tests for :mod:`xrops.grad` on uniform Cartesian grids."""
 
 from __future__ import annotations
 

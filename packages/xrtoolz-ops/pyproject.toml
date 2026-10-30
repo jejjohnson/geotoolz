@@ -191,7 +191,7 @@ ignore = [
 combine-as-imports = true
 lines-after-imports = 2
 # Sibling workspace members are first-party to the xrtoolz stack.
-known-first-party = ["xrops", "xrgrad"]
+known-first-party = ["xrops"]
 
 [tool.ty.environment]
 python-version = "3.12"

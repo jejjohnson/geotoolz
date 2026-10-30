@@ -1,4 +1,4 @@
-"""Tests for :mod:`xrgrad` on rectilinear (non-uniform) grids."""
+"""Tests for :mod:`xrops.grad` on rectilinear (non-uniform) grids."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Tests for per-dim geometry in :func:`xrgrad.divergence`."""
+"""Tests for per-dim geometry in :func:`xrops.grad.divergence`."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Quantify NaN/land-mask mitigations for xrgrad's finite differences.
+"""Quantify NaN/land-mask mitigations for xrops.grad's finite differences.
 
 Produces the error-vs-distance-from-coast table in
 ``docs/design/xrgrad-nan-masks.md``. Run with::
@@ -13,7 +13,7 @@ propagate
     Today's behaviour: a stencil touching land yields NaN, so a band of
     ocean ``~accuracy`` cells wide is lost.
 fill-then-mask
-    Harmonic-fill the land with :func:`xrtoolz.interpolate.fillnan_laplacian`,
+    Harmonic-fill the land with :func:`xrops.interpolate.fillnan_laplacian`,
     differentiate, then re-impose the mask. Recovers the band but the
     filled values are invented, so the derivative near the coast is
     biased toward the fill's smoothness.
@@ -31,8 +31,8 @@ import numpy as np
 import xarray as xr
 from scipy import ndimage
 
-import xrgrad
-from xrtoolz.interpolate import fillnan_laplacian
+from xrops import grad
+from xrops.interpolate import fillnan_laplacian
 
 
 NLON, NLAT = 121, 91
@@ -98,14 +98,14 @@ def main() -> None:
             f"   (RMS relative error; 'lost' = fraction returned as NaN)\n{'=' * 68}"
         )
 
-        propagate = xrgrad.partial(masked, "lon", accuracy=accuracy).values
+        propagate = grad.partial(masked, "lon", accuracy=accuracy).values
 
         filled = fillnan_laplacian(masked, max_iter=2000, tol=1e-8)
         fill_then_mask = np.where(
-            ocean, xrgrad.partial(filled, "lon", accuracy=accuracy).values, np.nan
+            ocean, grad.partial(filled, "lon", accuracy=accuracy).values, np.nan
         )
 
-        adaptive = xrgrad.partial(
+        adaptive = grad.partial(
             masked, "lon", accuracy=accuracy, nan_policy="adaptive"
         ).values
 
