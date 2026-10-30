@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-ops-v0.4.0...xrtoolz-ops-v0.5.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **xrops:** xrops.geo is gone, with no shim (PL-Q5): import from xrops.geom, xrops.mask, xrops.anomaly, xrops.extremes, xrops.wavelets or xrops.cf; xrops.geo.Reduce is xrops.utils.ReduceDims and FillNaN is xrops.interpolate.FillNaN.
+
+### Features
+
+* **xrops:** declared backends and the lane rules on every xrops operator ([#390](https://github.com/jejjohnson/xrtoolz/issues/390)) ([266dfbf](https://github.com/jejjohnson/xrtoolz/commit/266dfbfdaed7c279e455f7b1b391eaa2dd2136ee))
+* **xrops:** xrops.lift, a geoops geometry operator per item over a cube ([#389](https://github.com/jejjohnson/xrtoolz/issues/389)) ([57151e3](https://github.com/jejjohnson/xrtoolz/commit/57151e313e4f6add4ae455a690a67e01df8513e1))
+
+
+### Bug Fixes
+
+* **xrops:** an unknown input signature passes through every operator ([#386](https://github.com/jejjohnson/xrtoolz/issues/386)) ([41bc514](https://github.com/jejjohnson/xrtoolz/commit/41bc514f8c8cb9c38895da58584e725f0f99489e))
+
+
+### Code Refactoring
+
+* **xrops:** split xrops.geo into geom, mask, anomaly, extremes, wavelets and cf ([#387](https://github.com/jejjohnson/xrtoolz/issues/387)) ([c23740b](https://github.com/jejjohnson/xrtoolz/commit/c23740ba3bd750c70dfa79bfc034a7803aa4e317))
+
 ## [0.4.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-ops-v0.3.0...xrtoolz-ops-v0.4.0) (2026-10-30)
 
 

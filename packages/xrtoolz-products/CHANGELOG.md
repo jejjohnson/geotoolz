@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-products-v0.4.0...xrtoolz-products-v0.5.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **xrops:** xrops.geo is gone, with no shim (PL-Q5): import from xrops.geom, xrops.mask, xrops.anomaly, xrops.extremes, xrops.wavelets or xrops.cf; xrops.geo.Reduce is xrops.utils.ReduceDims and FillNaN is xrops.interpolate.FillNaN.
+
+### Code Refactoring
+
+* **xrops:** split xrops.geo into geom, mask, anomaly, extremes, wavelets and cf ([#387](https://github.com/jejjohnson/xrtoolz/issues/387)) ([c23740b](https://github.com/jejjohnson/xrtoolz/commit/c23740ba3bd750c70dfa79bfc034a7803aa4e317))
+
 ## [0.4.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-products-v0.3.0...xrtoolz-products-v0.4.0) (2026-10-30)
 
 

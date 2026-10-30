@@ -18,7 +18,7 @@ from xrops.combinators import ApplyToEach, Augment
 from xrops.grad import Difference, Gradient
 
 
-__version__ = "0.4.0"  # x-release-please-version
+__version__ = "0.5.0"  # x-release-please-version
 
 __all__ = [
     "ApplyToEach",
