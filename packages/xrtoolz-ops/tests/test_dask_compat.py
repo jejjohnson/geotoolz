@@ -25,7 +25,7 @@ import pytest
 import xarray as xr
 from sklearn.decomposition import PCA
 
-import xrgrad as calc
+from xrops import grad as calc
 from xrops.geo.operators import (
     AddLandMask,
     AddOceanMask,

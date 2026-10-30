@@ -14,14 +14,14 @@ Two layers, mirroring the rest of xrops:
 **Integral / volume-weighted operators** (:class:`ControlVolumeIntegral`,
 :class:`BoundaryFlux`) require explicit ``volume_metrics`` /
 ``face_metrics`` constructor arguments — never auto-derived (V4.4 / D16).
-Use :func:`xrgrad.grid_metrics_from_coords` to build them from
+Use :func:`xrops.grad.grid_metrics_from_coords` to build them from
 a Dataset's coords if the model output does not already ship them.
 
 **Per-cell residual operators** (:class:`HeatBudgetResidual`,
 :class:`SaltBudgetResidual`, :class:`VolumeBudgetResidual`,
 :class:`KineticEnergyBudgetResidual`) return a per-cell residual field
 ``∂φ/∂t + ∇·(u φ) − sources``. They use the spherical-metric
-divergence from :mod:`xrgrad`, which derives the differential
+divergence from :mod:`xrops.grad`, which derives the differential
 metric (``R cos φ``) from coordinates — they do **not** consume the
 ``volume_metrics`` / ``face_metrics`` Datasets. Multiply the residual
 by ``cell_volume`` and integrate with :class:`ControlVolumeIntegral`

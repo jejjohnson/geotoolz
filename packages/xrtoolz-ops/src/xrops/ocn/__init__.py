@@ -18,7 +18,7 @@ Content:
   re-exported here.
 
 All finite-differencing of lon/lat fields goes through
-:mod:`xrgrad`, which converts lon/lat (degrees) to metric
+:mod:`xrops.grad`, which converts lon/lat (degrees) to metric
 ``∂/∂x`` and ``∂/∂y`` and applies the spherical curvature corrections.
 """
 

@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-import xrgrad
+from xrops import grad
 from xrops.metrics import (
     DivergenceError,
     GeostrophicBalanceError,
@@ -39,7 +39,7 @@ def _balanced_jet(slope: float = 1e-3, n: int = 32) -> xr.Dataset:
     # η linear in x, v = (g/f) ∂η/∂x, u = 0: exact discrete geostrophy.
     x = np.arange(n) * (1e6 / n)
     eta = np.broadcast_to(slope * x[None, :], (n, n))
-    return _state(eta, 0.0, (xrgrad.GRAVITY / F0) * slope, n=n)
+    return _state(eta, 0.0, (grad.GRAVITY / F0) * slope, n=n)
 
 
 def test_imbalance_is_unity_for_pure_inertial_flow() -> None:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import xarray as xr
 
-import xrgrad
+from xrops import grad
 
 
 def volume_budget_residual(
@@ -25,13 +25,13 @@ def volume_budget_residual(
     """``∇·u`` with spherical curvature ``+ ∂w/∂z`` if ``w_var`` is given.
 
     Closes to ≈ 0 for an incompressible flow. ``w_var=None`` returns
-    the surface 2-D divergence only. Uses :func:`xrgrad.divergence`
+    the surface 2-D divergence only. Uses :func:`xrops.grad.divergence`
     so the spherical curvature term is included; when the vertical
     component is present it goes in the same call as a third
     ``rectilinear`` axis rather than a separately added partial.
     """
     if w_var is not None and depth is not None and depth in ds[w_var].dims:
-        return xrgrad.divergence(
+        return grad.divergence(
             ds[[u_var, v_var, w_var]],
             (u_var, v_var, w_var),
             dims=(lon, lat, depth),
@@ -39,7 +39,7 @@ def volume_budget_residual(
             lon=lon,
             lat=lat,
         ).rename("volume_budget_residual")
-    return xrgrad.divergence(
+    return grad.divergence(
         ds[[u_var, v_var]],
         (u_var, v_var),
         dims=(lon, lat),

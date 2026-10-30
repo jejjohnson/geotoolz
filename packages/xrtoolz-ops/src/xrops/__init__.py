@@ -12,6 +12,7 @@ operator subclasses (``DataTree`` dispatch on top of ``pipekit.Operator``).
 
 from xrops._src.operator import Operator
 from xrops.combinators import ApplyToEach, Augment
+from xrops.grad import Difference, Gradient
 
 
 __version__ = "0.3.0"  # x-release-please-version
@@ -19,6 +20,8 @@ __version__ = "0.3.0"  # x-release-please-version
 __all__ = [
     "ApplyToEach",
     "Augment",
+    "Difference",
+    "Gradient",
     "Operator",
     "__version__",
 ]

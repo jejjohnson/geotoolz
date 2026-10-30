@@ -42,6 +42,7 @@ Each package lives in `packages/<distribution>/src/<import name>/` with its own 
 | `xrops.interpolate` | Gap-filling (`FillNaN*`), regridding, KNN, binning, smoothing, coarsen/refine, downscaling, resampling, points↔grid, vertical coordinate remapping |
 | `xrops.metrics` | Verification metrics — pixel, spectral (PSD, resolved scale), distributional, probabilistic, structural, object-based, physical, forecast, masked, multiscale, Diebold–Mariano, region/leadtime composites, leaderboard |
 | `xrops.transforms` | Fourier/DCT/wavelet transforms, signal decompositions, morphology, coordinate remapping, space/time/basis encoders |
+| `xrops.grad` | Finite-difference calculus on labeled grids (`partial`, `gradient`, `divergence`, `curl`, `laplacian`; `Gradient` and `Difference` operators) over geoops's difference kernels; cartesian, rectilinear and spherical (sphere by default, `ellipsoid=` for an ellipsoidal metric) |
 | `xrops.learn` | scikit-learn on xarray over `pipekit_array.Estimator`: `XarrayEstimator` (Dataset variables as one feature table, DataTree per node or pooled) and the `.sklearn` accessor |
 | `xrops.inference` | `ModelOp` inference wrappers (duck-typed; sklearn/JAX adapters). Not re-exported at top level — import explicitly |
 | `xrops.utils` | Shared helpers — finite-mask utilities, grid spacing/resolution, validation guards |
@@ -77,7 +78,7 @@ Design rules:
 | `xrft` | Fourier transforms on xarray |
 | `xskillscore` | Verification metrics |
 
-The finitediffx/JAX stack rides exclusively in `xrtoolz-grad`, so it still reaches a full `xrtoolz` install transitively (ocn/budgets/metrics call `xrgrad` eagerly), and making `xrtoolz-grad` optional later is now a packaging decision, not a refactor. PyTorch and sklearn *models* remain non-dependencies — `ModelOp` uses duck typing so the user installs only what they need.
+xrops's calculus is `xrops.grad`, on geoops's difference kernels (`geotoolz-ops`, which also brings einx); the finitediffx/JAX stack is only in the legacy `xrtoolz-grad`, which no xrops module imports. PyTorch and sklearn *models* remain non-dependencies — `ModelOp` uses duck typing so the user installs only what they need.
 
 ## Common Commands
 

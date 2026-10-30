@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-import xrgrad
+from xrops import grad
 from xrops.ocn import (
     AbsoluteVorticity,
     Advection,
@@ -65,8 +65,8 @@ def test_beta_plane_geostrophy_of_gaussian_ssh() -> None:
 
     # y₀ defaults to the domain centre, which is 0 here.
     f = F0 + BETA * Y
-    u_true = -(xrgrad.GRAVITY / f) * (-2 * Y / L**2) * eta
-    v_true = (xrgrad.GRAVITY / f) * (-2 * X / L**2) * eta
+    u_true = -(grad.GRAVITY / f) * (-2 * Y / L**2) * eta
+    v_true = (grad.GRAVITY / f) * (-2 * X / L**2) * eta
     # Second-order central differences at 25 points per L: ~0.15 % error.
     scale = np.abs(u_true).max()
     np.testing.assert_allclose(out["u"].values, u_true, atol=5e-3 * scale)

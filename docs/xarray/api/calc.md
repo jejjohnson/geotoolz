@@ -12,26 +12,34 @@ $$
 \Delta\phi=\nabla\cdot\nabla\phi.
 $$
 
+The stencils are geoops's diagnostic difference kernel (`geoops.geom.difference`, geostack OP-O7), so a field gives the same numbers in `xrops.grad` and `geoops.geom`. On a lon/lat grid the metric is a sphere of radius `EARTH_RADIUS` by default; `ellipsoid="WGS84"` on `partial`, `gradient`, `Gradient` and `Difference` uses that ellipsoid's radii, as geoops does on a geographic CRS.
+
+## Operators
+
+::: xrops.grad.Gradient
+
+::: xrops.grad.Difference
+
 ## Differential operators
 
 These pure functions back the operators above; each takes `xr.DataArray`/`xr.Dataset` and a `dim:` argument.
 
-::: xrgrad.partial
+::: xrops.grad.partial
 
-::: xrgrad.gradient
+::: xrops.grad.gradient
 
-::: xrgrad.divergence
+::: xrops.grad.divergence
 
-::: xrgrad.curl
+::: xrops.grad.curl
 
-::: xrgrad.laplacian
+::: xrops.grad.laplacian
 
-::: xrgrad.grid_metrics_from_coords
+::: xrops.grad.grid_metrics_from_coords
 
 ## Physical constants
 
-::: xrgrad.EARTH_RADIUS
+::: xrops.grad.EARTH_RADIUS
 
-::: xrgrad.GRAVITY
+::: xrops.grad.GRAVITY
 
-::: xrgrad.OMEGA
+::: xrops.grad.OMEGA

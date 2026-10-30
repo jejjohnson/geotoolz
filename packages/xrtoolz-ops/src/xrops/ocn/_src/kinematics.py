@@ -1,7 +1,7 @@
 """Kinematic and geostrophic quantities for ocean fields.
 
 All operators take an :class:`xr.Dataset` and return a new Dataset with
-the computed variable. Finite differencing is delegated to :mod:`xrgrad`.
+the computed variable. Finite differencing is delegated to :mod:`xrops.grad`.
 By default the horizontal axes are geographic (``dims=("lon", "lat")``,
 ``geometry="spherical"``): lon/lat in degrees are converted to metric
 ``∂/∂x`` and ``∂/∂y`` via the ``1/(R cos φ)`` and ``1/R`` factors, with
@@ -40,7 +40,7 @@ from typing import Any, Literal, cast
 import numpy as np
 import xarray as xr
 
-import xrgrad
+from xrops import grad
 
 
 type Geometry = Literal["cartesian", "rectilinear", "spherical"]
@@ -60,11 +60,11 @@ def coriolis_parameter(
     Returns:
         Coriolis parameter with the same shape as ``lat``.
     """
-    return 2.0 * xrgrad.OMEGA * np.sin(np.deg2rad(lat))
+    return 2.0 * grad.OMEGA * np.sin(np.deg2rad(lat))
 
 
 def _geom_kw(dims: tuple[str, str], geometry: Geometry) -> dict[str, Any]:
-    """Coordinate-name kwargs xrgrad needs for ``geometry`` on ``dims``."""
+    """Coordinate-name kwargs xrops.grad needs for ``geometry`` on ``dims``."""
     if geometry == "spherical":
         return {"lon": dims[0], "lat": dims[1]}
     return {}
@@ -74,7 +74,7 @@ def _partial(
     da: xr.DataArray, dim: str, dims: tuple[str, str], geometry: Geometry
 ) -> xr.DataArray:
     """``∂da/∂dim`` for one of the horizontal ``dims`` under ``geometry``."""
-    return xrgrad.partial(da, dim, geometry=geometry, **_geom_kw(dims, geometry))
+    return grad.partial(da, dim, geometry=geometry, **_geom_kw(dims, geometry))
 
 
 def _coriolis_field(
@@ -139,7 +139,7 @@ def streamfunction(
     Args:
         ds: Dataset containing ``variable`` (SSH) and a ``lat`` coord.
         variable: Name of the SSH variable.
-        g: Gravity in m/s². Defaults to :data:`xrgrad.GRAVITY`.
+        g: Gravity in m/s². Defaults to :data:`xrops.grad.GRAVITY`.
         f0: Coriolis parameter in s⁻¹. Defaults to the mean over the
             latitude coordinate of ``ds``.
 
@@ -147,7 +147,7 @@ def streamfunction(
         Dataset with a single variable ``"psi"`` (stream function).
     """
     ssh = ds[variable]
-    g_value = xrgrad.GRAVITY if g is None else g
+    g_value = grad.GRAVITY if g is None else g
     f0_value = float(coriolis_parameter(ssh["lat"]).mean()) if f0 is None else float(f0)
     psi = (g_value / f0_value) * ssh
     psi.attrs.update(
@@ -172,7 +172,7 @@ def geostrophic_velocities(
         u = -(g / f) ∂η/∂y
         v =  (g / f) ∂η/∂x
 
-    with ``∂/∂x`` and ``∂/∂y`` taken by :func:`xrgrad.partial` under
+    with ``∂/∂x`` and ``∂/∂y`` taken by :func:`xrops.grad.partial` under
     ``geometry`` (the lon/lat sphere by default).
 
     Do **not** pass a stream-function field here — applying the same
@@ -208,8 +208,8 @@ def geostrophic_velocities(
     f_field = _coriolis_field(ssh, dims, geometry, f)
     deta_dx = _partial(ssh, dims[0], dims, geometry)
     deta_dy = _partial(ssh, dims[1], dims, geometry)
-    u = -(xrgrad.GRAVITY / f_field) * deta_dy
-    v = (xrgrad.GRAVITY / f_field) * deta_dx
+    u = -(grad.GRAVITY / f_field) * deta_dy
+    v = (grad.GRAVITY / f_field) * deta_dx
     u.attrs.update(long_name="Zonal Velocity", standard_name="zonal_velocity")
     v.attrs.update(long_name="Meridional Velocity", standard_name="meridional_velocity")
     return xr.Dataset({"u": u, "v": v})
@@ -261,7 +261,7 @@ def relative_vorticity(
             )
             relative_vorticity(ds, dims=("x", "y"), geometry="cartesian")
     """
-    zeta = xrgrad.curl(
+    zeta = grad.curl(
         ds, (u, v), dims=dims, geometry=geometry, **_geom_kw(dims, geometry)
     )
     zeta.attrs.update(
@@ -324,7 +324,7 @@ def divergence(
     Returns:
         Dataset with a single variable ``"div"`` (s⁻¹).
     """
-    div = xrgrad.divergence(
+    div = grad.divergence(
         ds, (u, v), dims=dims, geometry=geometry, **_geom_kw(dims, geometry)
     )
     div.attrs.update(long_name="Divergence", standard_name="divergence")
@@ -599,7 +599,7 @@ def advection(
                 f"not supported — interpolate {comp_name!r} onto the {scalar!r} "
                 "grid first."
             )
-    # The spherical pair may arrive in either order; xrgrad needs it by name.
+    # The spherical pair may arrive in either order; xrops.grad needs it by name.
     horizontal = ("lon", "lat") if geometry == "spherical" else (dims[0], dims[1])
     flux: xr.DataArray | None = None
     for comp_name, dim in zip(components, dims, strict=True):
@@ -608,7 +608,7 @@ def advection(
         if dim in horizontal:
             partial_c = _partial(ds[scalar], dim, horizontal, geometry)
         else:
-            partial_c = xrgrad.partial(ds[scalar], dim, geometry="rectilinear")
+            partial_c = grad.partial(ds[scalar], dim, geometry="rectilinear")
         term = ds[comp_name] * partial_c
         flux = term if flux is None else flux + term
     assert flux is not None
@@ -855,7 +855,7 @@ def brunt_vaisala_frequency(
         density: In-situ or potential density variable (kg m⁻³).
         depth: Name of the vertical coordinate (metres).
         rho0: Reference density (kg m⁻³). Defaults to 1025.
-        g: Gravity (m s⁻²). Defaults to :data:`xrgrad.GRAVITY`.
+        g: Gravity (m s⁻²). Defaults to :data:`xrops.grad.GRAVITY`.
         positive: Either ``"down"`` (default — oceanographic depth
             coordinate, increasing into the column) or ``"up"`` (height
             above some reference, decreasing into the column).
@@ -865,8 +865,8 @@ def brunt_vaisala_frequency(
     """
     if positive not in ("down", "up"):
         raise ValueError(f"positive={positive!r} must be 'down' or 'up'.")
-    g_value = xrgrad.GRAVITY if g is None else g
-    drho_dz = xrgrad.partial(ds[density], depth, geometry="rectilinear")
+    g_value = grad.GRAVITY if g is None else g
+    drho_dz = grad.partial(ds[density], depth, geometry="rectilinear")
     sign = 1.0 if positive == "down" else -1.0
     n_sq = sign * (g_value / rho0) * drho_dz
     n_sq.attrs.update(
@@ -904,7 +904,7 @@ def lapse_rate(
     """
     if positive not in ("down", "up"):
         raise ValueError(f"positive={positive!r} must be 'down' or 'up'.")
-    dT_dz = xrgrad.partial(ds[temperature], depth, geometry="rectilinear")
+    dT_dz = grad.partial(ds[temperature], depth, geometry="rectilinear")
     sign = 1.0 if positive == "down" else -1.0
     gamma = sign * dT_dz
     gamma.attrs.update(

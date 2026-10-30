@@ -1,4 +1,7 @@
-"""The base install stays without einx and scikit-learn (geostack gate B1)."""
+"""The base install stays without JAX and scikit-learn (geostack gate B1).
+
+einx is allowed: geoops's difference kernels under xrops.grad bring it.
+"""
 
 from __future__ import annotations
 
@@ -9,11 +12,12 @@ import numpy as np
 import pytest
 
 
-def test_importing_xrops_does_not_import_einx_or_sklearn() -> None:
+def test_importing_xrops_does_not_import_jax_or_sklearn() -> None:
     code = (
         "import sys, xrops, xrops.interpolate, xrops.metrics, xrops.transforms, "
-        "xrops.learn, xrops.utils; "
-        "print(sorted(m for m in ('einx', 'sklearn') if m in sys.modules))"
+        "xrops.learn, xrops.utils, xrops.grad, xrops.ocn, xrops.budgets; "
+        "print(sorted(m for m in ('jax', 'finitediffx', 'sklearn', 'xrgrad') "
+        "if m in sys.modules))"
     )
     out = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, check=True

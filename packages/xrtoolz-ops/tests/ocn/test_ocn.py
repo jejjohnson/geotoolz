@@ -278,7 +278,7 @@ def test_shear_plus_curvature_vorticity_sums_to_relative_vorticity(ds_uv_grid):
     # acts only on the curl operator). Exclude that term from the sum
     # comparison by reconstructing the plain ``∂v/∂x − ∂u/∂y`` field
     # — the same pieces shear+curvature reassemble.
-    from xrgrad import partial as _partial
+    from xrops.grad import partial as _partial
 
     plain_zeta = _partial(ds_uv_grid["v"], "lon", geometry="spherical") - _partial(
         ds_uv_grid["u"], "lat", geometry="spherical"
@@ -721,7 +721,7 @@ def test_advection_vertical_term_on_linear_tracer(ds_uvw_3d):
 
 
 def test_advection_3d_equals_horizontal_plus_vertical_term(ds_uvw_3d):
-    import xrgrad
+    from xrops import grad
 
     ds = ds_uvw_3d.assign(c=lambda d: d["u"] * 2.0)
     full = advection(
@@ -730,7 +730,7 @@ def test_advection_3d_equals_horizontal_plus_vertical_term(ds_uvw_3d):
     horizontal = advection(ds, scalar="c", components=("u", "v"), dims=("lon", "lat"))[
         "c_advection"
     ]
-    vertical = -ds["w"] * xrgrad.partial(ds["c"], "depth", geometry="rectilinear")
+    vertical = -ds["w"] * grad.partial(ds["c"], "depth", geometry="rectilinear")
     np.testing.assert_allclose(
         full.values, (horizontal + vertical).values, rtol=1e-12, atol=1e-18
     )

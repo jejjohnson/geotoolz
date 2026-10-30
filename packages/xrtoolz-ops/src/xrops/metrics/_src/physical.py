@@ -41,7 +41,7 @@ from typing import Any, Literal
 import numpy as np
 import xarray as xr
 
-import xrgrad
+from xrops import grad
 from xrops._src.operator import Operator
 from xrops.ocn._src.kinematics import (
     Coriolis,
@@ -63,7 +63,7 @@ def geostrophic_balance_error(
     v_var: str = "v",
     lat: str = "lat",
     lon: str = "lon",
-    g: float = xrgrad.GRAVITY,
+    g: float = grad.GRAVITY,
     dims: tuple[str, str] | None = None,
     geometry: Geometry = "spherical",
     f: Coriolis = None,
@@ -76,7 +76,7 @@ def geostrophic_balance_error(
         r_v = f * v - g * ∂η/∂x
 
     Both should be ≈ 0 for a geostrophic flow. Differencing uses
-    :func:`xrgrad.partial` under ``geometry`` (spherical metric by
+    :func:`xrops.grad.partial` under ``geometry`` (spherical metric by
     default).
 
     Args:
@@ -85,7 +85,7 @@ def geostrophic_balance_error(
         lat, lon: Names of latitude / longitude coordinates (degrees).
             Used when ``dims`` is ``None``.
         g: Gravitational acceleration (m/s²). Defaults to
-            :data:`xrgrad.GRAVITY`.
+            :data:`xrops.grad.GRAVITY`.
         dims: ``(x_dim, y_dim)`` horizontal dims. ``None`` (default)
             means ``(lon, lat)``.
         geometry: ``"spherical"`` (default), ``"cartesian"`` or
@@ -121,7 +121,7 @@ def geostrophic_imbalance(
     dims: tuple[str, str] = ("lon", "lat"),
     geometry: Geometry = "spherical",
     f: Coriolis = None,
-    g: float = xrgrad.GRAVITY,
+    g: float = grad.GRAVITY,
     eps: float = 1e-30,
 ) -> xr.DataArray:
     """Dimensionless ageostrophic fraction ``rms(r) / rms(f k×u)``.
@@ -189,7 +189,7 @@ def divergence_error(
 
     For a purely geostrophic flow this is ≈ 0; values away from zero
     indicate either ageostrophic flow or numerical noise. Uses
-    :func:`xrgrad.divergence`, so the spherical curvature term is
+    :func:`xrops.grad.divergence`, so the spherical curvature term is
     included on the default geometry.
 
     Args:
@@ -211,7 +211,7 @@ def divergence_error(
     """
     xy = (lon, lat) if dims is None else dims
     flow = ds[[u_var, v_var]]
-    div = xrgrad.divergence(
+    div = grad.divergence(
         flow,
         (u_var, v_var),
         dims=xy,
@@ -310,7 +310,7 @@ class GeostrophicBalanceError(Operator):
         v_var: str = "v",
         lat: str = "lat",
         lon: str = "lon",
-        g: float = xrgrad.GRAVITY,
+        g: float = grad.GRAVITY,
         dims: tuple[str, str] | None = None,
         geometry: Geometry = "spherical",
         f: Coriolis = None,
@@ -354,7 +354,7 @@ class GeostrophicImbalance(Operator):
         dims: tuple[str, str] = ("lon", "lat"),
         geometry: Geometry = "spherical",
         f: Coriolis = None,
-        g: float = xrgrad.GRAVITY,
+        g: float = grad.GRAVITY,
         eps: float = 1e-30,
     ) -> None:
         self.ssh_var = ssh_var

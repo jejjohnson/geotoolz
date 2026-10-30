@@ -23,7 +23,7 @@ class ControlVolumeIntegral(Operator):
     Integrates ``variable`` over ``dims`` weighted by the cell volumes in
     ``volume_metrics`` (optionally masked to ``region``). The metrics are
     explicit, never auto-derived — build them with
-    :func:`xrgrad.grid_metrics_from_coords` if the data does not ship
+    :func:`xrops.grad.grid_metrics_from_coords` if the data does not ship
     them.
 
     Args:
@@ -216,7 +216,7 @@ class _TracerBudgetOp(Operator):
 class HeatBudgetResidual(_TracerBudgetOp):
     """Per-cell heat-budget residual ``∂θ/∂t + ∇·(u θ) − Q``.
 
-    Uses the spherical-metric divergence from :mod:`xrgrad`; returns
+    Uses the spherical-metric divergence from :mod:`xrops.grad`; returns
     the per-cell residual (zero for a closed budget). It does **not** consume
     volume/face metrics — multiply by ``cell_volume`` and integrate with
     :class:`ControlVolumeIntegral` for a control-volume closure.

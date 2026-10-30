@@ -11,8 +11,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-import xrgrad as calc
-from xrops import metrics, ocn
+from xrops import grad as calc, metrics, ocn
 from xrops.budgets import (
     BoundaryFlux,
     BudgetResidual,

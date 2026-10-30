@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import xarray as xr
 
-import xrgrad
+from xrops import grad
 
 
 def _time_derivative(da: xr.DataArray, time_dim: str) -> xr.DataArray:
@@ -35,7 +35,7 @@ def _flux_divergence(
 ) -> xr.DataArray:
     """``∇·(u φ)`` with spherical curvature + rectilinear vertical.
 
-    Uses :func:`xrgrad.divergence` so the ``-(F_y tan φ)/R`` curvature
+    Uses :func:`xrops.grad.divergence` so the ``-(F_y tan φ)/R`` curvature
     correction is included; otherwise spatially uniform meridional
     fluxes would generate a spurious residual on lon/lat grids. A
     vertical flux joins the same call as a third ``rectilinear`` axis.
@@ -44,7 +44,7 @@ def _flux_divergence(
     flux_v = (v * tracer).rename("flux_v")
     if w is not None and depth is not None and depth in tracer.dims:
         flux_w = (w * tracer).rename("flux_w")
-        return xrgrad.divergence(
+        return grad.divergence(
             xr.Dataset({"flux_u": flux_u, "flux_v": flux_v, "flux_w": flux_w}),
             ("flux_u", "flux_v", "flux_w"),
             dims=(lon, lat, depth),
@@ -52,7 +52,7 @@ def _flux_divergence(
             lon=lon,
             lat=lat,
         )
-    return xrgrad.divergence(
+    return grad.divergence(
         xr.Dataset({"flux_u": flux_u, "flux_v": flux_v}),
         ("flux_u", "flux_v"),
         dims=(lon, lat),
