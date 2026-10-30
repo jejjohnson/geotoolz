@@ -44,6 +44,10 @@ lazy = pipeline(ds)        # nothing computed yet — a dask graph
 result = lazy.compute()    # run it (optionally under a dask scheduler/cluster)
 ```
 
+## Declared backends
+
+Every xrops operator declares `backends` from pipekit's vocabulary (OP-O6); today all declare `("numpy", "dask")`. A DataArray counts by the backend of its data and a Dataset by its variables', so a JAX-backed input raises a `BackendError` naming the conversion, while a NumPy operand beside a dask one (a static mask, an in-memory reference) joins the lazy computation. geoops geometry operators, which need a `GeoArray` per item, run over a cube through [`xrops.lift`](api/lift.md).
+
 ## Per-operator tiers
 
 Every operator falls into one of three tiers. The

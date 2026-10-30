@@ -37,10 +37,18 @@ This is the implementation of "PR α" from the design doc.
 from __future__ import annotations
 
 import functools
-from typing import Any
+from typing import Any, ClassVar
 
 import xarray as xr
-from pipekit import Node, Operator as _PipekitOperator
+from pipekit import Node, Operator as _PipekitOperator, backend_of
+from pipekit.adapters import BackendError
+
+
+def _leaves(value: Any) -> Any:
+    """A DataTree's data-bearing nodes as Datasets; anything else unchanged."""
+    if isinstance(value, xr.DataTree):
+        return [node.to_dataset() for node in value.subtree if node.data_vars]
+    return value
 
 
 class Operator(_PipekitOperator):
@@ -73,6 +81,45 @@ class Operator(_PipekitOperator):
 
         ```
     """
+
+    #: The backends of its inputs' data (OP-O6): every xrops operator takes
+    #: NumPy- and dask-backed carriers; one that runs elsewhere (or refuses
+    #: dask) overrides this. A Dataset counts by its data variables.
+    backends: ClassVar[tuple[str, ...] | None] = ("numpy", "dask")
+
+    def _check_backends(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+        """pipekit's backend rule, with NumPy beside dask counted as dask.
+
+        In the xarray lane a NumPy operand (a static mask, an in-memory
+        reference field) joins a dask graph without moving: xarray folds it
+        into the lazy computation. Any other mix, or a backend not in
+        ``backends`` (a JAX-backed DataArray), raises as in pipekit.
+        """
+        if self.backends is None:
+            return
+        found = set()
+        for value in (*args, *kwargs.values()):
+            for item in value if isinstance(value, list | tuple) else (value,):
+                # a Dataset has no backend of its own: its variables do
+                parts = (
+                    item.data_vars.values() if isinstance(item, xr.Dataset) else (item,)
+                )
+                for part in parts:
+                    if (backend := backend_of(part)) is not None:
+                        found.add(backend)
+        if found == {"numpy", "dask"}:
+            found = {"dask"}
+        if len(found) > 1:
+            raise BackendError(
+                f"{type(self).__name__}: inputs on {sorted(found)}; put them on one "
+                "backend first (inputs never move between backends silently)."
+            )
+        if found and (got := found.pop()) not in self.backends:
+            raise BackendError(
+                f"{type(self).__name__} runs on {' and '.join(self.backends)} only, "
+                f"not {got}. Convert the input first; inputs never move between "
+                "backends silently."
+            )
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Make each ``compute_output_signature`` override pass an unknown on.
@@ -120,6 +167,8 @@ class Operator(_PipekitOperator):
         if any(isinstance(a, Node) for a in args):
             return super().__call__(*args, **kwargs)
         if any(isinstance(a, xr.DataTree) for a in args):
+            # the declared backends hold for a tree too: check every leaf
+            self._check_backends(tuple(_leaves(a) for a in args), kwargs)
             return self._apply_tree(*args, **kwargs)
         return super().__call__(*args, **kwargs)
 
