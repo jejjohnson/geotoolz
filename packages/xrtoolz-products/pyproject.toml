@@ -1,6 +1,6 @@
 [project]
 name = "xrtoolz-products"
-version = "0.3.0"
+version = "0.4.0"
 description = "Authenticated archive readers for xarray geodata (CMEMS, CDS, AEMET)."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

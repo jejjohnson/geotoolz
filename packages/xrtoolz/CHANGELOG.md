@@ -28,6 +28,19 @@
 
 * `xrtoolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xrtoolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.4.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.3.0...xrtoolz-v0.4.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* the xrtoolz-grad (xrgrad) distribution is gone, with no shim (PL-Q5): use from xrops import grad.
+* **xrops:** the xrtoolz-core distribution and the xrcore import are gone, with no shim (PL-Q5): use from xrops import Operator and from pipekit import Signature.
+
+### Code Refactoring
+
+* delete xrtoolz-grad; xrops.grad is the calculus ([#382](https://github.com/jejjohnson/xrtoolz/issues/382)) ([82f6fa7](https://github.com/jejjohnson/xrtoolz/commit/82f6fa78faf510fde4cd8a389dd97b529645a4fe))
+* **xrops:** fold xrcore into xrops._src and delete xrtoolz-core ([#380](https://github.com/jejjohnson/xrtoolz/issues/380)) ([756fc30](https://github.com/jejjohnson/xrtoolz/commit/756fc3074317737e8546ffa08890d7565aee3aa0))
+
 ## [0.3.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.2.0...xrtoolz-v0.3.0) (2026-10-29)
 
 

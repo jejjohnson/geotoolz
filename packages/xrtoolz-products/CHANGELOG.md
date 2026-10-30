@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-products-v0.3.0...xrtoolz-products-v0.4.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* the xrtoolz-grad (xrgrad) distribution is gone, with no shim (PL-Q5): use from xrops import grad.
+* **xrops:** the xrtoolz-core distribution and the xrcore import are gone, with no shim (PL-Q5): use from xrops import Operator and from pipekit import Signature.
+
+### Code Refactoring
+
+* delete xrtoolz-grad; xrops.grad is the calculus ([#382](https://github.com/jejjohnson/xrtoolz/issues/382)) ([82f6fa7](https://github.com/jejjohnson/xrtoolz/commit/82f6fa78faf510fde4cd8a389dd97b529645a4fe))
+* **xrops:** fold xrcore into xrops._src and delete xrtoolz-core ([#380](https://github.com/jejjohnson/xrtoolz/issues/380)) ([756fc30](https://github.com/jejjohnson/xrtoolz/commit/756fc3074317737e8546ffa08890d7565aee3aa0))
+
 ## [0.3.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-products-v0.2.0...xrtoolz-products-v0.3.0) (2026-10-29)
 
 
