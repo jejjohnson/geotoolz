@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>geopatcher boundary policies</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1340px; }
+  .row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
+  .panel { background: #fff; border: 1.5px solid var(--cut); border-radius: 12px; padding: 12px 12px 10px; }
+  .panel .k { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--cut-ink); }
+  .panel .o { font-size: 12px; color: var(--muted); margin: 3px 0 10px; line-height: 1.35; min-height: 48px; }
+  .panel svg { display: block; margin: 0 auto; }
+  .legend { display: flex; gap: 22px; margin-top: 16px; font-size: 12px; color: var(--muted); align-items: center; }
+  .legend span.sw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">spatial.geometry.Rectangular(boundary=…) — what happens at the edge</div>
+  <div class="subtitle">A 10 × 10 domain, 4 × 4 patches every 4 cells: the anchor at (8, 8) overflows by 2 cells on each axis.</div>
+  <div class="row">
+    <div class="panel"><div class="k">"drop"</div><div class="o">default — the anchor is never placed; the 2-cell residual is not covered</div><svg id="drop"></svg></div>
+    <div class="panel"><div class="k">"pad"</div><div class="o">full 4 × 4 patch; overflow filled with nodata or <code>pad_value</code></div><svg id="pad"></svg></div>
+    <div class="panel"><div class="k">"reflect"</div><div class="o">full 4 × 4 patch; overflow mirrored from the interior</div><svg id="reflect"></svg></div>
+    <div class="panel"><div class="k">"shrink"</div><div class="o">patch clipped to the domain: 2 × 2 here, weights cropped to match</div><svg id="shrink"></svg></div>
+    <div class="panel"><div class="k">"raise"</div><div class="o"><code>split</code> raises <code>ValueError</code> on the first overflowing window</div><svg id="raise"></svg></div>
+  </div>
+  <div class="legend">
+    <span><span class="sw" style="background:#8fb98a"></span>domain cells</span>
+    <span><span class="sw" style="border:2.5px solid #3f6fb5"></span>the edge patch</span>
+    <span><span class="sw" style="background:#cbd5e1"></span>padded with nodata</span>
+    <span><span class="sw" style="background:#f3c8cb"></span>no patch / error</span>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  const N = 10, C = 17, PAD = 2, P = 4, A = 8;
+  const W = (N + PAD) * C + 2;
+  const shade = (r, c) => {
+    const t = (r + c) / (2 * (N - 1));
+    const a = [207, 227, 196], b = [79, 127, 106];
+    return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(",")})`;
+  };
+  const mirror = (i) => (i < N ? i : 2 * (N - 1) - i);
+  function draw(id) {
+    const svg = document.getElementById(id);
+    svg.setAttribute("width", W); svg.setAttribute("height", W);
+    let s = "";
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++)
+      s += `<rect x="${1 + c * C}" y="${1 + r * C}" width="${C}" height="${C}" fill="${shade(r, c)}" stroke="#fff" stroke-width=".6"/>`;
+    for (let r = A; r < A + P; r++) for (let c = A; c < A + P; c++) {
+      const inside = r < N && c < N;
+      const x = 1 + c * C, y = 1 + r * C;
+      if (inside) continue;
+      if (id === "pad") s += `<rect x="${x}" y="${y}" width="${C}" height="${C}" fill="#cbd5e1" stroke="#fff" stroke-width=".6"/>`;
+      if (id === "reflect") s += `<rect x="${x}" y="${y}" width="${C}" height="${C}" fill="${shade(mirror(r), mirror(c))}" stroke="#fff" stroke-width=".6" opacity=".75"/>`;
+      if (id === "raise") s += `<rect x="${x}" y="${y}" width="${C}" height="${C}" fill="#f3c8cb" stroke="#fff" stroke-width=".6"/>`;
+    }
+    if (id === "drop") {
+      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++)
+        if (r >= A || c >= A) s += `<rect x="${1 + c * C}" y="${1 + r * C}" width="${C}" height="${C}" fill="#f3c8cb" opacity=".8" stroke="#fff" stroke-width=".6"/>`;
+      s += `<rect x="${1 + 4 * C}" y="${1 + 4 * C}" width="${P * C}" height="${P * C}" fill="none" stroke="#3f6fb5" stroke-width="2.5"/>`;
+      s += `<text x="${1 + 8.9 * C}" y="${1 + 9.3 * C}" font-size="26" font-weight="700" fill="#c2474f" text-anchor="middle">×</text>`;
+    } else if (id === "shrink") {
+      s += `<rect x="${1 + A * C}" y="${1 + A * C}" width="${(N - A) * C}" height="${(N - A) * C}" fill="none" stroke="#3f6fb5" stroke-width="2.5"/>`;
+    } else {
+      const dash = id === "raise" ? ' stroke-dasharray="5 3"' : "";
+      const col = id === "raise" ? "#c2474f" : "#3f6fb5";
+      s += `<rect x="${1 + A * C}" y="${1 + A * C}" width="${P * C}" height="${P * C}" fill="none" stroke="${col}" stroke-width="2.5"${dash}/>`;
+    }
+    s += `<rect x="1" y="1" width="${N * C}" height="${N * C}" fill="none" stroke="#1b2f50" stroke-width="1.2"/>`;
+    svg.innerHTML = s;
+  }
+  ["drop", "pad", "reflect", "shrink", "raise"].forEach(draw);
+  ready();
+</script>
+</body>
+</html>
