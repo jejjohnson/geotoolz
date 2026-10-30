@@ -12,6 +12,7 @@ Each family is a subpackage: :mod:`xrops.anomaly`, :mod:`xrops.atm`,
 operator subclasses (``DataTree`` dispatch on top of ``pipekit.Operator``).
 """
 
+from xrops._src.lift import Lift, lift
 from xrops._src.operator import Operator
 from xrops.combinators import ApplyToEach, Augment
 from xrops.grad import Difference, Gradient
@@ -24,6 +25,8 @@ __all__ = [
     "Augment",
     "Difference",
     "Gradient",
+    "Lift",
     "Operator",
     "__version__",
+    "lift",
 ]

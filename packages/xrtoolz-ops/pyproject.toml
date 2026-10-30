@@ -51,6 +51,8 @@ dependencies = [
     # The diagnostic difference kernels under xrops.grad (geostack OP-O7):
     # the slim geoops base (numpy, scipy, pandas, pyproj, einx; no GDAL).
     "geotoolz-ops>=0.17",
+    # GeoArray per item for xrops.lift (geostack OP-O4); geoops brings it too.
+    "geotoolz-array>=0.3",
     "matplotlib>=3.8",
     # The Operator / Sequential / Graph composition layer lives in pipekit
     # (formerly xrops.core). Every per-domain operator subclasses
