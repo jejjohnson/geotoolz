@@ -36,6 +36,7 @@ This is the implementation of "PR α" from the design doc.
 
 from __future__ import annotations
 
+import functools
 from typing import Any
 
 import xarray as xr
@@ -72,6 +73,28 @@ class Operator(_PipekitOperator):
 
         ```
     """
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Make each ``compute_output_signature`` override pass an unknown on.
+
+        An upstream step that does not track shape (a nested `pipekit.Graph`,
+        whose output is a dict) hands ``None`` to the next step; the operator
+        then has nothing to transform and reports ``None`` too, rather than
+        failing on ``None.dims``.
+        """
+        super().__init_subclass__(**kwargs)
+        own = cls.__dict__.get("compute_output_signature")
+        if own is None or getattr(own, "_passes_unknown", False):
+            return
+
+        @functools.wraps(own)
+        def compute_output_signature(self: Any, input_signature: Any) -> Any:
+            if input_signature is None:
+                return None
+            return own(self, input_signature)
+
+        compute_output_signature.__dict__["_passes_unknown"] = True
+        cls.compute_output_signature = compute_output_signature
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         """Dispatch eager / symbolic / DataTree modes on positional args.

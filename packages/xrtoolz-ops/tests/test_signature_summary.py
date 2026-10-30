@@ -150,3 +150,30 @@ def test_calculate_climatology_smoothed_uses_canonical_dim() -> None:
 
     assert detrend.CLIMATOLOGY_DIMS["day"] in dict(smoothed.dims)
     assert "time" not in dict(smoothed.dims)
+
+
+def test_an_unknown_input_signature_passes_through_every_operator() -> None:
+    from pipekit import Graph, Input
+
+    from xrops.interpolate.operators import ResampleTime
+
+    for op in (
+        SubsetBBox(lon_bnds=(0, 30), lat_bnds=(-30, 30)),
+        ResampleTime("1D"),
+        Reduce(op="mean", dim=("lat", "lon")),
+        Coarsen({"lat": 2}),
+        RenameCoords({"longitude": "lon"}),
+    ):
+        assert op.compute_output_signature(None) is None
+
+    inner_in = Input("ds_in")
+    inner = Graph(
+        inputs={"ds_in": inner_in},
+        outputs={"out": SubsetTime("2010", "2011")(inner_in)},
+    )
+    outer_in = Input("ds")
+    out = Reduce(op="mean", dim=("lat", "lon"))(ResampleTime("1ME")(inner(outer_in)))
+    outer = Graph(inputs={"ds": outer_in}, outputs={"mean": out})
+    sig = make({"time": 3650, "lat": 181, "lon": 360}, dtype="float32")
+    assert outer.output_signatures(sig) == {"mean": None}
+    assert "?" in outer.summary(sig)
