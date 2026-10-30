@@ -25,7 +25,7 @@ import xarray as xr
 import xskillscore as xs
 from scipy.stats import energy_distance as _scipy_energy_distance, wasserstein_distance
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 
 
 def _check_member_dim(da: xr.DataArray, dim: str, *, min_size: int = 2) -> None:

@@ -56,7 +56,7 @@ class Operator(_PipekitOperator):
         ```pycon
         >>> import numpy as np
         >>> import xarray as xr
-        >>> from xrcore import Operator
+        >>> from xrops import Operator
         >>> class Scale(Operator):
         ...     def __init__(self, factor: float) -> None:
         ...         self.factor = factor
@@ -127,7 +127,7 @@ class Operator(_PipekitOperator):
 
             ```pycon
             >>> import xarray as xr
-            >>> from xrcore import Operator
+            >>> from xrops import Operator
             >>> class GlobalScale(Operator):
             ...     def _apply(self, ds):
             ...         return ds

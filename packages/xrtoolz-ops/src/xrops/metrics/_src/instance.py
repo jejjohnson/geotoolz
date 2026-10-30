@@ -28,7 +28,7 @@ import numpy as np
 import xarray as xr
 from jaxtyping import Bool, Float, Shaped
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 
 
 def _as_3d_bool(

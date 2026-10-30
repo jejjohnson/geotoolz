@@ -354,3 +354,11 @@ def test_scores_named_like_the_feature_dim_still_invert() -> None:
     scores = est.transform(da)
     assert scores.sizes["lon"] == 2
     assert est.inverse_transform(scores).sizes["lon"] == 4
+
+
+def test_calling_the_operator_on_a_tree_uses_the_fitted_tree() -> None:
+    tree = xr.DataTree.from_dict({"a": xr.Dataset({"ssh": _cube()})})
+    est = XarrayEstimator(StandardScaler(), sample_dims="time").fit(tree)
+    xr.testing.assert_allclose(
+        est(tree)["a"].to_dataset(), est.transform(tree)["a"].to_dataset()
+    )

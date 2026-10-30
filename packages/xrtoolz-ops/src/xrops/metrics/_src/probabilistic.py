@@ -23,7 +23,7 @@ import numpy as np
 import xarray as xr
 from jaxtyping import Float
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 
 
 def _check_ensemble_dim(da: xr.DataArray, dim: str) -> None:

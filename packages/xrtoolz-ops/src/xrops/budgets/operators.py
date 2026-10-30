@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 
 import xarray as xr
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 from xrops.budgets._src.flux import boundary_flux
 from xrops.budgets._src.heat import heat_budget_residual
 from xrops.budgets._src.ke import kinetic_energy_budget_residual

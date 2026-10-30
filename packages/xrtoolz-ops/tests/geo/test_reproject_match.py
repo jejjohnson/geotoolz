@@ -96,17 +96,17 @@ def test_operator_maps_over_a_two_leaf_datatree() -> None:
 
 
 def test_output_signature_replaces_source_spatial_dims_with_targets() -> None:
-    from xrcore import Signature
+    from xrops._src.signature import make
 
     target = _raster(4, scale=2.0)
 
     signature = ReprojectMatch(target).compute_output_signature(
-        Signature({"time": 5, "lat": 8, "lon": 8}, dtype=np.dtype("float32"))
+        make({"time": 5, "lat": 8, "lon": 8}, dtype=np.dtype("float32"))
     )
 
     # reproject_match returns the *target's* spatial names, so the source's
     # must not survive alongside them as a phantom third/fourth spatial dim.
-    assert signature.dims == {"time": 5, "y": 4, "x": 4}
+    assert dict(signature.dims) == {"time": 5, "y": 4, "x": 4}
 
 
 def test_differing_spatial_dim_names_take_the_target_names() -> None:

@@ -12,7 +12,7 @@ import xarray as xr
 from jaxtyping import Float
 from scipy.stats import binned_statistic_2d
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 
 
 def bin_residuals_2d(

@@ -16,7 +16,7 @@ from typing import Any
 
 import xarray as xr
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 
 
 # ---------- Layer-0 -------------------------------------------------------

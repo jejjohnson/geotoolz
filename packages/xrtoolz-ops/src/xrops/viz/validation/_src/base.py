@@ -15,7 +15,7 @@ from typing import Any
 import matplotlib.figure as mpl_figure
 import matplotlib.pyplot as plt
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 
 
 class _ValidationPanel(Operator):

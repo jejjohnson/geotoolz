@@ -32,7 +32,7 @@ dependencies = [
     # negligible weight. See docs/design/conventions/array-typing.md.
     "jaxtyping>=0.2.34",
     "scipy>=1.12",
-    # DataTree polymorphism on xrcore.Operator depends on
+    # DataTree polymorphism on xrops.Operator depends on
     # ``xr.DataTree`` + ``xr.map_over_datasets``, both stabilised in
     # xarray 2024.10. Older versions raise ``AttributeError`` on the
     # isinstance check even for plain Dataset calls.
@@ -44,10 +44,8 @@ dependencies = [
     "xrft>=1.0",
     "xskillscore>=0.0.26",
     "numpy-groupies>=0.11",
-    # Split-out workspace members: xrcore supplies the xarray-aware
-    # Operator + Signature, xrgrad the finite-difference calculus (sole
-    # carrier of the finitediffx/JAX stack).
-    "xrtoolz-core>=0.0.1",
+    # Split-out workspace member: xrgrad, the finite-difference calculus
+    # (sole carrier of the finitediffx/JAX stack).
     "xrtoolz-grad>=0.0.1",
     # The shared bridges (geostack OP-O2, OP-O3): to_rows / from_rows and
     # the DataArray adapter. xrops.learn builds on pipekit_array.Estimator;
@@ -193,7 +191,7 @@ ignore = [
 combine-as-imports = true
 lines-after-imports = 2
 # Sibling workspace members are first-party to the xrtoolz stack.
-known-first-party = ["xrops", "xrcore", "xrgrad"]
+known-first-party = ["xrops", "xrgrad"]
 
 [tool.ty.environment]
 python-version = "3.12"

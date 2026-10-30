@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 from xrops.atm.gas.ch4._src import column as _column
 
 

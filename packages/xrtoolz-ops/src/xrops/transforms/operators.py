@@ -21,7 +21,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 from xrops.transforms._src import (
     dct as _dct,
     fourier as _fourier,

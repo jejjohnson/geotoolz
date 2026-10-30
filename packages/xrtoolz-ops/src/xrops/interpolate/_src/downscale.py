@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 
 
 class _ResolutionOp(Operator):

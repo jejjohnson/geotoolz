@@ -10,7 +10,7 @@ from numpy.typing import ArrayLike, NDArray
 from scipy import signal
 from scipy.stats import circmean
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 from xrops.metrics._src._segmented_psd_kernels import _segment_bounds
 
 

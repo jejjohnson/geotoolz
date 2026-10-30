@@ -25,7 +25,7 @@ import numpy as np
 import xarray as xr
 from jaxtyping import Float, Int
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 from xrops.utils._src.optional_imports import _require_optional
 
 

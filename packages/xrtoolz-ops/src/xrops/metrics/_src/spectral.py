@@ -29,7 +29,7 @@ import xarray as xr
 from jaxtyping import Float
 from scipy.interpolate import interp1d
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 from xrops.geo._src.wavelet import wvlt_power_spectrum
 from xrops.geo._src.wavelet_utils import scale_to_wavenumber
 from xrops.transforms._src.fourier import (

@@ -12,10 +12,10 @@ from collections.abc import Hashable, Mapping, Sequence
 from typing import Any, ClassVar, Literal, Self, get_args
 
 import xarray as xr
-from pipekit import Operator
 from pipekit_array import DimArray, Estimator, to_rows
 from pipekit_array.estimator import NanPolicy
 
+from xrops._src.operator import Operator
 from xrops.learn._src.layout import (
     SAMPLE,
     Layout,
@@ -323,6 +323,10 @@ class XarrayEstimator(Operator):
 
     def _apply(self, x: Any) -> Any:
         return getattr(self, self.method)(x)
+
+    def _apply_tree(self, x: Any) -> Any:
+        # the whole tree at once: fitted per node or pooled, not leaf by leaf
+        return self._apply(x)
 
     def _run(self, method: str, x: Any) -> Any:
         if isinstance(x, xr.DataTree):

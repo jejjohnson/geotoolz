@@ -7,8 +7,6 @@ imported under its own name:
   budgets, geo, interpolate, metrics, transforms, viz);
 - ``xrtoolz-products`` (``xrproducts``): readers for CMEMS, CDS, AEMET and
   local L2 products;
-- ``xrtoolz-core`` (``xrcore``): the xarray ``Operator`` base and
-  ``Signature``;
 - ``xrtoolz-grad`` (``xrgrad``): finite-difference calculus on xarray.
 
 Example:

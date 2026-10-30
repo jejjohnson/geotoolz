@@ -39,7 +39,7 @@ from typing import Any, ClassVar
 import xarray as xr
 from pipekit import Operator as _PipekitOperator
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 
 
 class Augment(Operator):

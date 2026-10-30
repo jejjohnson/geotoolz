@@ -2,15 +2,14 @@
 
 The composition primitives are carrier-agnostic and live in
 [`pipekit`](https://github.com/jejjohnson/pipekit); the xarray-aware
-`Operator` base is `xrcore`, and the Dataset combinators are `xrops`:
+`Operator` base and the Dataset combinators are `xrops`:
 
 ```python
 from pipekit import Sequential, Graph, Input, Node
-from xrcore import Operator
-from xrops import Augment
+from xrops import Augment, Operator
 ```
 
-`xrcore.Operator` is a thin xarray-aware subclass of `pipekit.Operator`
+`xrops.Operator` is a thin xarray-aware subclass of `pipekit.Operator`
 that adds `xarray.DataTree` dispatch to `__call__` — every operator in the
 library inherits it, so all of them map leaf-wise over a `DataTree` for
 free. The xarray-Dataset-specific combinators (`Augment`, `ApplyToEach`)
@@ -35,7 +34,7 @@ live in `xrops.combinators`.
 
 ## Operator base class
 
-::: xrcore.Operator
+::: xrops.Operator
 
 ## Sequential pipelines
 
@@ -69,7 +68,6 @@ variable independently.
 
 ## Shape signatures
 
-`Signature` is the dict-keyed shape descriptor used by
-`compute_output_signature` for static shape inference across a pipeline.
+`Signature` is pipekit's shape descriptor (ordered `(name, size)` dims and a dtype), used by `compute_output_signature` for static shape inference across a pipeline.
 
-::: xrcore.Signature
+::: pipekit.Signature

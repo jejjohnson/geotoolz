@@ -9,7 +9,6 @@ live in sibling packages and are installed automatically with it:
 
 | Distribution | Import | Scope |
 |---|---|---|
-| `xrtoolz-core` | `xrcore` | xarray-aware `Operator` (DataTree dispatch) + `Signature` |
 | `xrtoolz-grad` | `xrgrad` | Finite-difference calculus on labeled grids |
 | `pipekit-array` | `pipekit_array` | The shared bridges: `to_rows` / `from_rows`, `Estimator`, and the `[einx]` bridge |
 

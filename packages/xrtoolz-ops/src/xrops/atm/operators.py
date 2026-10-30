@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 import xarray as xr
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 from xrops.atm._src import vertical as _vertical, wind as _wind
 
 

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xrcore import Signature
+from xrops._src.signature import make
 from xrops.interpolate import along_track, sample_at_points
 from xrops.interpolate.operators import AlongTrack, SampleAtPoints
 
@@ -139,7 +139,7 @@ def test_sample_at_points_operator_config_and_signature() -> None:
     cfg = op.get_config()
     assert json.loads(json.dumps(cfg)) == cfg
     sig = op.compute_output_signature(
-        Signature({"time": 3, "lat": 9, "lon": 11}, dtype="float64")
+        make({"time": 3, "lat": 9, "lon": 11}, dtype="float64")
     )
     assert dict(sig.dims) == {"time": 3, "points": 2}
 

@@ -1,7 +1,7 @@
 [project]
 name = "xrtoolz"
 version = "0.3.0"
-description = "The xarray side of the geostack in one install: xrtoolz-ops, -products, -core and -grad."
+description = "The xarray side of the geostack in one install: xrtoolz-ops, -products and -grad."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]
@@ -23,7 +23,6 @@ classifiers = [
 dependencies = [
     "xrtoolz-ops>=0.0.0",
     "xrtoolz-products>=0.0.2",
-    "xrtoolz-core>=0.0.1",
     "xrtoolz-grad>=0.0.1",
 ]
 

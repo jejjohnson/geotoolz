@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xrcore import Signature
+from xrops._src.signature import make
 from xrops.interpolate import (
     RegridConservative,
     coarsen_conservative,
@@ -482,12 +482,12 @@ def test_operator_matches_function_and_config_round_trips() -> None:
     xr.testing.assert_allclose(rebuilt(ds), op(ds))
 
     sig = op.compute_output_signature(
-        Signature({"time": 3, "lat": 10, "lon": 10}, dtype=np.dtype("float32"))
+        make({"time": 3, "lat": 10, "lon": 10}, dtype=np.dtype("float32"))
     )
-    assert sig.dims == {"time": 3, "lat": 5, "lon": 2} and sig.dtype == "float64"
-    csig = op.compute_output_signature(Signature({"lat": 10, "lon": 10}, "complex64"))
+    assert dict(sig.dims) == {"time": 3, "lat": 5, "lon": 2} and sig.dtype == "float64"
+    csig = op.compute_output_signature(make({"lat": 10, "lon": 10}, "complex64"))
     assert csig.dtype == "complex128"
-    assert op.compute_output_signature(Signature({"lat": 10})).dtype == "float64"
+    assert op.compute_output_signature(make({"lat": 10})).dtype == "float64"
     with pytest.raises(ValueError, match="missing"):
         RegridConservative({"lat": [0.0, 1.0]})
 

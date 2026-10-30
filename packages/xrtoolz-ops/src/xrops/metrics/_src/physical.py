@@ -42,7 +42,7 @@ import numpy as np
 import xarray as xr
 
 import xrgrad
-from xrcore import Operator
+from xrops._src.operator import Operator
 from xrops.ocn._src.kinematics import (
     Coriolis,
     Geometry,

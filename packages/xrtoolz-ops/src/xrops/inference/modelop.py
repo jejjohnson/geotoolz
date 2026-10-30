@@ -21,7 +21,7 @@ from typing import Any, ClassVar
 import numpy as np
 import xarray as xr
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 
 
 _XR_TYPES = (xr.DataArray, xr.Dataset)

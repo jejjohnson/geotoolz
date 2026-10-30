@@ -1,4 +1,4 @@
-"""Tests for the xarray-aware :class:`xrcore.Operator`.
+"""Tests for the xarray-aware :class:`xrops.Operator`.
 
 Covers the three ``__call__`` dispatch modes added on top of
 ``pipekit.Operator``:
@@ -21,7 +21,7 @@ import pytest
 import xarray as xr
 from pipekit import Graph, Input, Node, Sequential
 
-from xrcore import Operator
+from xrops import Operator
 
 
 # ---------- toy operators --------------------------------------------------

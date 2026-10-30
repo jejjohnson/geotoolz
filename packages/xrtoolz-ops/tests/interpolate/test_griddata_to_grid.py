@@ -179,15 +179,15 @@ def test_operator_default_config_encodes_nan_fill_json_safely() -> None:
 
 
 def test_operator_output_signature_matches_grid() -> None:
-    from xrcore import Signature
+    from xrops._src.signature import make
 
     grid = _interior_grid()
 
     signature = GriddataToGrid(grid).compute_output_signature(
-        Signature({"points": 3000}, dtype=np.dtype("float32"))
+        make({"points": 3000}, dtype=np.dtype("float32"))
     )
 
-    assert signature.dims == {"lat": len(grid.lat), "lon": len(grid.lon)}
+    assert dict(signature.dims) == {"lat": len(grid.lat), "lon": len(grid.lon)}
     # The kernel casts to float64, so a float32 payload must not be
     # reported as float32 downstream.
     assert signature.dtype == np.dtype("float64")

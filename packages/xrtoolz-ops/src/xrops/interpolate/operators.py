@@ -14,8 +14,10 @@ from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
+from pipekit import Signature
 
-from xrcore import Operator, Signature
+from xrops._src import signature as _sig
+from xrops._src.operator import Operator
 from xrops.interpolate._src import (
     binning as _binning,
     downscale as _downscale,
@@ -554,7 +556,7 @@ class ResampleTime(Operator):
         return _fn(ds)
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
-        return input_signature.replace_dims({self.time: None})
+        return _sig.replace_dims(input_signature, {self.time: None})
 
 
 # ---------- grid-to-grid ---------------------------------------------------
@@ -611,7 +613,7 @@ class Coarsen(Operator):
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         updates: dict[str, int | None] = {}
         for dim, factor in self.factor.items():
-            size = input_signature.dims.get(dim)
+            size = _sig.sizes(input_signature).get(dim)
             if size is None:
                 updates[dim] = None
             elif self.boundary == "trim":
@@ -623,7 +625,7 @@ class Coarsen(Operator):
                 )
             else:
                 updates[dim] = (size + factor - 1) // factor
-        return input_signature.replace_dims(updates)
+        return _sig.replace_dims(input_signature, updates)
 
 
 class Refine(Operator):
@@ -733,7 +735,7 @@ class Refine(Operator):
         for dim, factor in self.factor.items():
             if dim not in active_dims:
                 continue
-            size = input_signature.dims.get(dim)
+            size = _sig.sizes(input_signature).get(dim)
             if size is None:
                 updates[dim] = None
             elif self.order is None or float(factor).is_integer():
@@ -741,7 +743,7 @@ class Refine(Operator):
                 updates[dim] = (size - 1) * _as_integer_factor(dim, factor) + 1
             else:
                 updates[dim] = max(1, round(size * factor))
-        return input_signature.replace_dims(updates)
+        return _sig.replace_dims(input_signature, updates)
 
 
 class RegridLike(Operator):
@@ -781,7 +783,7 @@ class RegridLike(Operator):
             for dim in self.dims
             if dim in self.target.sizes
         }
-        return input_signature.replace_dims(updates)
+        return _sig.replace_dims(input_signature, updates)
 
 
 class RegridConservative(Operator):
@@ -886,8 +888,8 @@ class RegridConservative(Operator):
             )
         except TypeError:  # unknown (None) or non-numpy dtype tag
             is_complex = False
-        return Signature(
-            input_signature.replace_dims(updates).dims,
+        return _sig.make(
+            _sig.sizes(_sig.replace_dims(input_signature, updates)),
             dtype=np.complex128 if is_complex else np.float64,
         )
 
@@ -928,7 +930,7 @@ class Bin2D(Operator):
         }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
-        return Signature(
+        return _sig.make(
             {self.lat: len(self.grid.lat), self.lon: len(self.grid.lon)},
             dtype=input_signature.dtype,
         )
@@ -949,7 +951,7 @@ class Histogram2D(Operator):
         return {"grid": "<Grid>", "lon": self.lon, "lat": self.lat}
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
-        return Signature(
+        return _sig.make(
             {self.lat: len(self.grid.lat), self.lon: len(self.grid.lon)},
             dtype=input_signature.dtype,
         )
@@ -978,7 +980,7 @@ class PointsToGrid(Operator):
         return {"grid": "<Grid>", "statistic": self.statistic}
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
-        return Signature(
+        return _sig.make(
             {"lat": len(self.grid.lat), "lon": len(self.grid.lon)},
             dtype=input_signature.dtype,
         )
@@ -1023,7 +1025,7 @@ class GriddataToGrid(Operator):
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         # griddata_to_grid casts its inputs to float64 before triangulating,
         # so the result is float64 regardless of the payload's dtype.
-        return Signature(
+        return _sig.make(
             {"lat": len(self.grid.lat), "lon": len(self.grid.lon)},
             dtype=np.dtype("float64"),
         )
@@ -1094,7 +1096,7 @@ class KDEToGrid(Operator):
         }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
-        return Signature(
+        return _sig.make(
             {"lat": len(self.grid.lat), "lon": len(self.grid.lon)},
             dtype=input_signature.dtype,
         )
@@ -1149,7 +1151,7 @@ class IDWToGrid(Operator):
         }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
-        return Signature(
+        return _sig.make(
             {"lat": len(self.grid.lat), "lon": len(self.grid.lon)},
             dtype=input_signature.dtype,
         )
@@ -1219,7 +1221,7 @@ class IDWToPoints(Operator):
             if len(out_shape) == 1
             else {f"dim_{i}": int(s) for i, s in enumerate(out_shape)}
         )
-        return Signature(dims, dtype=dtype)
+        return _sig.make(dims, dtype=dtype)
 
 
 # ---------- grid → points --------------------------------------------------
@@ -1274,11 +1276,11 @@ class SampleAtPoints(Operator):
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         dims = {
             dim: size
-            for dim, size in input_signature.dims.items()
+            for dim, size in _sig.sizes(input_signature).items()
             if dim not in self.coords
         }
         dims[self.point_dim] = self.points.sizes.get(self.point_dim)
-        return Signature(dims, dtype=input_signature.dtype)
+        return _sig.make(dims, dtype=input_signature.dtype)
 
 
 class AlongTrack(Operator):
@@ -1326,11 +1328,11 @@ class AlongTrack(Operator):
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         dims = {
             dim: size
-            for dim, size in input_signature.dims.items()
+            for dim, size in _sig.sizes(input_signature).items()
             if dim not in self.coords
         }
         dims[self.point_dim] = self.track.sizes.get(self.point_dim)
-        return Signature(dims, dtype=input_signature.dtype)
+        return _sig.make(dims, dtype=input_signature.dtype)
 
 
 # ---------- smoothers ------------------------------------------------------
@@ -1689,12 +1691,12 @@ class RemapAxis(Operator):
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         target_name = self._resolve_target_name()
         dims = {}
-        for name, size in input_signature.dims.items():
+        for name, size in _sig.sizes(input_signature).items():
             if name == self.source_axis:
                 dims[target_name] = len(self._target_values)
             else:
                 dims[name] = size
-        return Signature(dims, dtype=input_signature.dtype)
+        return _sig.make(dims, dtype=input_signature.dtype)
 
     def _resolve_target_name(self) -> str:
         if self.target_name is not None:
@@ -1851,12 +1853,12 @@ class ToPhase(Operator):
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         dims = {}
-        for name, size in input_signature.dims.items():
+        for name, size in _sig.sizes(input_signature).items():
             if name == self.time_dim:
                 dims["phase"] = self.n_bins
             else:
                 dims[name] = size
-        return Signature(dims, dtype=input_signature.dtype)
+        return _sig.make(dims, dtype=input_signature.dtype)
 
 
 # ---------- learned resolution change --------------------------------------

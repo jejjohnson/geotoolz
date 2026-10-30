@@ -88,7 +88,7 @@ convention = "google"
 [tool.ruff.lint.isort]
 combine-as-imports = true
 lines-after-imports = 2
-known-first-party = ["xrtoolz", "xrcore", "xrgrad"]
+known-first-party = ["xrtoolz", "xrgrad"]
 
 [tool.ty.environment]
 python-version = "3.12"

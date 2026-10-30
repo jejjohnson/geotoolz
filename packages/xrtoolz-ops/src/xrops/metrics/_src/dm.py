@@ -10,7 +10,7 @@ import xarray as xr
 from jaxtyping import Float
 from scipy import stats
 
-from xrcore import Operator
+from xrops._src.operator import Operator
 
 
 _ALTERNATIVES = {"two-sided", "less", "greater"}

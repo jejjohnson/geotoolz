@@ -18,8 +18,10 @@ from typing import Any, ClassVar, Literal
 import numpy as np
 import regionmask
 import xarray as xr
+from pipekit import Signature
 
-from xrcore import Operator, Signature
+from xrops._src import signature as _sig
+from xrops._src.operator import Operator
 from xrops.geo._src import (
     along_track as _along_track,
     crs as _crs,
@@ -47,8 +49,8 @@ def _validate_signature(
     ``validate_latitude``: if any alias is present in the input dims,
     rename it to ``canonical``. Shape-preserving otherwise."""
     for alias in aliases:
-        if alias in input_signature.dims:
-            return input_signature.rename_dims({alias: canonical})
+        if alias in _sig.sizes(input_signature):
+            return _sig.rename_dims(input_signature, {alias: canonical})
     return input_signature
 
 
@@ -195,7 +197,7 @@ class RenameCoords(Operator):
         return {"mapping": self.mapping}
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
-        return input_signature.rename_dims(self.mapping)
+        return _sig.rename_dims(input_signature, self.mapping)
 
 
 class RenameVariables(Operator):
@@ -328,7 +330,7 @@ class SubsetBBox(Operator):
         }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
-        return input_signature.replace_dims({self.lon: None, self.lat: None})
+        return _sig.replace_dims(input_signature, {self.lon: None, self.lat: None})
 
 
 class SubsetToRegion(Operator):
@@ -389,7 +391,7 @@ class SubsetToRegion(Operator):
         }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
-        return input_signature.replace_dims({self.lon: None, self.lat: None})
+        return _sig.replace_dims(input_signature, {self.lon: None, self.lat: None})
 
 
 class SubsetTime(Operator):
@@ -422,7 +424,7 @@ class SubsetTime(Operator):
         }
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
-        return input_signature.replace_dims({self.time: None})
+        return _sig.replace_dims(input_signature, {self.time: None})
 
 
 class SelectVariables(Operator):
@@ -608,8 +610,8 @@ class Reduce(Operator):
 
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         if self.keepdims:
-            return input_signature.replace_dims({dim: 1 for dim in self.dim})
-        return input_signature.drop_dims(self.dim)
+            return _sig.replace_dims(input_signature, {dim: 1 for dim in self.dim})
+        return _sig.drop_dims(input_signature, self.dim)
 
 
 class BandpassWavelength(Operator):
@@ -1075,8 +1077,8 @@ class ApplyMask(Operator):
     def compute_output_signature(self, input_signature: Signature) -> Signature:
         if not self.drop:
             return input_signature
-        return Signature(
-            {name: None for name in input_signature.dims},
+        return _sig.make(
+            {name: None for name in _sig.sizes(input_signature)},
             dtype=input_signature.dtype,
         )
 
@@ -1129,12 +1131,12 @@ class ReprojectMatch(Operator):
         source_spatial = {"x", "y", "lat", "lon", "latitude", "longitude"}
         dims = {
             name: size
-            for name, size in input_signature.dims.items()
+            for name, size in _sig.sizes(input_signature).items()
             if name not in source_spatial
         }
         dims[y_dim] = self.target.sizes[y_dim]
         dims[x_dim] = self.target.sizes[x_dim]
-        return Signature(dims, dtype=input_signature.dtype)
+        return _sig.make(dims, dtype=input_signature.dtype)
 
 
 class AssignLocalXY(Operator):
@@ -1470,9 +1472,9 @@ def _replace_dim(
     size: int | None,
 ) -> Signature:
     dims = {}
-    for name, dim_size in input_signature.dims.items():
+    for name, dim_size in _sig.sizes(input_signature).items():
         if name == old:
             dims[new] = size
         else:
             dims[name] = dim_size
-    return Signature(dims, dtype=input_signature.dtype)
+    return _sig.make(dims, dtype=input_signature.dtype)

@@ -25,8 +25,10 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
+from pipekit import Signature
 
-from xrcore import Operator, Signature
+from xrops._src import signature as _sig
+from xrops._src.operator import Operator
 from xrops.metrics._src import _pixel_kernels as _kernels
 
 
@@ -175,7 +177,7 @@ class _PixelMetricOp(Operator):
         dims = (self.dims,) if isinstance(self.dims, str) else tuple(self.dims)
         # Pixel metric kernels promote int inputs to float64 (see
         # _apply_pixel_kernel above), so the inferred output dtype follows.
-        return Signature(signature.drop_dims(dims).dims, dtype=np.float64)
+        return _sig.make(_sig.sizes(_sig.drop_dims(signature, dims)), dtype=np.float64)
 
 
 class MSE(_PixelMetricOp):
@@ -227,17 +229,16 @@ class R2Score(_PixelMetricOp):
 
 
 def _validate_compatible_signatures(left: Signature, right: Signature) -> None:
-    if set(left.dims) != set(right.dims):
+    lhs, rhs = _sig.sizes(left), _sig.sizes(right)
+    if set(lhs) != set(rhs):
         raise ValueError(
             "Metric inputs must have matching dimension names; "
-            f"got {tuple(left.dims)} and {tuple(right.dims)}."
+            f"got {tuple(lhs)} and {tuple(rhs)}."
         )
     mismatched = {
-        name: (left.dims[name], right.dims[name])
-        for name in left.dims
-        if left.dims[name] is not None
-        and right.dims[name] is not None
-        and left.dims[name] != right.dims[name]
+        name: (lhs[name], rhs[name])
+        for name in lhs
+        if lhs[name] is not None and rhs[name] is not None and lhs[name] != rhs[name]
     }
     if mismatched:
         raise ValueError(f"Metric input signature sizes do not match: {mismatched}.")

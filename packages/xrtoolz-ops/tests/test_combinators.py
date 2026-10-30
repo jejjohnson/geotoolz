@@ -14,8 +14,7 @@ import pytest
 import xarray as xr
 from pipekit import Sequential
 
-from xrcore import Operator
-from xrops import ApplyToEach, Augment
+from xrops import ApplyToEach, Augment, Operator
 
 
 # ---------- helper ops -----------------------------------------------------
