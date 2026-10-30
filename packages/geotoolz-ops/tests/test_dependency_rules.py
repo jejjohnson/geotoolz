@@ -78,12 +78,8 @@ FORBIDDEN: dict[str, str] = {
     "somax": "somax",
     "spectraldiffx": "spectraldiffx",
     "vardax": "vardax",
-    "xrcore": "xrtoolz-core",
-    "xreinx": "xrtoolz-einx",
-    "xrgrad": "xrtoolz-grad",
     "xrops": "xrtoolz-ops",
-    "xrreader": "xrtoolz-reader",
-    "xrsklearn": "xrtoolz-sklearn",
+    "xrproducts": "xrtoolz-products",
     "xrtoolz": "xrtoolz",
     "xtremax": "xtremax",
 }
