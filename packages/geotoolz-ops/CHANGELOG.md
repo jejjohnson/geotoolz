@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.18.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.17.0...geotoolz-ops-v0.18.0) (2026-11-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ops:** geoarray.reduce and geoarray.argreduce are removed. Use geoops.compositing.reduce / argreduce to leave nodata out, or pipekit_array.reduce / argreduce (the same objects geoarray re-exported).
+* **ops:** geoarray.interp_at is removed; use geoops.geom.interp_at (same signature) or geoops.InterpAt.
+
+### Features
+
+* **ops:** add Coupling, measure_coupling and assert_coupling ([#621](https://github.com/jejjohnson/geotoolz/issues/621)) ([d2a5905](https://github.com/jejjohnson/geotoolz/commit/d2a59059bbb552806ca820774a44153cb7a296f0)), closes [#615](https://github.com/jejjohnson/geotoolz/issues/615)
+* **ops:** declare coupling on every operator; the contract test requires it ([#623](https://github.com/jejjohnson/geotoolz/issues/623)) ([fb5c1c6](https://github.com/jejjohnson/geotoolz/commit/fb5c1c69bc93ce47773422c72bf2927146c6ff75))
+* **ops:** declare coupling on indices, spectral, radiometry, normalize and qa ([#622](https://github.com/jejjohnson/geotoolz/issues/622)) ([a5408aa](https://github.com/jejjohnson/geotoolz/commit/a5408aad1cffd1ca9fd57e35107ac7aa4d957ce6)), closes [#616](https://github.com/jejjohnson/geotoolz/issues/616)
+* **ops:** move interp_at to geoops.geom with an InterpAt operator ([#636](https://github.com/jejjohnson/geotoolz/issues/636)) ([ee8e46c](https://github.com/jejjohnson/geotoolz/commit/ee8e46ce396dc49dfe32741926b8040909008d43))
+* **ops:** nodata-aware reduce / argreduce in geoops.compositing ([#637](https://github.com/jejjohnson/geotoolz/issues/637)) ([409a772](https://github.com/jejjohnson/geotoolz/commit/409a7726042c3bd7b1cfacadaaac4a9c08816b42))
+* **patcher:** warn in ApplyToChips when patching changes the answer ([#626](https://github.com/jejjohnson/geotoolz/issues/626)) ([528a0ab](https://github.com/jejjohnson/geotoolz/commit/528a0abac747c33095da722dd03e10434123de06))
+
 ## [0.17.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.16.0...geotoolz-ops-v0.17.0) (2026-10-29)
 
 
