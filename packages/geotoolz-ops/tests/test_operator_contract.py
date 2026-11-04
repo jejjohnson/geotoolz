@@ -55,6 +55,7 @@ from geoops._src.contract import (
     time_series_of,
     time_stack_of,
 )
+from geoops.carrier import Coupling
 
 
 def _key(cls: type) -> str:
@@ -83,10 +84,17 @@ def _sklearn(name: str) -> Callable[[], dict[str, Any]]:
             sklearn.svm,
         ):
             if hasattr(mod, name):
-                return {"estimator": getattr(mod, name)()}
+                return {"estimator": _seeded(getattr(mod, name)())}
         raise LookupError(name)
 
     return build
+
+
+def _seeded(estimator: Any) -> Any:
+    """``estimator`` with ``random_state=0`` where it takes one, so runs repeat."""
+    if "random_state" in estimator.get_params():
+        estimator.set_params(random_state=0)
+    return estimator
 
 
 def _mf(**extra: Any) -> Callable[[], dict[str, Any]]:
@@ -202,7 +210,7 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
         )
     },
     "learn._src.operators.PixelwiseGMM": lambda: {
-        "estimator": __import__("sklearn.mixture").mixture.GaussianMixture()
+        "estimator": _seeded(__import__("sklearn.mixture").mixture.GaussianMixture())
     },
     "learn._src.operators.PixelwiseIPCA": lambda: {
         "estimator": __import__("sklearn.decomposition").decomposition.IncrementalPCA()
@@ -1618,62 +1626,41 @@ STOCHASTIC_PER_PIXEL: frozenset[str] = frozenset(
     }
 )
 
-#: Operators that fit statistics (a per-band mean, a background covariance,
-#: a stretch range, principal components) and deliberately pool them over
-#: every frame of a stack -- one fit for the whole time series -- so their
-#: values differ from per-frame fits; only the output shape is checked.
-POOLED_STATISTICS: dict[str, str] = {
-    "augment._src.operators.SimulatedClouds": "cloud brightness of the stack",
-    "matched_filter._src.operators.ColumnEnhancement": "one background fit",
-    "normalize._src.operators.HistogramMatch": "one source CDF per band",
-    "normalize._src.operators.HistogramStretch": "per-band percentiles",
-    "normalize._src.operators.ZeroOne": "per-band min / max",
-    "restore._src.operators.DenoisePCA": "one PCA basis",
-    "restore._src.operators.MNF": "one PCA basis",
-}
+# The time-stack facts below are each operator's declared ``coupling``
+# (geoops.carrier.Coupling, #618), not hand lists.
+
+
+def _coupling(cls: type) -> Coupling:
+    return cls.coupling
+
+
+#: Operators whose statistic pools over every frame of a stack: ``time`` is
+#: coupled or fitted, so their values differ from per-frame runs; only the
+#: output shape is checked.
+POOLED_STATISTICS: frozenset[str] = frozenset(
+    _key(cls)
+    for cls in _CLASSES
+    if "time" in (_coupling(cls).couples | _coupling(cls).fit)
+)
 
 #: Operators whose output depends only on the carrier's grid (a rasterised
-#: geometry) or on a static second carrier (a DEM), so one ``(H, W)`` mask
-#: serves every frame of a stack.
+#: geometry) or on a static second carrier (a DEM), never on the input's
+#: values, so one ``(H, W)`` result serves every frame of a stack.
 TIME_INVARIANT: frozenset[str] = frozenset(
-    f"mask._src.operators.{name}"
-    for name in (
-        "BBoxMask",
-        "CountryMask",
-        "DistanceMask",
-        "LandMask",
-        "OceanMask",
-        "PolygonMask",
-        "AltitudeMask",
-        "SlopeMask",
-    )
-) | {"geom._src.operators.Rasterize", "geom._src.operators.RasterizeLike"}
+    _key(cls) for cls in _CLASSES if not _coupling(cls).reads_values
+)
 
-#: learn estimators in their default ``mode="pixel"`` treat every
-#: non-spatial axis as a feature, so a ``(T, C, H, W)`` stack is fitted on
-#: ``T * C`` features per pixel and returns one ``(k, H, W)`` map -- by
-#: design, not per frame (``mode="pixel_time"`` gives ``(T, k, H, W)``; see
-#: ``test_learn``). Only the output grid is checked.
+#: Estimators that treat every non-spatial axis as a feature (learn's
+#: ``mode="pixel"``): a ``(T, C, H, W)`` stack is fitted on ``T * C``
+#: features per pixel and returns one ``(k, H, W)`` map, by design; only
+#: the output grid is checked. They couple ``band`` and ``time``, reduce
+#: ``time`` and fit (or read) over ``space``.
 STACK_AS_FEATURES: frozenset[str] = frozenset(
-    {
-        *(
-            f"learn._src.operators.Pixelwise{name}"
-            for name in (
-                "GMM",
-                "IPCA",
-                "IsolationForest",
-                "IterativeImputer",
-                "KMeans",
-                "KNNImputer",
-                "LocalOutlierFactor",
-                "MiniBatchKMeans",
-                "NMF",
-                "OneClassSVM",
-                "PCA",
-            )
-        ),
-        "learn._src.operators.SklearnOp",
-    }
+    _key(cls)
+    for cls in _CLASSES
+    if {"band", "time"} <= _coupling(cls).couples
+    and _coupling(cls).effect("time") == "reduce"
+    and "space" in (_coupling(cls).couples | _coupling(cls).fit)
 )
 
 #: Strict xfails for the 4-D contract (none open).
@@ -1712,7 +1699,8 @@ def _is_frame_carrier(value: Any) -> bool:
 
 def _assert_matches_frames(key: str, out: Any, expected: list[Any]) -> None:
     """``out`` equals the per-frame results restacked along time."""
-    if key in TIME_INVARIANT:
+    if key in TIME_INVARIANT and np.shape(out) == np.shape(expected[0]):
+        # one result for the whole stack: it equals every frame's
         for e in expected:
             np.testing.assert_array_equal(np.asarray(out), np.asarray(e))
         return

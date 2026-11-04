@@ -340,3 +340,90 @@ def test_a_wider_declaration_passes_unless_exact() -> None:
 def test_an_undeclared_operator_fails() -> None:
     with pytest.raises(AssertionError, match="declares no `coupling`"):
         assert_coupling(object(), measure_coupling(Scale, _scene()))
+
+
+def test_reads_values_is_checked() -> None:
+    class GridOnly:
+        coupling = Coupling(reads_values=False)
+
+        def __call__(self, x: GeoArray) -> GeoArray:
+            return x.replace(data=np.zeros(x.shape, dtype=bool))
+
+    class ClaimsGridOnly(Scale):
+        coupling = Coupling(reads_values=False)
+
+    measured = measure_coupling(GridOnly, _scene())
+    assert not measured.reads_values
+    assert_coupling(GridOnly(), measured, exact=True)
+    with pytest.raises(AssertionError, match="reads_values=True"):
+        assert_coupling(ClaimsGridOnly(), measure_coupling(Scale, _scene()))
+    with pytest.raises(AssertionError, match="reads_values=False"):
+        assert_coupling(Scale(), measured, exact=True)
+
+
+def test_a_reduction_over_time_is_measured() -> None:
+    class StackMean:
+        coupling = Coupling(couples={"time"}, effects={"time": "reduce"})
+
+        def __call__(self, x: GeoArray) -> np.ndarray:
+            a = np.asarray(x)
+            return a.mean(axis=0) if a.ndim == 4 else a
+
+    measured = measure_coupling(StackMean, _scene())
+    assert measured.time == "reduce"
+    assert_coupling(StackMean(), measured, exact=True)
+
+
+def test_a_scene_wide_nodata_fill_is_global() -> None:
+    """A local filter that first fills nodata from the whole scene reads it all."""
+
+    class FillThenBox(_Toy):
+        coupling = Coupling(couples={"space"}, reach=1)
+
+        def f(self, a: np.ndarray) -> np.ndarray:
+            filled = np.where(np.isfinite(a), a, np.nanmedian(a))
+            size = (1,) * (a.ndim - 2) + (3, 3)
+            return ndimage.uniform_filter(filled, size=size, mode="nearest")
+
+    measured = measure_coupling(FillThenBox, _scene())
+    assert measured.reach is None
+    with pytest.raises(AssertionError, match="declare reach=None"):
+        assert_coupling(FillThenBox(), measured)
+
+
+def test_a_frame_selector_is_not_a_time_coupling() -> None:
+    class LastFrame:
+        coupling = Coupling(effects={"time": "select"})
+
+        def __call__(self, x: GeoArray) -> np.ndarray:
+            a = np.asarray(x)
+            return a[-1] if a.ndim == 4 else a
+
+    measured = measure_coupling(LastFrame, _scene())
+    assert measured.time == "select"
+    assert measured.couples == frozenset()
+    assert measured.effects == {"time": "select"}
+
+
+def test_measure_frames_bumps_the_centre_of_4d_frames() -> None:
+    frames = [np.random.default_rng(t).uniform(size=(2, 3, 16, 16)) for t in range(2)]
+
+    class Mean:
+        coupling = Coupling(couples={"time"}, effects={"time": "reduce"})
+
+        def __call__(self, *xs: np.ndarray) -> np.ndarray:
+            return np.mean(np.stack(xs), axis=0)
+
+    measured = measure_frames(Mean, frames)
+    assert measured.couples == {"time"}
+
+
+def test_a_sub_pixel_regrid_is_not_the_same_grid() -> None:
+    class ShiftHalfMetre:
+        coupling = Coupling(effects={"space": "regrid"})
+
+        def __call__(self, x: GeoArray) -> GeoArray:
+            return x.shift_origin((0.5, 0.0))
+
+    measured = measure_coupling(ShiftHalfMetre, _scene())
+    assert measured.regrids

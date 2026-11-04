@@ -2164,7 +2164,7 @@ class Rasterize(Operator):
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
     # depends only on the grid and the geometries
-    coupling: ClassVar[Coupling] = Coupling()
+    coupling: ClassVar[Coupling] = Coupling(reads_values=False)
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -2234,7 +2234,7 @@ class RasterizeLike(Operator):
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
     # depends only on the grid and the geometries
-    coupling: ClassVar[Coupling] = Coupling()
+    coupling: ClassVar[Coupling] = Coupling(reads_values=False)
 
     forbid_in_yaml: ClassVar[bool] = True
 

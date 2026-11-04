@@ -623,7 +623,7 @@ class WindAdvectionCone(Operator):
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
     # depends only on the grid, the source and the wind
-    coupling: ClassVar[Coupling] = Coupling()
+    coupling: ClassVar[Coupling] = Coupling(reads_values=False)
 
     def __init__(
         self,
