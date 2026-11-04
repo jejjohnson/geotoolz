@@ -572,11 +572,9 @@ class MedianDenoise(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
-    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
-
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: half the window."""
-        return self.window // 2
+    # a local median, but nodata is first filled with the median of the whole
+    # array, so a hole makes every output read the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(self, *, window: int = 3) -> None:
         self.window = window

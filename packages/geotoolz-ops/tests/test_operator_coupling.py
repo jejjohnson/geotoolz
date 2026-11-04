@@ -101,11 +101,10 @@ def _wide_scene():
     "build",
     [
         lambda: __import__("geoops").restore.GaussianDenoise(sigma=2.0),
-        lambda: __import__("geoops").restore.MedianDenoise(window=5),
         lambda: __import__("geoops").restore.DespeckleLee(window=9),
         lambda: __import__("geoops").geom.Laplacian2D(accuracy=2),
     ],
-    ids=["GaussianDenoise", "MedianDenoise", "DespeckleLee", "Laplacian2D"],
+    ids=["GaussianDenoise", "DespeckleLee", "Laplacian2D"],
 )
 def test_spatial_reach_follows_the_arguments(build) -> None:
     """An argument-dependent reach bounds the reach measured on a 32 x 32 scene."""
@@ -121,7 +120,12 @@ def test_spatial_reach_values() -> None:
     import geoops
 
     assert reach_of(geoops.restore.GaussianDenoise(sigma=2.0)) == 8
-    assert reach_of(geoops.restore.MedianDenoise(window=5)) == 2
+    assert reach_of(geoops.restore.DespeckleLee(window=5)) == 2
+    # nodata is filled with the scene median first
+    assert reach_of(geoops.restore.MedianDenoise(window=5)) is None
+    # a periodic x joins a patch's own edges
+    assert reach_of(geoops.geom.Laplacian2D(periodic_x=True)) is None
+    assert reach_of(geoops.geom.Gradient1D(periodic=True)) is None
     assert reach_of(geoops.mask.DilateMask(iterations=3)) == 3
     assert reach_of(geoops.mask.OpenMask(iterations=2)) == 4
     assert reach_of(geoops.mask.BufferMask(radius=2.5)) == 3
