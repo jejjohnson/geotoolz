@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from affine import Affine
-from jaxtyping import Bool, Float, Shaped
+from jaxtyping import Bool, Float, Int, Shaped
 from pipekit_array import array_namespace
 
 from geoops._src.blending import triangular_weights
@@ -1670,3 +1670,118 @@ def _periodic(
         term = coeff * xp.roll(f, -offset, axis=axis)
         out = term if out is None else out + term
     return out
+
+
+def bilinear_stencil(
+    rows: Float[np.ndarray, " n"],
+    cols: Float[np.ndarray, " n"],
+    height: int,
+    width: int,
+) -> tuple[Int[np.ndarray, "n 4"], Int[np.ndarray, "n 4"], Float[np.ndarray, "n 4"]]:
+    r"""The four pixels and weights of bilinear sampling at fractional pixels.
+
+    With r₀ = clip(⌊r⌋, 0, H − 2), r₁ = min(r₀ + 1, H − 1) and the weight
+    w_r = clip(r − r₀, 0, 1) (likewise for columns), the corners are
+    (r₀, c₀), (r₀, c₁), (r₁, c₀), (r₁, c₁) with weights
+
+        (1 − w_r)(1 − w_c),  (1 − w_r) w_c,  w_r (1 − w_c),  w_r w_c,
+
+    which sum to 1. Clipping extends the edge value beyond the grid, as
+    ``scipy.ndimage.map_coordinates(..., order=1, mode="nearest")`` does.
+    The stencil is also the adjoint's: Hᵀ scatters a value at a point back
+    to the same four pixels with the same weights.
+
+    Args:
+        rows: Fractional row positions, pixel centres at integers.
+        cols: Fractional column positions.
+        height: H, the number of rows.
+        width: W, the number of columns.
+
+    Returns:
+        ``(row_index, col_index, weight)``, each ``(N, 4)``.
+
+    Example:
+        >>> ri, ci, w = bilinear_stencil(np.array([0.25]), np.array([1.5]), 4, 4)
+        >>> ri.tolist(), ci.tolist(), w.tolist()
+        ([[0, 0, 1, 1]], [[1, 2, 1, 2]], [[0.375, 0.375, 0.125, 0.125]])
+    """
+    xp = array_namespace(rows, cols)
+    r0 = xp.clip(xp.floor(rows), 0, max(height - 2, 0)).astype(int)
+    c0 = xp.clip(xp.floor(cols), 0, max(width - 2, 0)).astype(int)
+    r1 = xp.minimum(r0 + 1, height - 1)
+    c1 = xp.minimum(c0 + 1, width - 1)
+    # w_r = r − r₀, w_c = c − c₀, clipped to [0, 1] at the border
+    wr = xp.clip(rows - r0, 0.0, 1.0)
+    wc = xp.clip(cols - c0, 0.0, 1.0)
+    row_index = xp.stack([r0, r0, r1, r1], axis=-1)
+    col_index = xp.stack([c0, c1, c0, c1], axis=-1)
+    weight = xp.stack(
+        [(1 - wr) * (1 - wc), (1 - wr) * wc, wr * (1 - wc), wr * wc], axis=-1
+    )
+    return row_index, col_index, weight
+
+
+def sample_bilinear(
+    data: Shaped[np.ndarray, "*batch h w"],
+    rows: Float[np.ndarray, " n"],
+    cols: Float[np.ndarray, " n"],
+) -> Float[np.ndarray, "*batch n"]:
+    r"""``data`` read at fractional pixels by bilinear interpolation.
+
+    v = ∑ₖ wₖ · data[..., rₖ, cₖ] over the four corners of
+    :func:`bilinear_stencil`; the edge value extends beyond the grid. No
+    nodata handling: a NaN corner with a non-zero weight spreads
+    (`geoops.geom.interp_at` adds the nodata, CRS and padding rules).
+    Equal to ``scipy.ndimage.map_coordinates(data, [rows, cols], order=1,
+    mode="nearest")`` per leading slice; runs on NumPy and under ``jax.jit``.
+
+    Args:
+        data: The field, rows and columns last; leading axes are kept.
+        rows: Fractional row positions, pixel centres at integers.
+        cols: Fractional column positions.
+
+    Returns:
+        The values, ``(..., N)``.
+
+    Example:
+        >>> data = np.arange(16.0).reshape(4, 4)  # v = 4·row + col
+        >>> sample_bilinear(data, np.array([0.25]), np.array([1.5])).tolist()
+        [2.5]
+    """
+    reject_geotensor(data, "sample_bilinear")
+    ri, ci, w = bilinear_stencil(rows, cols, data.shape[-2], data.shape[-1])
+    # Σₖ wₖ vₖ over the four corners
+    return sum(w[:, k] * data[..., ri[:, k], ci[:, k]] for k in range(4))
+
+
+def sample_nearest(
+    data: Shaped[np.ndarray, "*batch h w"],
+    rows: Float[np.ndarray, " n"],
+    cols: Float[np.ndarray, " n"],
+) -> Shaped[np.ndarray, "*batch n"]:
+    """``data`` at the pixel nearest each fractional position.
+
+    The position is rounded and clipped to the grid, so the edge value
+    extends beyond it, as ``scipy.ndimage.map_coordinates(data, [rows,
+    cols], order=0, mode="nearest")`` does away from exact half-pixel ties.
+    Returns input values, in ``data``'s dtype.
+
+    Args:
+        data: The field, rows and columns last; leading axes are kept.
+        rows: Fractional row positions, pixel centres at integers.
+        cols: Fractional column positions.
+
+    Returns:
+        The values, ``(..., N)``.
+
+    Example:
+        >>> data = np.arange(16.0).reshape(4, 4)
+        >>> sample_nearest(data, np.array([0.6, -3.0]), np.array([1.4, 9.0])).tolist()
+        [5.0, 3.0]
+    """
+    reject_geotensor(data, "sample_nearest")
+    xp = array_namespace(rows, cols)
+    height, width = data.shape[-2], data.shape[-1]
+    ri = xp.clip(xp.round(rows), 0, height - 1).astype(int)
+    ci = xp.clip(xp.round(cols), 0, width - 1).astype(int)
+    return data[..., ri, ci]

@@ -22,6 +22,7 @@ from geoops.geom._src.array import (
     adaptive_laplacian_1d,
     adaptive_laplacian_2d,
     adaptive_laplacian_3d,
+    bilinear_stencil,
     curl_2d,
     curl_3d,
     difference,
@@ -34,6 +35,8 @@ from geoops.geom._src.array import (
     laplacian_1d,
     laplacian_2d,
     laplacian_3d,
+    sample_bilinear,
+    sample_nearest,
 )
 from geoops.geom._src.operators import (
     AntimeridianSplit,
@@ -128,6 +131,7 @@ __all__ = [
     "adaptive_laplacian_1d",
     "adaptive_laplacian_2d",
     "adaptive_laplacian_3d",
+    "bilinear_stencil",
     "curl_2d",
     "curl_3d",
     "difference",
@@ -144,4 +148,6 @@ __all__ = [
     "laplacian_2d",
     "laplacian_3d",
     "nonuniform_coeffs",
+    "sample_bilinear",
+    "sample_nearest",
 ]

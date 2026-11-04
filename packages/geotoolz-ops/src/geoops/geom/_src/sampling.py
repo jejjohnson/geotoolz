@@ -18,6 +18,8 @@ from typing import Any
 from geoarray import SPATIAL_DIMS, GeoArray, GeoPoints, to_pixel
 from pipekit import backend_of
 
+from geoops.geom._src.array import bilinear_stencil
+
 
 __all__ = ["interp_at"]
 
@@ -44,9 +46,11 @@ def interp_at(
 ) -> GeoPoints:
     """H(x): ``grid`` read at the positions of ``points``.
 
-    Bilinear sampling clips the neighbour indices to [0, R − 2] × [0, C − 2]
-    (exact on the last row and column) and the weights to [0, 1] (the half
-    pixel at the border takes the edge value). A point outside the grid's
+    Bilinear sampling uses `geoops.geom.bilinear_stencil`: the neighbour
+    indices are clipped to [0, R − 2] × [0, C − 2] (exact on the last row and
+    column) and the weights to [0, 1] (the half pixel at the border takes the
+    edge value), so inside the grid's extent the values equal
+    ``scipy.ndimage.map_coordinates(..., order=1, mode="nearest")``. A point outside the grid's
     extent, at a non-finite position, or reading a nodata pixel (non-finite
     or the grid's fill, in any band, with a non-zero weight) gives NaN and
     ``valid=False``; nodata never blends into a value. A padded point
@@ -143,21 +147,10 @@ def interp_at(
         supported = usable(values)
         values = xp.where(supported, values, xp.zeros_like(values))
     else:
-        r0 = xp.clip(xp.floor(r), 0, max(height - 2, 0)).astype(int)
-        c0 = xp.clip(xp.floor(c), 0, max(width - 2, 0)).astype(int)
-        r1 = xp.minimum(r0 + 1, height - 1)
-        c1 = xp.minimum(c0 + 1, width - 1)
-        # w_r = r − r₀, w_c = c − c₀, clipped to [0, 1] at the border
-        wr = xp.clip(r - r0, 0.0, 1.0)
-        wc = xp.clip(c - c0, 0.0, 1.0)
+        # the four corners and weights of geom.bilinear_stencil
+        ri, ci, w = bilinear_stencil(r, c, height, width)
         corners = [
-            (_gather(data, ri, ci, frame, xp), w)
-            for ri, ci, w in (
-                (r0, c0, (1 - wr) * (1 - wc)),
-                (r0, c1, (1 - wr) * wc),
-                (r1, c0, wr * (1 - wc)),
-                (r1, c1, wr * wc),
-            )
+            (_gather(data, ri[:, k], ci[:, k], frame, xp), w[:, k]) for k in range(4)
         ]
         # a nodata neighbour with weight > 0 leaves the point unsupported;
         # with weight 0 it is ignored (and zeroed, so 0 · NaN never spreads)
