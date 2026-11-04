@@ -45,6 +45,7 @@ from pyproj import CRS, Transformer
 from geoops.carrier import (
     SENTINEL2_L2A_BANDS,
     BandRef,
+    Coupling,
     affine_of,
     as_tuple,
     band_dim,
@@ -183,6 +184,10 @@ class SBMP(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a band ratio between two passes
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "time"}, effects={"band": "reduce", "time": "reduce"}
+    )
 
     def __init__(
         self,
@@ -263,6 +268,8 @@ class PlumeMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a scene threshold, then connected components
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -310,6 +317,8 @@ class PlumeContours(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # connected components
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -383,6 +392,9 @@ class PlumeFootprint(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -610,6 +622,8 @@ class WindAdvectionCone(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # depends only on the grid, the source and the wind
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -732,6 +746,9 @@ class IMEEstimate(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -845,6 +862,9 @@ class CrossSectionalFlux(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -949,6 +969,7 @@ class ColumnToMass(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -1033,6 +1054,8 @@ class PlumeShapeFilter(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # shape measures of connected components
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -1150,6 +1173,9 @@ class PlumeColumnStats(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -1313,6 +1339,9 @@ class PlumeQNDFeatures(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 

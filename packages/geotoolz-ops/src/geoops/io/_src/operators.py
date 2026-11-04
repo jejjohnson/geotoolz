@@ -53,6 +53,7 @@ from geoops._src.config import (
     mapping_from_pairs,
     mapping_to_pairs,
 )
+from geoops._src.coupling import Coupling
 from geoops._src.engine import from_engine, to_engine
 from geoops._src.geo import reject_georeader, require_geoarray
 from geoops._src.optional import optional_name, optional_root
@@ -114,6 +115,7 @@ class SourceOperator(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(kind="source")
 
 
 class SinkOperator(Operator):
@@ -126,6 +128,7 @@ class SinkOperator(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(kind="sink")
 
     _terminal: ClassVar[bool] = True
 

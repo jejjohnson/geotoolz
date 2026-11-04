@@ -32,6 +32,7 @@ from geoops.measure._src.array import (
 if TYPE_CHECKING:
     from geoarray import GeoArray
 
+from geoops._src.coupling import Coupling
 from geoops._src.optional import import_optional, optional_name
 
 
@@ -59,6 +60,8 @@ class LabelConnectedComponents(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a connected component can span the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -125,6 +128,9 @@ class RegionProps(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -220,6 +226,10 @@ class FindContours(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # marching squares over 2 x 2 cells
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=1, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -290,6 +300,10 @@ class ProfileLine(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # values interpolated along a line: a profile, not a raster
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -345,6 +359,7 @@ class RANSAC(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(kind="conversion")
 
     _terminal: ClassVar[bool] = True
 
@@ -421,6 +436,9 @@ class SkeletonLength(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -449,6 +467,9 @@ class ShannonEntropy(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 

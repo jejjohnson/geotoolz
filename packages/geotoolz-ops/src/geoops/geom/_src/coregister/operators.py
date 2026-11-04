@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import numpy as np
 from pipekit import Operator
 
+from geoops._src.coupling import Coupling
 from geoops._src.geo import affine_of, require_geoarray
 from geoops._src.optional import import_optional, optional_name
 from geoops._src.shape import require_ndim
@@ -154,6 +155,10 @@ class RasterToRasterLike(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # resampled onto another grid
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, effects={"space": "regrid"}, reach=None
+    )
 
     def __init__(self, *, resampling: str = "bilinear") -> None:
         self.resampling = resampling
@@ -198,6 +203,10 @@ class RasterToPoints(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # values read at points
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,
@@ -293,6 +302,10 @@ class PointsToRaster(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # points binned onto the grid
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,
@@ -436,6 +449,10 @@ class RasterToPointCloud(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # values read at points from their neighbours
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,
@@ -567,6 +584,10 @@ class PointCloudToRaster(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # points binned or interpolated onto the grid
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,
@@ -686,6 +707,10 @@ class VectorToRasterAgg(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # values aggregated per geometry
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,

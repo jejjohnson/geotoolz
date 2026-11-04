@@ -25,6 +25,10 @@ Keep = Literal["inside", "outside"]
 _KEEP_VALUES = ("inside", "outside")
 
 
+#: The morphology masks' structuring element when none is given: 3 x 3.
+DEFAULT_STRUCTURE: Bool[np.ndarray, "3 3"] = np.ones((3, 3), dtype=bool)
+
+
 def _check_keep(keep: str, name: str) -> str:
     """Validate a ``keep=`` flag (``"inside"`` or ``"outside"``).
 
@@ -527,7 +531,7 @@ def _apply_binary_morphology(
     if iterations < 0:
         raise ValueError("morphology iterations must be non-negative")
     if structure is None:
-        structure = np.ones((3, 3), dtype=bool)
+        structure = DEFAULT_STRUCTURE
     else:
         structure = np.asarray(structure, dtype=bool)
         if structure.ndim != 2:

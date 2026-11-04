@@ -51,6 +51,7 @@ from geoops._src.config import (
     mapping_from_pairs,
     mapping_to_pairs,
 )
+from geoops._src.coupling import Coupling
 from geoops._src.geo import (
     affine_of,
     reject_geotensor,
@@ -310,6 +311,11 @@ class Compose(Sequential):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the widest of its members: crops and flips regrid,
+    # ContrastJitter and SimulatedClouds read the whole scene
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, effects={"space": "regrid"}, reach=None
+    )
 
     def __init__(
         self,
@@ -406,6 +412,7 @@ class RandomFlip(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "regrid"})
 
     def __init__(
         self,
@@ -477,6 +484,7 @@ class RandomRotate90(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "regrid"})
 
     def __init__(self, *, p: float = 0.75, seed: int | None = None) -> None:
         _check_probability(p, "p")
@@ -525,6 +533,7 @@ class RandomCrop(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "regrid"})
 
     def __init__(self, *, size: tuple[int, int], seed: int | None = None) -> None:
         if size[0] <= 0 or size[1] <= 0:
@@ -575,6 +584,7 @@ class RandomShift(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "regrid"})
 
     def __init__(self, *, max_shift: tuple[int, int], seed: int | None = None) -> None:
         if max_shift[0] < 0 or max_shift[1] < 0:
@@ -617,6 +627,7 @@ class BrightnessJitter(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -674,6 +685,8 @@ class ContrastJitter(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # deviations from each band's mean over the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -738,6 +751,7 @@ class GaussianNoise(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -797,6 +811,7 @@ class SpeckleNoise(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(self, *, sigma: ScalarOrRange = 0.05, seed: int | None = None) -> None:
         sigma = as_tuple(sigma)
@@ -837,6 +852,7 @@ class BandDropout(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self, *, p: float = 0.1, fill_value: float = 0.0, seed: int | None = None
@@ -881,6 +897,8 @@ class BandJitter(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # bands permuted within groups: moved, not mixed
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "select"})
 
     def __init__(
         self,
@@ -938,6 +956,7 @@ class SunAngleJitter(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -989,6 +1008,7 @@ class AtmosphericHaze(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self, *, intensity: ScalarOrRange = (0.0, 0.05), seed: int | None = None
@@ -1042,6 +1062,8 @@ class SimulatedClouds(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # cloud brightness from the scene (pooled over a stack); a smooth cloud field
+    coupling: ClassVar[Coupling] = Coupling(couples={"space", "time"}, reach=None)
 
     def __init__(
         self,
@@ -1140,6 +1162,8 @@ class CutMix(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # each pixel from the input or the donor
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,

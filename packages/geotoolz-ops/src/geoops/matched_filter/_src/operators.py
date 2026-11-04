@@ -34,6 +34,7 @@ import numpy as np
 from pipekit import Operator
 
 from geoops.carrier import (
+    Coupling,
     band_dim,
     callable_name,
     cube_to_samples,
@@ -140,6 +141,10 @@ class MatchedFilter(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # alpha = t^T S^-1 (x - mu) / t^T S^-1 t per pixel; mu, S fitted over the scene
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}, fit={"space", "time"}
+    )
 
     def __init__(
         self,
@@ -282,6 +287,10 @@ class MatchedFilterPixel(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # mean and covariance given
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -326,6 +335,7 @@ class MatchedFilterSNR(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(kind="conversion")
 
     _terminal: ClassVar[bool] = True
 
@@ -372,6 +382,7 @@ class DetectionThreshold(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(kind="conversion")
 
     _terminal: ClassVar[bool] = True
 
@@ -417,6 +428,8 @@ class ValidateMFInputs(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    # checks and passes its input through
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -461,6 +474,10 @@ class EstimateMean(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a mean spectrum over the scene
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,
@@ -506,6 +523,9 @@ class EstimateCovEmpirical(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,
@@ -556,6 +576,9 @@ class EstimateCovShrunk(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,
@@ -611,6 +634,9 @@ class EstimateCovLowRank(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,
@@ -679,6 +705,9 @@ class GMMClusterBackground(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,
@@ -728,6 +757,10 @@ class AdaptiveWindowBackground(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a local mean and covariance per window
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,
@@ -775,6 +808,10 @@ class ApplyClusterMF(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the background is a second input
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -832,6 +869,10 @@ class ApplyAdaptiveMF(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the background is a second input
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -898,6 +939,9 @@ class StreamingBackground(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     def __init__(
         self,
@@ -967,6 +1011,8 @@ class LinearTargetFromObs(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a target spectrum
+    coupling: ClassVar[Coupling] = Coupling(kind="conversion")
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -1041,6 +1087,8 @@ class NonlinearTargetFromObs(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a target spectrum
+    coupling: ClassVar[Coupling] = Coupling(kind="conversion")
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -1119,6 +1167,10 @@ class ColumnEnhancement(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the background is fitted on every call
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space", "time"}, effects={"band": "reduce"}, reach=None
+    )
 
     def __init__(
         self,

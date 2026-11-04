@@ -54,6 +54,7 @@ from geoops._src.bands import (
     resolve_band,
     strip_band_attrs,
 )
+from geoops._src.coupling import Coupling
 from geoops._src.geo import reject_geotensor, require_grid_match
 from geoops._src.shape import gather_inputs
 from geoops._src.valid import (
@@ -241,6 +242,9 @@ class MedianComposite(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"time"}, effects={"time": "reduce"}
+    )
 
     def __init__(
         self, *, nan_policy: NanPolicy = "ignore", return_count: bool = False
@@ -302,6 +306,10 @@ class MaxNDVIComposite(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # NDVI across bands, then the best frame per pixel
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "time"}, effects={"time": "reduce"}
+    )
 
     def __init__(
         self,
@@ -414,6 +422,10 @@ class CloudFreeComposite(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # mean over the clear frames
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"time"}, effects={"time": "reduce"}
+    )
 
     def __init__(
         self,
@@ -543,6 +555,10 @@ class BAPComposite(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # per-pixel scores from metadata and the distance to clouds pick a frame
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space", "time"}, effects={"time": "reduce"}, reach=None
+    )
 
     def __init__(
         self,
@@ -690,6 +706,10 @@ class MinCloudComposite(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the frame with the lowest cloud fraction over the scene
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space", "time"}, effects={"time": "reduce"}, reach=None
+    )
 
     def __init__(self, *, return_count: bool = False) -> None:
         self.return_count = return_count
@@ -867,6 +887,8 @@ class StackMatched(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the N inputs joined along the band axis
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "join"})
 
     def __init__(
         self,
@@ -967,6 +989,10 @@ class BlendMatched(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # weighted mean over the N inputs (time is the N-ary axis, OC-Q5)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"time"}, effects={"time": "reduce"}
+    )
 
     def __init__(
         self,

@@ -26,6 +26,7 @@ from pipekit import Carrier, Operator
 from pipekit.protocols import Predictor
 
 from geoops._src.config import jsonable
+from geoops._src.coupling import Coupling
 from geoops._src.fitted import fit_lock, fit_once
 from geoops._src.geo import reject_geotensor
 from geoops.learn._src.estimators import (
@@ -104,6 +105,12 @@ class SklearnOp(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # every non-spatial axis is a feature; the estimator is fitted over every pixel
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "time"},
+        effects={"band": "mix", "time": "reduce"},
+        fit={"space"},
+    )
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -330,6 +337,13 @@ class PixelwiseIPCA(SklearnOp):
     :class:`SklearnOp` keyword argument passes through.
     """
 
+    # partial_fit on every call: the state follows each scene
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space", "time"},
+        effects={"band": "mix", "time": "reduce"},
+        reach=None,
+    )
+
     def __init__(self, *, estimator: Any, **kwargs: Any) -> None:
         kwargs.setdefault("mode", "pixel")
         kwargs.setdefault("fit_mode", "fit_streaming")
@@ -525,6 +539,10 @@ class ModelOp(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # any model: unknown until configured
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space", "time"}, reach=None
+    )
 
     forbid_in_yaml: ClassVar[bool] = True
     # ConfigMixin would auto-derive `model` from `__init__` as a non-JSON

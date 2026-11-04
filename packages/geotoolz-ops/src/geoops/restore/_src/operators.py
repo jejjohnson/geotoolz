@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 import numpy as np
 from pipekit import Operator
 
+from geoops._src.coupling import Coupling
 from geoops._src.fitted import fit_once
 from geoops._src.shape import band_dim, dim_axis, require_ndim
 from geoops._src.valid import (
@@ -149,6 +150,11 @@ class DespeckleLee(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=3)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: half the window."""
+        return self.window // 2
 
     def __init__(self, *, window: int = 7, cu: float = 0.523) -> None:
         self.window = window
@@ -179,6 +185,11 @@ class DespeckleFrost(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=3)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: half the window."""
+        return self.window // 2
 
     def __init__(self, *, window: int = 7, damping: float = 2.0) -> None:
         self.window = window
@@ -207,6 +218,11 @@ class DespeckleRefinedLee(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=3)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: half the window."""
+        return self.window // 2
 
     def __init__(self, *, window: int = 7) -> None:
         self.window = window
@@ -243,6 +259,8 @@ class DestripeColumn(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # statistics of whole columns (or rows)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -281,6 +299,8 @@ class MomentMatching(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # each column matched to statistics over the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(self, *, window: int | None = 21) -> None:
         self.window = window
@@ -322,6 +342,10 @@ class DenoisePCA(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # principal components fitted on every call
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space", "time"}, effects={"band": "mix"}, reach=None
+    )
 
     def __init__(
         self, *, n_components: int, dim: str = "band", axis: int | None = None
@@ -398,6 +422,10 @@ class MNF(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the noise and signal covariances are fitted over the scene
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "mix"}, fit={"space", "time"}
+    )
 
     def __init__(
         self,
@@ -515,6 +543,11 @@ class GaussianDenoise(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=4)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: ⌈4σ⌉, scipy's default truncation."""
+        return int(np.ceil(4 * self.sigma))
 
     def __init__(self, *, sigma: float = 1.0) -> None:
         self.sigma = sigma
@@ -539,6 +572,9 @@ class MedianDenoise(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a local median, but nodata is first filled with the median of the whole
+    # array, so a hole makes every output read the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(self, *, window: int = 3) -> None:
         self.window = window
@@ -565,6 +601,8 @@ class BilateralDenoise(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # range weights scaled by the scene's value range
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(self, *, sigma_color: float = 0.1, sigma_space: float = 5.0) -> None:
         self.sigma_color = sigma_color
@@ -598,6 +636,8 @@ class NLMeans(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # patch weights scaled by the scene's noise level
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self, *, window: int = 5, search_radius: int = 6, h: float = 0.1
@@ -637,6 +677,11 @@ class GapFillIDW(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=5)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the search radius."""
+        return int(np.ceil(self.radius))
 
     def __init__(self, *, power: float = 2.0, radius: int = 5) -> None:
         self.power = power
@@ -667,6 +712,8 @@ class GapFillInpaintBiharmonic(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a smooth fill across each hole
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         return _gap_fill(gt, gap_fill_biharmonic)
@@ -691,6 +738,8 @@ class GapFillLaplacian(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a diffusion across each hole
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(self, *, iterations: int = 200) -> None:
         self.iterations = iterations
@@ -720,6 +769,11 @@ class GapFillNearest(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
+
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: unbounded unless a maximum distance is set."""
+        return None if self.max_distance is None else int(np.ceil(self.max_distance))
 
     def __init__(self, *, max_distance: int | None = None) -> None:
         self.max_distance = max_distance
@@ -747,6 +801,8 @@ class OutlierMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a threshold from robust statistics of every value
+    coupling: ClassVar[Coupling] = Coupling(couples={"space", "time"}, reach=None)
 
     def __init__(
         self, *, method: Literal["mad", "zscore"] = "mad", k: float = 3.0
@@ -778,6 +834,8 @@ class ReplaceOutliers(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a threshold from robust statistics of every value
+    coupling: ClassVar[Coupling] = Coupling(couples={"space", "time"}, reach=None)
 
     def __init__(
         self,

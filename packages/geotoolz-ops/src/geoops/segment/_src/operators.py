@@ -46,6 +46,7 @@ from geoops.segment._src.array import (
 if TYPE_CHECKING:
     from geoarray import GeoArray as GeoArrayType
 
+from geoops._src.coupling import Coupling
 from geoops._src.optional import optional_name
 from geoops._src.shape import band_dim, dim_axis
 
@@ -113,6 +114,9 @@ class SLIC(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space"}, effects={"band": "reduce"}, reach=None
+    )
 
     def __init__(
         self,
@@ -195,6 +199,9 @@ class Felzenszwalb(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space"}, effects={"band": "reduce"}, reach=None
+    )
 
     def __init__(
         self,
@@ -278,6 +285,9 @@ class Quickshift(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space"}, effects={"band": "reduce"}, reach=None
+    )
 
     def __init__(
         self,
@@ -365,6 +375,7 @@ class Watershed(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -431,6 +442,7 @@ class ChanVese(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -489,6 +501,7 @@ class RandomWalker(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -564,6 +577,8 @@ class Threshold(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a threshold over the scene (Otsu or a percentile)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(self, *, threshold: ThresholdMode = "otsu", nbins: int = 256) -> None:
         if isinstance(threshold, str) and not (
@@ -596,6 +611,11 @@ class ExpandLabels(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the expansion distance."""
+        return int(np.ceil(self.distance))
 
     def __init__(self, *, distance: float = 1.0) -> None:
         self.distance = distance
@@ -650,6 +670,8 @@ class MergeNearbyInstances(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # instances merged by distance and overlap
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -724,6 +746,10 @@ class MaskNMS(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # instance masks compared by overlap
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space"}, effects={"band": "reduce"}, reach=None
+    )
 
     def __init__(
         self,
@@ -781,6 +807,8 @@ class MarkBoundaries(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # boundaries of the labels, drawn thick
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=2)
 
     def __init__(
         self,
