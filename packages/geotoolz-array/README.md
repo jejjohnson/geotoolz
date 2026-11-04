@@ -20,6 +20,8 @@ compiled code across scenes and `grad` reaches the georeferencing.
 
 <p align="center"><img src="../../docs/assets/diagrams/geoarray-carrier.png" alt="A GeoArray: the data (..., H, W) and the (6,) float64 transform are pytree leaves, traced by jit, grad and vmap; the dims, coordinates, CRS, fill value and attrs are static and part of the compile cache key; the Grid is the transform, CRS and (H, W) without data, and a PixelWindow is a rectangle of pixels on it" width="100%"></p>
 
+<p align="center"><img src="../../docs/assets/diagrams/geoarray-verbs.png" alt="What geoarray does and what geoops does: geoarray re-indexes (isel, sel, crop, read_window, pad), joins (stack, concatenate, concat), carries your function (combine, map_over, map), re-describes (dims, coords, grid, pixel_coords, footprint) and locates pixels (to_pixel); its two documented exceptions, valid_mask and astype, compute; geoops computes new values on the same grid, new grids, values at points (interp_at, InterpAt) and nodata-aware reductions (reduce, argreduce)" width="100%"></p>
+
 ## Install
 
 ```bash
