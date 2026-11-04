@@ -280,3 +280,102 @@ def test_operator_refuses_a_geotensor_as_either_input() -> None:
         gz.InterpAt()(to_georeader(g), pts)
     with pytest.raises(TypeError, match="from_georeader"):
         gz.InterpAt()(g, to_georeader(g))
+
+
+# -- against scipy (#635) ---------------------------------------------------------
+#
+# scipy.ndimage.map_coordinates(order=1, mode="nearest") is bilinear
+# interpolation with the edge value extended beyond the grid: the same maths
+# as sample_bilinear everywhere, and as interp_at inside the grid's extent
+# (interp_at is NaN and invalid outside it). order=0 is nearest, away from
+# exact half-pixel ties, where the two round differently.
+
+
+def _field(shape: tuple[int, ...] = (7, 9), seed: int = 0) -> np.ndarray:
+    return np.random.default_rng(seed).normal(size=shape)
+
+
+def _positions(h: int, w: int, n: int = 200, pad: float = 2.0, seed: int = 1):
+    rng = np.random.default_rng(seed)
+    return rng.uniform(-pad, h - 1 + pad, n), rng.uniform(-pad, w - 1 + pad, n)
+
+
+@pytest.mark.parametrize("shape", [(7, 9), (3, 7, 9), (1, 9), (7, 1)])
+def test_sample_bilinear_matches_scipy(shape: tuple[int, ...]) -> None:
+    from scipy.ndimage import map_coordinates
+
+    data = _field(shape)
+    rows, cols = _positions(*shape[-2:])
+    got = gz.geom.sample_bilinear(data, rows, cols)
+    want = np.stack(
+        [
+            map_coordinates(band, [rows, cols], order=1, mode="nearest")
+            for band in data.reshape(-1, *shape[-2:])
+        ]
+    ).reshape(*shape[:-2], rows.size)
+    np.testing.assert_allclose(got, want, rtol=1e-12, atol=1e-12)
+
+
+def test_sample_nearest_matches_scipy() -> None:
+    from scipy.ndimage import map_coordinates
+
+    data = _field()
+    rows, cols = _positions(7, 9)
+    got = gz.geom.sample_nearest(data, rows, cols)
+    want = map_coordinates(data, [rows, cols], order=0, mode="nearest")
+    np.testing.assert_array_equal(got, want)
+
+
+@pytest.mark.parametrize("method", ["bilinear", "nearest"])
+def test_interp_at_matches_scipy_inside_and_is_nan_outside(method: str) -> None:
+    from scipy.ndimage import map_coordinates
+
+    data = _field((6, 5))
+    g = GeoArray(data, T, CRS, dims="y x")
+    rows, cols = _positions(6, 5, pad=1.0)
+    out = interp_at(g, _at(g, list(zip(rows, cols, strict=True))), method)
+    inside = (rows >= -0.5) & (rows <= 5.5) & (cols >= -0.5) & (cols <= 4.5)
+    order = 1 if method == "bilinear" else 0
+    want = map_coordinates(data, [rows, cols], order=order, mode="nearest")
+    # positions travel to UTM metres (|x| ≈ 6e5, 20 m pixels) and back through
+    # to_pixel: δr ≈ ε·|x|/res ≈ 2.2e-16 · 6e5 / 20 ≈ 7e-12 px, and the field's
+    # slope is O(1) per pixel, so values agree to ~1e-11; 1e-9 bounds it
+    np.testing.assert_allclose(out.data[inside], want[inside], rtol=0, atol=1e-9)
+    assert np.isnan(out.data[~inside]).all()
+    assert out.valid.tolist() == inside.tolist()
+
+
+def test_stencil_weights_are_a_partition_of_unity() -> None:
+    rows, cols = _positions(7, 9)
+    ri, ci, w = gz.geom.bilinear_stencil(rows, cols, 7, 9)
+    assert ri.shape == ci.shape == w.shape == (rows.size, 4)
+    assert (w >= 0).all()
+    np.testing.assert_allclose(w.sum(axis=1), 1.0, rtol=1e-14)
+    assert ri.min() >= 0 and ri.max() <= 6 and ci.min() >= 0 and ci.max() <= 8
+
+
+def test_stencil_gives_the_adjoint() -> None:
+    """Hᵀ scatters with the stencil's weights: ⟨Hx, y⟩ = ⟨x, Hᵀy⟩."""
+    x = _field((7, 9))
+    rows, cols = _positions(7, 9, n=50)
+    y = np.random.default_rng(2).normal(size=rows.size)
+    ri, ci, w = gz.geom.bilinear_stencil(rows, cols, 7, 9)
+    # Hᵀy: each yₙ added to its four pixels with weight wₙₖ
+    adjoint = np.zeros_like(x)
+    np.add.at(adjoint, (ri, ci), w * y[:, None])
+    lhs = gz.geom.sample_bilinear(x, rows, cols) @ y
+    assert lhs == pytest.approx(float(np.sum(x * adjoint)), rel=1e-12)
+
+
+def test_jax_sampling_matches_jax_scipy(x64: ModuleType) -> None:
+    from jax.scipy.ndimage import map_coordinates
+
+    jnp = x64.numpy
+    data = jnp.asarray(_field())
+    rows, cols = (jnp.asarray(a) for a in _positions(7, 9))
+    got = x64.jit(gz.geom.sample_bilinear)(data, rows, cols)
+    want = map_coordinates(data, [rows, cols], order=1, mode="nearest")
+    np.testing.assert_allclose(np.asarray(got), np.asarray(want), rtol=1e-12)
+    near = x64.jit(gz.geom.sample_nearest)(data, rows, cols)
+    want0 = map_coordinates(data, [rows, cols], order=0, mode="nearest")
+    np.testing.assert_array_equal(np.asarray(near), np.asarray(want0))

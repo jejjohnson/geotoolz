@@ -11,7 +11,7 @@ multi-source matchups live in the `geom.coregister` subnamespace
 - **Vector ↔ raster:** `Rasterize`, `RasterizeLike`, `Vectorize`
 - **Swath / sensor geometry:** `Georeference` (GLT), `SegmentStitch`, `BowtieCorrection`,
   `AntimeridianSplit`, `GeostationaryParallaxCorrect`
-- **Sampling at points:** `interp_at` (function, under `jit` / `grad`), `InterpAt` (operator): H(x), a grid read at `GeoPoints`
+- **Sampling at points:** `interp_at` (function, under `jit` / `grad`), `InterpAt` (operator): H(x), a grid read at `GeoPoints`; primitives `bilinear_stencil`, `sample_bilinear`, `sample_nearest` (arrays)
 - **Registration:** `PhaseAlign` (phase cross-correlation), `OpticalFlowILK`, `OpticalFlowTVL1`
 - **Diagnostic calculus:** `Gradient1D` / `2D` / `3D`, `Divergence1D` / `2D` / `3D`, `Curl2D` / `3D`, `Laplacian1D` / `2D` / `3D` (operators); `gradient_1d`, `divergence_2d`, `curl_3d`, … and their `adaptive_*` twins (arrays); `difference`, `adaptive_difference`, `difference_offsets`, `difference_coeffs`, `nonuniform_coeffs` (stencils)
 
@@ -79,6 +79,14 @@ not depend on the padding. It runs on NumPy and under `jax.jit` /
 `jax.grad`; `InterpAt` is the same function as an operator, with the
 points as its second input. It moved here from geoarray (GA-B6), which
 keeps `geoarray.to_pixel` for the coordinate maths.
+
+Under it are three array primitives. `bilinear_stencil(rows, cols, H, W)`
+gives the four pixels and weights of each point, the same stencil the
+adjoint Hᵀ scatters with. `sample_bilinear` and `sample_nearest` read a
+plain `(..., H, W)` array at fractional pixels, with no nodata rules.
+`sample_bilinear` equals `scipy.ndimage.map_coordinates(..., order=1,
+mode="nearest")`, and `interp_at` equals it inside the grid's extent; the
+tests hold both to scipy, and the JAX path to `jax.scipy.ndimage`.
 
 ::: geoops.geom
 
