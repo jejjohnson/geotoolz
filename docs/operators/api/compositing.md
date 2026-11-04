@@ -19,9 +19,11 @@ Per-pixel composites over co-registered frame stacks and matched multi-source tu
 ## Reductions that leave nodata out
 
 `reduce(x, fn, dim)` and `argreduce(x, fn, dim)` are pipekit-array's
-`reduce` / `argreduce` with the carrier's nodata read first: an entry that
-is non-finite or equals the fill (or, on `GeoPoints`, belongs to a sample
-that is not `valid`) never counts. A named reduction runs as its
+`reduce` / `argreduce` with the carrier's nodata read first, by the
+stack's rule (`GeoArray.valid_mask`): a value that is non-finite or equals
+the fill, every band of a pixel where any band is, and on `GeoPoints` a
+sample that is not `valid`, never count. They agree with
+`MedianComposite` on a `(time, band, y, x)` stack. A named reduction runs as its
 NaN-skipping form, a position with no valid entry is NaN, and the result's
 fill is NaN. `pipekit_array.reduce` reduces the raw values, so on a scene
 with fill 0 a time mean averages the zeros in. geoarray does not re-export

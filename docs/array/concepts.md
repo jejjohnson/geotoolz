@@ -76,12 +76,13 @@ crossings between the two backends.
 
 `isel`, `sel`, `transpose`, `take_along`, `map_over`, `concat` and
 `combine` are pipekit-array's functions (`geoarray.isel is
-pipekit_array.isel`). The named reductions, `reduce` and `argreduce`, are
-pipekit-array's too, but they compute, so geoarray does not re-export them:
-`geoops.compositing.reduce` / `argreduce` leave nodata out first (GA-B6). They reach a carrier through
-the named-array adapter geoarray registers with pipekit at import, so the
-same call runs on a `GeoArray`, a `pipekit_array.DimArray` and an
-`xr.DataArray`, and so does a pipekit-array `KernelOp`.
+pipekit_array.isel`). They reach a carrier through the named-array adapter
+geoarray registers with pipekit at import, so the same call runs on a
+`GeoArray`, a `pipekit_array.DimArray` and an `xr.DataArray`, and so does a
+pipekit-array `KernelOp`. The named reductions, `reduce` and `argreduce`,
+are pipekit-array's too, but they compute, so geoarray does not re-export
+them: `geoops.compositing.reduce` / `argreduce` leave nodata out first, on
+geoarray carriers only (GA-B6).
 
 The adapter keeps the georeference while it still describes the result:
 
