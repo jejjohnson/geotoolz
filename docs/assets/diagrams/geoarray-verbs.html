@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>geoarray or geoops</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1480px; }
+  .cols { display: grid; grid-template-columns: 1fr 400px; column-gap: 28px; align-items: stretch; }
+  .geoarray { --accent: #8b5cf6; --tint: #f5f3ff; --ink-accent: #4c1d95; }
+  .verbs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .verb-card .name { font-size: 15px; }
+  .verb-card .what { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .calls { margin-top: 10px; display: grid; grid-template-columns: max-content 1fr; column-gap: 12px; row-gap: 5px; }
+  .calls code { font-family: var(--mono); font-size: 12px; color: var(--ink); white-space: nowrap; }
+  .calls span { font-size: 12px; color: var(--muted); line-height: 1.35; }
+  .compute-col .node + .node { margin-top: 14px; }
+  .fams { margin-top: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--ink); }
+  .exc { grid-column: 1 / -1; border-style: dashed; border-color: #b45309; }
+  .exc .name { color: #92400e; }
+  .exc .calls { grid-template-columns: max-content 1fr; }
+  .test { margin-top: 22px; display: flex; gap: 14px; align-items: baseline; border-radius: 14px; padding: 12px 16px;
+          background: var(--base-bg); border: 1.5px solid #cbd5e1; font-size: 13px; }
+  .test b { font-size: 14px; }
+  .test code { font-family: var(--mono); font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">geoarray or geoops? Re-index, join, re-describe, locate, or compute</div>
+  <div class="subtitle">geoarray moves pixels and the georeference together and computes nothing, but for two documented exceptions; values, grids, H(x) and reductions are geoops.</div>
+
+  <div class="cols">
+    <div class="lane geoarray">
+      <div class="lane-head"><span class="verb">geoarray</span><span class="pkg">re-indexes and re-describes; computes no values of its own</span><span class="imp">import geoarray as ga</span></div>
+      <div class="verbs">
+        <div class="node verb-card geoarray">
+          <div class="name">re-index</div>
+          <div class="what">a subset or rearrangement of the pixels; the transform moves with them</div>
+          <div class="calls">
+            <code>g.isel(band=[0, 2], y=slice(0, 100))</code><span>by position, per dim name</span>
+            <code>g.sel(band="B12")</code><span>by exact label: band names, times, levels</span>
+            <code>g[..., r0:r1, c0:c1]</code><span>NumPy slicing, origin shifted</span>
+            <code>ga.crop · ga.read_window</code><span>a <code>PixelWindow</code>; fill where it leaves the array</span>
+            <code>ga.write_window · ga.pad</code><span>values into a window · fill pixels around the edge</span>
+            <code>g.squeeze · g.expand_dims · ga.transpose</code><span>leading axes, or dims reordered by name</span>
+          </div>
+        </div>
+        <div class="node verb-card geoarray">
+          <div class="name">join</div>
+          <div class="what">carriers on one grid become one carrier; a grid mismatch raises</div>
+          <div class="calls">
+            <code>ga.stack(scenes, "time")</code><span>along a new dim: (C, H, W) × T → (T, C, H, W)</span>
+            <code>ga.concatenate(parts)</code><span>along an existing axis (bands by default)</span>
+            <code>ga.concat(parts, "band")</code><span>the same, by dim name</span>
+            <code>ga.combine · ga.map_over · g.map</code><span>carry: <i>your</i> function computes, geoarray carries the grid</span>
+          </div>
+        </div>
+        <div class="node verb-card geoarray">
+          <div class="name">re-describe</div>
+          <div class="what">what the carrier is and where it lies; the pixels are untouched</div>
+          <div class="calls">
+            <code>g.dims · g.coords · g.labels("band")</code><span><code>SpectralAxis</code>, <code>TimeAxis</code>, <code>VerticalAxis</code>, …</span>
+            <code>g.grid · g.bounds · g.res</code><span>a hashable <code>Grid</code>: transform, CRS, (H, W)</span>
+            <code>ga.pixel_coords · ga.footprint</code><span>map x, y of each pixel (2, H, W) · the outline: coordinates, not values</span>
+            <code>g.with_attrs · g.shift_origin</code><span>new attrs · the same pixels, moved in the CRS</span>
+          </div>
+        </div>
+        <div class="node verb-card geoarray">
+          <div class="name">locate</div>
+          <div class="what">coordinates in, pixel positions out: transform maths, no pixel values</div>
+          <div class="calls">
+            <code>ga.to_pixel(g.transform, xy)</code><span>map (x, y) → fractional (row, col); reading values there is H(x), in geoops</span>
+          </div>
+        </div>
+        <div class="node verb-card exc">
+          <div class="name">the two documented exceptions: these do compute</div>
+          <div class="what">each stays for a stated reason (<code>packages/geotoolz-array/AGENTS.md</code>); a new function that computes goes to geoops, or joins this list with its reason</div>
+          <div class="calls">
+            <code>g.valid_mask()</code><span>(H, W), True where every band is finite and not the fill: a band reduction that defines the nodata model; geoproducts and geopatcher, which may not import geoops, need it</span>
+            <code>g.astype(np.float32)</code><span>a cast; float → int truncates. Representation only, fill carried; scaling is geoops</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lane compute compute-col">
+      <div class="lane-head"><span class="verb">geoops</span><span class="pkg">computes</span></div>
+      <div class="node">
+        <div class="name">new values, same grid</div>
+        <div class="desc">each output pixel is a function of input values; transform and CRS kept</div>
+        <div class="fams">indices · radiometry · mask · qa · normalize · restore · segment · spectral · learn · …</div>
+        <div class="chips"><span class="chip"><span class="t">NDVI</span><span class="s">(C,H,W) → (H,W)</span></span><span class="chip"><span class="t">GaussianDenoise</span></span></div>
+      </div>
+      <div class="node">
+        <div class="name">new grid</div>
+        <div class="desc">values resampled onto other pixels, or vectors burned onto a grid: a new transform, CRS or shape</div>
+        <div class="fams">Reproject · ReprojectLike · Resample · ResampleLike · Resize · Mosaic · Rasterize</div>
+        <div class="chips"><span class="chip"><span class="t">wrap_like(…, transform=)</span></span></div>
+      </div>
+      <div class="node">
+        <div class="name">values at points: H(x)</div>
+        <div class="desc">a grid read at <code>GeoPoints</code>; bilinear blends the 4 pixels around each point. NumPy, <code>jit</code>, <code>grad</code></div>
+        <div class="fams">geom.interp_at · InterpAt</div>
+      </div>
+      <div class="node">
+        <div class="name">reductions over a dim</div>
+        <div class="desc">named reductions that leave nodata out; a position with no valid entry is NaN</div>
+        <div class="fams">compositing.reduce · compositing.argreduce</div>
+        <div class="chips"><span class="chip"><span class="t">reduce(stack, "median", "time")</span></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="test"><b>The test</b><span>if the output holds only input values, fills and coordinates, it is <code>geoarray</code>. Otherwise it is <code>geoops</code>, unless it is one of the two documented exceptions (<code>valid_mask</code>, <code>astype</code>).</span></div>
+</div>
+<script src="_connect.js"></script>
+<script>ready();</script>
+</body>
+</html>

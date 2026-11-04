@@ -163,27 +163,46 @@ and names the fix: `geoarray.map_over(x, first_band, "time")`.
 
 geoarray and geoops split the work in one place:
 
+![What geoarray does and what geoops does: geoarray re-indexes (isel, sel, crop, read_window, pad), joins (stack, concatenate, concat), carries your function (combine, map_over, map), re-describes (dims, coords, grid, pixel_coords, footprint) and locates pixels (to_pixel); its two documented exceptions, valid_mask and astype, compute; geoops computes new values on the same grid, new grids, values at points (interp_at, InterpAt) and nodata-aware reductions (reduce, argreduce)](../assets/diagrams/geoarray-verbs.png)
+
 ```
-geoarray: reads the georeference, never computes a field
+geoarray: re-indexes and re-describes; computes no values of its own
   re-index     isel, sel, crop, read_window, write_window, pad
-  join         stack, concat, combine      one grid; your fn computes
-  re-describe  dims, coords, pixel_coords, valid_mask, footprint
-  read at      to_pixel, interp_at         points in, values out
+  join         stack, concatenate, concat        one grid
+  carry        combine, map_over, GeoArray.map    one grid; your fn computes
+  re-describe  dims, coords, pixel_coords, footprint
+  locate       to_pixel                           coordinates → pixels
+  exceptions   valid_mask, astype                 documented below
 
 geoops: computes
   new values   indices, radiometry, mask, normalize, …   same grid
   new grid     reproject, resample, warp, mosaic, rasterize
+  at points    geom.interp_at, InterpAt                  H(x)
+  reductions   compositing.reduce, argreduce             nodata left out
 ```
 
 The test: if the output holds only input values, fills and coordinates,
-or values read at points you gave it, it is geoarray. Otherwise it is
-geoops.
+it is geoarray. Otherwise it is geoops, unless it is one of the two
+documented exceptions below. A new function that computes values goes to
+geoops, or joins this list with its reason; never neither.
 
-`interp_at`, the observation operator H(x), blends neighbouring pixels,
-but its output lives on the points it was given, not on a new grid: it
-reads the field at those points, which is why every carrier-level cost can
-use it with geoarray alone. `combine` aligns carriers on one grid and runs
-your function on their data; geoarray computes nothing of its own.
+Two geoarray functions compute, each for a stated reason:
+
+| Function | What it computes | Why it stays in geoarray |
+|---|---|---|
+| `GeoArray.valid_mask` | a bool per pixel: every band finite and not the fill (a reduction over bands) | it defines the nodata model: `fill_value` is a field of the carrier, and packages that may not import geoops (geoproducts, geopatcher) need it |
+| `GeoArray.astype` | a cast to another dtype; float to int truncates | it changes the representation only and carries the fill; scaling and rounding are geoops' (`radiometry`, `normalize`) |
+
+Two more used to live here and moved to geoops (geostack GA-B6): H(x),
+which blends the four pixels around each point, is `geoops.geom.interp_at`
+(and the `InterpAt` operator); the named reductions are
+`geoops.compositing.reduce` / `argreduce`, which leave nodata out
+(`pipekit_array.reduce` / `argreduce` reduce raw values).
+
+`combine`, `map_over` and `GeoArray.map` align carriers on one grid and
+run your function on their data; geoarray computes nothing of its own.
+`to_pixel`, `pixel_coords` and `footprint(crs=…)` compute coordinates, not
+values.
 
 `sample` and `member` are dim names, not functions: a `sample` is one
 item of an ML batch, a `member` one draw of an ensemble, and `obs` one

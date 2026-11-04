@@ -57,28 +57,45 @@ GB2, …) name the tests that enforce it.
 ## The membership test
 
 ```
-geoarray: reads the georeference, never computes a field
+geoarray: re-indexes and re-describes; computes no values of its own
   re-index     isel, sel, crop, read_window, write_window, pad
-  join         stack, concat, combine      one grid; your fn computes
-  re-describe  dims, coords, pixel_coords, valid_mask, footprint
-  read at      to_pixel, interp_at         points in, values out
+  join         stack, concatenate, concat        one grid
+  carry        combine, map_over, GeoArray.map    one grid; your fn computes
+  re-describe  dims, coords, pixel_coords, footprint
+  locate       to_pixel                           coordinates → pixels
+  exceptions   valid_mask, astype                 documented below
 
 geoops: computes
   new values   indices, radiometry, mask, normalize, …   same grid
   new grid     reproject, resample, warp, mosaic, rasterize
+  at points    geom.interp_at, InterpAt                  H(x)
+  reductions   compositing.reduce, argreduce             nodata left out
 ```
 
 The test: if the output holds only input values, fills and coordinates,
-or values read at points you gave it, it is geoarray. Otherwise it is
-geoops.
+it is geoarray. Otherwise it is geoops, unless it is one of the two
+documented exceptions below. A new function that computes values goes to
+geoops, or joins this list with its reason; never neither.
+
+Two geoarray functions compute, each for a stated reason:
+
+| Function | What it computes | Why it stays in geoarray |
+|---|---|---|
+| `GeoArray.valid_mask` | a bool per pixel: every band finite and not the fill (a reduction over bands) | it defines the nodata model: `fill_value` is a field of the carrier, and packages that may not import geoops (geoproducts, geopatcher) need it |
+| `GeoArray.astype` | a cast to another dtype; float to int truncates | it changes the representation only and carries the fill; scaling and rounding are geoops' (`radiometry`, `normalize`) |
+
+Two more used to live here and moved to geoops (geostack GA-B6): H(x),
+which blends the four pixels around each point, is `geoops.geom.interp_at`
+(and the `InterpAt` operator); the named reductions are
+`geoops.compositing.reduce` / `argreduce`, which leave nodata out
+(`pipekit_array.reduce` / `argreduce` reduce raw values).
 
 Mosaic, CRS maths and reflective padding write new values, so they are
-`geoops.geom`. `interp_at` blends neighbours, but its output lives on the
-points it was given, not on a new grid, so it is "read at", not
-resampling. `combine` aligns carriers and runs *your* function on their
-data: geoarray computes nothing itself. The nouns `sample` (an ML batch
-item) and `member` (an ensemble draw) are kept for dim names, never
-function names.
+`geoops.geom`. `combine`, `map_over` and `GeoArray.map` align carriers
+and run *your* function on their data: geoarray computes nothing itself.
+`to_pixel`, `pixel_coords` and `footprint(crs=…)` compute coordinates,
+not values. The nouns `sample` (an ML batch item) and `member` (an
+ensemble draw) are kept for dim names, never function names.
 
 ## The pytree split
 
