@@ -16,7 +16,7 @@
   .lane .node + .node { margin-top: 24px; }
   .base-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: 16px;
     margin-top: 34px;
   }
@@ -33,7 +33,7 @@
 <body>
 <div id="diagram">
   <div class="title">The geostack — find · read · cut · compute · stitch</div>
-  <div class="subtitle">Four packages, one carrier. Every arrow is a typed object you can hold in a variable.</div>
+  <div class="subtitle">Four stages over one carrier, one storage layer and one composition core. Every arrow is a typed object you can hold in a variable.</div>
 
   <div class="grid">
     <!-- column 1: find + read -->
@@ -46,14 +46,14 @@
         </div>
         <div class="node" id="catalog">
           <div class="name"><code>GeoCatalog</code></div>
-          <div class="desc">STAC · CMR · local files → InMemory or DuckDB index; <code>query()</code> opens no file</div>
+          <div class="desc">STAC · CMR · EarthAccess · GEE · local files → InMemory or DuckDB index; <code>query()</code> opens no file</div>
         </div>
       </div>
       <div class="lane read" id="lane-read">
         <div class="lane-head"><span class="verb">read</span><span class="pkg">geotoolz-products</span></div>
         <div class="node" id="reader">
           <div class="name"><code>ProductReader</code></div>
-          <div class="desc">one reader per mission or provider — <code>toy_sensor</code>, <code>carbonmapper</code> — each a <code>RasterSource</code> that reads <code>GeoArray</code>s</div>
+          <div class="desc">one reader per mission — <code>goes</code>, <code>himawari</code>, <code>toy_sensor</code> — each a <code>RasterSource</code> that reads <code>GeoArray</code>s; <code>carbonmapper</code> for plume and source records</div>
         </div>
       </div>
     </div>
@@ -90,19 +90,23 @@
       </div>
       <div class="node solid" id="result">
         <div class="name">result on the AOI grid</div>
-        <div class="desc">same CRS · transform · fill as the request</div>
+        <div class="desc">the request's CRS and transform · NaN where no patch reached</div>
       </div>
     </div>
   </div>
 
   <div class="base-row">
     <div class="slab">
+      <div class="lib">geotoolz-cloud</div>
+      <div class="what">the one pooled <code>obstore</code> client per bucket, credentials and file verbs: what <code>stage</code>, <code>CogField</code> and the GOES / Himawari readers fetch through.</div>
+    </div>
+    <div class="slab">
       <div class="lib">geotoolz-array</div>
       <div class="what"><code>GeoArray</code> — the array every reader returns and every operator takes; NumPy or JAX data carrying CRS, transform, band names and fill value end to end.</div>
     </div>
     <div class="slab">
       <div class="lib">pipekit</div>
-      <div class="what"><code>Operator</code> · <code>Sequential</code> · <code>Graph</code> — every step composes and serialises the same way; <code>patch_ops</code> turns split → operate → merge into one more <code>Sequential</code>.</div>
+      <div class="what"><code>Operator</code> · <code>Sequential</code> · <code>Graph</code> — every step composes the same way; <code>patch_ops</code> turns split → operate → merge into one more <code>Sequential</code>.</div>
     </div>
   </div>
 </div>

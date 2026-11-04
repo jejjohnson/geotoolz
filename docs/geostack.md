@@ -99,7 +99,7 @@ sources: list[cm.CMSource] = cm.list_sources(token, bbox=bbox_lonlat, sectors=["
 aoi: gc.GeoSlice = gc.GeoSlice(
     bounds=pyproj.Transformer.from_crs("EPSG:4326", utm, always_xy=True).transform_bounds(*bbox_lonlat),
     interval=pd.Interval(pd.Timestamp("2025-06-01"), pd.Timestamp("2025-06-30"), closed="both"),
-    resolution=(20.0, 20.0),                              # native SWIR → grid (H, W) = (1675, 1430)
+    resolution=(20.0, 20.0),                              # native SWIR → grid (H, W) = (1675, 1431)
     crs=utm,
 )
 client: pystac_client.Client = pystac_client.Client.open(
@@ -114,10 +114,10 @@ swir: dict[str, gp.RasterField] = {
             dest="./cache",
         ).query(aoi),
         aoi,
-    )                                                    # (1, 1675, 1430) uint16 per band
+    )                                                    # (1, 1675, 1431) uint16 per band
     for band in ("B11", "B12")                           # SWIR-1 ≈ 1610 nm · SWIR-2 ≈ 2190 nm
 }
-scene: GeoArray = gz.StackBands()([swir["B11"].reader, swir["B12"].reader])  # (2, 1675, 1430) uint16
+scene: GeoArray = gz.StackBands()([swir["B11"].reader, swir["B12"].reader])  # (2, 1675, 1431) uint16
 
 # 3 · patcher + operators — SWIR-ratio methane score, tile by tile
 patcher: gp.SpatialPatcher = gp.SpatialPatcher(
@@ -136,10 +136,10 @@ screen: gz.Sequential = gz.Sequential([
     ApplyToChips(operator=enhancement),                  # list[Patch] → list[Patch] (128, 128) each
     MergePatches(aggregation=gp.spatial.aggregation.OverlapAdd(), domain=field.domain),
 ])
-score: GeoArray = screen(field)                        # (1675, 1430) float64, on the scene's grid
+score: GeoArray = screen(field)                        # (1675, 1431) float64, on the scene's grid
 
 # 4 · products again — known sources rasterized onto the same grid as labels
-labels: GeoArray = cm.rasterize_sources_like(sources, score, buffer_m=150.0)  # (1675, 1430) uint8 {0, 1}
+labels: GeoArray = cm.rasterize_sources_like(sources, score, buffer_m=150.0)  # (1675, 1431) uint8 {0, 1}
 
 pair: tuple[np.ndarray, np.ndarray] = (np.asarray(score), np.asarray(labels))  # aligned pixel-for-pixel
 ```

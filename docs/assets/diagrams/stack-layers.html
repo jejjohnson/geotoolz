@@ -25,28 +25,28 @@
   .slab code { font-family: var(--mono); font-size: 12px; color: var(--ink); }
   #geoarray { grid-column: 1 / -1; border-color: #8b5cf6; background: #f5f3ff; }
   #geoarray .lib { color: #6d28d9; }
-  #geocloud { grid-column: 1 / 4; }
-  #pipekit { grid-column: 4 / -1; }
+  #geocloud { grid-column: 1 / -1; }
+  #pipekit { grid-column: 1 / -1; }
   .slab.cloud { border-color: #94a3b8; background: #f1f5f9; }
 </style>
 </head>
 <body>
 <div id="diagram">
   <div class="title">Dependency layers</div>
-  <div class="subtitle">A strict layering: every package stands on geotoolz-array, nothing depends back up, and every cross-package link is an opt-in extra.</div>
+  <div class="subtitle">A strict layering: every package stands on geotoolz-array, which stands on pipekit; nothing depends back up, and every cross-package link is an opt-in extra.</div>
 
   <div class="pkgs">
     <div class="pkg-card read" id="p-products">
       <div class="verb">read</div>
       <div class="dist">geotoolz-products</div>
       <div class="imp">import geoproducts</div>
-      <div class="one">ProductReader ABC + per-provider readers (GOES, Himawari, Carbon Mapper)</div>
+      <div class="one">ProductReader ABC + per-mission readers (GOES, Himawari); Carbon Mapper records and rasters</div>
     </div>
     <div class="pkg-card find" id="p-catalog">
       <div class="verb">find</div>
       <div class="dist">geotoolz-catalog</div>
       <div class="imp">import geocatalog</div>
-      <div class="one">GeoSlice queries over InMemory / DuckDB catalogs; STAC · CMR sources; loaders</div>
+      <div class="one">GeoSlice queries over InMemory / DuckDB catalogs; STAC · CMR · EarthAccess · GEE sources; staging; loaders</div>
     </div>
     <div class="pkg-card cut" id="p-patcher">
       <div class="verb">cut</div>
@@ -64,8 +64,8 @@
 
   <div class="slabs">
     <div class="slab cloud" id="geocloud"><span class="lib">geotoolz-cloud</span><span class="what"><code>import geocloud</code> — the one pooled <code>obstore</code> client per process · async COG reads (<code>CogSource</code>, <code>[cog]</code>)</span></div>
-    <div class="slab" id="pipekit"><span class="lib">pipekit</span><span class="what"><code>Operator</code> · <code>Graph</code></span></div>
     <div class="slab" id="geoarray"><span class="lib">geotoolz-array</span><span class="what"><code>import geoarray</code> — <code>GeoArray</code> · <code>Grid</code> · <code>RasterSource</code>, the carrier under all five packages (georeader is only an internal engine)</span></div>
+    <div class="slab" id="pipekit"><span class="lib">pipekit</span><span class="what"><code>Operator</code> · <code>Sequential</code> · <code>Graph</code> and pipekit-array's named arrays: under geoarray, and imported by geoops directly</span></div>
   </div>
 
   <div class="legend">
@@ -80,19 +80,16 @@
         label: "<span class='t'>[operators]</span><span class='s'>sensor presets</span>" });
   wire("p-catalog", "p-patcher", { from: "right", to: "left", dashed: true, color: X,
         label: "<span class='t'>[patch]</span>", dy: -18 });
-  wire("p-products", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, toShift: -360,
+  wire("p-products", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, toShift: -561,
         label: "<span class='t'>[goes] [himawari]</span>" });
-  wire("p-catalog", "geocloud", { from: "bottom", to: "top", dashed: true, color: X,
+  wire("p-catalog", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, toShift: -187,
         label: "<span class='t'>[cloud]</span>" });
-  wire("p-geoops", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, fromShift: -110, toShift: 470, dx: -95, dy: 14,
-        label: "<span class='t'>[cloud] [hdf5]</span>" });
-  wire("p-patcher", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, fromShift: -40, toShift: 360,
+  wire("p-geoops", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, toShift: 561, dx: -40,
+        label: "<span class='t'>[cloud] [hdf5] [hdf4] [netcdf]</span>" });
+  wire("p-patcher", "geocloud", { from: "bottom", to: "top", dashed: true, color: X, toShift: 187,
         label: "<span class='t'>[cog]</span>" });
   wire("p-geoops", "p-patcher", { from: "left", to: "right", dashed: true, color: X,
         label: "<span class='t'>[patch]</span>", dy: -18 });
-  wire("p-patcher", "pipekit", { from: "bottom", to: "top", dashed: true, color: X, fromShift: 60, toShift: -80, bend: 18,
-        label: "<span class='t'>[pipekit]</span>" });
-  wire("p-geoops", "pipekit", { from: "bottom", to: "top", color: "#475569", toShift: 40 });
   ready();
 </script>
 </body>
