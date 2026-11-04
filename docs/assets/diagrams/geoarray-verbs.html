@@ -25,11 +25,11 @@
 <body>
 <div id="diagram">
   <div class="title">geoarray or geoops? Re-index, join, re-describe, read at, or compute</div>
-  <div class="subtitle">geoarray moves pixels and the georeference together but never computes a field; anything that makes new values or a new grid is an operator in geoops.</div>
+  <div class="subtitle">geoarray moves pixels and the georeference together and computes no new values, with one deliberate exception; anything that makes new values or a new grid is an operator in geoops.</div>
 
   <div class="cols">
     <div class="lane geoarray">
-      <div class="lane-head"><span class="verb">geoarray</span><span class="pkg">reads the georeference, never computes a field</span><span class="imp">import geoarray as ga</span></div>
+      <div class="lane-head"><span class="verb">geoarray</span><span class="pkg">reads the georeference; computes no new values (one exception)</span><span class="imp">import geoarray as ga</span></div>
       <div class="verbs">
         <div class="node verb-card geoarray">
           <div class="name">re-index</div>
@@ -69,7 +69,8 @@
           <div class="what">points in, values out: the observation operator H(x)</div>
           <div class="calls">
             <code>ga.to_pixel(g.transform, xy)</code><span>map (x, y) → fractional (row, col)</span>
-            <code>ga.interp_at(g, points)</code><span><code>GeoPoints</code> in, <code>GeoPoints</code> out; nearest or bilinear, NaN off the grid or on nodata</span>
+            <code>ga.interp_at(g, pts, "nearest")</code><span>input values at your points: a pure read</span>
+            <code>ga.interp_at(g, pts, "bilinear")</code><span><b>the exception:</b> blends the 4 surrounding pixels (spatial, reach 1). Kept here because H(x) must run under <code>jit</code> / <code>grad</code> and geoarray cannot import geoops; the output lives on your points, never on a new grid</span>
           </div>
         </div>
       </div>
@@ -96,7 +97,7 @@
     </div>
   </div>
 
-  <div class="test"><b>The test</b><span>if the output holds only input values, fills and coordinates, or values read at points you gave it, it is <code>geoarray</code>. Otherwise it is <code>geoops</code>.</span></div>
+  <div class="test"><b>The test</b><span>if the output holds only input values, fills and coordinates, it is <code>geoarray</code>. Otherwise it is <code>geoops</code>, except bilinear <code>interp_at</code>, kept in geoarray as the observation operator.</span></div>
 </div>
 <script src="_connect.js"></script>
 <script>ready();</script>
