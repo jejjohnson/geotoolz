@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Operator coupling classes</title>
+<link rel="stylesheet" href="_base.css">
+<style>
+  #diagram { width: 1480px; }
+  :root { --band: #23978a; --space: #3f6fb5; --time: #cf9418; }
+  .row { display: grid; column-gap: 40px; margin-top: 26px; justify-content: center; }
+  .row.one { grid-template-columns: 400px; }
+  .row.three { grid-template-columns: repeat(3, 400px); }
+  .cls { z-index: 3; }
+  .cls .top { display: flex; align-items: baseline; gap: 10px; }
+  .cls .name { font-size: 15px; font-weight: 700; }
+  .cls .n { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .dims { display: inline-flex; gap: 4px; }
+  .d { font-family: var(--mono); font-size: 11px; font-weight: 700; color: #fff; border-radius: 6px; padding: 2px 6px; }
+  .d.band { background: var(--band); } .d.space { background: var(--space); } .d.time { background: var(--time); }
+  .d.none { background: #cbd5e1; color: var(--ink); }
+  .cls .ex { margin-top: 7px; font-family: var(--mono); font-size: 11.5px; line-height: 1.55; color: var(--ink); }
+  .cls .ex i { font-family: var(--sans); font-style: normal; color: var(--muted); font-size: 11.5px; }
+  .cls .so { margin-top: 7px; font-size: 12px; line-height: 1.4; color: var(--muted); border-top: 1px dashed #e2e8f0; padding-top: 6px; }
+  .cls .so b { color: var(--ink); font-weight: 600; }
+  #c-vol { position: absolute; top: 112px; right: 40px; width: 300px; border-style: dashed; }
+  .keys { margin-top: 34px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .key { border-radius: 12px; padding: 10px 12px; background: var(--base-bg); border: 1.5px solid #cbd5e1; font-size: 12px; line-height: 1.45; color: var(--muted); }
+  .key b { display: block; color: var(--ink); font-size: 13px; margin-bottom: 2px; }
+  .key code { font-family: var(--mono); font-size: 11.5px; color: var(--ink); }
+</style>
+</head>
+<body>
+<div id="diagram">
+  <div class="title">Coupling classes: which dims an operator mixes</div>
+  <div class="subtitle">An operator couples a dim when one output depends on two or more inputs that differ along it. Each row down adds one coupled dim; the counts cover the 275 public geoops operators.</div>
+
+  <div class="node cls base" id="c-vol">
+    <div class="top"><span class="name">volumetric</span><span class="dims"><span class="d space">space</span><span class="d space">level</span></span><span class="n">4</span></div>
+    <div class="ex">Gradient3D · Laplacian3D · Divergence3D · Curl3D</div>
+    <div class="so">a stencil across (level, y, x); <b>reach</b> as for spatial</div>
+  </div>
+
+  <div class="row one">
+    <div class="node cls base" id="c-point">
+      <div class="top"><span class="name">pointwise</span><span class="dims"><span class="d none">none</span></span><span class="n">99</span></div>
+      <div class="ex">DNToReflectance · ApplyMask · LogScale · Rasterize <i>(reads only the grid)</i> · MinMaxScaler <i>(fitted over space, time)</i></div>
+      <div class="so"><b>Split anything:</b> patches, bands and frames give the same answer, unless a state is fitted over them</div>
+    </div>
+  </div>
+
+  <div class="row three">
+    <div class="node cls" id="c-spec" style="--accent: var(--band)">
+      <div class="top"><span class="name">spectral</span><span class="dims"><span class="d band">band</span></span><span class="n">35</span></div>
+      <div class="ex">NDVI <i>(band reduce)</i> · BandMath · ContinuumRemoval · MatchedFilter <i>(fitted over space, time)</i></div>
+      <div class="so"><b>Keep a pixel's bands together;</b> tile and split time freely</div>
+    </div>
+    <div class="node cls" id="c-spat" style="--accent: var(--space)">
+      <div class="top"><span class="name">spatial</span><span class="dims"><span class="d space">space</span></span><span class="n">94</span></div>
+      <div class="ex">Gradient2D <i>(reach 1)</i> · DilateMask <i>(reach = iterations)</i> · GaussianDenoise <i>(⌈4σ⌉)</i> · Reproject <i>(regrid, global)</i> · LabelConnectedComponents <i>(global)</i></div>
+      <div class="so"><b>Tiles overlap ≥ 2 × reach,</b> or the seams differ; a global reach means patching changes the answer (<code>ApplyToChips</code> warns)</div>
+    </div>
+    <div class="node cls" id="c-time" style="--accent: var(--time)">
+      <div class="top"><span class="name">temporal</span><span class="dims"><span class="d time">time</span></span><span class="n">4</span></div>
+      <div class="ex">MedianComposite · CloudFreeComposite <i>(time reduce)</i> · BlendMatched · CombineMasks</div>
+      <div class="so"><b>Keep the whole time stack;</b> tile and pick bands freely</div>
+    </div>
+  </div>
+
+  <div class="row three">
+    <div class="node cls" id="c-ss" style="--accent: var(--space)">
+      <div class="top"><span class="name">spatio-spectral</span><span class="dims"><span class="d band">band</span><span class="d space">space</span></span><span class="n">9</span></div>
+      <div class="ex">S2Cloudless · OmniCloudMask · SLIC · Felzenszwalb · Quickshift</div>
+      <div class="so">all bands, and context around each pixel</div>
+    </div>
+    <div class="node cls" id="c-st" style="--accent: var(--band)">
+      <div class="top"><span class="name">spectro-temporal</span><span class="dims"><span class="d band">band</span><span class="d time">time</span></span><span class="n">14</span></div>
+      <div class="ex">PixelwisePCA · PixelwiseKMeans <i>(stack as features, fitted over space)</i> · MaxNDVIComposite · dNBR · SBMP</div>
+      <div class="so">each pixel's whole (T, C) block</div>
+    </div>
+    <div class="node cls" id="c-sp" style="--accent: var(--time)">
+      <div class="top"><span class="name">spatio-temporal</span><span class="dims"><span class="d space">space</span><span class="d time">time</span></span><span class="n">11</span></div>
+      <div class="ex">Mosaic <i>(regrid, time reduce)</i> · OpticalFlowTVL1 · HistogramMatch · BAPComposite</div>
+      <div class="so">every frame, and context around each pixel</div>
+    </div>
+  </div>
+
+  <div class="row one">
+    <div class="node cls base" id="c-all">
+      <div class="top"><span class="name">spatio-spectro-temporal</span><span class="dims"><span class="d band">band</span><span class="d space">space</span><span class="d time">time</span></span><span class="n">5</span></div>
+      <div class="ex">ModelOp · Einx <i>(whatever the model or expression does)</i> · DenoisePCA · ColumnEnhancement</div>
+      <div class="so">the whole cube: a patch must carry every band and frame</div>
+    </div>
+  </div>
+
+  <div class="keys">
+    <div class="key"><b>effect, per dim</b>what happens to a dim it doesn't couple, or how it couples: <code>keep · select · reduce · mix · expand · split · join · regrid</code></div>
+    <div class="key"><b>reach</b>pixels of context each output reads: an int, or <i>global</i>; <code>reach_of(op)</code> follows the arguments (<code>spatial_reach()</code>)</div>
+    <div class="key"><b>fitted over</b>dims a learned state is estimated over though the apply is local: a scaler is pointwise but <code>fit</code> sees every pixel</div>
+    <div class="key"><b>declared and checked</b><code>op.coupling</code> is a <code>geoops.carrier.Coupling</code>; <code>geoops.testing.assert_coupling</code> probes it on every operator</div>
+  </div>
+</div>
+<script src="_connect.js"></script>
+<script>
+  ready();
+</script>
+</body>
+</html>
