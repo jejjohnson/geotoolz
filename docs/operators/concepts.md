@@ -224,6 +224,53 @@ denoised: np.ndarray = mnf.inverse(mnf(scene))                # (4, 32, 32) → 
 - **Pre-trained models.** `learn.ModelOp` wraps a trained model and never
   fits. It returns the model's output as it is, without rewrapping it.
 
+## Coupling: which dims an operator mixes
+
+An operator *couples* a dim when some output depends on two or more input
+values that differ along it: a filter mixes neighbouring pixels, a band
+ratio mixes bands, a composite mixes dates. Re-indexing alone (selecting
+or reordering bands, cropping) moves values without mixing them, so it is
+an effect on the dim, not a coupling. The set of coupled dims is the
+operator's coupling class:
+
+| Coupled dims | Class | Examples |
+|---|---|---|
+| none | pointwise | `DNToReflectance`, `ApplyMask` |
+| `band` | spectral | `NDVI`, `BandMath`, `ApplySRF` |
+| `space` (`y` and `x`) | spatial | `GaussianDenoise`, `Reproject`, `PercentileClip` |
+| `time` | temporal | `MedianComposite` |
+| `level`, `space` | volumetric | `Gradient3D` |
+| `band`, `space` | spatio-spectral | `SLIC` |
+
+An operator class declares it as `coupling`, a `geoops.carrier.Coupling`,
+beside `backends`. With the coupled dims come what the operator does to
+each one (`select`, `reduce`, `regrid`, …), the spatial reach in pixels
+(`None` for an operator that reads the whole scene) and the dims a fit
+reads beyond them.
+
+```python
+from geoops.carrier import Coupling
+
+# NDVI = (ρ_NIR − ρ_red) / (ρ_NIR + ρ_red): two bands at one pixel → one band
+ndvi: Coupling = Coupling(couples={"band"}, effects={"band": "reduce"})
+# per-band percentiles over the whole scene, then a pointwise stretch
+clip: Coupling = Coupling(couples={"space"}, reach=None)
+# x′ = (x − μ_c) / σ_c, with μ_c and σ_c fitted over every pixel
+scaler: Coupling = Coupling(fit={"space"})
+```
+
+The reach is what tiling needs: a tile reproduces the whole-scene result
+in its interior only when it overlaps its neighbours by at least the reach.
+An operator with `reach=None` gives a different answer per tile, whatever
+the overlap.
+
+`geoops.testing.measure_coupling(build, scene)` measures the coupling by
+perturbing one pixel, a far block and one frame of a stack, and
+`geoops.testing.assert_coupling(op, measured)` checks that the declaration
+contains what was measured. The measurement is a lower bound: a topology
+statistic such as a connected-components label can ignore one changed
+pixel.
+
 ## Where geotoolz fits
 
 ![The geostack: geocatalog finds, geoproducts reads, geopatcher cuts, geoops computes, geopatcher stitches](../assets/diagrams/stack-overview.png)
