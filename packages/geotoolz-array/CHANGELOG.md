@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.3.2...geotoolz-array-v0.4.0) (2026-11-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ops:** geoarray.reduce and geoarray.argreduce are removed. Use geoops.compositing.reduce / argreduce to leave nodata out, or pipekit_array.reduce / argreduce (the same objects geoarray re-exported).
+* **ops:** geoarray.interp_at is removed; use geoops.geom.interp_at (same signature) or geoops.InterpAt.
+
+### Features
+
+* **ops:** move interp_at to geoops.geom with an InterpAt operator ([#636](https://github.com/jejjohnson/geotoolz/issues/636)) ([ee8e46c](https://github.com/jejjohnson/geotoolz/commit/ee8e46ce396dc49dfe32741926b8040909008d43))
+* **ops:** nodata-aware reduce / argreduce in geoops.compositing ([#637](https://github.com/jejjohnson/geotoolz/issues/637)) ([409a772](https://github.com/jejjohnson/geotoolz/commit/409a7726042c3bd7b1cfacadaaac4a9c08816b42))
+
 ## [0.3.2](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.3.1...geotoolz-array-v0.3.2) (2026-10-27)
 
 

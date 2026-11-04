@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.3](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.14.2...geotoolz-patcher-v0.14.3) (2026-11-04)
+
+
+### Features
+
+* **patcher:** warn in ApplyToChips when patching changes the answer ([#626](https://github.com/jejjohnson/geotoolz/issues/626)) ([528a0ab](https://github.com/jejjohnson/geotoolz/commit/528a0abac747c33095da722dd03e10434123de06))
+
 ## [0.14.2](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.14.1...geotoolz-patcher-v0.14.2) (2026-10-27)
 
 
