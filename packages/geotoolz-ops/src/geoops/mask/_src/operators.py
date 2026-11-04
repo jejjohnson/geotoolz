@@ -30,6 +30,7 @@ from geoops._src.shape import gather_inputs
 from geoops._src.valid import carried_fill, carrier_fill_value, wrap_filled
 from geoops._src.wrap import wrap_like
 from geoops.mask._src.array import (
+    DEFAULT_STRUCTURE,
     Keep,
     _check_keep,
     _drop_polarity,
@@ -1062,8 +1063,9 @@ def _safe_extract_zip(zf: ZipFile, extract_dir: Path) -> None:
 
 
 def _structure_half_width(structure: Any) -> int:
-    """Half the widest side of a structuring element; 1 for the default 3 x 3."""
-    return 1 if structure is None else max(np.shape(structure)) // 2
+    """Half the widest side of a structuring element (the default if ``None``)."""
+    chosen = DEFAULT_STRUCTURE if structure is None else structure
+    return max(np.shape(chosen)) // 2
 
 
 def _morph_config(iterations: int, structure: np.ndarray | None) -> dict[str, Any]:

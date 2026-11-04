@@ -2746,6 +2746,17 @@ def _validate_segment_compatible(
         raise ValueError("All segments must share pixel size.")
 
 
+def _calculus_reach(op: Any, derivative: int) -> int | None:
+    """A calculus operator's reach; ``None`` when x wraps (``periodic_x``).
+
+    A periodic axis joins column 0 to column W - 1, so a patch's own edges
+    would be joined: no overlap makes a patch agree with the whole scene.
+    """
+    if getattr(op, "periodic_x", False) or getattr(op, "periodic", False):
+        return None
+    return _stencil_reach(derivative, op.accuracy)
+
+
 def _stencil_reach(derivative: int, accuracy: int) -> int:
     """The widest offset of any stencil the mask-aware policy may pick."""
     # central where the data allow it, else forward or backward (adaptive_difference)
@@ -2820,9 +2831,9 @@ class Gradient2D(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
     coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
 
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
-        return _stencil_reach(1, self.accuracy)
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use; None when x is periodic."""
+        return _calculus_reach(self, 1)
 
     def __init__(
         self,
@@ -2946,9 +2957,9 @@ class Divergence2D(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
     coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
 
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
-        return _stencil_reach(1, self.accuracy)
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use; None when x is periodic."""
+        return _calculus_reach(self, 1)
 
     def __init__(
         self,
@@ -2998,9 +3009,9 @@ class Curl2D(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
     coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
 
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
-        return _stencil_reach(1, self.accuracy)
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use; None when x is periodic."""
+        return _calculus_reach(self, 1)
 
     def __init__(
         self,
@@ -3067,9 +3078,9 @@ class Laplacian2D(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
     coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=2)
 
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
-        return _stencil_reach(2, self.accuracy)
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use; None when x is periodic."""
+        return _calculus_reach(self, 2)
 
     def __init__(
         self,
@@ -3126,9 +3137,9 @@ class Gradient1D(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
     coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
 
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
-        return _stencil_reach(1, self.accuracy)
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use; None when x is periodic."""
+        return _calculus_reach(self, 1)
 
     def __init__(
         self,
@@ -3173,9 +3184,9 @@ class Divergence1D(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
     coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
 
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
-        return _stencil_reach(1, self.accuracy)
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use; None when x is periodic."""
+        return _calculus_reach(self, 1)
 
     def __init__(
         self,
@@ -3222,9 +3233,9 @@ class Laplacian1D(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
     coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=2)
 
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
-        return _stencil_reach(2, self.accuracy)
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use; None when x is periodic."""
+        return _calculus_reach(self, 2)
 
     def __init__(
         self,
@@ -3276,9 +3287,9 @@ class Gradient3D(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
     coupling: ClassVar[Coupling] = Coupling(couples={"level", "space"}, reach=1)
 
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
-        return _stencil_reach(1, self.accuracy)
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use; None when x is periodic."""
+        return _calculus_reach(self, 1)
 
     def __init__(
         self,
@@ -3330,9 +3341,9 @@ class Divergence3D(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
     coupling: ClassVar[Coupling] = Coupling(couples={"level", "space"}, reach=1)
 
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
-        return _stencil_reach(1, self.accuracy)
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use; None when x is periodic."""
+        return _calculus_reach(self, 1)
 
     def __init__(
         self,
@@ -3388,9 +3399,9 @@ class Curl3D(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
     coupling: ClassVar[Coupling] = Coupling(couples={"level", "space"}, reach=1)
 
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
-        return _stencil_reach(1, self.accuracy)
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use; None when x is periodic."""
+        return _calculus_reach(self, 1)
 
     def __init__(
         self,
@@ -3442,9 +3453,9 @@ class Laplacian3D(Operator):
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
     coupling: ClassVar[Coupling] = Coupling(couples={"level", "space"}, reach=2)
 
-    def spatial_reach(self) -> int:
-        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
-        return _stencil_reach(2, self.accuracy)
+    def spatial_reach(self) -> int | None:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use; None when x is periodic."""
+        return _calculus_reach(self, 2)
 
     def __init__(
         self,
