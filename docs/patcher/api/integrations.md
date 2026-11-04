@@ -16,6 +16,7 @@ from geopatcher.integrations.pipekit import GridSampler, ApplyToChips, MergePatc
 ::: geopatcher.integrations.pipekit.GridSampler
 ::: geopatcher.integrations.pipekit.ApplyToChips
 ::: geopatcher.integrations.pipekit.MergePatches
+::: geopatcher.integrations.pipekit.PatchReachWarning
 
 ## pipekit-train dataset (`geopatcher.integrations.train`, `[train]` extra)
 

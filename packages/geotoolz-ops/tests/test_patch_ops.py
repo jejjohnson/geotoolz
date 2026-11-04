@@ -173,7 +173,8 @@ class TestApplyToChips:
                 "class": "Lambda",
                 "module": "pipekit.blocks",
                 "config": double.get_config(),
-            }
+            },
+            "check_reach": True,
         }
 
 

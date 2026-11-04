@@ -174,3 +174,12 @@ classes are importable from `geopatcher.integrations.pipekit`.
   field; `gz.Stitch` mosaics georeferenced GeoArray tiles.
 - **Other sampling axes** (along-track, points, temporal) live in
   geopatcher; see [Patcher concepts](../patcher/concepts.md).
+- **Overlap and reach.** A tile reproduces the whole-scene result only
+  where every pixel it reads is inside the tile. `ApplyToChips` reads the
+  operator's [coupling](api/coupling.md) and warns with
+  `PatchReachWarning` when neighbouring tiles overlap by less than twice
+  its spatial reach, or when the operator reads the whole scene (a
+  percentile stretch, an Otsu threshold): such an operator gives a
+  different answer per tile however much they overlap. Overlap is
+  necessary, not sufficient: `OverlapAdd` still blends each tile's edge
+  pixels unless the window gives them zero weight.
