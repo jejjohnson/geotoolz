@@ -35,11 +35,13 @@ and no package depends on `geotoolz-catalog`.
 Where geoarray stops and geoops starts:
 
 ```
-geoarray: reads the georeference, never computes a field
+geoarray: re-indexes and re-describes; computes no values of its own
   re-index     isel, sel, crop, read_window, write_window, pad
-  join         stack, concat, combine      one grid; your fn computes
-  re-describe  dims, coords, pixel_coords, valid_mask, footprint
-  read at      to_pixel, interp_at         points in, values out
+  join         stack, concatenate, concat        one grid
+  carry        combine, map_over, GeoArray.map    one grid; your fn computes
+  re-describe  dims, coords, pixel_coords, footprint
+  read at      to_pixel, interp_at("nearest")    points in, values out
+  exceptions   interp_at("bilinear"), reduce, argreduce, valid_mask, astype
 
 geoops: computes
   new values   indices, radiometry, mask, normalize, …   same grid
@@ -47,8 +49,9 @@ geoops: computes
 ```
 
 The test: if the output holds only input values, fills and coordinates,
-or values read at points you gave it, it is geoarray. Otherwise it is
-geoops.
+it is geoarray. Otherwise it is geoops, unless it is one of the documented
+exceptions in
+[`packages/geotoolz-array/AGENTS.md`](packages/geotoolz-array/AGENTS.md#the-membership-test).
 
 ## Reuse before you write
 

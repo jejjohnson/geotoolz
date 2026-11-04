@@ -16,6 +16,9 @@
   .calls span { font-size: 12px; color: var(--muted); line-height: 1.35; }
   .compute-col .node + .node { margin-top: 14px; }
   .fams { margin-top: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--ink); }
+  .exc { grid-column: 1 / -1; border-style: dashed; border-color: #b45309; }
+  .exc .name { color: #92400e; }
+  .exc .calls { grid-template-columns: max-content 1fr; }
   .test { margin-top: 22px; display: flex; gap: 14px; align-items: baseline; border-radius: 14px; padding: 12px 16px;
           background: var(--base-bg); border: 1.5px solid #cbd5e1; font-size: 13px; }
   .test b { font-size: 14px; }
@@ -25,11 +28,11 @@
 <body>
 <div id="diagram">
   <div class="title">geoarray or geoops? Re-index, join, re-describe, read at, or compute</div>
-  <div class="subtitle">geoarray moves pixels and the georeference together and computes no new values, with one deliberate exception; anything that makes new values or a new grid is an operator in geoops.</div>
+  <div class="subtitle">geoarray moves pixels and the georeference together and computes no values of its own, except a few documented exceptions; anything else that makes new values or a new grid is an operator in geoops.</div>
 
   <div class="cols">
     <div class="lane geoarray">
-      <div class="lane-head"><span class="verb">geoarray</span><span class="pkg">reads the georeference; computes no new values (one exception)</span><span class="imp">import geoarray as ga</span></div>
+      <div class="lane-head"><span class="verb">geoarray</span><span class="pkg">re-indexes and re-describes; computes no values of its own</span><span class="imp">import geoarray as ga</span></div>
       <div class="verbs">
         <div class="node verb-card geoarray">
           <div class="name">re-index</div>
@@ -50,7 +53,7 @@
             <code>ga.stack(scenes, "time")</code><span>along a new dim: (C, H, W) × T → (T, C, H, W)</span>
             <code>ga.concatenate(parts)</code><span>along an existing axis (bands by default)</span>
             <code>ga.concat(parts, "band")</code><span>the same, by dim name</span>
-            <code>ga.combine · ga.map_over · ga.reduce</code><span>your function on the joined data: <i>it</i> computes, geoarray carries the grid</span>
+            <code>ga.combine · ga.map_over · g.map</code><span>carry: <i>your</i> function computes, geoarray carries the grid</span>
           </div>
         </div>
         <div class="node verb-card geoarray">
@@ -59,8 +62,7 @@
           <div class="calls">
             <code>g.dims · g.coords · g.labels("band")</code><span><code>SpectralAxis</code>, <code>TimeAxis</code>, <code>VerticalAxis</code>, …</span>
             <code>g.grid · g.bounds · g.res</code><span>a hashable <code>Grid</code>: transform, CRS, (H, W)</span>
-            <code>ga.pixel_coords · ga.footprint</code><span>map x, y of each pixel (2, H, W) · the outline</span>
-            <code>g.valid_mask()</code><span>(H, W), True where every band holds data</span>
+            <code>ga.pixel_coords · ga.footprint</code><span>map x, y of each pixel (2, H, W) · the outline: coordinates, not values</span>
             <code>g.with_attrs · g.shift_origin</code><span>new attrs · the same pixels, moved in the CRS</span>
           </div>
         </div>
@@ -70,7 +72,16 @@
           <div class="calls">
             <code>ga.to_pixel(g.transform, xy)</code><span>map (x, y) → fractional (row, col)</span>
             <code>ga.interp_at(g, pts, "nearest")</code><span>input values at your points: a pure read</span>
-            <code>ga.interp_at(g, pts, "bilinear")</code><span><b>the exception:</b> blends the 4 surrounding pixels (spatial, reach 1). Kept here because H(x) must run under <code>jit</code> / <code>grad</code> and geoarray cannot import geoops; the output lives on your points, never on a new grid</span>
+          </div>
+        </div>
+        <div class="node verb-card exc">
+          <div class="name">documented exceptions: these do compute</div>
+          <div class="what">each stays in geoarray for a stated reason (<code>packages/geotoolz-array/AGENTS.md</code>); a new one is added there, or the code goes to geoops</div>
+          <div class="calls">
+            <code>ga.interp_at(g, pts, "bilinear")</code><span>blends the 4 pixels around each point (spatial, reach 1). The observation operator H(x): it must run under <code>jit</code> / <code>grad</code>, geoarray cannot import geoops, and the output lives on your points, never a new grid</span>
+            <code>ga.reduce(g, "mean", "time") · ga.argreduce</code><span>a named reduction over a dim. pipekit-array's dim-generic primitives, shared by every carrier; no nodata handling (use <code>"nanmean"</code> or <code>where=</code>); nodata-aware composites are <code>geoops.compositing</code></span>
+            <code>g.valid_mask()</code><span>(H, W), True where every band is finite and not the fill: a band reduction that defines the nodata model every package shares</span>
+            <code>g.astype(np.float32)</code><span>a cast; float → int truncates. Representation only, fill carried; scaling is geoops</span>
           </div>
         </div>
       </div>
@@ -82,7 +93,7 @@
         <div class="name">new values, same grid</div>
         <div class="desc">each output pixel is a function of input values; transform and CRS kept</div>
         <div class="fams">indices · radiometry · mask · qa · normalize · restore · segment · spectral · learn · …</div>
-        <div class="chips"><span class="chip"><span class="t">NDVI</span><span class="s">(C,H,W) → (1,H,W)</span></span><span class="chip"><span class="t">GaussianDenoise</span></span></div>
+        <div class="chips"><span class="chip"><span class="t">NDVI</span><span class="s">(C,H,W) → (H,W)</span></span><span class="chip"><span class="t">GaussianDenoise</span></span></div>
       </div>
       <div class="node">
         <div class="name">new grid</div>
@@ -97,7 +108,7 @@
     </div>
   </div>
 
-  <div class="test"><b>The test</b><span>if the output holds only input values, fills and coordinates, it is <code>geoarray</code>. Otherwise it is <code>geoops</code>, except bilinear <code>interp_at</code>, kept in geoarray as the observation operator.</span></div>
+  <div class="test"><b>The test</b><span>if the output holds only input values, fills and coordinates, it is <code>geoarray</code>. Otherwise it is <code>geoops</code>, unless it is one of the documented exceptions.</span></div>
 </div>
 <script src="_connect.js"></script>
 <script>ready();</script>
