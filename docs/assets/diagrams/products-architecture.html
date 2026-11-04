@@ -33,31 +33,31 @@
         <div class="surface">
           <code>net · s3 — retries · rate limits · anonymous buckets</code>
           <code>files · credentials — atomic writes · tokens</code>
-          <code>hdf — CF-packed variables · flag tables</code>
+          <code>hdf — PackedGridReader · flag tables</code>
           <code>geostationary — fixed grids · Earth-disk mask</code>
           <code>presets — Recipe · RGB / operator builders</code>
+          <code>stack — any readers → one grid</code>
         </div>
       </div>
 
       <div class="node read" id="ns">
         <div class="name">one namespace per product</div>
-        <div class="desc">the same small surface, whatever the mission, format or API</div>
+        <div class="desc">the same small surface for each imager, whatever the format or API</div>
         <div class="ns">
           <span class="chip"><span class="t">Reader</span><span class="s">· L2Reader — lazy, calibrated</span></span>
-          <span class="chip"><span class="t">aws · api</span><span class="s">list · download</span></span>
+          <span class="chip"><span class="t">aws</span><span class="s">list_files · download</span></span>
           <span class="chip"><span class="t">BANDS · constants</span></span>
           <span class="chip"><span class="t">recipes</span><span class="s">RGBs as data</span></span>
           <span class="chip"><span class="t">presets</span><span class="s">[operators]</span></span>
-          <span class="chip"><span class="t">stack</span><span class="s">any readers → one grid</span></span>
         </div>
-        <div class="examples">e.g. <code>goes</code> · <code>himawari</code> · <code>carbonmapper</code> · <code>toy_sensor</code> — each behind its own extra</div>
+        <div class="examples"><code>goes</code> · <code>himawari</code> <code>[goes]</code> <code>[himawari]</code> · <code>toy_sensor</code> · <code>carbonmapper</code> <code>[carbonmapper]</code> (its own API client and rasters)</div>
       </div>
 
       <div class="node read abc" id="abc">
         <div class="name"><code>ProductReader</code> <span style="font-weight:500;color:var(--muted)">(geoarray RasterSource, ABC)</span></div>
         <div class="surface">
           <code>grid · crs · transform · shape · bounds</code>
-          <code>band_names · dtype · fill_value</code>
+          <code>bands · attrs · dtype · fill_value</code>
           <code>read_window / load / read_from_bounds</code>
           <code>_read_window(PixelWindow) — lazy, boundless</code>
           <code>files via geocloud — local or s3://</code>

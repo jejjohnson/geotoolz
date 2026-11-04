@@ -31,7 +31,7 @@
 <body>
 <div id="diagram">
   <div class="title">Advanced: methane screening with labels, across all four packages</div>
-  <div class="subtitle">Permian Basin, June 2025 · Sentinel-2 SWIR on a 20 m UTM 13N grid of (H, W) = (1675, 1430) · shapes as returned at each step</div>
+  <div class="subtitle">Permian Basin, June 2025 · Sentinel-2 SWIR on a 20 m UTM 13N grid of (H, W) = (1675, 1431) · shapes as returned at each step</div>
 
   <div class="rows">
     <div class="row read">
@@ -44,7 +44,7 @@
       <div class="node c8" id="rasterize"><span class="step">8</span>
         <div class="name"><code>rasterize_sources_like</code></div>
         <div class="desc">sources onto <i>grid</i>, buffer_m=150</div>
-        <div class="chips"><span class="chip"><span class="t">GeoArray</span><span class="s">(1675, 1430) uint8</span></span></div>
+        <div class="chips"><span class="chip"><span class="t">GeoArray</span><span class="s">(1675, 1431) uint8</span></span></div>
       </div>
     </div>
 
@@ -58,7 +58,7 @@
       <div class="node c3" id="fieldfor"><span class="step">3</span>
         <div class="name"><code>stage</code> · <code>query</code> · <code>field_for</code></div>
         <div class="desc">mosaic onto the AOI GeoSlice</div>
-        <div class="chips"><span class="chip"><span class="t">RasterField</span><span class="s">(1, 1675, 1430) uint16 × 2</span></span></div>
+        <div class="chips"><span class="chip"><span class="t">RasterField</span><span class="s">(1, 1675, 1431) uint16 × 2</span></span></div>
       </div>
     </div>
 
@@ -67,7 +67,7 @@
       <div class="node c4" id="stack"><span class="step">4</span>
         <div class="name"><code>StackBands</code></div>
         <div class="desc">[B11, B12] → one carrier</div>
-        <div class="chips"><span class="chip"><span class="t">GeoArray</span><span class="s">(2, 1675, 1430) uint16</span></span></div>
+        <div class="chips"><span class="chip"><span class="t">GeoArray</span><span class="s">(2, 1675, 1431) uint16</span></span></div>
       </div>
       <div class="node c6" id="sbmp"><span class="step">6</span>
         <div class="name"><code>DNToReflectance | SBMP</code></div>
@@ -85,8 +85,8 @@
       </div>
       <div class="node c7" id="merge"><span class="step">7</span>
         <div class="name"><code>MergePatches</code></div>
-        <div class="desc">OverlapAdd onto the one-band <i>grid</i></div>
-        <div class="chips"><span class="chip"><span class="t">ndarray</span><span class="s">(1, 1675, 1430) float64</span></span></div>
+        <div class="desc">OverlapAdd back onto the scene grid</div>
+        <div class="chips"><span class="chip"><span class="t">GeoArray</span><span class="s">(1675, 1431) float64</span></span></div>
       </div>
     </div>
 
@@ -108,8 +108,8 @@
   wire("grid", "sbmp", { from: "right", to: "bottom", bend: 60, toShift: -40, color: B, label: "<span class='t'>ApplyToChips</span>", at: 0.35 });
   wire("sbmp", "merge", { from: "right", to: "top", bend: 60, toShift: -40, color: C });
   wire("sources", "rasterize", { color: R, label: "<span class='t'>sources</span>", at: 0.5 });
-  wire("stack", "rasterize", { from: "top", to: "left", dashed: true, color: "#64748b", fromShift: 60, toShift: 18, bend: 120,
-        label: "<span class='t'>grid</span><span class='s'>= isel(band=0:1)</span>", at: 0.42 });
+  wire("merge", "rasterize", { from: "top", to: "left", dashed: true, color: "#64748b", fromShift: 70, toShift: 18, bend: 160,
+        label: "<span class='t'>like</span><span class='s'>= score's grid</span>", at: 0.5 });
   wire("merge", "pair", { from: "bottom", to: "top", color: O, toShift: -110, bend: 40, label: "<span class='t'>score</span>" });
   wire("rasterize", "pair", { from: "bottom", to: "top", color: O, toShift: 110, bend: 160, label: "<span class='t'>labels</span>", at: 0.78 });
   ready();
