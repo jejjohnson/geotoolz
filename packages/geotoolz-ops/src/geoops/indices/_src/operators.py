@@ -39,6 +39,7 @@ from geoops._src.bands import (
     strip_band_attrs,
 )
 from geoops._src.config import nested_config
+from geoops._src.coupling import Coupling
 from geoops._src.kernels import band_kernel, carrier_kernel
 from geoops._src.shape import band_dim, dim_axis
 from geoops._src.valid import carried_fill, wrap_filled
@@ -110,6 +111,9 @@ class NormalizedDifference(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -182,6 +186,10 @@ class NDVI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # two bands at one pixel -> one band
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -242,6 +250,9 @@ class NDWI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -307,6 +318,9 @@ class NDBI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -372,6 +386,9 @@ class NBR(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -438,6 +455,9 @@ class SAVI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -511,6 +531,9 @@ class EVI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -591,6 +614,9 @@ class EVI2(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -660,6 +686,9 @@ class ARVI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -729,6 +758,9 @@ class GCI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -792,6 +824,9 @@ class kNDVI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -861,6 +896,9 @@ class MNDWI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -926,6 +964,9 @@ class NDMI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -993,6 +1034,9 @@ class NDSI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -1052,6 +1096,9 @@ class NBR2(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -1129,6 +1176,9 @@ class BAIS2(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -1198,6 +1248,10 @@ class dNBR(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # NBR(pre) - NBR(post): bands and the two dates mix
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "time"}, effects={"band": "reduce", "time": "reduce"}
+    )
 
     def _apply(self, pre: Any, post: Any) -> Any:
         return carrier_kernel(dnbr, pre, post, name="dNBR")
@@ -1248,6 +1302,9 @@ class BSI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -1316,6 +1373,9 @@ class IronOxide(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -1383,6 +1443,9 @@ class ClayMinerals(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -1445,6 +1508,8 @@ class CIRI(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # the cirrus band, passed through
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "select"})
 
     def __init__(
         self,
@@ -1490,6 +1555,10 @@ class AppendIndex(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the input bands, plus one index computed across them
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "expand"}
+    )
 
     def __init__(
         self, *, index_op: Operator, dim: str = "band", axis: int | None = None

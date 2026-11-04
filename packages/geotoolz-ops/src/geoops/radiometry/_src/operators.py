@@ -88,6 +88,7 @@ def _parse_datetime(value: datetime | str) -> datetime:
 if TYPE_CHECKING:
     from geoarray import GeoArray
 
+from geoops._src.coupling import Coupling
 from geoops._src.optional import optional_name
 from geoops._src.shape import band_dim, dim_axis
 
@@ -121,6 +122,7 @@ class ToFloat32(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         # Rewrap (not `GeoArray.astype`) so integer DN promoted to float
@@ -166,6 +168,7 @@ class DNToRadiance(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -233,6 +236,7 @@ class RadianceToDN(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -311,6 +315,8 @@ class DNToReflectance(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # rho = scale * DN + offset, per band and pixel
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -392,6 +398,7 @@ class RadianceToReflectance(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -501,6 +508,7 @@ class ReflectanceToRadiance(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -599,6 +607,8 @@ class EarthSunDistanceCorrection(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # computed from the acquisition date
+    coupling: ClassVar[Coupling] = Coupling(kind="source")
 
     _terminal: ClassVar[bool] = True
 
@@ -642,6 +652,8 @@ class ComputeSZA(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # computed from the location and time
+    coupling: ClassVar[Coupling] = Coupling(kind="source")
 
     _terminal: ClassVar[bool] = True
 
@@ -724,6 +736,8 @@ class IntegratedIrradiance(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # computed from the SRF table
+    coupling: ClassVar[Coupling] = Coupling(kind="source")
 
     # Holds a ``pandas.DataFrame``, not YAML-serialisable.
     forbid_in_yaml: ClassVar[bool] = True
@@ -921,6 +935,10 @@ class ApplySRF(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # each target band integrates the source bands under its SRF
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -1066,6 +1084,7 @@ class BTFromRadiance(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -1146,6 +1165,8 @@ class DOS1(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the dark object is a low percentile of each band over the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(self, *, dark_percentile: float = 1.0) -> None:
         self.dark_percentile = dark_percentile
@@ -1181,6 +1202,8 @@ class SimpleAtmosphericCorrection(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # DOS1: a per-band dark object over the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -1226,6 +1249,7 @@ class MinMaxStretch(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(self, *, vmin: float, vmax: float, clip: bool = True) -> None:
         self.vmin = vmin
@@ -1268,6 +1292,8 @@ class PercentileClip(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # per-band percentiles over the scene, then a pointwise stretch
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -1323,6 +1349,7 @@ class Gamma(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(self, *, gamma: float = 1.2) -> None:
         self.gamma = gamma
