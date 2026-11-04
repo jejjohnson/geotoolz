@@ -372,3 +372,58 @@ def test_a_reduction_over_time_is_measured() -> None:
     measured = measure_coupling(StackMean, _scene())
     assert measured.time == "reduce"
     assert_coupling(StackMean(), measured, exact=True)
+
+
+def test_a_scene_wide_nodata_fill_is_global() -> None:
+    """A local filter that first fills nodata from the whole scene reads it all."""
+
+    class FillThenBox(_Toy):
+        coupling = Coupling(couples={"space"}, reach=1)
+
+        def f(self, a: np.ndarray) -> np.ndarray:
+            filled = np.where(np.isfinite(a), a, np.nanmedian(a))
+            size = (1,) * (a.ndim - 2) + (3, 3)
+            return ndimage.uniform_filter(filled, size=size, mode="nearest")
+
+    measured = measure_coupling(FillThenBox, _scene())
+    assert measured.reach is None
+    with pytest.raises(AssertionError, match="declare reach=None"):
+        assert_coupling(FillThenBox(), measured)
+
+
+def test_a_frame_selector_is_not_a_time_coupling() -> None:
+    class LastFrame:
+        coupling = Coupling(effects={"time": "select"})
+
+        def __call__(self, x: GeoArray) -> np.ndarray:
+            a = np.asarray(x)
+            return a[-1] if a.ndim == 4 else a
+
+    measured = measure_coupling(LastFrame, _scene())
+    assert measured.time == "select"
+    assert measured.couples == frozenset()
+    assert measured.effects == {"time": "select"}
+
+
+def test_measure_frames_bumps_the_centre_of_4d_frames() -> None:
+    frames = [np.random.default_rng(t).uniform(size=(2, 3, 16, 16)) for t in range(2)]
+
+    class Mean:
+        coupling = Coupling(couples={"time"}, effects={"time": "reduce"})
+
+        def __call__(self, *xs: np.ndarray) -> np.ndarray:
+            return np.mean(np.stack(xs), axis=0)
+
+    measured = measure_frames(Mean, frames)
+    assert measured.couples == {"time"}
+
+
+def test_a_sub_pixel_regrid_is_not_the_same_grid() -> None:
+    class ShiftHalfMetre:
+        coupling = Coupling(effects={"space": "regrid"})
+
+        def __call__(self, x: GeoArray) -> GeoArray:
+            return x.shift_origin((0.5, 0.0))
+
+    measured = measure_coupling(ShiftHalfMetre, _scene())
+    assert measured.regrids

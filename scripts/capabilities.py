@@ -296,21 +296,29 @@ def render() -> tuple[str, list[str]]:
     return "\n".join(out).rstrip() + "\n", collisions
 
 
-def render_backends() -> str:
-    """The backends table: every public geoops operator and where it runs."""
+def _public_operators() -> dict[str, list[tuple[str, type]]]:
+    """Every public geoops operator class, by family, sorted by name."""
     from pipekit import Operator
 
     import geoops
 
-    rows: dict[str, list[tuple[str, tuple[str, ...]]]] = defaultdict(list)
+    rows: dict[str, list[tuple[str, type]]] = defaultdict(list)
     for name in sorted(getattr(geoops, "__all__", dir(geoops))):
         obj = getattr(geoops, name, None)
         if not (inspect.isclass(obj) and issubclass(obj, Operator)):
             continue
         if not obj.__module__.startswith("geoops."):
             continue
-        family = obj.__module__.split(".")[1]
-        rows[family].append((name, tuple(obj.backends or ())))
+        rows[obj.__module__.split(".")[1]].append((name, obj))
+    return rows
+
+
+def render_backends() -> str:
+    """The backends table: every public geoops operator and where it runs."""
+    rows = {
+        family: [(name, tuple(cls.backends or ())) for name, cls in ops]
+        for family, ops in _public_operators().items()
+    }
     n_jax = sum("jax" in b for ops in rows.values() for _, b in ops)
     n_all = sum(len(ops) for ops in rows.values())
     out = [
@@ -336,23 +344,6 @@ def render_backends() -> str:
         for name, backends in rows[family]:
             out.append(f"| `{family}` | `{name}` | {', '.join(backends)} |")
     return "\n".join(out) + "\n"
-
-
-def _public_operators() -> dict[str, list[tuple[str, type]]]:
-    """Every public geoops operator class, by family, sorted by name."""
-    from pipekit import Operator
-
-    import geoops
-
-    rows: dict[str, list[tuple[str, type]]] = defaultdict(list)
-    for name in sorted(getattr(geoops, "__all__", dir(geoops))):
-        obj = getattr(geoops, name, None)
-        if not (inspect.isclass(obj) and issubclass(obj, Operator)):
-            continue
-        if not obj.__module__.startswith("geoops."):
-            continue
-        rows[obj.__module__.split(".")[1]].append((name, obj))
-    return rows
 
 
 def render_coupling() -> str:
