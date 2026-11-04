@@ -11,6 +11,7 @@ multi-source matchups live in the `geom.coregister` subnamespace
 - **Vector ↔ raster:** `Rasterize`, `RasterizeLike`, `Vectorize`
 - **Swath / sensor geometry:** `Georeference` (GLT), `SegmentStitch`, `BowtieCorrection`,
   `AntimeridianSplit`, `GeostationaryParallaxCorrect`
+- **Sampling at points:** `interp_at` (function, under `jit` / `grad`), `InterpAt` (operator): H(x), a grid read at `GeoPoints`
 - **Registration:** `PhaseAlign` (phase cross-correlation), `OpticalFlowILK`, `OpticalFlowTVL1`
 - **Diagnostic calculus:** `Gradient1D` / `2D` / `3D`, `Divergence1D` / `2D` / `3D`, `Curl2D` / `3D`, `Laplacian1D` / `2D` / `3D` (operators); `gradient_1d`, `divergence_2d`, `curl_3d`, … and their `adaptive_*` twins (arrays); `difference`, `adaptive_difference`, `difference_offsets`, `difference_coeffs`, `nonuniform_coeffs` (stencils)
 
@@ -66,6 +67,18 @@ depth = np.array([0.0, 5.0, 15.0, 30.0])              # (4,) uneven levels, m
 dtdz = gz.geom.gradient_1d(depth**2, coords=depth)    # (4,) per metre
 lap = gz.geom.laplacian_3d(np.zeros((4, 7, 9)), z=depth)  # (4, 7, 9) float64
 ```
+
+## Sampling at points
+
+`interp_at` reads a grid at the positions of a `geoarray.GeoPoints`: the
+observation operator H(x) of data assimilation. Bilinear weights blend the
+four pixels around each point (`InterpAt` declares it spatial, reach 1);
+`"nearest"` reads one. A point off the grid or on nodata is NaN and
+invalid, and a padded point gives 0, so a masked cost and its gradient do
+not depend on the padding. It runs on NumPy and under `jax.jit` /
+`jax.grad`; `InterpAt` is the same function as an operator, with the
+points as its second input. It moved here from geoarray (GA-B6), which
+keeps `geoarray.to_pixel` for the coordinate maths.
 
 ::: geoops.geom
 

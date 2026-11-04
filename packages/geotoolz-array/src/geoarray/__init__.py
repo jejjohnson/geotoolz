@@ -37,9 +37,9 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
     (`concatenate`, by position);
   - **re-describe** — coordinates and dims, `pixel_coords`,
     `GeoArray.valid_mask`, `GeoArray.map`, `footprint` (``[vector]``);
-  - **read at** — `to_pixel` (map coordinates → fractional pixel centres)
-    and `interp_at` (H(x): a grid read at `GeoPoints`, bilinear or
-    nearest, padding-safe): points in, values out.
+  - **read at** — `to_pixel` (map coordinates → fractional pixel centres).
+    Reading a grid at `GeoPoints`, H(x), blends pixels, so it is geoops':
+    `geoops.geom.interp_at` (GA-B6).
 - `RasterSource` / `AsyncRasterSource` — what a lazy reader provides:
   its `Grid`, shape, dtype, fill and attrs, and reads that return a
   `GeoArray` (``read_window``, ``load``). A `GeoArray` is one too.
@@ -113,7 +113,7 @@ from geoarray._src.geometry import (
 )
 from geoarray._src.grid import Grid, PixelWindow, as_crs, as_transform
 from geoarray._src.options import HostTransferWarning, get_options, set_options
-from geoarray._src.sampling import interp_at, to_pixel
+from geoarray._src.sampling import to_pixel
 from geoarray._src.source import AsyncRasterSource, RasterSource
 
 
@@ -162,7 +162,6 @@ __all__ = [
     "crop",
     "footprint",
     "get_options",
-    "interp_at",
     "isel",
     "map_over",
     "pad",

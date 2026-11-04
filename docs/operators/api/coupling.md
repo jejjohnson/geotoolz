@@ -27,7 +27,7 @@ declare.
 | Class | Operators |
 |---|---|
 | pointwise | 99 |
-| spatial | 94 |
+| spatial | 95 |
 | spectral | 35 |
 | spectro-temporal | 14 |
 | spatio-temporal | 11 |
@@ -89,6 +89,7 @@ declare.
 | `geom` | `Gradient1D` | spatial |  | 1 (by argument) |  |  |
 | `geom` | `Gradient2D` | spatial |  | 1 (by argument) |  |  |
 | `geom` | `Gradient3D` | volumetric |  | 1 (by argument) |  |  |
+| `geom` | `InterpAt` | spatial |  | 1 |  | conversion |
 | `geom` | `Laplacian1D` | spatial |  | 2 (by argument) |  |  |
 | `geom` | `Laplacian2D` | spatial |  | 2 (by argument) |  |  |
 | `geom` | `Laplacian3D` | volumetric |  | 2 (by argument) |  |  |
