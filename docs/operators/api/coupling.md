@@ -274,7 +274,7 @@ declare.
 | `restore` | `GapFillNearest` | spatial |  | global (by argument) |  |  |
 | `restore` | `GaussianDenoise` | spatial |  | 4 (by argument) |  |  |
 | `restore` | `MNF` | spectral | band mix |  | space, time |  |
-| `restore` | `MedianDenoise` | spatial |  | 1 (by argument) |  |  |
+| `restore` | `MedianDenoise` | spatial |  | global |  |  |
 | `restore` | `MomentMatching` | spatial |  | global |  |  |
 | `restore` | `NLMeans` | spatial |  | global |  |  |
 | `restore` | `OutlierMask` | spatio-temporal |  | global |  |  |
