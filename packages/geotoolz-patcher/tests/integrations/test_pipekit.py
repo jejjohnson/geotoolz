@@ -239,7 +239,7 @@ def _chips(size: int, step: int, window: Any = None) -> tuple[RasterField, list]
 
 def test_warns_when_the_overlap_is_smaller_than_the_reach() -> None:
     _, chips = _chips(size=8, step=6)  # overlap 2 px
-    with pytest.warns(PatchReachWarning, match="reach of 4 px.*overlap by 2 px"):
+    with pytest.warns(PatchReachWarning, match="reach of 4 px.*as little as 2 px"):
         ApplyToChips(operator=_Box(r=4))(chips)
 
 
@@ -307,3 +307,49 @@ def test_enough_overlap_reproduces_the_whole_scene() -> None:
     interior = (slice(1, -1), slice(1, -1))
     got = np.asarray(merged)[interior]
     np.testing.assert_allclose(got, whole[interior], rtol=0, atol=1e-12)
+
+
+class _FitOverSpace(Operator):
+    """Applies per pixel, fits over the scene (a scaler)."""
+
+    coupling = types.SimpleNamespace(couples=frozenset(), fit=frozenset({"space"}))
+
+    def _apply(self, x: GeoArray) -> GeoArray:
+        return x
+
+
+def test_warns_for_an_operator_fitted_over_space() -> None:
+    _, chips = _chips(size=16, step=8)
+    with pytest.warns(PatchReachWarning, match="fits a state over the whole scene"):
+        ApplyToChips(operator=_FitOverSpace())(chips)
+
+
+def test_a_sequential_combines_its_steps() -> None:
+    _, chips = _chips(size=16, step=12)  # overlap 4 px
+    # reaches add up: 1 + 2 = 3 > 4 // 2; an undeclared step counts as pointwise
+    pipe = Sequential([_Box(r=1), _Undeclared(), _Box(r=2)])
+    with pytest.warns(PatchReachWarning, match="reach of 3 px"):
+        ApplyToChips(operator=pipe)(chips)
+    with pytest.warns(PatchReachWarning, match="reads the whole scene"):
+        ApplyToChips(operator=Sequential([_Box(r=1), _MinusMean()]))(chips)
+
+
+def test_jittered_anchors_use_the_smallest_real_overlap() -> None:
+    """Nominal overlap 0 with jitter: the check sees the real seams."""
+    field = RasterField(_scene(64))
+    patcher = SpatialPatcher(
+        geometry=spatial.geometry.Rectangular(size=(16, 16)),
+        sampler=spatial.sampler.JitteredStride(step=(16, 16), jitter=0.5, seed=0),
+        window=spatial.window.Hann(),
+        aggregation=spatial.aggregation.OverlapAdd(),
+    )
+    chips = GridSampler(patcher=patcher)(field)
+    with pytest.warns(PatchReachWarning, match="reach of 4 px"):
+        ApplyToChips(operator=_Box(r=4))(chips)
+
+
+def test_the_warning_points_at_the_caller() -> None:
+    _, chips = _chips(size=8, step=6)
+    with pytest.warns(PatchReachWarning) as record:
+        ApplyToChips(operator=_Box(r=4))(chips)
+    assert record[0].filename == __file__

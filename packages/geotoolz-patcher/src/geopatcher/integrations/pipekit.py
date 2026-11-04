@@ -29,8 +29,9 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Sequence
-from itertools import pairwise
 from typing import Any, ClassVar
+
+import numpy as np
 
 
 try:
@@ -89,10 +90,14 @@ class PatchReachWarning(UserWarning):
 
 
 def _overlaps(patches: Sequence[Patch]) -> tuple[int | None, int | None] | None:
-    """The overlap ``(rows, cols)`` of neighbouring raster patches.
+    """The smallest overlap ``(rows, cols)`` between neighbouring raster patches.
 
-    ``None`` on an axis with one patch offset (no seam there), and ``None``
-    overall when the patches' indices are not raster windows.
+    Along each axis, a patch's neighbour is the next patch along that axis
+    whose span on the other axis intersects its own; the overlap is how
+    far the two intersect (negative for a gap). ``None`` on an axis with no
+    neighbours (no seam there), and ``None`` overall when the patches'
+    indices are not raster windows. Works for jittered and ragged anchors,
+    not only a regular stride.
     """
     try:
         windows = [as_pixel_window(p.indices) for p in patches]
@@ -100,35 +105,64 @@ def _overlaps(patches: Sequence[Patch]) -> tuple[int | None, int | None] | None:
         return None
     if len(windows) < 2:
         return None
+    rows = np.array([[w.row_off, w.row_off + w.height] for w in windows])
+    cols = np.array([[w.col_off, w.col_off + w.width] for w in windows])
 
-    def along(offsets: list[int], size: int) -> int | None:
-        distinct = sorted(set(offsets))
-        if len(distinct) < 2:
-            return None
-        step = min(b - a for a, b in pairwise(distinct))
-        return size - step
+    def along(this: np.ndarray, other: np.ndarray) -> int | None:
+        # pairs i < j sorted by start along `this`, sharing a span on `other`
+        order = np.argsort(this[:, 0], kind="stable")
+        this, other = this[order], other[order]
+        best: int | None = None
+        for i in range(len(this)):
+            later = np.arange(i + 1, len(this))
+            beside = (other[later, 0] < other[i, 1]) & (other[i, 0] < other[later, 1])
+            ahead = later[beside & (this[later, 0] > this[i, 0])]
+            if ahead.size == 0:
+                continue
+            # the nearest patch ahead is the neighbour across this seam
+            nearest = ahead[np.argmin(this[ahead, 0])]
+            overlap = int(this[i, 1] - this[nearest, 0])
+            best = overlap if best is None else min(best, overlap)
+        return best
 
-    return (
-        along([w.row_off for w in windows], min(w.height for w in windows)),
-        along([w.col_off for w in windows], min(w.width for w in windows)),
-    )
+    return along(rows, cols), along(cols, rows)
 
 
 _NOT_DECLARED = object()
 
 
-def _spatial_reach(operator: Any) -> Any:
-    """The operator's spatial reach, read by duck typing (geopatcher never
-    imports geoops): ``spatial_reach()`` if defined, else ``coupling.reach``.
+def _coupling_of(operator: Any) -> tuple[Any, bool]:
+    """``(reach, fitted_over_space)`` read by duck typing; geopatcher never
+    imports geoops.
+
+    The reach is ``spatial_reach()`` if defined, else ``coupling.reach``:
     ``0`` when ``space`` is not coupled, ``None`` for a global operator, and
-    `_NOT_DECLARED` when the operator declares no ``coupling``."""
+    `_NOT_DECLARED` when the operator declares no ``coupling``. A pipekit
+    ``Sequential`` combines its steps: reaches add up, a global step makes
+    the whole global, and steps without a coupling count as pointwise.
+    """
+    steps = getattr(operator, "operators", None)
+    if getattr(operator, "coupling", None) is None and isinstance(steps, list | tuple):
+        total: Any = 0
+        fitted = False
+        declared = False
+        for step in steps:
+            reach, step_fitted = _coupling_of(step)
+            if reach is _NOT_DECLARED:
+                continue
+            declared = True
+            fitted |= step_fitted
+            total = None if reach is None or total is None else total + reach
+        return (total if declared else _NOT_DECLARED), fitted
     coupling = getattr(operator, "coupling", None)
     if coupling is None or not hasattr(coupling, "couples"):
-        return _NOT_DECLARED
+        return _NOT_DECLARED, False
+    fitted = "space" in getattr(coupling, "fit", ())
     if "space" not in coupling.couples:
-        return 0
+        return 0, fitted
     method = getattr(operator, "spatial_reach", None)
-    return method() if callable(method) else getattr(coupling, "reach", None)
+    reach = method() if callable(method) else getattr(coupling, "reach", None)
+    return reach, fitted
 
 
 class ApplyToChips(Operator):
@@ -138,13 +172,15 @@ class ApplyToChips(Operator):
     replaces ``patch.data``; ``anchor`` / ``indices`` / ``weights`` are
     preserved so downstream `MergePatches` can reconstruct the field.
 
-    When the operator declares a ``coupling`` (every geoops operator does),
-    the call warns with `PatchReachWarning` when patching changes the
-    answer: a global operator (``reach=None``, such as a scene percentile
-    stretch) gives a different result per patch whatever the overlap, and
-    a local one with reach ``r`` pixels needs neighbouring raster patches
-    to overlap by at least ``2 r`` pixels, so every pixel lies at least
-    ``r`` from the edge of a patch that keeps it. The check is necessary,
+    When the operator declares a ``coupling`` (every geoops operator does;
+    a pipekit ``Sequential`` combines its steps), the call warns with
+    `PatchReachWarning` when patching changes the answer: an operator fitted
+    over space (a scaler, a matched filter) fits per patch or reuses one
+    patch's fit; a global operator (``reach=None``, such as a scene
+    percentile stretch) gives a different result per patch whatever the
+    overlap; and a local one with reach ``r`` pixels needs neighbouring
+    raster patches to overlap by at least ``2 r`` pixels, so every pixel
+    lies at least ``r`` from the edge of a patch that keeps it. The check is necessary,
     not sufficient: `MergePatches` with `spatial.aggregation.OverlapAdd`
     still blends in edge pixels unless the window gives them zero weight.
 
@@ -165,17 +201,24 @@ class ApplyToChips(Operator):
         return [p.with_data(self.operator(p.data)) for p in patches]
 
     def _warn_on_reach(self, patches: list[Patch]) -> None:
-        reach = _spatial_reach(self.operator)
-        if reach is _NOT_DECLARED or reach == 0:
+        reach, fitted = _coupling_of(self.operator)
+        if reach is _NOT_DECLARED:
             return
         name = type(self.operator).__name__
+        if fitted:
+            self._warn(
+                f"{name} fits a state over the whole scene: on patches, each "
+                "patch fits its own, or a fit on the first patch is reused; "
+                "fit it on the whole scene first, or pass check_reach=False "
+                "if per-patch fits are intended"
+            )
+        if reach == 0:
+            return
         if reach is None:
-            warnings.warn(
+            self._warn(
                 f"{name} reads the whole scene: each patch gives a different "
                 "answer whatever the overlap; run it on the whole scene, or "
-                "pass check_reach=False if per-patch results are intended",
-                PatchReachWarning,
-                stacklevel=3,
+                "pass check_reach=False if per-patch results are intended"
             )
             return
         overlaps = _overlaps(patches)
@@ -183,13 +226,16 @@ class ApplyToChips(Operator):
             return
         seams = [o for o in overlaps if o is not None]
         if seams and min(seams) // 2 < reach:
-            warnings.warn(
+            self._warn(
                 f"{name} has a spatial reach of {reach} px, but the patches "
-                f"overlap by {min(seams)} px: overlap them by at least "
-                f"{2 * reach} px so every pixel is computed away from a seam",
-                PatchReachWarning,
-                stacklevel=3,
+                f"overlap by as little as {min(seams)} px: overlap them by at "
+                f"least {2 * reach} px so every pixel is computed away from a seam"
             )
+
+    @staticmethod
+    def _warn(message: str) -> None:
+        # _warn <- _warn_on_reach <- _apply <- pipekit's __call__ <- user code
+        warnings.warn(message, PatchReachWarning, stacklevel=5)
 
     def get_config(self) -> dict[str, Any]:
         return {
