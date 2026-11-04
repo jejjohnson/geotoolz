@@ -20,8 +20,9 @@ anywhere else).
 - **The named-array adapter** (`_src/adapter.py`) — `GeoArrayAdapter`,
   registered with pipekit at import, so pipekit-array's dim-level
   functions and `KernelOp` run on carriers. geoarray re-exports those
-  functions (`geoarray.reduce is pipekit_array.reduce`); never write a
-  geoarray-local copy, add an adapter fast path instead.
+  functions that compute nothing (`geoarray.isel is pipekit_array.isel`;
+  the named reductions are geoops', GA-B6); never write a geoarray-local
+  copy, add an adapter fast path instead.
 - **`Grid`, `PixelWindow`** (`_src/grid.py`) — a pixel grid without data,
   and a rectangle of pixels (named apart from geopatcher's window
   *functions*, in rasterio's `Window` field order); all affine maths
