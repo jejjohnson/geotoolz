@@ -40,6 +40,7 @@ from geoarray import GeoArray
 from pipekit import Operator
 
 from geoops._src.config import mapping_from_pairs, mapping_to_pairs
+from geoops._src.coupling import Coupling
 from geoops._src.geo import affine_of, reject_geotensor
 from geoops._src.valid import (
     carried_fill,
@@ -269,6 +270,10 @@ class Einx(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # any einx pattern: unknown until configured
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space", "time"}, reach=None
+    )
 
     def __init__(
         self,
@@ -378,6 +383,9 @@ class CHWtoHWC(Einx):
         >>> rgb = gz.CHWtoHWC()(composite_gt)  # (H, W, C) ndarray  # doctest: +SKIP
     """
 
+    # a reordering of the axes
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "regrid"})
+
     def __init__(self) -> None:
         super().__init__(op="id", pattern="... c y x -> ... y x c")
 
@@ -398,6 +406,9 @@ class HWCtoCHW(Einx):
         >>> import geoops as gz
         >>> chw = gz.HWCtoCHW()(hwc_array)
     """
+
+    # a reordering of the axes
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "regrid"})
 
     def __init__(self) -> None:
         # `spatial_survives` rejects this pattern (the carrier's input
@@ -439,6 +450,10 @@ class PerBandReduce(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # each band reduced over the scene to one value: a vector, not a raster
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, effects={"space": "reduce"}, reach=None, kind="conversion"
+    )
 
     pattern = "... c y x -> ... c"
 
@@ -511,6 +526,10 @@ class SpatialPool(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # factor x factor blocks pooled onto a coarser grid
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, effects={"space": "regrid"}, reach=None
+    )
 
     pattern = "... (y py) (x px) -> ... y x"
 

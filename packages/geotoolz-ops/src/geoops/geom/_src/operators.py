@@ -74,6 +74,7 @@ from geoops.geom._src.array import (
     target_slices,
     valid_pixel_mask,
 )
+from geoops.geom._src.stencils import difference_offsets
 
 
 _RAY_DISCRIMINANT_TOLERANCE = 1.0e-6
@@ -90,6 +91,7 @@ if TYPE_CHECKING:
     import geopandas as gpd
     from shapely.geometry.base import BaseGeometry
 
+from geoops._src.coupling import Coupling
 from geoops._src.optional import import_optional, optional_name, optional_root
 
 
@@ -304,6 +306,10 @@ class Reproject(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # resampled onto a new grid
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, effects={"space": "regrid"}, reach=None
+    )
 
     def __init__(
         self,
@@ -381,6 +387,10 @@ class ReprojectLike(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # resampled onto another grid
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, effects={"space": "regrid"}, reach=None
+    )
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -465,6 +475,8 @@ class PhaseAlign(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a shift estimated by cross-correlation over the scene, then applied
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -581,6 +593,8 @@ class OpticalFlowTVL1(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a flow field between two frames, from a global variational fit
+    coupling: ClassVar[Coupling] = Coupling(couples={"space", "time"}, reach=None)
 
     def __init__(self, *, band: int = 0) -> None:
         self.band = band
@@ -664,6 +678,9 @@ class Resize(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, effects={"space": "regrid"}, reach=None
+    )
 
     def __init__(
         self,
@@ -722,6 +739,9 @@ class Resample(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, effects={"space": "regrid"}, reach=None
+    )
 
     def __init__(
         self,
@@ -794,6 +814,7 @@ class PadTo(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "regrid"})
 
     def __init__(
         self,
@@ -877,6 +898,7 @@ class CropTo(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "regrid"})
 
     def __init__(self, *, shape: tuple[int, int], anchor: str = "center") -> None:
         self.shape = shape
@@ -932,6 +954,7 @@ class CropToBounds(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "regrid"})
 
     def __init__(
         self,
@@ -1001,6 +1024,7 @@ class Tile(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "split"}, kind="fan-out")
 
     def __init__(
         self,
@@ -1161,6 +1185,8 @@ class Stitch(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # tiles joined onto one grid, overlaps blended
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "join"})
 
     def __init__(
         self,
@@ -1479,6 +1505,8 @@ class BowtieCorrection(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # each scan resampled along track
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -1679,6 +1707,8 @@ class AntimeridianSplit(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # one carrier per side of the longitude wrap
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "split"}, kind="fan-out")
 
     def __init__(self, *, crs: str = "EPSG:4326", tolerance_deg: float = 90.0) -> None:
         self.crs = crs
@@ -1743,6 +1773,8 @@ class GeostationaryParallaxCorrect(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # pixels moved by a height-dependent shift, resampled
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -1838,6 +1870,8 @@ class SegmentStitch(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # segments joined into one carrier
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "join"})
 
     def __init__(
         self, *, direction: str = "scan", fill_value: float | None = None
@@ -1942,6 +1976,12 @@ class Mosaic(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # several rasters resampled onto one grid; the first valid value wins
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space", "time"},
+        effects={"space": "regrid", "time": "reduce"},
+        reach=None,
+    )
 
     _REDUCERS: ClassVar[dict[str, Any]] = {
         "first": _nan_first,
@@ -2044,6 +2084,8 @@ class Georeference(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a lookup table moves each sensor pixel onto the map grid
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "regrid"})
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -2121,6 +2163,8 @@ class Rasterize(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # depends only on the grid and the geometries
+    coupling: ClassVar[Coupling] = Coupling()
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -2189,6 +2233,8 @@ class RasterizeLike(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # depends only on the grid and the geometries
+    coupling: ClassVar[Coupling] = Coupling()
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -2262,6 +2308,10 @@ class Vectorize(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # polygons from connected regions
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -2696,6 +2746,18 @@ def _validate_segment_compatible(
         raise ValueError("All segments must share pixel size.")
 
 
+def _stencil_reach(derivative: int, accuracy: int) -> int:
+    """The widest offset of any stencil the mask-aware policy may pick."""
+    # central where the data allow it, else forward or backward (adaptive_difference)
+    return max(
+        abs(offset)
+        for method in ("central", "forward", "backward")
+        for offset in difference_offsets(
+            derivative=derivative, accuracy=accuracy, method=method
+        )
+    )
+
+
 class Gradient2D(Operator):
     r"""Diagnostic gradient of a gridded field in map axes, NaN- and mask-aware (OP-O7).
 
@@ -2756,6 +2818,11 @@ class Gradient2D(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
+        return _stencil_reach(1, self.accuracy)
 
     def __init__(
         self,
@@ -2877,6 +2944,11 @@ class Divergence2D(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
+        return _stencil_reach(1, self.accuracy)
 
     def __init__(
         self,
@@ -2924,6 +2996,11 @@ class Curl2D(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
+        return _stencil_reach(1, self.accuracy)
 
     def __init__(
         self,
@@ -2988,6 +3065,11 @@ class Laplacian2D(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=2)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
+        return _stencil_reach(2, self.accuracy)
 
     def __init__(
         self,
@@ -3042,6 +3124,11 @@ class Gradient1D(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
+        return _stencil_reach(1, self.accuracy)
 
     def __init__(
         self,
@@ -3084,6 +3171,11 @@ class Divergence1D(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
+        return _stencil_reach(1, self.accuracy)
 
     def __init__(
         self,
@@ -3128,6 +3220,11 @@ class Laplacian1D(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=2)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
+        return _stencil_reach(2, self.accuracy)
 
     def __init__(
         self,
@@ -3177,6 +3274,11 @@ class Gradient3D(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(couples={"level", "space"}, reach=1)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
+        return _stencil_reach(1, self.accuracy)
 
     def __init__(
         self,
@@ -3226,6 +3328,11 @@ class Divergence3D(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(couples={"level", "space"}, reach=1)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
+        return _stencil_reach(1, self.accuracy)
 
     def __init__(
         self,
@@ -3279,6 +3386,11 @@ class Curl3D(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(couples={"level", "space"}, reach=1)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
+        return _stencil_reach(1, self.accuracy)
 
     def __init__(
         self,
@@ -3328,6 +3440,11 @@ class Laplacian3D(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    coupling: ClassVar[Coupling] = Coupling(couples={"level", "space"}, reach=2)
+
+    def spatial_reach(self) -> int:
+        """The spatial reach in pixels: the widest stencil the mask-aware policy may use."""
+        return _stencil_reach(2, self.accuracy)
 
     def __init__(
         self,

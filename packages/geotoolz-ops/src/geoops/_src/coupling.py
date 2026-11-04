@@ -230,10 +230,17 @@ def reach_of(op: Any) -> int | None:
 # Measuring
 # ---------------------------------------------------------------------------
 
-#: The pixel the local probe perturbs, and the far block the non-local probe
-#: perturbs; both on a 16 x 16 (or larger) sample.
-_CENTRE = (8, 8)
+#: The far block the non-local probe perturbs. The local probe perturbs the
+#: centre pixel ``(H // 2, W // 2)``, so a larger sample tells a longer
+#: local reach from a global one.
 _CORNER = (slice(0, 3), slice(0, 3))
+_MIN_SIDE = 12
+
+
+def _centre(shape: tuple[int, ...]) -> tuple[int, int]:
+    return shape[-2] // 2, shape[-1] // 2
+
+
 _ATOL = 1e-9
 
 
@@ -289,11 +296,11 @@ def _arrays(out: Any) -> list[np.ndarray] | None:
 def _kind(out: Any) -> str:
     if out is None:
         return "sink"
-    if isinstance(out, GeoArray | np.ndarray):
+    if isinstance(out, GeoArray) or (isinstance(out, np.ndarray) and out.ndim >= 2):
         return "transform"
-    if _arrays(out) is not None:
+    if isinstance(out, list | tuple) and out:
         return "fan-out"
-    return "conversion"
+    return "conversion"  # a table, geometry, scalar, vector or model
 
 
 def _equal(a: Any, b: Any) -> bool:
@@ -398,8 +405,10 @@ def measure_coupling(
 
     Args:
         build: Builds the operator, with no arguments (a lambda).
-        sample: A raster the operator accepts, at least 16 x 16; a
-            ``(C, H, W)`` GeoArray probes ``band`` and ``time`` too.
+        sample: A raster the operator accepts, at least 12 x 12. A local
+            reach is read up to half the sample's side, so a larger sample
+            tells a longer reach from a global one. A ``(C, H, W)``
+            GeoArray probes ``band`` and ``time`` too.
         *others: Further carriers of a multi-input operator, passed
             unchanged on every call.
         call: ``call(op, x)`` instead of ``op(x, *others)``, for further
@@ -416,8 +425,9 @@ def measure_coupling(
         >>> measure_coupling(lambda: (lambda x: x.map(np.sqrt)), scene).name
         'pointwise'
     """
-    if np.shape(sample)[-2] <= _CENTRE[0] + 3 or np.shape(sample)[-1] <= _CENTRE[1] + 3:
+    if min(np.shape(sample)[-2:]) < _MIN_SIDE:
         raise ValueError("measure_coupling needs a sample of at least 12 x 12 pixels")
+    centre = _centre(np.shape(sample))
 
     def run(op: Any, x: Any) -> Any:
         return _quiet(lambda: call(op, x) if call is not None else op(x, *others))
@@ -438,16 +448,16 @@ def measure_coupling(
     moved_per_band: list[bool] = []
     reach = 0
     for c in range(n_lead):
-        bumped = _bump(flat, (c, *_CENTRE)).reshape(values.shape)
+        bumped = _bump(flat, (c, *centre)).reshape(values.shape)
         moved = _changed(y0, run(build(), _with(sample, bumped)))
         moved_per_band.append(bool(np.any(moved)))
         if isinstance(moved, np.ndarray) and grid_kept and moved.ndim >= 2:
             by_row = moved.reshape(-1, *moved.shape[-2:])
             ys, xs = np.nonzero(by_row.any(axis=0))
             if ys.size:
-                dist = np.maximum(abs(ys - _CENTRE[0]), abs(xs - _CENTRE[1]))
+                dist = np.maximum(abs(ys - centre[0]), abs(xs - centre[1]))
                 reach = max(reach, int(dist.max()))
-            for k in np.nonzero(by_row[:, _CENTRE[0], _CENTRE[1]])[0]:
+            for k in np.nonzero(by_row[:, centre[0], centre[1]])[0]:
                 rows.setdefault(int(k), set()).add(c)
 
     global_fresh = global_frozen = False
@@ -472,7 +482,7 @@ def measure_coupling(
         mixes = any(len(v) >= 2 for v in rows.values())
         moves = out_lead == n_lead and any(k != c for k, v in rows.items() for c in v)
         read = sum(moved_per_band)
-        if mixes or (not grid_kept and read >= 2 and out_lead < n_lead):
+        if mixes:
             couples.add(lead_dim)
         if out_lead == n_lead:
             effect = "mix" if mixes else "select" if moves else "keep"
@@ -517,7 +527,8 @@ def measure_coupling(
 def _centre_moved(moved: Any) -> bool:
     if isinstance(moved, np.ndarray) and moved.ndim >= 2:
         by_row = moved.reshape(-1, *moved.shape[-2:])
-        return bool(by_row[:, _CENTRE[0], _CENTRE[1]].any())
+        cy, cx = _centre(moved.shape)
+        return bool(by_row[:, cy, cx].any())
     return bool(moved) if isinstance(moved, bool | np.bool_) else False
 
 
@@ -532,7 +543,7 @@ def _probe_time(
     except Exception:
         return "rejects stack"
     values = np.asarray(stack).copy()
-    values[0] = _bump(values[0], (slice(None), *_CENTRE))
+    values[0] = _bump(values[0], (slice(None), *_centre(values.shape)))
     moved = _changed(y0, run(build(), stack.replace(data=values)))
     if not isinstance(moved, np.ndarray) or moved.ndim < 3:
         return None
@@ -581,7 +592,8 @@ def measure_frames(
     reaches = 0
     for t, item in enumerate(frames):
         frame = item[0] if isinstance(item, tuple) else item
-        index = (slice(None), *_CENTRE) if np.ndim(frame) == 3 else _CENTRE
+        centre = _centre(np.shape(frame))
+        index = (slice(None), *centre) if np.ndim(frame) == 3 else centre
         new = _with(frame, _bump(np.asarray(frame), index))
         bumped = list(frames)
         bumped[t] = (new, *item[1:]) if isinstance(item, tuple) else new
@@ -661,7 +673,7 @@ def assert_coupling(op: Any, measured: Measured, *, exact: bool = False) -> None
             and measured.reach > reach
         ):
             problems.append(f"measured reach {measured.reach} px > declared {reach} px")
-    if measured.regrids and declared.effect("space") != "regrid":
+    if measured.regrids and declared.effect("space") not in ("regrid", "reduce"):
         problems.append("changes the grid: declare effects={'space': 'regrid'}")
     if exact and measured.couples != allowed:
         problems.append(

@@ -28,6 +28,7 @@ from geoops.feature._src.array import (
 if TYPE_CHECKING:
     from geoarray import GeoArray
 
+from geoops._src.coupling import Coupling
 from geoops._src.optional import import_optional, optional_name
 
 
@@ -69,6 +70,9 @@ class PeakLocalMax(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -136,6 +140,10 @@ class _BlobBase(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # detections from scale-space neighbourhoods
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -320,6 +328,8 @@ class Canny(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # hysteresis follows an edge across the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -361,6 +371,9 @@ class CornerHarris(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -416,6 +429,10 @@ class HOG(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a descriptor of gradient histograms over cells and blocks
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -462,6 +479,11 @@ class StructureTensor(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=5)
+
+    def spatial_reach(self) -> int:
+        """Spatial reach in pixels: a 3 x 3 gradient, then a 4-sigma Gaussian."""
+        return int(np.ceil(4 * self.sigma)) + 1
 
     def __init__(self, *, sigma: float = 1.0) -> None:
         self.sigma = sigma
@@ -492,6 +514,8 @@ class MultiscaleBasicFeatures(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # Gaussians up to sigma_max = 16 px, on intensities rescaled over the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -535,6 +559,9 @@ class HoughLines(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 
@@ -586,6 +613,9 @@ class HoughCircles(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
 
     _terminal: ClassVar[bool] = True
 

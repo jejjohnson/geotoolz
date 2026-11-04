@@ -51,6 +51,7 @@ from geoops._src.config import (
     mapping_from_pairs,
     mapping_to_pairs,
 )
+from geoops._src.coupling import Coupling
 from geoops._src.engine import to_engine
 from geoops._src.geo import (
     affine_of,
@@ -299,6 +300,8 @@ class StretchToUint8(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # percentiles over the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -351,6 +354,7 @@ class GammaCorrect(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(self, *, gamma: float = 1.0, inplace_norm: bool = True) -> None:
         self.gamma = gamma
@@ -415,6 +419,8 @@ class RGBRecipe(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # three band expressions
+    coupling: ClassVar[Coupling] = Coupling(couples={"band"}, effects={"band": "mix"})
 
     def __init__(
         self,
@@ -539,6 +545,8 @@ class ApplyColormap(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # vmin and vmax from the scene when not given
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -604,6 +612,8 @@ class ApplyDiscreteColormap(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # one RGBA colour per class
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "expand"})
 
     def __init__(
         self, *, mapping: Mapping[int, Color] | Sequence[Sequence[Any]]
@@ -657,6 +667,8 @@ class Hillshade(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a 3 x 3 slope and aspect
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
 
     def __init__(
         self,
@@ -728,6 +740,8 @@ class ShadedRelief(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # hillshade, then a colour map scaled over the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -784,6 +798,8 @@ class Overlay(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # two carriers blended per pixel
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(self, *, alpha: float = 0.6, mode: str = "alpha") -> None:
         self.alpha = alpha
@@ -844,6 +860,10 @@ class AnnotatePolygons(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # drawn, then the bands scaled together over the scene for display
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space"}, effects={"band": "expand"}, reach=None
+    )
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -933,6 +953,10 @@ class AnnotatePoints(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # drawn, then the bands scaled together over the scene for display
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space"}, effects={"band": "expand"}, reach=None
+    )
 
     forbid_in_yaml: ClassVar[bool] = True
 

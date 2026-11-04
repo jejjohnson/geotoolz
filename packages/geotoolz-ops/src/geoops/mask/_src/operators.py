@@ -17,6 +17,7 @@ from geoarray import GeoArray
 from pipekit import Operator
 
 from geoops._src.config import jsonable, nested_config
+from geoops._src.coupling import Coupling
 from geoops._src.engine import to_engine
 from geoops._src.geo import (
     ground_pixel_size,
@@ -92,6 +93,8 @@ class PolygonMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # depends only on the grid and the geometry
+    coupling: ClassVar[Coupling] = Coupling()
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -387,6 +390,8 @@ class AltitudeMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the DEM at each pixel
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -441,6 +446,8 @@ class SlopeMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # slope from the DEM's 3 x 3 neighbourhood
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
 
     def __init__(
         self,
@@ -484,6 +491,11 @@ class DilateMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
+
+    def spatial_reach(self) -> int:
+        """Spatial reach in pixels: a structuring half-width per iteration."""
+        return self.iterations * _structure_half_width(self.structure)
 
     def __init__(
         self, *, iterations: int = 1, structure: np.ndarray | None = None
@@ -514,6 +526,11 @@ class ErodeMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
+
+    def spatial_reach(self) -> int:
+        """Spatial reach in pixels: a structuring half-width per iteration."""
+        return self.iterations * _structure_half_width(self.structure)
 
     def __init__(
         self, *, iterations: int = 1, structure: np.ndarray | None = None
@@ -545,6 +562,11 @@ class OpenMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=2)
+
+    def spatial_reach(self) -> int:
+        """Spatial reach in pixels: a 3 x 3 erosion and dilation per iteration."""
+        return 2 * self.iterations
 
     def __init__(self, *, iterations: int = 1) -> None:
         self.iterations = iterations
@@ -569,6 +591,11 @@ class CloseMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=2)
+
+    def spatial_reach(self) -> int:
+        """Spatial reach in pixels: a 3 x 3 dilation and erosion per iteration."""
+        return 2 * self.iterations
 
     def __init__(self, *, iterations: int = 1) -> None:
         self.iterations = iterations
@@ -598,6 +625,11 @@ class BufferMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
+
+    def spatial_reach(self) -> int | None:
+        """Spatial reach in pixels: ⌈radius⌉; None for a radius in map units."""
+        return int(np.ceil(self.radius)) if self.unit == "pixels" else None
 
     def __init__(self, *, radius: float, unit: str = "pixels") -> None:
         self.radius = radius
@@ -631,6 +663,8 @@ class RemoveSmallObjects(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a connected component can span the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(self, *, min_area_px: int) -> None:
         self.min_area_px = min_area_px
@@ -652,6 +686,8 @@ class RemoveSmallHoles(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a connected component can span the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(self, *, max_hole_area_px: int) -> None:
         self.max_hole_area_px = max_hole_area_px
@@ -677,6 +713,8 @@ class CleanMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # connected components, then a closing
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -719,6 +757,10 @@ class CombineMasks(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # or / and / xor over the N masks (time is the N-ary axis, OC-Q5)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"time"}, effects={"time": "reduce"}
+    )
 
     def __init__(self, *, op: str = "or") -> None:
         self.op = op
@@ -743,6 +785,7 @@ class InvertMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def _apply(self, mask: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
         out = invert_mask(np.asarray(mask))
@@ -791,6 +834,7 @@ class ApplyMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -1015,6 +1059,11 @@ def _safe_extract_zip(zf: ZipFile, extract_dir: Path) -> None:
                 f"refusing to extract unsafe zip member {member.filename!r}"
             )
     zf.extractall(extract_root)
+
+
+def _structure_half_width(structure: Any) -> int:
+    """Half the widest side of a structuring element; 1 for the default 3 x 3."""
+    return 1 if structure is None else max(np.shape(structure)) // 2
 
 
 def _morph_config(iterations: int, structure: np.ndarray | None) -> dict[str, Any]:

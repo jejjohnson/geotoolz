@@ -43,6 +43,7 @@ from geoarray import GeoArray
 from pipekit import Operator
 
 from geoops._src.blending import triangular_weights
+from geoops._src.coupling import Coupling
 from geoops._src.geo import reject_geotensor
 from geoops._src.optional import optional_name
 
@@ -248,6 +249,8 @@ class StratifiedSample(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a list of chips
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "split"}, kind="fan-out")
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -319,6 +322,8 @@ class BalancedSampler(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a list of chips
+    coupling: ClassVar[Coupling] = Coupling(effects={"space": "split"}, kind="fan-out")
 
     forbid_in_yaml: ClassVar[bool] = True
 
