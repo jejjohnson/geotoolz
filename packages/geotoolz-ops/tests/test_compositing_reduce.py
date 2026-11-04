@@ -83,7 +83,9 @@ def test_integer_data_is_reduced_as_float() -> None:
 
 
 def test_reduce_over_band_and_over_space() -> None:
-    g = _stack().with_data(_stack().data, dims=("band", "y", "x"))
+    # (band=2, y=2, x=2): only pixel (1, 1) has a fill band, so only it is nodata
+    bands = np.array([[[1.0, 2.0], [3.0, 0.0]], [[5.0, 6.0], [7.0, 8.0]]])
+    g = GeoArray(bands, T, CRS, fill_value=0.0, dims="band y x")
     np.testing.assert_array_equal(reduce(g, "max", "band").data, [[5, 6], [7, np.nan]])
     profile = reduce(_stack(), "mean", "x")  # consumes x: no grid any more
     assert type(profile).__name__ == "DimArray"
@@ -159,3 +161,20 @@ def test_jax_matches_numpy_under_jit(fn: str, x64: ModuleType) -> None:
     assert (
         np.asarray(idx).tolist() == argreduce(_stack(), "argmax", "time").data.tolist()
     )
+
+
+def test_a_pixel_with_one_invalid_band_is_invalid_in_every_band() -> None:
+    """The stack's nodata rule (GeoArray.valid_mask), as MedianComposite applies it."""
+    from geoops.compositing import MedianComposite
+
+    data = np.array([[[[1.0]], [[0.0]]], [[[5.0]], [[7.0]]], [[[6.0]], [[8.0]]]])
+    g = GeoArray(data, T, CRS, fill_value=0.0, dims="time band y x")
+    got = reduce(g, "median", "time")
+    np.testing.assert_array_equal(got.data[:, 0, 0], [5.5, 7.5])
+    np.testing.assert_array_equal(got.data, np.asarray(MedianComposite()(g).data))
+    assert reduce(g, "mean", "time").data[0, 0, 0] == pytest.approx(5.5)
+
+
+def test_complex_data_keeps_its_imaginary_part() -> None:
+    g = GeoArray(np.array([[[1 + 1j]], [[2 + 2j]]]), T, CRS, dims="time y x")
+    assert reduce(g, "mean", "time").data[0, 0] == pytest.approx(1.5 + 1.5j)

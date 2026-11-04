@@ -2,9 +2,11 @@
 
 `pipekit_array.reduce` / `argreduce` reduce any named carrier, and know
 nothing of nodata: on a `GeoArray` with fill 0, a time mean averages the
-zeros in. These versions read the carrier's nodata first: an entry is
-invalid when it is non-finite or equals the fill (and, on `GeoPoints`,
-when its sample is not ``valid``). Invalid entries become NaN, a named
+zeros in. These versions read the carrier's nodata first, with the
+stack's rule (`GeoArray.valid_mask`): a value is invalid when it is
+non-finite or equals the fill, a pixel is invalid in every band when any
+of its bands is, and on `GeoPoints` a sample that is not ``valid`` is
+invalid. Invalid entries become NaN, a named
 reduction runs as its NaN-skipping form, and a position with no valid
 entry is NaN, the result's fill. They run on NumPy and under ``jax.jit``.
 
@@ -149,11 +151,19 @@ def _masked(x: Any, what: str) -> Any:
         )
     xp = x.xp
     data = x.data
-    floating = data if data.dtype.kind == "f" else data.astype(xp.float64)
+    floating = data if data.dtype.kind in "fc" else data.astype(xp.float64)
+    # geoops._src.valid holds the same rule on the host (NumPy); written on
+    # the carrier's array namespace here, so it also runs under jax.jit
     invalid = ~xp.isfinite(floating)
     fill = x.fill_value
     if fill is not None and fill == fill:  # a NaN fill is already non-finite
         invalid = invalid | (data == fill)
+    dims = tuple(getattr(x, "dims", ()))
+    if "band" in dims:  # a pixel is nodata in every band when any band is
+        axis = dims.index("band")
+        invalid = xp.broadcast_to(
+            xp.any(invalid, axis=axis, keepdims=True), invalid.shape
+        )
     valid = getattr(x, "valid", None)
     if valid is not None:  # GeoPoints: a sample that is not an observation
         invalid = invalid | ~xp.asarray(valid, dtype=bool)
