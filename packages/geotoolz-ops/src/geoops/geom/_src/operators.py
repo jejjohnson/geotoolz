@@ -3928,7 +3928,12 @@ class InterpAt(Operator):
     (bilinear or nearest), ``valid=False`` and NaN off the grid or on
     nodata, and 0 on padded points so a masked cost stays finite. The
     points are the second positional input, so a `pipekit.Graph` wires
-    them from their own `Input`.
+    them from their own `Input`. Unlike the function, the operator never
+    moves a NumPy grid to JAX for JAX points: pipekit refuses mixed
+    backends, so call ``grid.to_jax()`` first.
+
+    The declared coupling (spatial, reach 1) is bilinear's; ``"nearest"``
+    reads one pixel, so for it the declaration is an upper bound.
 
     Args:
         method: ``"bilinear"`` (blends the four pixels around each point)
@@ -3968,5 +3973,11 @@ class InterpAt(Operator):
         self.along = along
 
     def _apply(self, grid: GeoArray, points: GeoPoints, frame: Any = None) -> GeoPoints:
-        reject_geotensor(grid, "InterpAt")
+        require_geoarray(grid, "InterpAt")
+        reject_geotensor(points, "InterpAt")
+        if not isinstance(points, GeoPoints):
+            raise TypeError(
+                f"InterpAt reads a grid at a geoarray.GeoPoints, "
+                f"got {type(points).__name__}"
+            )
         return interp_at(grid, points, self.method, frame=frame, along=self.along)

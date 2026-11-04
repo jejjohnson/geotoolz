@@ -259,3 +259,24 @@ def test_operator_on_jax_matches_numpy_under_jit(x64: ModuleType) -> None:
     op = gz.InterpAt()
     got = x64.jit(lambda grid, p: op(grid, p).data)(g.to_jax(), pts.to_jax())
     np.testing.assert_allclose(np.asarray(got), want.data, rtol=1e-14)
+
+
+def test_operator_refuses_inputs_that_are_not_a_grid_and_points() -> None:
+    g = _ramp()
+    pts = _at(g, [(1.5, 1.5)])
+    with pytest.raises(TypeError, match="InterpAt"):
+        gz.InterpAt()(np.asarray(g.data), pts)
+    with pytest.raises(TypeError, match="GeoPoints"):
+        gz.InterpAt()(g, np.asarray(pts.xy))
+
+
+def test_operator_refuses_a_geotensor_as_either_input() -> None:
+    pytest.importorskip("georeader")
+    from geoarray.interop.georeader import to_georeader
+
+    g = _ramp()
+    pts = _at(g, [(1.5, 1.5)])
+    with pytest.raises(TypeError, match="from_georeader"):
+        gz.InterpAt()(to_georeader(g), pts)
+    with pytest.raises(TypeError, match="from_georeader"):
+        gz.InterpAt()(g, to_georeader(g))

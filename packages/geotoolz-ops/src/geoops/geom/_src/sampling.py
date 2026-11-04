@@ -11,6 +11,7 @@ on JAX.
 
 from __future__ import annotations
 
+import sys
 import warnings
 from typing import Any
 
@@ -29,9 +30,8 @@ _PROMOTION_WARNING = (
 
 def _is_tracer(x: Any) -> bool:
     """Whether ``x`` is a JAX tracer (JAX is already imported for JAX data)."""
-    import jax
-
-    return isinstance(x, jax.core.Tracer)
+    jax = sys.modules.get("jax")
+    return jax is not None and isinstance(x, jax.core.Tracer)
 
 
 def interp_at(
