@@ -255,14 +255,15 @@ def test_registered_and_shared() -> None:
         "isel",
         "sel",
         "transpose",
-        "reduce",
-        "argreduce",
         "take_along",
         "map_over",
         "concat",
         "combine",
     ):
         assert getattr(geoarray, name) is getattr(pa, name), name
+    # the named reductions compute: geoops re-exports them, nodata-aware (GA-B6)
+    for name in ("reduce", "argreduce"):
+        assert not hasattr(geoarray, name), name
 
 
 def _make_carrier(xp: Any = np) -> Any:
@@ -422,10 +423,10 @@ def test_import_loads_neither_jax_nor_xarray() -> None:
                     raise ImportError(name)
 
         sys.meta_path.insert(0, Block())
-        import geoarray, numpy as np
+        import geoarray, numpy as np, pipekit_array
         t = (1, 0, 0, 0, -1, 0)
         g = geoarray.GeoArray(np.zeros((2, 3, 3)), t, None, dims="band y x")
-        geoarray.reduce(g, "mean", "band")
+        pipekit_array.reduce(g, "mean", "band")
         print([m for m in ("jax", "xarray") if sys.modules.get(m) is not None])
         """
     )

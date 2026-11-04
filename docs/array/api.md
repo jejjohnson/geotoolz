@@ -22,8 +22,10 @@ Carriers whose georeference is not an affine grid: per-pixel lat/lon on
 
 ## Dim-level functions
 
-pipekit-array's functions, re-exported: `geoarray.reduce is
-pipekit_array.reduce`. They are documented in pipekit-array; geoarray's
+pipekit-array's functions, re-exported: `geoarray.isel is
+pipekit_array.isel`. The named reductions compute, so geoarray does not
+re-export them: use `geoops.compositing.reduce` / `argreduce`, which leave
+nodata out, or `pipekit_array.reduce` / `argreduce` as they are (GA-B6). They are documented in pipekit-array; geoarray's
 adapters are registered with pipekit at import, and give carriers these
 fast paths:
 

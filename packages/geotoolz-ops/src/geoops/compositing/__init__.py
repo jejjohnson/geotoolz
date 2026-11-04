@@ -1,4 +1,6 @@
-"""Explicit compositing operators for co-registered GeoArray stacks."""
+"""Compositing operators for co-registered GeoArray stacks, and the
+nodata-aware reductions they are built from (`reduce`, `argreduce`).
+"""
 
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from geoops.compositing._src.operators import (
     MinCloudComposite,
     StackMatched,
 )
+from geoops.compositing._src.reduce import argreduce, reduce
 
 
 __all__ = [
@@ -34,6 +37,7 @@ __all__ = [
     "MedianComposite",
     "MinCloudComposite",
     "StackMatched",
+    "argreduce",
     "bap_scores",
     "blend_weighted",
     "cloud_distance_score",
@@ -43,6 +47,7 @@ __all__ = [
     "mean_composite",
     "median_composite",
     "opacity_score",
+    "reduce",
     "take_by_spatial_index",
     "view_angle_score",
 ]

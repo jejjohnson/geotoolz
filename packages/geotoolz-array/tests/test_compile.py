@@ -119,7 +119,7 @@ def _functions() -> list[tuple[str, Any]]:
     return [
         ("isel", lambda g: g.isel(time=[2, 0], x=slice(1, 4))),
         ("sel", lambda g: g.sel(band="B8")),
-        ("reduce", lambda g: geoarray.reduce(g, "mean", "time")),
+        ("reduce", lambda g: pa.reduce(g, "mean", "time")),
         ("combine", lambda g: geoarray.combine(lambda a, b: a - 2 * b, g, g)),
         ("stack", lambda g: geoarray.stack([g, g], "run")),
         (

@@ -74,12 +74,15 @@ crossings between the two backends.
 
 ## One set of dim-level functions
 
-`isel`, `sel`, `transpose`, `reduce`, `argreduce`, `take_along`,
-`map_over`, `concat` and `combine` are pipekit-array's functions
-(`geoarray.reduce is pipekit_array.reduce`). They reach a carrier through
-the named-array adapter geoarray registers with pipekit at import, so the
-same call runs on a `GeoArray`, a `pipekit_array.DimArray` and an
-`xr.DataArray`, and so does a pipekit-array `KernelOp`.
+`isel`, `sel`, `transpose`, `take_along`, `map_over`, `concat` and
+`combine` are pipekit-array's functions (`geoarray.isel is
+pipekit_array.isel`). They reach a carrier through the named-array adapter
+geoarray registers with pipekit at import, so the same call runs on a
+`GeoArray`, a `pipekit_array.DimArray` and an `xr.DataArray`, and so does a
+pipekit-array `KernelOp`. The named reductions, `reduce` and `argreduce`,
+are pipekit-array's too, but they compute, so geoarray does not re-export
+them: `geoops.compositing.reduce` / `argreduce` leave nodata out first, on
+geoarray carriers only (GA-B6).
 
 The adapter keeps the georeference while it still describes the result:
 
@@ -93,8 +96,9 @@ import numpy as np
 import pipekit_array as pa
 from pipekit_array import DimArray
 
-import geoarray
 from geoarray import GeoArray
+
+from geoops.compositing import reduce
 
 scene: GeoArray = GeoArray(
     np.random.default_rng(0).random((3, 4, 5)),     # (T, H, W) float64
@@ -102,7 +106,7 @@ scene: GeoArray = GeoArray(
     "EPSG:32613",
     dims=("time", "y", "x"),
 )
-mean: GeoArray = geoarray.reduce(scene, "mean", "time")  # (H, W) float64, on the grid
+mean: GeoArray = reduce(scene, "mean", "time")          # (H, W) float64, on the grid
 profile: DimArray = pa.reduce(scene, "mean", "x")        # (T, H) float64, no grid
 ```
 

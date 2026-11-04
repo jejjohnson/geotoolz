@@ -141,7 +141,7 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 | `GeoSwath`, `GeoPoints` | Swaths in sensor geometry (lat/lon leaves) and point sets (xy, z, time, valid); `pad_points` |
 | `geoarray.coords` | `SpectralAxis`, `VariableAxis`, `VerticalAxis`, `TimeAxis` and the grid coordinates |
 | `geoarray.types` | Readable names (`GeoImage`, `GeoMapSeries`, `GeoTracks`, …) any carrier can match; `check_dims` |
-| Dim-level functions | `isel`, `sel`, `transpose`, `reduce`, `argreduce`, `take_along`, `map_over`, `concat`, `combine`: pipekit-array's, on every named carrier |
+| Dim-level functions | `isel`, `sel`, `transpose`, `take_along`, `map_over`, `concat`, `combine`: pipekit-array's, on every named carrier (named reductions: `geoops.compositing.reduce` / `argreduce`) |
 | `to_pixel` | Map coordinates to fractional pixels (H(x) itself is `geoops.geom.interp_at`) |
 | `to_xarray`, `from_xarray`, `to_dataset`, `to_datatree` | Lossless xarray converters with a CF `spatial_ref` (`[xarray]`) |
 | `Grid` | A pixel grid with no data; hashable, with `bounds`, `res`, `shift`, `crop`, `from_bounds`, `isclose`, `get_config` |

@@ -119,6 +119,7 @@ current).
 | `MedianComposite` | class | Per-pixel median across a stack of co-registered GeoArrays. |
 | `MinCloudComposite` | class | Pick each pixel from the scene with the lowest *global* cloud coverage. |
 | `StackMatched` | class | Concatenate aligned tensors along the band axis. |
+| `argreduce` | function | ``pipekit_array.argreduce`` that never picks an invalid entry. |
 | `bap_scores` | function | Weighted Best-Available-Pixel score per frame-pixel. |
 | `blend_weighted` | function | Weighted mean over the leading source axis of a NaN-masked stack. |
 | `cloud_distance_score` | function | Sigmoid distance-to-cloud score (Griffiths et al., 2013, eq. 2). |
@@ -128,6 +129,7 @@ current).
 | `mean_composite` | function | Per-pixel mean over the clear samples of a frame stack. |
 | `median_composite` | function | Per-pixel median over the frame axis of a NaN-masked stack. |
 | `opacity_score` | function | Piecewise-linear atmospheric-opacity score (White et al., 2014). |
+| `reduce` | function | ``pipekit_array.reduce`` over the valid entries of a geoarray carrier. |
 | `take_by_spatial_index` | function | Select one frame per sample from a ``(T, ..., H, W)`` stack. |
 | `view_angle_score` | function | Gaussian view-zenith-angle score, best at nadir. |
 
@@ -1426,7 +1428,6 @@ current).
 | `RasterSource` | class | A raster whose grid is known and whose pixels are read on demand. |
 | `SPATIAL_DIMS` | constant | `('y', 'x')` |
 | `X64Error` | class | A JAX carrier needs ``jax_enable_x64``: its transform is float64. |
-| `argreduce` | function | Re-exported from `pipekit_array`. |
 | `as_crs` | function | Coerce ``crs`` to a ``pyproj.CRS``; ``None`` stays ``None``. |
 | `as_transform` | function | Coerce a transform to a tuple of six Python floats (a, b, c, d, e, f). |
 | `combine` | function | Re-exported from `pipekit_array`. |
@@ -1441,7 +1442,6 @@ current).
 | `pad_points` | function | ``points`` padded to ``n`` samples, with ``valid=False`` on the pad. |
 | `pixel_coords` | function | Map coordinates of every pixel, ``(2, H, W)``: x then y. |
 | `read_window` | function | The pixels of ``window``, padding with fill where it leaves the array. |
-| `reduce` | function | Re-exported from `pipekit_array`. |
 | `sel` | function | Re-exported from `pipekit_array`. |
 | `set_options` | class | Set process-wide options, for good or within a ``with`` block. |
 | `stack` | function | Stack carriers on one grid along a new dim. |

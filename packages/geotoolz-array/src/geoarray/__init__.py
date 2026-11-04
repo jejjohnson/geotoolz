@@ -12,12 +12,14 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   name, `GeoArray.to_jax` / `GeoArray.to_numpy`, `GeoArray.with_data` to
   rewrap a result, `GeoArray.from_coords`.
 - The dim-level functions, shared with every named carrier (they are
-  pipekit-array's: ``geoarray.reduce is pipekit_array.reduce``): `isel`,
-  `sel`, `transpose`, `reduce`, `argreduce`, `take_along`, `map_over`,
-  `concat`, `combine`. geoarray's `GeoArrayAdapter` is registered with
-  pipekit at import, so they, and pipekit-array's ``KernelOp``, run on
-  carriers; a result that consumed ``y`` or ``x`` is a
-  ``pipekit_array.DimArray`` (`to_dimarray`).
+  pipekit-array's: ``geoarray.isel is pipekit_array.isel``): `isel`,
+  `sel`, `transpose`, `take_along`, `map_over`, `concat`, `combine`. The
+  named reductions compute, so they are geoops': nodata-aware
+  `geoops.compositing.reduce` / `argreduce` (GA-B6), or
+  `pipekit_array.reduce` / `argreduce` as they are. geoarray's
+  `GeoArrayAdapter` is registered with pipekit at import, so they, and
+  pipekit-array's ``KernelOp``, run on carriers; a result that consumed
+  ``y`` or ``x`` is a ``pipekit_array.DimArray`` (`to_dimarray`).
 - `GeoSwath` (per-pixel lat/lon on ``row col``) and `GeoPoints` (xy, and
   optional z, time and valid on ``obs``): the carriers whose georeference
   is not an affine grid; `pad_points` pads a point set to a fixed N.
@@ -73,12 +75,10 @@ imports JAX.
 from __future__ import annotations
 
 from pipekit_array import (
-    argreduce,
     combine,
     concat,
     isel,
     map_over,
-    reduce,
     sel,
     stack_items,
     take_along,
@@ -153,7 +153,6 @@ __all__ = [
     "RasterSource",
     "X64Error",
     "__version__",
-    "argreduce",
     "as_crs",
     "as_transform",
     "combine",
@@ -168,7 +167,6 @@ __all__ = [
     "pad_points",
     "pixel_coords",
     "read_window",
-    "reduce",
     "sel",
     "set_options",
     "stack",
