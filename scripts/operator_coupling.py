@@ -115,31 +115,39 @@ def _table(rows: list[dict[str, Any]]) -> str:
 
 
 def _cross_check(rows: list[dict[str, Any]]) -> list[str]:
-    """How the measurements compare with the contract test's hand lists."""
+    """The contract test's time-stack sets (derived from the declarations)
+    against what the probe saw: how many members it confirms, and any
+    operator it saw behave that way outside the set."""
     by_key = {r["key"]: r for r in rows}
 
-    def report(name: str, keys: list[str], measured: Any) -> str:
-        hit = [k for k in keys if k in by_key and measured(by_key[k])]
-        missed = sorted(k.rsplit(".", 1)[-1] for k in keys if k not in hit)
-        return f"{name}: {len(hit)}/{len(keys)} measured" + (
-            f" (not: {', '.join(missed)})" if missed else ""
+    def report(name: str, keys: frozenset[str], seen: Any, *, closed: bool) -> str:
+        confirmed = sum(1 for k in keys if k in by_key and seen(by_key[k]))
+        # a "reads no values" measurement is a toy artefact as often as not,
+        # so only a set the probe can close is checked from outside
+        outside = sorted(
+            r["name"] for k, r in by_key.items() if closed and k not in keys and seen(r)
         )
+        line = f"{name}: {len(keys)} declared, {confirmed} confirmed by the probe"
+        return line + (f"; seen outside it: {', '.join(outside)}" if outside else "")
 
     return [
         report(
             "POOLED_STATISTICS",
-            list(tc.POOLED_STATISTICS),
-            lambda r: r["time"] == "pooled",
+            tc.POOLED_STATISTICS,
+            lambda r: r["time"] in ("pooled", "reduce"),
+            closed=True,
         ),
         report(
             "TIME_INVARIANT",
-            sorted(tc.TIME_INVARIANT),
+            tc.TIME_INVARIANT,
             lambda r: r["measured"] == "reads no values",
+            closed=False,
         ),
         report(
             "STACK_AS_FEATURES",
-            sorted(tc.STACK_AS_FEATURES),
+            tc.STACK_AS_FEATURES,
             lambda r: r["time"] == "reduce",
+            closed=False,
         ),
     ]
 

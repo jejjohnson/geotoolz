@@ -94,7 +94,7 @@ class PolygonMask(Operator):
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
     # depends only on the grid and the geometry
-    coupling: ClassVar[Coupling] = Coupling()
+    coupling: ClassVar[Coupling] = Coupling(reads_values=False)
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -390,8 +390,8 @@ class AltitudeMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
-    # the DEM at each pixel
-    coupling: ClassVar[Coupling] = Coupling()
+    # the DEM at each pixel; the input gives only the grid
+    coupling: ClassVar[Coupling] = Coupling(reads_values=False)
 
     def __init__(
         self,
@@ -446,8 +446,10 @@ class SlopeMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
-    # slope from the DEM's 3 x 3 neighbourhood
-    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=1)
+    # slope from the DEM's 3 x 3 neighbourhood; the input gives only the grid
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=1, reads_values=False
+    )
 
     def __init__(
         self,

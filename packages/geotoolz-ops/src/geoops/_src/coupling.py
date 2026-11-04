@@ -131,6 +131,9 @@ class Coupling:
         kind: ``"transform"`` (raster in, raster out), ``"fan-out"`` (a list
             of rasters), ``"conversion"`` (a table, geometry, scalar or
             model), ``"source"`` (no raster in) or ``"sink"``.
+        reads_values: ``False`` when the output depends only on the input's
+            grid, never on its values (a rasterised polygon, a land mask):
+            one result then serves every frame of a stack.
 
     Raises:
         ValueError: An unknown dim, effect or kind; a dim both coupled and
@@ -149,6 +152,7 @@ class Coupling:
     reach: int | None
     fit: frozenset[str]
     kind: str
+    reads_values: bool
 
     def __init__(
         self,
@@ -158,6 +162,7 @@ class Coupling:
         reach: int | None = 0,
         fit: Iterable[str] = (),
         kind: str = "transform",
+        reads_values: bool = True,
     ) -> None:
         coupled = _dims(couples, "couples")
         fitted = _dims(fit, "fit")
@@ -191,6 +196,7 @@ class Coupling:
         object.__setattr__(self, "reach", reach)
         object.__setattr__(self, "fit", fitted)
         object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "reads_values", bool(reads_values))
 
     @property
     def name(self) -> str:
@@ -545,10 +551,11 @@ def _probe_time(
     values = np.asarray(stack).copy()
     values[0] = _bump(values[0], (slice(None), *_centre(values.shape)))
     moved = _changed(y0, run(build(), stack.replace(data=values)))
-    if not isinstance(moved, np.ndarray) or moved.ndim < 3:
+    if not isinstance(moved, np.ndarray):
         return None
-    if np.shape(y0)[0] != 2 or np.ndim(y0) < 3:
-        return "reduce"
+    if np.ndim(y0) < 3 or np.shape(y0)[0] != 2:
+        # the time axis is gone: the frames were combined, if they were read
+        return "reduce" if bool(moved.any()) else None
     return "pooled" if bool(moved[1].any()) else "per frame"
 
 
@@ -627,7 +634,9 @@ def assert_coupling(op: Any, measured: Measured, *, exact: bool = False) -> None
       `reach_of`), unless ``space`` is fitted;
     * a grid change needs ``effects={"space": "regrid"}``;
     * the declared ``kind`` is the measured one (``source`` and ``sink``
-      are not measured).
+      are not measured);
+    * an output that moved with the input's values is not declared
+      ``reads_values=False``.
 
     With ``exact=True`` the declared ``couples | fit`` must also equal the
     measured couples. A stochastic measurement checks nothing, and neither
@@ -673,6 +682,10 @@ def assert_coupling(op: Any, measured: Measured, *, exact: bool = False) -> None
             and measured.reach > reach
         ):
             problems.append(f"measured reach {measured.reach} px > declared {reach} px")
+    if measured.reads_values and not declared.reads_values:
+        problems.append("the output moves with the input's values: reads_values=True")
+    if exact and not measured.reads_values and declared.reads_values:
+        problems.append("exact: no perturbation moved the output; reads_values=False")
     if measured.regrids and declared.effect("space") not in ("regrid", "reduce"):
         problems.append("changes the grid: declare effects={'space': 'regrid'}")
     if exact and measured.couples != allowed:

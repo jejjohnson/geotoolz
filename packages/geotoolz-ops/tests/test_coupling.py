@@ -340,3 +340,35 @@ def test_a_wider_declaration_passes_unless_exact() -> None:
 def test_an_undeclared_operator_fails() -> None:
     with pytest.raises(AssertionError, match="declares no `coupling`"):
         assert_coupling(object(), measure_coupling(Scale, _scene()))
+
+
+def test_reads_values_is_checked() -> None:
+    class GridOnly:
+        coupling = Coupling(reads_values=False)
+
+        def __call__(self, x: GeoArray) -> GeoArray:
+            return x.replace(data=np.zeros(x.shape, dtype=bool))
+
+    class ClaimsGridOnly(Scale):
+        coupling = Coupling(reads_values=False)
+
+    measured = measure_coupling(GridOnly, _scene())
+    assert not measured.reads_values
+    assert_coupling(GridOnly(), measured, exact=True)
+    with pytest.raises(AssertionError, match="reads_values=True"):
+        assert_coupling(ClaimsGridOnly(), measure_coupling(Scale, _scene()))
+    with pytest.raises(AssertionError, match="reads_values=False"):
+        assert_coupling(Scale(), measured, exact=True)
+
+
+def test_a_reduction_over_time_is_measured() -> None:
+    class StackMean:
+        coupling = Coupling(couples={"time"}, effects={"time": "reduce"})
+
+        def __call__(self, x: GeoArray) -> np.ndarray:
+            a = np.asarray(x)
+            return a.mean(axis=0) if a.ndim == 4 else a
+
+    measured = measure_coupling(StackMean, _scene())
+    assert measured.time == "reduce"
+    assert_coupling(StackMean(), measured, exact=True)
