@@ -37,6 +37,7 @@ import numpy as np
 from geoarray import GeoArray
 
 from geoops._src.contract import time_stack_of
+from geoops._src.geo import grid_matches
 
 
 __all__ = [
@@ -247,7 +248,9 @@ def _centre(shape: tuple[int, ...]) -> tuple[int, int]:
     return shape[-2] // 2, shape[-1] // 2
 
 
-_ATOL = 1e-9
+#: "Moved": not within this relative / absolute tolerance of the reference.
+_RTOL = 1e-9
+_ATOL = 1e-12
 
 
 @dataclasses.dataclass(frozen=True)
@@ -339,7 +342,7 @@ def _changed(a: Any, b: Any) -> np.ndarray | bool:
     ):
         return True
     moved = [
-        (np.abs(x - y) > _ATOL) | (np.isnan(x) != np.isnan(y))
+        ~np.isclose(x, y, rtol=_RTOL, atol=_ATOL, equal_nan=True)
         for x, y in zip(aa, bb, strict=True)
     ]
     return moved[0] if len(moved) == 1 else np.stack(moved)
@@ -379,13 +382,7 @@ def _quiet(fn: Callable[[], Any]) -> Any:
 
 def _same_grid(x: Any, out: Any) -> bool:
     arrays = _arrays(out)
-    if arrays is None or len(arrays) != 1:
-        return False
-    if arrays[0].shape[-2:] != np.shape(x)[-2:]:
-        return False
-    if isinstance(out, GeoArray) and isinstance(x, GeoArray):
-        return bool(np.allclose(np.asarray(out.transform), np.asarray(x.transform)))
-    return True
+    return arrays is not None and len(arrays) == 1 and grid_matches(x, out)
 
 
 def measure_coupling(
@@ -475,6 +472,7 @@ def measure_coupling(
             fitted = build()
             first = run(fitted, sample)
             global_frozen |= _centre_moved(_changed(first, run(fitted, far_x)))
+        global_fresh |= _hole_reads_scene(build, sample, flat, centre, run)
 
     reads_values = any(moved_per_band) or global_fresh
     couples: set[str] = set()
@@ -515,8 +513,8 @@ def measure_coupling(
     time = _probe_time(build, sample, run)
     if time in ("pooled", "reduce"):
         couples.add("time")
-        if time == "reduce":
-            effects["time"] = "reduce"
+    if time in ("reduce", "select"):
+        effects["time"] = time
     return Measured(
         couples=frozenset(couples),
         frozen_space=global_frozen if grid_kept else None,
@@ -530,6 +528,35 @@ def measure_coupling(
     )
 
 
+def _hole_reads_scene(
+    build: Callable[[], Any],
+    sample: Any,
+    flat: np.ndarray,
+    centre: tuple[int, int],
+    run: Callable[[Any, Any], Any],
+) -> bool:
+    """With a nodata hole beside the centre, does a far change move the centre?
+
+    An operator that fills nodata from statistics of the whole scene before
+    a local step is global only once there is nodata to fill.
+    """
+    if flat.dtype.kind != "f":
+        return False
+    cy, cx = centre
+    holed = flat.copy()
+    # a 5 x 5 hole around the centre pixel, which keeps its value
+    holed[:, cy - 2 : cy + 3, cx - 2 : cx + 3] = np.nan
+    holed[:, cy, cx] = flat[:, cy, cx]
+    shape = np.shape(sample)
+    try:
+        y_hole = run(build(), _with(sample, holed.reshape(shape)))
+        far = _far_variants(holed)[-1]  # the brightened corner
+        moved = _changed(y_hole, run(build(), _with(sample, far.reshape(shape))))
+    except Exception:
+        return False  # refuses NaN: no hole to fill
+    return _centre_moved(moved)
+
+
 def _centre_moved(moved: Any) -> bool:
     if isinstance(moved, np.ndarray) and moved.ndim >= 2:
         by_row = moved.reshape(-1, *moved.shape[-2:])
@@ -541,6 +568,13 @@ def _centre_moved(moved: Any) -> bool:
 def _probe_time(
     build: Callable[[], Any], sample: Any, run: Callable[[Any, Any], Any]
 ) -> str | None:
+    """On a two-frame stack of ``sample``, bump each frame in turn.
+
+    ``"pooled"`` when a frame moves the other frame's output, ``"per
+    frame"`` when it moves only its own; with the time axis gone,
+    ``"reduce"`` when both frames reach the output and ``"select"`` when
+    one does.
+    """
     if not isinstance(sample, GeoArray) or sample.ndim != 3 or "level" in sample.dims:
         return None
     stack = time_stack_of(sample)
@@ -548,15 +582,21 @@ def _probe_time(
         y0 = run(build(), stack)
     except Exception:
         return "rejects stack"
-    values = np.asarray(stack).copy()
-    values[0] = _bump(values[0], (slice(None), *_centre(values.shape)))
-    moved = _changed(y0, run(build(), stack.replace(data=values)))
-    if not isinstance(moved, np.ndarray):
-        return None
-    if np.ndim(y0) < 3 or np.shape(y0)[0] != 2:
-        # the time axis is gone: the frames were combined, if they were read
-        return "reduce" if bool(moved.any()) else None
-    return "pooled" if bool(moved[1].any()) else "per frame"
+    kept = np.ndim(y0) >= 3 and np.shape(y0)[0] == 2
+    reaching = 0
+    pooled = False
+    for t in range(2):
+        values = np.asarray(stack).copy()
+        values[t] = _bump(values[t], (slice(None), *_centre(values.shape)))
+        moved = _changed(y0, run(build(), stack.replace(data=values)))
+        if not isinstance(moved, np.ndarray):
+            return None
+        reaching += bool(moved.any())
+        if kept:
+            pooled |= bool(moved[1 - t].any())
+    if kept:
+        return "pooled" if pooled else "per frame"
+    return {0: None, 1: "select", 2: "reduce"}[reaching]
 
 
 def measure_frames(
@@ -599,8 +639,7 @@ def measure_frames(
     reaches = 0
     for t, item in enumerate(frames):
         frame = item[0] if isinstance(item, tuple) else item
-        centre = _centre(np.shape(frame))
-        index = (slice(None), *centre) if np.ndim(frame) == 3 else centre
+        index = (..., *_centre(np.shape(frame)))
         new = _with(frame, _bump(np.asarray(frame), index))
         bumped = list(frames)
         bumped[t] = (new, *item[1:]) if isinstance(item, tuple) else new
