@@ -58,6 +58,14 @@ Config:
     describe a nested operator or a callable, and `reject_config_summary`
     refuses a debug summary passed back to a constructor.
 
+Coupling:
+    `Coupling` is the record an operator class declares as ``coupling``:
+    the dims its output reads across (``band``, ``level``, ``space``,
+    ``time``), what it does to each, its spatial reach and the dims a fit
+    reads. `reach_of` gives an operator's reach (``spatial_reach()`` when
+    it depends on an argument). `geoops.testing.measure_coupling` and
+    `geoops.testing.assert_coupling` check a declaration.
+
 Optional dependencies:
     `import_optional` imports an extra's module inside the function that
     needs it, with an error naming the extra; `optional_name` is the
@@ -106,6 +114,7 @@ from geoops._src.config import (
     nested_config,
     reject_config_summary,
 )
+from geoops._src.coupling import Coupling, reach_of
 from geoops._src.dtype import as_float
 from geoops._src.fitted import fit_once
 from geoops._src.geo import (
@@ -150,6 +159,7 @@ __all__ = [
     "INHERIT",
     "SENTINEL2_L2A_BANDS",
     "BandRef",
+    "Coupling",
     "SampleLayout",
     "affine_of",
     "as_float",
@@ -176,6 +186,7 @@ __all__ = [
     "optional_root",
     "over_frames",
     "pixel_xy",
+    "reach_of",
     "reject_config_summary",
     "reject_georeader",
     "reject_geotensor",

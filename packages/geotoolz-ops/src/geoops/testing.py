@@ -9,6 +9,11 @@ left untouched, ``(T, C, H, W)`` stacks handled or rejected, a georeader
 ``GeoTensor`` refused, ``backends`` declared and kept). Use it in the
 tests of an operator you write on top of the stack.
 
+`measure_coupling` (and `measure_frames` for an N-ary reducer) measure
+which dims an operator's output reads across by perturbing a sample, and
+`assert_coupling` holds the operator's declared ``coupling`` to that
+measurement.
+
 Example:
     ::
 
@@ -26,9 +31,21 @@ from typing import Any
 import numpy as np
 
 from geoops._src import contract
+from geoops._src.coupling import (
+    Measured,
+    assert_coupling,
+    measure_coupling,
+    measure_frames,
+)
 
 
-__all__ = ["check_operator"]
+__all__ = [
+    "Measured",
+    "assert_coupling",
+    "check_operator",
+    "measure_coupling",
+    "measure_frames",
+]
 
 
 def check_operator(op: Any, sample: Any, *others: Any, gap_filler: bool = False) -> Any:
