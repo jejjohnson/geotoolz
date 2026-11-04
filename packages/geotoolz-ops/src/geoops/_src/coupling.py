@@ -618,7 +618,8 @@ def assert_coupling(op: Any, measured: Measured, *, exact: bool = False) -> None
       are not measured).
 
     With ``exact=True`` the declared ``couples | fit`` must also equal the
-    measured couples. A stochastic measurement checks nothing.
+    measured couples. A stochastic measurement checks nothing, and neither
+    does a declared ``source``: its output comes from its configuration.
 
     Args:
         op: The operator (an instance; a class attribute is read through it).
@@ -632,8 +633,8 @@ def assert_coupling(op: Any, measured: Measured, *, exact: bool = False) -> None
     declared = getattr(op, "coupling", None)
     if not isinstance(declared, Coupling):
         raise AssertionError(f"{name} declares no `coupling` (geoops.carrier.Coupling)")
-    if measured.stochastic:
-        return
+    if measured.stochastic or declared.kind == "source":
+        return  # a source's output comes from its configuration, not its input
     problems: list[str] = []
     allowed = declared.couples | declared.fit
     if declared.kind not in ("source", "sink") and measured.kind != declared.kind:

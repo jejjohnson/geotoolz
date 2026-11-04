@@ -63,6 +63,7 @@ from pipekit import Operator
 
 from geoops._src.bands import resolve_band, strip_band_attrs
 from geoops._src.config import mapping_from_pairs, mapping_to_pairs
+from geoops._src.coupling import Coupling
 from geoops._src.geo import reject_geotensor
 from geoops._src.kernels import mask_kernel
 from geoops._src.shape import band_dim, dim_axis, over_frames
@@ -342,6 +343,8 @@ class DecodeBitmask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # one QA band -> one boolean layer per named bit field
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "expand"})
 
     def __init__(
         self,
@@ -449,6 +452,10 @@ class MaskInvalid(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # invalid where any band is nodata
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -503,6 +510,8 @@ class _QAMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # reads the QA band only
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "select"})
 
     _target_name: ClassVar[str] = "qa"
 
@@ -645,6 +654,10 @@ class MaskNoData(_QAMask):
     # the fill-driven path reads the whole carrier through the NumPy nodata
     # model (geoops._src.valid), so the operator stays NumPy-only
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the QA band, or any band equal to the fill
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
@@ -701,6 +714,10 @@ class MaskSaturated(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # saturated where any band reaches the limit
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -772,6 +789,8 @@ class S2QA60(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # reads the QA60 band only
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "select"})
 
     def __init__(
         self,
@@ -826,6 +845,8 @@ class S2SCL(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # reads the SCL band only
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "select"})
 
     _DEFAULT_TARGETS: ClassVar[tuple[str, ...]] = (
         "no_data",
@@ -905,6 +926,8 @@ class LandsatQA_PIXEL(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # reads the QA_PIXEL band only
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "select"})
 
     _SENSOR_KEYS: ClassVar[dict[str, str]] = {
         "l89": "landsat_qa_pixel",
@@ -992,6 +1015,8 @@ class MODISStateQA(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # reads the state QA band only
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "select"})
 
     def __init__(
         self,
@@ -1035,6 +1060,10 @@ class S2Cloudless(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a learned detector over bands and neighbourhoods
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space"}, effects={"band": "reduce"}, reach=None
+    )
 
     # Calling this Operator raises ImportError — its `get_config` is
     # still serialisable, but actually instantiating the underlying
@@ -1064,6 +1093,10 @@ class OmniCloudMask(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a learned detector over bands and neighbourhoods
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space"}, effects={"band": "reduce"}, reach=None
+    )
 
     forbid_in_yaml: ClassVar[bool] = True
 
@@ -1089,6 +1122,10 @@ class CloudSEN12(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a learned detector over bands and neighbourhoods
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space"}, effects={"band": "reduce"}, reach=None
+    )
 
     forbid_in_yaml: ClassVar[bool] = True
 

@@ -9,11 +9,12 @@ and so on (`geoops.carrier.Coupling`; geostack
 
 For every operator the contract test can build, this script picks the first
 toy input the operator accepts and runs `geoops.testing.measure_coupling`
-(or `measure_frames` for the N-ary reducers) on it. It reuses the contract
-test's tables (constructor kwargs, second carriers, primary inputs, N-ary
-inputs), prints a count per measured class and a cross-check against the
-contract test's hand lists, and for operators that declare ``coupling``,
-whether the declaration holds (`geoops.testing.assert_coupling`).
+(or `measure_frames` for the N-ary reducers) on it, through the same input
+selection as ``tests/test_operator_coupling.py``
+(``packages/geotoolz-ops/tests/_coupling_inputs.py``). It prints a count
+per measured class, a cross-check against the contract test's hand lists,
+and, for operators that declare ``coupling``, whether the declaration holds
+(`geoops.testing.assert_coupling`); it exits non-zero when one does not.
 
 A measurement is a lower bound: a rank statistic can ignore one pixel, and a
 toy input can make an operator the identity (a ``like`` grid equal to the
@@ -40,119 +41,22 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 
 ROOT = Path(__file__).resolve().parents[1]
 OPS_TESTS = ROOT / "packages" / "geotoolz-ops" / "tests"
 sys.path.insert(0, str(OPS_TESTS))
 
+import _coupling_inputs as ci
 import test_operator_contract as tc
-from _helpers import toy_geoarray
 
 from geoops.carrier import Coupling
-from geoops.testing import Measured, assert_coupling, measure_coupling, measure_frames
-
-
-#: Probe-only constructor settings, for operators the contract test builds
-#: but that cannot run on a toy scene as built.
-PROBE_KWARGS: dict[str, dict[str, Any]] = {
-    **{
-        f"normalize._src.operators.{name}": {"fit_on_call": True}
-        for name in ("StandardScaler", "MinMaxScaler", "RobustScaler")
-    },
-    **{
-        f"qa._src.operators.{name}": {"qa_band": 0, "bits": [3]}
-        for name in (
-            "MaskCirrus",
-            "MaskCloudShadow",
-            "MaskClouds",
-            "MaskSnow",
-            "MaskWater",
-        )
-    },
-    "geom._src.operators.CropToBounds": {
-        "bounds": (500_030.0, 3_999_870.0, 500_130.0, 3_999_970.0)
-    },
-}
-
-#: Operators that take one list of carriers, probed like the N-ary reducers.
-PROBE_LISTS: tuple[str, ...] = (
-    "geom._src.operators.Mosaic",
-    "spectral._src.operators.StackBands",
-)
-
-_LABEL_OPERATOR = "measure._src.operators.LabelConnectedComponents"
-
-
-def _domain_inputs(key: str) -> list[Any]:
-    """Inputs an operator family really reads, tried before the generic ones."""
-    scene = tc._scene()
-    if key.startswith("mask.") or key == _LABEL_OPERATOR:
-        return [tc._mask_like(scene)]
-    if key.startswith("qa.") and "S2" not in key and "Landsat" not in key:
-        qa = np.random.default_rng(0).integers(0, 2**12, (16, 16)).astype(np.uint16)
-        return [toy_geoarray(qa, fill_value=None)]
-    if key.startswith("restore.") and ("GapFill" in key or "Outlier" in key):
-        values = np.asarray(scene).copy()
-        if "Outlier" in key:
-            values[:, 8, 9] = 50.0  # an outlier next to the centre pixel
-        else:
-            values[:, 8:10, 9:11] = np.nan  # a hole next to the centre pixel
-        return [scene.replace(data=values, fill_value=np.nan)]
-    return []
-
-
-def _setup() -> None:
-    for key, kwargs in PROBE_KWARGS.items():
-        base = tc.CTOR_KWARGS.get(key, {})
-        tc.CTOR_KWARGS[key] = {**(base() if callable(base) else base), **kwargs}
-    for key in PROBE_LISTS:
-        tc.NARY_INPUTS[key] = lambda: [tc._two_frames()]
+from geoops.testing import Measured, assert_coupling
 
 
 def probe(cls: type) -> tuple[str, Measured | None, str]:
     """``(status, measurement, why)`` for one operator class."""
-    key = tc._key(cls)
-
-    def build() -> Any:
-        return tc._build_seeded(cls)
-
-    try:
-        op = build()
-    except BaseException as exc:  # pytest.skip raises a BaseException
-        return "unbuilt", None, str(exc)[:120]
-    if key in tc.NARY_INPUTS:
-        given = tc.NARY_INPUTS[key]()
-        as_list = len(given) == 1 and isinstance(given[0], list)
-        frames = given[0] if as_list else given
-        try:
-            return "ok", measure_frames(build, frames, as_list=as_list), ""
-        except Exception as exc:
-            return "error", None, f"{type(exc).__name__}: {exc}"
-    if not tc._single_carrier_in(op):
-        return "no input", None, "no primary input"
-    primary = tc.GRAPH_PRIMARY.get(key)
-    candidates = [
-        *([primary()] if primary is not None else []),
-        *_domain_inputs(key),
-        *tc._toy_inputs(),
-        *tc._attributed_inputs(),
-    ]
-    why = "no toy input accepted"
-    for x in candidates:
-        if not tc._is_carrier(x) or np.ndim(x) < 2:
-            continue
-        try:
-            tc._call(build(), x)
-        except Exception as exc:
-            why = f"{type(exc).__name__}: {exc}"
-            continue
-        try:
-            return "ok", measure_coupling(build, x, call=tc._call), ""
-        except Exception as exc:
-            return "error", None, f"{type(exc).__name__}: {exc}"
-    return "no input", None, why[:160]
+    measured, why = ci.probe(cls)
+    return ("ok" if measured is not None else "unprobed"), measured, why
 
 
 def report_class(measured: Measured | None) -> str:
@@ -180,7 +84,7 @@ def _declared(cls: type, measured: Measured | None) -> tuple[str, str]:
     if measured is None:
         return coupling.name, "unprobed"
     try:
-        assert_coupling(tc._build_seeded(cls), measured)
+        assert_coupling(ci.build_for_probe(cls), measured)
     except AssertionError as exc:
         return coupling.name, f"FAILS: {str(exc).split(': ', 1)[-1]}"
     return coupling.name, "holds"
@@ -245,7 +149,6 @@ def main() -> int:
     parser.add_argument("--out", type=Path, help="write coupling.json and .md here")
     args = parser.parse_args()
     warnings.filterwarnings("ignore")
-    _setup()
     cwd = os.getcwd()
     os.chdir(tempfile.mkdtemp())  # sink operators write their relative paths here
     rows: list[dict[str, Any]] = []

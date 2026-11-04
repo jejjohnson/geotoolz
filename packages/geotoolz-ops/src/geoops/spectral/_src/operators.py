@@ -62,6 +62,7 @@ from geoops._src.bands import (
     take_band_coords,
 )
 from geoops._src.config import jsonable
+from geoops._src.coupling import Coupling
 from geoops._src.geo import grid_matches, reject_geotensor
 from geoops._src.shape import band_dim, dim_axis, keep_band_axis
 from geoops._src.valid import carried_fill, wrap_filled
@@ -120,6 +121,8 @@ class SelectBands(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # each output band is one input band
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "select"})
 
     def __init__(
         self, *, bands: list[BandRef], dim: str = "band", axis: int | None = None
@@ -228,6 +231,8 @@ class StackBands(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # carriers joined along the band axis
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "join"})
 
     def __init__(self, *, dim: str = "band", axis: int | None = None) -> None:
         self.dim = band_dim(dim, axis, "StackBands")
@@ -301,6 +306,8 @@ class SplitBands(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # one single-band carrier per band
+    coupling: ClassVar[Coupling] = Coupling(effects={"band": "split"}, kind="fan-out")
 
     def __init__(
         self,
@@ -373,6 +380,9 @@ class BandMath(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -434,6 +444,9 @@ class BandRatio(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -507,6 +520,8 @@ class ContinuumRemoval(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the hull runs along each pixel's spectrum
+    coupling: ClassVar[Coupling] = Coupling(couples={"band"}, effects={"band": "mix"})
 
     def __init__(
         self,
@@ -575,6 +590,10 @@ class SpectralBinning(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # each bin averages the source bands within it
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
 
     def __init__(
         self,
@@ -657,6 +676,8 @@ class SpectralSmoothing(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # a smoothing window along each pixel's spectrum
+    coupling: ClassVar[Coupling] = Coupling(couples={"band"}, effects={"band": "mix"})
 
     def __init__(
         self,

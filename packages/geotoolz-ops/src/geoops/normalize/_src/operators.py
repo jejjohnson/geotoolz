@@ -44,6 +44,7 @@ from pipekit import Operator, get_adapter
 from pipekit_array import KernelOp
 
 from geoops._src.config import jsonable
+from geoops._src.coupling import Coupling
 from geoops._src.fitted import fit_once, require_concrete
 from geoops._src.geo import reject_geotensor
 from geoops._src.kernels import _declare_fill, named, pixel_kernel
@@ -308,6 +309,8 @@ class PerBandStats(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # returns its input; the statistics are a side effect
+    coupling: ClassVar[Coupling] = Coupling()
     # writes self.stats: eager on JAX, refused under jax.jit (the contract checks)
     traceable: ClassVar[bool] = False
 
@@ -356,6 +359,8 @@ class CLAHE(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # contextual histograms, on intensities rescaled over the scene
+    coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
     def __init__(
         self,
@@ -462,6 +467,8 @@ class StandardScaler(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # x' = (x - mu_c) / sigma_c pointwise; mu_c, sigma_c fitted over every pixel and frame
+    coupling: ClassVar[Coupling] = Coupling(fit={"space", "time"})
 
     def __init__(
         self,
@@ -589,6 +596,8 @@ class RobustScaler(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # median and IQR fitted over every pixel and frame
+    coupling: ClassVar[Coupling] = Coupling(fit={"space", "time"})
 
     def __init__(
         self,
@@ -711,6 +720,8 @@ class MinMaxScaler(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # min and max fitted over every pixel and frame
+    coupling: ClassVar[Coupling] = Coupling(fit={"space", "time"})
 
     def __init__(
         self,
@@ -818,6 +829,8 @@ class HistogramStretch(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # per-band percentiles over every pixel and frame of the input
+    coupling: ClassVar[Coupling] = Coupling(couples={"space", "time"}, reach=None)
 
     def __init__(
         self,
@@ -887,6 +900,8 @@ class HistogramMatch(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # the source CDF of each band over every pixel and frame
+    coupling: ClassVar[Coupling] = Coupling(couples={"space", "time"}, reach=None)
 
     # Holds a live GeoArray reference, which is not JSON/YAML
     # serialisable.
@@ -962,6 +977,7 @@ class LogScale(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(self, *, base: float = 10.0, eps: float = 1e-6) -> None:
         self.base = base
@@ -996,6 +1012,7 @@ class AsinhScale(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(self, *, a: float = 1.0) -> None:
         self.a = a
@@ -1028,6 +1045,7 @@ class PowerScale(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(self, *, gamma: float = 0.5) -> None:
         self.gamma = gamma
@@ -1063,6 +1081,8 @@ class Normalize(StandardScaler):
 
     # fixed statistics: _apply never fits, so the transform runs anywhere
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # fixed statistics: nothing is fitted
+    coupling: ClassVar[Coupling] = Coupling()
 
     def __init__(
         self,
@@ -1100,6 +1120,8 @@ class ZeroOne(Operator):
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy", "jax", "dask")
+    # per-band min and max over every pixel and frame of the input
+    coupling: ClassVar[Coupling] = Coupling(couples={"space", "time"}, reach=None)
 
     def __init__(self, *, per_band: bool = True) -> None:
         self.per_band = per_band
