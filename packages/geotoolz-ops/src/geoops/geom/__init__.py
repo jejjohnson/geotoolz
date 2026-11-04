@@ -50,6 +50,7 @@ from geoops.geom._src.operators import (
     Gradient1D,
     Gradient2D,
     Gradient3D,
+    InterpAt,
     Laplacian1D,
     Laplacian2D,
     Laplacian3D,
@@ -71,6 +72,7 @@ from geoops.geom._src.operators import (
     Tile,
     Vectorize,
 )
+from geoops.geom._src.sampling import interp_at
 from geoops.geom._src.stencils import (
     difference_coeffs,
     difference_offsets,
@@ -93,6 +95,7 @@ __all__ = [
     "Gradient1D",
     "Gradient2D",
     "Gradient3D",
+    "InterpAt",
     "Laplacian1D",
     "Laplacian2D",
     "Laplacian3D",
@@ -136,6 +139,7 @@ __all__ = [
     "gradient_1d",
     "gradient_2d",
     "gradient_3d",
+    "interp_at",
     "laplacian_1d",
     "laplacian_2d",
     "laplacian_3d",

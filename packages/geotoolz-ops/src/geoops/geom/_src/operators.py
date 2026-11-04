@@ -23,12 +23,12 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast
 
 import geoarray
 import numpy as np
 from affine import Affine
-from geoarray import DIMS, FrozenAttrs, GeoArray, GridMismatchError
+from geoarray import DIMS, FrozenAttrs, GeoArray, GeoPoints, GridMismatchError
 from pipekit import Operator, get_adapter
 from pipekit_array import array_namespace
 from pyproj import CRS
@@ -74,6 +74,7 @@ from geoops.geom._src.array import (
     target_slices,
     valid_pixel_mask,
 )
+from geoops.geom._src.sampling import interp_at
 from geoops.geom._src.stencils import difference_offsets
 
 
@@ -3917,3 +3918,55 @@ def _geographic_metric(gt: GeoArray) -> _Metric | None:
         e2=e2,
         per_unit=per_unit,
     )
+
+
+class InterpAt(Operator):
+    """H(x): a grid read at the positions of points, as an operator.
+
+    `geoops.geom.interp_at` in a pipeline: ``InterpAt()(grid, points)``
+    returns a `geoarray.GeoPoints` with the grid's values at the points
+    (bilinear or nearest), ``valid=False`` and NaN off the grid or on
+    nodata, and 0 on padded points so a masked cost stays finite. The
+    points are the second positional input, so a `pipekit.Graph` wires
+    them from their own `Input`.
+
+    Args:
+        method: ``"bilinear"`` (blends the four pixels around each point)
+            or ``"nearest"``.
+        along: The dim a per-point ``frame`` index selects; ``frame`` is
+            the optional third input.
+
+    Example:
+        >>> import numpy as np
+        >>> from geoarray import GeoArray, GeoPoints
+        >>> import geoops as gz
+        >>> t = (1.0, 0.0, 0.0, 0.0, -1.0, 4.0)
+        >>> g = GeoArray(np.arange(16.0).reshape(4, 4), t, None, dims="y x")
+        >>> p = GeoPoints(np.zeros(1), xy=np.array([[1.0, 3.0]]), dims="obs", crs=None)
+        >>> gz.InterpAt()(g, p).data.tolist()
+        [2.5]
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy", "jax")
+    # each value blends the 2 x 2 pixels around its point
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=1, kind="conversion"
+    )
+    _terminal: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        *,
+        method: Literal["bilinear", "nearest"] = "bilinear",
+        along: str = "time",
+    ) -> None:
+        if method not in ("bilinear", "nearest"):
+            raise ValueError(
+                f"InterpAt.method is 'bilinear' or 'nearest', got {method!r}"
+            )
+        self.method = method
+        self.along = along
+
+    def _apply(self, grid: GeoArray, points: GeoPoints, frame: Any = None) -> GeoPoints:
+        reject_geotensor(grid, "InterpAt")
+        return interp_at(grid, points, self.method, frame=frame, along=self.along)

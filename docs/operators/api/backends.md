@@ -11,7 +11,7 @@ NumPy result on a JAX carrier and trace once under `jax.jit` for
 same-shape inputs on different grids (the contract test checks
 both).
 
-56 of 275 operators run on JAX today.
+57 of 276 operators run on JAX today.
 
 | Family | Operator | Backends |
 |---|---|---|
@@ -66,6 +66,7 @@ both).
 | `geom` | `Gradient1D` | numpy, jax |
 | `geom` | `Gradient2D` | numpy, jax |
 | `geom` | `Gradient3D` | numpy, jax |
+| `geom` | `InterpAt` | numpy, jax |
 | `geom` | `Laplacian1D` | numpy, jax |
 | `geom` | `Laplacian2D` | numpy, jax |
 | `geom` | `Laplacian3D` | numpy, jax |

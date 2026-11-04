@@ -43,10 +43,12 @@ fast paths:
 ::: geoarray.GeoPointsAdapter
 ::: geoarray.to_dimarray
 
-## Sampling at points
+## Coordinates to pixels
 
 ::: geoarray.to_pixel
-::: geoarray.interp_at
+
+Reading a grid at points, H(x), blends pixels, so it is geoops':
+[`geoops.geom.interp_at`](../operators/api/geom.md#sampling-at-points).
 
 ## `Grid`
 

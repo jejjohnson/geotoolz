@@ -190,6 +190,8 @@ ignore = ["E402", "E721", "E731", "E741", "F722"]
 "src/geoops/radiometry/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "src/geoops/geom/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "src/geoops/normalize/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
+# H(x) tests moved from geotoolz-array keep its math comments (y − H(x)).
+"tests/test_interp_at.py" = ["RUF003"]
 "src/geoops/matched_filter/**/*.py" = ["RUF001", "RUF002", "RUF003"]
 "tests/test_matched_filter.py" = ["RUF001", "RUF002", "RUF003"]
 "src/geoops/augment/**/*.py" = ["RUF001", "RUF002", "RUF003"]
