@@ -31,7 +31,7 @@
       <div class="lane-head"><span class="verb">sources</span></div>
       <div class="stack">
         <div class="node find"><div class="name">STAC</div><div class="desc">Planetary Computer · Earth Search · any API</div></div>
-        <div class="node find"><div class="name">EarthAccess · GEE</div><div class="desc">NASA CMR · Earth Engine</div></div>
+        <div class="node find"><div class="name">CMR · EarthAccess · GEE</div><div class="desc">NASA CMR · earthaccess · Earth Engine</div></div>
         <div class="node find"><div class="name">local · s3:// · gs://</div><div class="desc">GeoTIFF · NetCDF · Zarr · vectors</div></div>
       </div>
     </div>
@@ -54,9 +54,9 @@
     <div class="lane find" id="load">
       <div class="lane-head"><span class="verb">load</span><span class="pkg">the hits only</span></div>
       <div class="stack">
-        <div class="node compute"><div class="name"><code>load_raster</code></div><div class="desc">mosaic onto the slice grid</div><div class="chips"><span class="chip"><span class="t">GeoArray</span><span class="s">(C, H, W)</span></span></div></div>
+        <div class="node compute"><div class="name"><code>load_raster</code></div><div class="desc">mosaic onto the slice grid; <code>load_raster_timeseries</code> for (T, C, H, W)</div><div class="chips"><span class="chip"><span class="t">GeoArray</span><span class="s">(C, H, W)</span></span></div></div>
         <div class="node compute"><div class="name"><code>load_vector</code></div><div class="desc">rasterise features onto the slice grid</div><div class="chips"><span class="chip"><span class="t">GeoMap</span><span class="s">(H, W)</span></span></div></div>
-        <div class="node cut"><div class="name"><code>patch.field_for</code></div><div class="desc">bridge to geopatcher · [patch] extra</div><div class="chips"><span class="chip"><span class="t">RasterField</span><span class="s">(C, H, W)</span></span></div></div>
+        <div class="node cut"><div class="name"><code>patch.field_for</code></div><div class="desc">after <code>staging.stage</code> makes local copies · [patch] extra</div><div class="chips"><span class="chip"><span class="t">RasterField</span><span class="s">(C, H, W)</span></span></div></div>
       </div>
     </div>
   </div>
@@ -64,10 +64,10 @@
   <div class="slice">
     <div class="label"><div class="k">GeoSlice</div><div class="d">the frozen request every catalog answers and every loader honours</div></div>
     <div class="field"><div class="n">bounds</div><div class="v">(xmin, ymin, xmax, ymax)</div></div>
-    <div class="field"><div class="n">interval</div><div class="v">pd.Interval(start, end)</div></div>
+    <div class="field"><div class="n">interval</div><div class="v">pd.Interval(start, end, closed="both")</div></div>
     <div class="field"><div class="n">resolution</div><div class="v">(10.0, 10.0)</div></div>
     <div class="field"><div class="n">crs</div><div class="v">"EPSG:32611"</div></div>
-    <div class="field"><div class="n">align</div><div class="v">"off" · exact grid snap</div></div>
+    <div class="field"><div class="n">align</div><div class="v">"off" · "warn" · "error" · "snap"</div></div>
   </div>
 </div>
 <script src="_connect.js"></script>

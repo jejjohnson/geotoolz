@@ -54,10 +54,10 @@ const edge = (i) => X0 + CW * i;               // left edge of column i
 const ROW = [292, 412, 532];                   // patch rows (split → combine)
 const MID = ROW[1];
 const STAGES = [
-  ["Search", "STAC · CMR · s3://"],
+  ["Search", "STAC · CMR · GEE"],
   ["Catalog", "index once, query fast"],
   ["Save", "stage what you need"],
-  ["Stream", "lazy windows"],
+  ["Stream", "a Field to cut"],
   ["Split", "overlapping patches"],
   ["Apply", "operator per patch"],
   ["Combine", "window-weighted merge"],

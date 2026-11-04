@@ -61,15 +61,15 @@
       <div class="colhead">what the split buys</div>
       <div class="stackcol" style="gap:26px">
         <div class="node jax" id="trace"><div class="name"><code>jax.jit</code> · <code>jax.grad</code> · <code>jax.vmap</code></div><div class="desc">gradients reach the georeferencing; <code>map_over</code> maps a named dim, with one transform per patch, (P, 6), in one trace</div></div>
-        <div class="node static" id="cache"><div class="name">the compile cache</div><div class="desc">a new transform or new dates (another scene, another patch) reuse the compiled code; new dims, coords, CRS, shape or attrs compile once more</div></div>
-        <div class="node np" id="np"><div class="name">NumPy</div><div class="desc"><code>np.asarray(g)</code> is the data, so NumPy code keeps working; <code>to_jax</code> / <code>to_numpy</code> move between backends</div></div>
+        <div class="node static" id="cache"><div class="name">the compile cache</div><div class="desc">a new transform or new dates (another scene, another patch) reuse the compiled code; new dims, coords, CRS, fill, shape or attrs compile once more</div></div>
+        <div class="node np" id="np"><div class="name">NumPy</div><div class="desc"><code>np.asarray(g)</code> is the data, so eager NumPy code keeps working (a JAX carrier is copied to the host); <code>to_jax</code> / <code>to_numpy</code> move between backends</div></div>
       </div>
     </div>
   </div>
 
   <div class="row2">
     <div class="node geom" id="grid"><div class="name"><code>Grid</code> · geometry without pixels</div><div class="desc">transform, CRS and (H, W): hashable, so a warp target or static config · <code>bounds</code> · <code>res</code> · <code>shift</code> · <code>isclose</code></div></div>
-    <div class="node geom" id="window"><div class="name"><code>PixelWindow</code></div><div class="desc">a rectangle of pixels on a grid: row_off, col_off, height, width — rasterio's Window without rasterio</div></div>
+    <div class="node geom" id="window"><div class="name"><code>PixelWindow</code></div><div class="desc">a rectangle of pixels on a grid: col_off, row_off, width, height — rasterio's Window without rasterio</div></div>
   </div>
 
   <div class="legend">

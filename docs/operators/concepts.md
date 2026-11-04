@@ -242,6 +242,8 @@ operator's coupling class:
 | `level`, `space` | volumetric | `Gradient3D` |
 | `band`, `space` | spatio-spectral | `SLIC` |
 
+![The nine coupling classes as a lattice over band, space and time, with the number of geoops operators in each, examples with their reach, and what each class means when a scene is tiled or split in time](../assets/diagrams/operator-coupling.png)
+
 An operator class declares it as `coupling`, a `geoops.carrier.Coupling`,
 beside `backends`. With the coupled dims come what the operator does to
 each one (`select`, `reduce`, `regrid`, …), the spatial reach in pixels

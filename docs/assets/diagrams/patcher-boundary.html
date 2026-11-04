@@ -24,7 +24,7 @@
     <div class="panel"><div class="k">"pad"</div><div class="o">full 4 × 4 patch; overflow filled with nodata or <code>pad_value</code></div><svg id="pad"></svg></div>
     <div class="panel"><div class="k">"reflect"</div><div class="o">full 4 × 4 patch; overflow mirrored from the interior</div><svg id="reflect"></svg></div>
     <div class="panel"><div class="k">"shrink"</div><div class="o">patch clipped to the domain: 2 × 2 here, weights cropped to match</div><svg id="shrink"></svg></div>
-    <div class="panel"><div class="k">"raise"</div><div class="o"><code>split</code> raises <code>ValueError</code> on the first overflowing window</div><svg id="raise"></svg></div>
+    <div class="panel"><div class="k">"raise"</div><div class="o"><code>split</code> raises <code>ValueError</code> on the first overflowing window (<code>on_error="skip"</code> records it and moves on)</div><svg id="raise"></svg></div>
   </div>
   <div class="legend">
     <span><span class="sw" style="background:#8fb98a"></span>domain cells</span>
