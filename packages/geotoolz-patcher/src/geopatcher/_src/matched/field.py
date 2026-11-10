@@ -5,7 +5,7 @@ A `MatchedField` wraps:
 * one **primary** `Field` (defines the anchor space, CRS, and domain),
 * N **secondary** `Field`s keyed by name,
 * a **coregistration callable** per secondary (any `Callable`; the
-  intended choice is a `pipekit.Operator` from
+  intended choice is a `pipekit_ops.Operator` from
   ``geoops.geom.coregister``, but the type is the broader Callable
   so geopatcher's core stays framework-free — see ADR-003).
 
@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 # A coregistration callable maps ``(raw_secondary_patch_data,
 # primary_patch_data) -> aligned_secondary_data``. The runtime
 # contract is intentionally loose so any callable — a
-# `pipekit.Operator`, a partial, a plain function — works.
+# `pipekit_ops.Operator`, a partial, a plain function — works.
 CoregFn = Callable[[Any, Any], Any]
 
 # ``(source_name, field, indexer) -> data`` — one source's read.
@@ -201,7 +201,7 @@ class MatchedField:
             raw = read(name, sec, sec_indexer)
             # Coreg callable: (secondary_raw, primary_data) -> aligned.
             # The runtime contract is intentionally loose so any
-            # callable — pipekit.Operator, partial, lambda — works.
+            # callable — pipekit_ops.Operator, partial, lambda — works.
             result[name] = self.coreg[name](raw, primary_data)
         return result
 

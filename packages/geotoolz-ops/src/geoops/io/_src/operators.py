@@ -14,10 +14,10 @@ Two families:
   A georeader ``GeoTensor`` / ``GeoData`` is refused with a ``TypeError``
   naming ``from_georeader`` / ``source_from_georeader``. Sources override
   ``_apply`` with no positional input and are valid as the first step of
-  a :class:`~pipekit.Sequential`.
+  a :class:`~pipekit_ops.Sequential`.
 * **Sink operators** (subclasses of :class:`SinkOperator`) consume a
   ``GeoArray`` and write it to disk / object storage. They are marked
-  ``_terminal = True`` so :class:`~pipekit.Sequential` only
+  ``_terminal = True`` so :class:`~pipekit_ops.Sequential` only
   accepts them as the last step.
 
 Configs built from paths, bounds, windows and asset IDs are plain JSON
@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 from geoarray import GeoArray, RasterSource
 from geoarray.interop.georeader import source_from_georeader
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.config import (
     as_tuple,
@@ -101,11 +101,11 @@ class SourceOperator(Operator):
     """Operator that produces a `GeoArray` without an input carrier.
 
     Source operators are valid as the *first* step of a
-    :class:`~pipekit.Sequential` because
-    :class:`~pipekit.Sequential` calls ``op()`` (no input) when the
+    :class:`~pipekit_ops.Sequential` because
+    :class:`~pipekit_ops.Sequential` calls ``op()`` (no input) when the
     pipeline is invoked without a carrier.
 
-    Graph mode: a source is not a :class:`~pipekit.Graph` node. Its
+    Graph mode: a source is not a :class:`~pipekit_ops.Graph` node. Its
     ``_apply`` takes no carrier, while a graph node is always built from
     (and later called with) at least one parent ``Node`` — and calling
     ``op()`` with no argument while building a graph simply reads
@@ -122,7 +122,7 @@ class SinkOperator(Operator):
     """Terminal operator that consumes a `GeoArray` and writes it.
 
     Sink operators are marked ``_terminal = True`` so
-    :class:`~pipekit.Sequential` only accepts them as the *last*
+    :class:`~pipekit_ops.Sequential` only accepts them as the *last*
     step (anywhere else they would break the GeoArray → next op
     contract by returning ``None``).
     """

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from _helpers import toy_geoarray
 from geoarray import GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 
 import geoops as gz
 from geoops.carrier import mask_invalid_to_nan, over_frames, wrap_like
@@ -130,7 +130,7 @@ def test_broken_operators_fail_naming_the_rule(op: Any, dtype: Any, match: str) 
 def test_containers_of_operators_round_trip_as_pipekit_refuses_them() -> None:
     # A config holding a *list* of nested operators is refused by pipekit's
     # from_state; that refusal is the expected outcome, not a crash.
-    from pipekit import Identity, Sequential
+    from pipekit_ops import Identity, Sequential
 
     from geoops._src.contract import assert_config_round_trips
 

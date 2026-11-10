@@ -12,7 +12,7 @@
 Today the three packages cover discovery / transform / patching as separate concerns:
 
 - **`geocatalog`** is a *local* spatiotemporal index over files already on disk. Its `GeoCatalog` Protocol, `GeoSlice` wire format, GeoParquet 1.1 persistence, and DuckDB SQL backend handle "what do I have, where, when?" for raster, vector, and xarray sources.
-- **`geotoolz`** is a `pipekit.Operator` library of remote-sensing domain operations on `geoarray.GeoArray` (radiometry, indices, masking, single-source geom ops, segmentation, etc.). Every operator is serializable to YAML and composes into `Sequential` / `Graph` pipelines.
+- **`geotoolz`** is a `pipekit_ops.Operator` library of remote-sensing domain operations on `geoarray.GeoArray` (radiometry, indices, masking, single-source geom ops, segmentation, etc.). Every operator is serializable to YAML and composes into `Sequential` / `Graph` pipelines.
 - **`geopatcher`** is a four-axis (Geometry × Sampler × Window × Aggregation) patching framework with three patcher types (`SpatialPatcher`, `TemporalPatcher`, `SpatioTemporalPatcher`) and `Field` adapters for raster / xarray / vector / xvec / rio-xarray. Streaming-first, numpy + scipy in the core.
 
 What's missing is the layer **above** local catalogs — discovering remote granules from external systems (NASA earthaccess, STAC endpoints, Google Earth Engine), deciding what's interesting, persisting that decision, finding *matchups* between heterogeneous sources, and optionally staging bytes — and the layer **between** patching and these matched sources so a downstream sampler can read co-located neighborhoods across LEO, GEO, vector, and point-cloud modalities.
@@ -27,7 +27,7 @@ This design covers all three packages because the user-facing workflow crosses a
 2. Persist queries themselves (not just their results) so workflows are reproducible and shareable.
 3. Compute matchups (pairwise or N-way) between persisted catalog entries with explicit spatial + temporal tolerances; persist matchups as first-class catalog artifacts.
 4. Stage / download bytes for a matchup set or query tag with caching, retry, and parallelism.
-5. Express cross-modality coregistration (LEO ↔ GEO, raster ↔ points, raster ↔ point-cloud, vector ↔ raster) as standard `pipekit.Operator`s in geotoolz so they compose declaratively and serialize to YAML.
+5. Express cross-modality coregistration (LEO ↔ GEO, raster ↔ points, raster ↔ point-cloud, vector ↔ raster) as standard `pipekit_ops.Operator`s in geotoolz so they compose declaratively and serialize to YAML.
 6. Let a downstream `geopatcher` sampler emit *matched patches* — joint local neighborhoods across the matched sources — without changing any existing patcher, geometry, window, or aggregation code.
 
 ### Non-goals
@@ -97,7 +97,7 @@ This design covers all three packages because the user-facing workflow crosses a
 │   ────────────────────                                                          │
 │     StackMatched              BlendMatched (IVW, weighted mean)                 │
 │                                                                                 │
-│   All are pipekit.Operator subclasses with get_config() → YAML serializable     │
+│   All are pipekit_ops.Operator subclasses with get_config() → YAML serializable     │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -364,7 +364,7 @@ The staged catalog is a normal `GeoCatalog`, so the existing `load_raster` / `lo
 
 ## 5. GeoToolz: `geom.coregister` and `compositing.matched`
 
-All cross-modality alignment lives in geotoolz under the existing `geom` namespace, plus two new operators in `compositing`. Each follows the package's two-tier convention: a pure numpy/scipy primitive in `_src/array.py`, a `pipekit.Operator` wrapper in `_src/operators.py`.
+All cross-modality alignment lives in geotoolz under the existing `geom` namespace, plus two new operators in `compositing`. Each follows the package's two-tier convention: a pure numpy/scipy primitive in `_src/array.py`, a `pipekit_ops.Operator` wrapper in `_src/operators.py`.
 
 ### 5.1 New file layout
 
@@ -377,7 +377,7 @@ src/geoops/
       coregister/                                     # NEW
         __init__.py
         array.py        # numpy/scipy primitives for cross-modality alignment
-        operators.py    # pipekit.Operator wrappers
+        operators.py    # pipekit_ops.Operator wrappers
     coregister.py       # public re-exports: from geoops.geom.coregister import *
   compositing/
     _src/
@@ -386,7 +386,7 @@ src/geoops/
 
 ### 5.2 Operator catalog
 
-All operators are `pipekit.Operator` subclasses, `__call__(*inputs) → GeoArray`, with `get_config()` for YAML round-trip.
+All operators are `pipekit_ops.Operator` subclasses, `__call__(*inputs) → GeoArray`, with `get_config()` for YAML round-trip.
 
 | Operator | Inputs → Output | Builds on | Notes |
 |---|---|---|---|
@@ -444,7 +444,7 @@ class RasterToPoints(Operator):
 
 ### 5.4 What this unlocks beyond matchups
 
-Because these are stateless `pipekit.Operator`s, they're useful outside any matchup or patching context:
+Because these are stateless `pipekit_ops.Operator`s, they're useful outside any matchup or patching context:
 
 - A flat pipeline that stacks Sentinel-2 + Landsat for a single AOI: `Sequential([RasterToRasterLike(), StackMatched()])`.
 - A station-validation script: `RasterToPoints()` to extract model output at in-situ buoy locations.
@@ -487,7 +487,7 @@ class MatchedField:
     """
     primary: Field
     secondaries: Mapping[str, Field]
-    coreg: Mapping[str, Callable]   # any Callable; pipekit.Operator (e.g. from
+    coreg: Mapping[str, Callable]   # any Callable; pipekit_ops.Operator (e.g. from
                                     # geoops.geom.coregister) is the recommended choice
                                     # — see ADR-003 for why the type is the broader Callable.
     valid_mask: bool = True         # matched patchers emit per-source nodata masks
@@ -729,7 +729,7 @@ Resolved questions keep their decision for the record.
 | 3 | STAC adapter: one generic + named factory helpers, or distinct subclasses per provider? | **Generic `STACSource(endpoint=...)` with class-method factories** |
 | 4 | Auth surface: defer to libraries, or add `geocatalog auth status` aggregator? | **Defer**; `Source.auth_status()` per adapter |
 | 5 | `MatchedPatch` subclasses `Patch` or sibling carrier? | **Sibling** (avoid LSP issues) |
-| 6 | `MatchedField.coreg` typed as `dict[str, Operator]` (pipekit) or untyped `Callable`? | **Resolved (ADR-003):** typed as `Mapping[str, Callable]`; `pipekit.Operator` is the recommended value but not required, so geopatcher's core stays framework-free. |
+| 6 | `MatchedField.coreg` typed as `dict[str, Operator]` (pipekit) or untyped `Callable`? | **Resolved (ADR-003):** typed as `Mapping[str, Callable]`; `pipekit_ops.Operator` is the recommended value but not required, so geopatcher's core stays framework-free. |
 | 7 | Should the matchup engine emit a *new catalog* or in-place new rows in `items.parquet`? | **New rows in `matchups.parquet`**; `items` stays atoms |
 | 8 | Cache scope for staging: per-catalog, per-user, or per-host? | **Per-user** (`~/.cache/geocatalog/`), overridable by `$GEOCATALOG_CACHE` |
 | 9 | Ship `BlendMatched(method="ivw")` with the first coregistration operators, or defer (uncertainty maps not always present)? | **Shipped** alongside `StackMatched` |
@@ -744,12 +744,12 @@ Resolved questions keep their decision for the record.
 
 ### A2. Coregistration strategies as a new `CoregistrationStrategy` class in geopatcher
 
-**Chosen:** plain `pipekit.Operator`s in geotoolz, held in a `dict[str, Operator]` on `MatchedField`.
+**Chosen:** plain `pipekit_ops.Operator`s in geotoolz, held in a `dict[str, Operator]` on `MatchedField`.
 **Rejected:** dedicated `CoregistrationStrategy` ABC in geopatcher. Reasons:
 - Duplicates work geotoolz's `geom` module already does for single-source ops.
 - Forces geopatcher to import or re-implement reprojection, rasterization, KDTree binning.
 - Breaks the "geopatcher core is numpy + scipy only" invariant.
-- Loses YAML serializability that `pipekit.Operator` gives for free.
+- Loses YAML serializability that `pipekit_ops.Operator` gives for free.
 
 ### A3. Merge `items.parquet` and `matchups.parquet` into one table
 

@@ -187,7 +187,7 @@ into a one-band result.
 
 ## Installation / extras
 
-`geotoolz` depends on [`pipekit`](https://github.com/jejjohnson/pipekit),
+`geotoolz` depends on [`pipekit-ops`](https://github.com/jejjohnson/pipekit),
 which is also pre-PyPI. The workspace root `pyproject.toml` pins its git
 source, so the simplest install is a clone of the monorepo:
 
@@ -197,12 +197,12 @@ cd geotoolz
 make install        # uv sync --all-packages --all-groups --all-extras + pre-commit hooks
 ```
 
-Outside the workspace, install pipekit from git alongside geotoolz (and
+Outside the workspace, install pipekit-ops from git alongside geotoolz (and
 `geotoolz-patcher` the same way for the `[patch]` extra):
 
 ```bash
 uv pip install \
-  "pipekit @ git+https://github.com/jejjohnson/pipekit#subdirectory=packages/pipekit" \
+  "pipekit-ops @ git+https://github.com/jejjohnson/pipekit@pipekit-ops-v0.2.1#subdirectory=packages/pipekit-ops" \
   "geotoolz @ git+https://github.com/jejjohnson/geotoolz@main#subdirectory=packages/geotoolz-ops"
 ```
 

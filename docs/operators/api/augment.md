@@ -64,7 +64,7 @@ restarts its stream. A seeded `Compose` owns its children's draws (it
 forwards a derived per-call seed to each child whose `_apply` accepts a
 `seed`); an unseeded one lets each child use its own stream.
 
-`Compose` is a probability-gated `pipekit.Sequential`. It lives only at
+`Compose` is a probability-gated `pipekit_ops.Sequential`. It lives only at
 `gz.augment.Compose` (not `gz.Compose`, which would read as pipekit's
 right-to-left `compose`). `compose | op` keeps the gate, but pipekit
 flattens a `Sequential` on the right of `|`, so write

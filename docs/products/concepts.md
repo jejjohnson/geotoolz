@@ -107,7 +107,7 @@ only when you call one.
 import numpy as np
 from affine import Affine
 from geoarray import GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoproducts import goes
 

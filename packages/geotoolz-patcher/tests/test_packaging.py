@@ -170,7 +170,7 @@ def test_scanner_sees_known_imports() -> None:
         assert expected in module_scope, expected
     used = _used_distributions()
     # georeader is an internal engine, imported only where it runs.
-    lazy_dists = ("xarray", "zarr", "jax", "geotoolz-cloud", "pipekit", "pyproj")
+    lazy_dists = ("xarray", "zarr", "jax", "geotoolz-cloud", "pipekit-ops", "pyproj")
     for lazy in (*lazy_dists, "georeader-spaceml"):
         assert lazy in used, lazy
         assert lazy not in {_dist(r) for r in module_scope}, lazy

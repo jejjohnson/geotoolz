@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import numpy as np
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.coupling import Coupling
 from geoops._src.geo import affine_of, require_geoarray

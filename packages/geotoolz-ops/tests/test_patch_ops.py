@@ -19,7 +19,7 @@ import numpy as np
 import rasterio
 from geoarray import GeoArray
 from geopatcher import Patch, RasterField, SpatialPatcher, spatial
-from pipekit import Lambda
+from pipekit_ops import Lambda
 
 import geoops
 import geoops.patch_ops as patch_ops
@@ -171,7 +171,7 @@ class TestApplyToChips:
         assert config == {
             "operator": {
                 "class": "Lambda",
-                "module": "pipekit.blocks",
+                "module": "pipekit_ops.blocks",
                 "config": double.get_config(),
             },
             "check_reach": True,

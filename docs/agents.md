@@ -51,8 +51,8 @@ geopatcher (tile / stitch), geoproducts (EO product readers) and geocloud
 or object-store helper, search the capability index
 (https://jejjohnson.github.io/geotoolz/capabilities/) or the installed
 packages' `__all__`, and compose what exists. New processing steps are
-`pipekit.Operator`s that keep the two contracts, so they chain with
-`geoops.Sequential` and run in a `pipekit.Graph`:
+`pipekit_ops.Operator`s that keep the two contracts, so they chain with
+`geoops.Sequential` and run in a `pipekit_ops.Graph`:
 
 - **Operator.**
   - Implement `_apply`, never `__call__`.

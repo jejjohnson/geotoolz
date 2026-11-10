@@ -44,7 +44,7 @@ class TestModelValidation:
             ModelOp(model=_Doubler(), method="predict")
 
     def test_predict_accepts_predictor(self) -> None:
-        from pipekit.protocols import Predictor
+        from pipekit_ops.protocols import Predictor
 
         model = _SklearnLike()
         assert isinstance(model, Predictor)

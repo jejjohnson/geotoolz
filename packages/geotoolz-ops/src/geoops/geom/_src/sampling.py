@@ -16,7 +16,7 @@ import warnings
 from typing import Any
 
 from geoarray import SPATIAL_DIMS, GeoArray, GeoPoints, to_pixel
-from pipekit import backend_of
+from pipekit_ops import backend_of
 
 
 __all__ = ["interp_at"]

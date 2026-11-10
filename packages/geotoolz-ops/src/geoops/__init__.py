@@ -49,7 +49,7 @@ workspace package (import name `geoproducts`); their output is a
 
 from __future__ import annotations
 
-from pipekit import (
+from pipekit_ops import (
     Branch,
     Carrier,
     Const,

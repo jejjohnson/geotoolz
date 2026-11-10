@@ -12,10 +12,11 @@ from packaging.version import Version
 
 PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 
-# The first release of each that geoarray needs: pipekit 0.1.3 ships
-# `pipekit.on_import` (the lazy JAX pytree registration); pipekit-array 0.0.5
-# registers `DimArray` the same way, so neither imports JAX on import.
-NEEDED = {"pipekit": Version("0.1.3"), "pipekit-array": Version("0.0.6")}
+# The first release of each that geoarray needs: pipekit-ops 0.2.0, the first
+# release of the core under that name, ships `pipekit_ops.on_import` (the lazy
+# JAX pytree registration); pipekit-array 0.1.1 registers `DimArray` the same
+# way, so neither imports JAX on import, and is the release built on pipekit-ops.
+NEEDED = {"pipekit-ops": Version("0.2.0"), "pipekit-array": Version("0.1.1")}
 
 
 @pytest.mark.parametrize("name", sorted(NEEDED))

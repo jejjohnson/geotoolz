@@ -30,7 +30,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.bands import (
     BAND_NAME_KEYS,

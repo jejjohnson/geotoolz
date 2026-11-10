@@ -23,8 +23,8 @@ from typing import Any, ClassVar, cast
 
 import numpy as np
 import pyproj
-from pipekit import on_import
 from pipekit_array.dimarray import vmapped_dims
+from pipekit_ops import on_import
 
 from geoarray._src.array import (
     _check_coords,
@@ -852,7 +852,7 @@ def pad_points(points: GeoPoints, n: int) -> GeoPoints:
 
 
 def _register_pytrees(jax: Any) -> None:
-    """Register `GeoSwath` and `GeoPoints` with JAX (run by `pipekit.on_import`)."""
+    """Register `GeoSwath` and `GeoPoints` with JAX (run by `pipekit_ops.on_import`)."""
     from jax.tree_util import GetAttrKey
 
     def swath_keys(s: GeoSwath) -> tuple[Any, Any]:

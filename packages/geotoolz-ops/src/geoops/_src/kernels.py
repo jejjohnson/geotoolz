@@ -29,8 +29,8 @@ from typing import Any
 
 import numpy as np
 from geoarray import GeoArray, GridMismatchError
-from pipekit import get_adapter
 from pipekit_array import DimArray, KernelOp, array_namespace, isel
+from pipekit_ops import get_adapter
 
 from geoops._src.bands import BandRef, resolve_band
 from geoops._src.geo import reject_geotensor

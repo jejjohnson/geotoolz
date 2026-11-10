@@ -821,7 +821,7 @@ def test_gap_fill_laplacian_operator_exposes_iterations() -> None:
 # MNF fitted-operator contract (#143): fit / transform / inverse.
 # ----------------------------------------------------------------------------
 def test_mnf_satisfies_fittable_transformer() -> None:
-    from pipekit.protocols import FittableTransformer
+    from pipekit_ops.protocols import FittableTransformer
 
     assert isinstance(MNF(n_components=2), FittableTransformer)
 
@@ -879,7 +879,7 @@ def test_mnf_first_call_fits_once_under_thread_map() -> None:
     import threading
     import time
 
-    from pipekit.parallel import ThreadMap
+    from pipekit_ops.parallel import ThreadMap
 
     rng = np.random.default_rng(24)
     scenes = [rng.normal(loc=i, scale=i + 1, size=(3, 6, 6)) for i in range(8)]

@@ -68,7 +68,7 @@ PY
    - parsers for products the stack reads (GOES, Himawari, Carbon Mapper)
      → `geoproducts`;
    - pipekit re-implemented:
-     - retry or backoff loops → `pipekit.Retry`;
+     - retry or backoff loops → `pipekit_ops.Retry`;
      - `try` / `except` fallbacks between steps → `Try` / `Coalesce`;
      - `if` dispatch between pipelines → `Branch` / `Switch`;
      - memo dicts → `Cache`;
@@ -78,7 +78,7 @@ PY
    - a new processing step that breaks the operator or carrier contract
      (see "Your own operators: the two contracts" in the
      `build-geo-pipeline` skill):
-     - it is not a `pipekit.Operator`, or it overrides `__call__`;
+     - it is not a `pipekit_ops.Operator`, or it overrides `__call__`;
      - its constructor takes positional arguments or a raster;
      - it returns a bare array for a GeoArray input, or accepts a
        georeader `GeoTensor` (convert once at the boundary with

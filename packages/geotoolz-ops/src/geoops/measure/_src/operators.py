@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.config import as_tuple
 from geoops._src.geo import (

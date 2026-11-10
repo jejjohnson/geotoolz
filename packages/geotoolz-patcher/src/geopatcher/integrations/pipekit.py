@@ -1,10 +1,10 @@
 """pipekit operators around `geopatcher`: `GridSampler`, `ApplyToChips`, `MergePatches`.
 
-Thin glue between the four-axis Patcher framework and `pipekit.Operator`,
+Thin glue between the four-axis Patcher framework and `pipekit_ops.Operator`,
 so a sliding-window inference pipeline composes inside a `Sequential` or
 `Graph`::
 
-    from pipekit import Sequential
+    from pipekit_ops import Sequential
     from geopatcher.integrations.pipekit import (
         GridSampler, ApplyToChips, MergePatches,
     )
@@ -15,13 +15,13 @@ so a sliding-window inference pipeline composes inside a `Sequential` or
         MergePatches(aggregation=spatial.aggregation.OverlapAdd(), domain=field.domain),
     ])
 
-Optional extra: install the ``[pipekit]`` extra to pull in pipekit.
-While `pipekit` is pre-PyPI, use ``uv sync --extra pipekit`` from a
+Optional extra: install the ``[pipekit]`` extra to pull in pipekit-ops.
+While `pipekit-ops` is pre-PyPI, use ``uv sync --extra pipekit`` from a
 checkout of the geotoolz monorepo so uv can resolve the git source the
-workspace declares. Once `pipekit` ships to PyPI, plain
+workspace declares. Once `pipekit-ops` ships to PyPI, plain
 ``pip install 'geotoolz-patcher[pipekit]'`` will work too.
 
-Importing this module without pipekit installed raises a friendly
+Importing this module without pipekit-ops installed raises a friendly
 ``ImportError`` pointing at the right extra.
 """
 
@@ -35,14 +35,14 @@ import numpy as np
 
 
 try:
-    from pipekit import Operator
-    from pipekit._base.operator import nested_config
+    from pipekit_ops import Operator
+    from pipekit_ops._base.operator import nested_config
 except ImportError as _e:  # pragma: no cover - exercised when [pipekit] is missing
     raise ImportError(
-        "geopatcher.integrations.pipekit requires the `pipekit` package. "
+        "geopatcher.integrations.pipekit requires the `pipekit-ops` package. "
         "Install the [pipekit] extra with `uv sync --extra pipekit` "
         "(or `uv pip install 'geotoolz-patcher[pipekit]'`); plain "
-        "`pip install` will work once pipekit reaches PyPI."
+        "`pip install` will work once pipekit-ops reaches PyPI."
     ) from _e
 
 from geopatcher import Patch, SpatialPatcher
@@ -64,8 +64,8 @@ class GridSampler(Operator):
 
     Note:
         ``forbid_in_yaml = True`` — `patcher` is a runtime `SpatialPatcher`
-        (not a `pipekit.Operator`), so pipekit's `from_state` cannot rebuild
-        it and `pipekit.check_pickleable` cannot look inside it; the flag
+        (not a `pipekit_ops.Operator`), so pipekit's `from_state` cannot rebuild
+        it and `pipekit_ops.check_pickleable` cannot look inside it; the flag
         makes the lint report this operator, so a closure-bearing axis
         (e.g. `spatial.window.Custom`) is not hidden. `get_config()` nests the
         patcher as a ``{"class", "config"}`` envelope, which
@@ -185,7 +185,7 @@ class ApplyToChips(Operator):
     still blends in edge pixels unless the window gives them zero weight.
 
     Args:
-        operator: The per-chip operator (any `pipekit.Operator`).
+        operator: The per-chip operator (any `pipekit_ops.Operator`).
         check_reach: Warn as above. ``False`` turns the check off.
     """
 

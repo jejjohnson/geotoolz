@@ -28,8 +28,8 @@ from importlib import import_module
 from typing import Any
 
 import numpy as np
-from pipekit import Signature, get_adapter, register_adapter
 from pipekit_array import DimArray, DimArrayAdapter
+from pipekit_ops import Signature, get_adapter, register_adapter
 
 from geoarray._src.array import SPATIAL_DIMS, GeoArray, build, fill_fits
 from geoarray._src.attrs import PER_BAND_KEYS, concat_bands, drop_band_keys
@@ -65,7 +65,7 @@ def _fill_for_dtype(fill: Any, dtype: Any) -> Any:
 
 
 class GeoArrayAdapter:
-    """The `pipekit.NamedArrayAdapter` for `GeoArray`.
+    """The `pipekit_ops.NamedArrayAdapter` for `GeoArray`.
 
     Example:
         >>> import numpy as np
@@ -89,7 +89,13 @@ class GeoArrayAdapter:
         return x.data
 
     def labels(self, x: GeoArray, dim: str) -> tuple[Any, ...] | None:
-        """The dim's coordinate labels; ``None`` for ``y``, ``x`` and bare dims."""
+        """The dim's coordinate labels; ``None`` for ``y``, ``x`` and bare dims.
+
+        pipekit-array also reads back the ``DimArray`` that `rewrap` returns
+        off the grid, so that carrier is read as a ``DimArray``.
+        """
+        if isinstance(x, DimArray):
+            return _DIMARRAY.labels(x, dim)
         return None if dim in SPATIAL_DIMS else x.labels(dim)
 
     def batch_dims(self, x: GeoArray) -> tuple[str, ...]:
@@ -349,7 +355,13 @@ class _GeolocatedAdapter:
         return x.data
 
     def labels(self, x: Any, dim: str) -> tuple[Any, ...] | None:
-        """The dim's coordinate labels; ``None`` for the spatial dims."""
+        """The dim's coordinate labels; ``None`` for the spatial dims.
+
+        Like `GeoArrayAdapter.labels`, it reads `rewrap`'s off-geometry
+        ``DimArray`` as a ``DimArray``.
+        """
+        if isinstance(x, DimArray):
+            return _DIMARRAY.labels(x, dim)
         return None if dim in x.spatial_dims else x.labels(dim)
 
     def batch_dims(self, x: Any) -> tuple[str, ...]:
@@ -453,7 +465,7 @@ class _GeolocatedAdapter:
 
 
 class GeoSwathAdapter(_GeolocatedAdapter):
-    """The `pipekit.NamedArrayAdapter` for `GeoSwath`: lat/lon must match exactly.
+    """The `pipekit_ops.NamedArrayAdapter` for `GeoSwath`: lat/lon must match exactly.
 
     A reduction over ``row`` or ``col`` (per-column statistics) is a
     ``DimArray``.
@@ -464,7 +476,7 @@ class GeoSwathAdapter(_GeolocatedAdapter):
 
 
 class GeoPointsAdapter(_GeolocatedAdapter):
-    """The `pipekit.NamedArrayAdapter` for `GeoPoints`: xy, z, time, valid match.
+    """The `pipekit_ops.NamedArrayAdapter` for `GeoPoints`: xy, z, time, valid match.
 
     A reduction over ``obs`` is a ``DimArray``.
     """

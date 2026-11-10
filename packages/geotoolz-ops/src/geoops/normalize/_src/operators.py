@@ -9,7 +9,7 @@ carrier-aware wrappers handle:
 * fitting per-band statistics (``fit(x)`` / ``fit_on_call=True``) into
   fitted ``*_`` attributes that ``get_config()`` never serialises, with a
   pure ``transform(x)`` -- the scalers satisfy
-  :class:`pipekit.protocols.FittableTransformer`,
+  :class:`pipekit_ops.protocols.FittableTransformer`,
 * JSON-safe ``get_config()`` via the shared
   :func:`geoops._src.config.jsonable` helper (ndarray leaves become
   plain Python lists for Hydra / YAML round-trip),
@@ -40,8 +40,8 @@ from typing import Any, ClassVar, NamedTuple, Self
 
 import numpy as np
 from geoarray import GeoArray
-from pipekit import Operator, get_adapter
 from pipekit_array import KernelOp
+from pipekit_ops import Operator, get_adapter
 
 from geoops._src.config import jsonable
 from geoops._src.coupling import Coupling
@@ -446,7 +446,7 @@ class StandardScaler(Operator):
         fit_on_call: If ``True`` and the operator is not fitted yet,
             fit ``mean_`` / ``std_`` on the first call and reuse them for
             every later call. The fit
-            runs once even under concurrent calls (``pipekit.ThreadMap``),
+            runs once even under concurrent calls (``pipekit_ops.ThreadMap``),
             but which scene it sees is then the first to arrive -- call
             :meth:`fit` before parallel use for a deterministic fit.
 

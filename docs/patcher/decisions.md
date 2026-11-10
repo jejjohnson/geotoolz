@@ -132,7 +132,7 @@ patchers (`MatchedSpatialPatcher`, `MatchedTemporalPatcher`,
   coregistration callable per secondary, called as
   `coreg[name](raw_secondary, primary_data)`. Type is the broad
   `Callable[[Any, Any], Any]`, but the **recommended** value is a
-  `pipekit.Operator` from `geoops.geom.coregister.*` so the
+  `pipekit_ops.Operator` from `geoops.geom.coregister.*` so the
   alignment step round-trips through YAML.
 - `MatchedField.select(indexer)` returns a plain
   `dict[str, data]` — the primary's read under `"primary"`
@@ -168,8 +168,8 @@ The composite-Field approach satisfies all three constraints: every
 existing sampler, geometry and window places anchors and indexers on
 a `MatchedField` unchanged (they only see the primary's domain); the
 heavy alignment work lives in `geoops.geom.coregister.*`
-`pipekit.Operator`s; geopatcher's only new typing dependency is the
-standard-library `Callable` (since `pipekit.Operator` IS callable).
+`pipekit_ops.Operator`s; geopatcher's only new typing dependency is the
+standard-library `Callable` (since `pipekit_ops.Operator` IS callable).
 
 **Consequences.**
 
@@ -215,10 +215,10 @@ standard-library `Callable` (since `pipekit.Operator` IS callable).
   `anchor`, `indices`, `weights` would break on a `MatchedPatch`
   because there is no single `data`. Sibling carrier sidesteps the
   whole question.
-- *Type `coreg` as `Mapping[str, pipekit.Operator]`.* Imports
+- *Type `coreg` as `Mapping[str, pipekit_ops.Operator]`.* Imports
   pipekit into geopatcher's runtime, breaking the framework-free
   core. Rejected; the broader `Callable` is enough.
-  `pipekit.Operator` users are still first-class — they're just
+  `pipekit_ops.Operator` users are still first-class — they're just
   not the only allowed value.
 - *A separate `MatchedPatcher` family alongside `SpatialPatcher` /
   `TemporalPatcher` with its own samplers, geometries, windows and

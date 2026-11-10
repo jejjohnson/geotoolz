@@ -40,7 +40,7 @@ geoops/<family>/
 └── _src/
     ├── array.py        # Tier A: pure numpy primitives, jaxtyping-annotated,
     │                   # no GeoArray / metadata / operator state
-    ├── operators.py    # Tier B: every pipekit.Operator of the family; judges
+    ├── operators.py    # Tier B: every pipekit_ops.Operator of the family; judges
     │                   # nodata, calls Tier A, rewraps via wrap_like
     └── <topic>.py      # optional: constants / lookup tables / non-Operator
                         # helpers (qa/_src/scl.py, radiometry/_src/solar.py, …)
@@ -86,7 +86,7 @@ Anything two or more families need lives in `geoops/_src/`:
 
 ## Operator parameter vocabulary
 
-Every `pipekit.Operator` constructor is **keyword-only** —
+Every `pipekit_ops.Operator` constructor is **keyword-only** —
 `__init__(self, *, ...)`, with no exception for a wrapped estimator / model /
 patcher (`PixelwisePCA(estimator=PCA())`, `ModelOp(model=net)`,
 `GridSampler(patcher=p)`). One concept has one parameter name across every

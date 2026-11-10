@@ -60,7 +60,7 @@ assert gz.Operator.from_state(op.state).get_config() == op.get_config()
 - the fill suits the output dtype, the input's nodata stays nodata, and
   the input is left untouched;
 - `backends` is declared: a NumPy-only operator refuses a JAX carrier
-  with `pipekit.BackendError`, and one that lists `"jax"` matches its
+  with `pipekit_ops.BackendError`, and one that lists `"jax"` matches its
   NumPy result and traces once under `jax.jit`;
 - a `(T, C, H, W)` stack matches the per-frame results, or is rejected
   with an error naming the operator;

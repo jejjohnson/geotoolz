@@ -237,7 +237,7 @@ class TestMergeRefusesGeoreader:
             asyncio.run(patcher.amerge(stream(), field.domain))
 
     def test_merge_patches_refuses_a_geotensor_domain_and_chips(self) -> None:
-        pytest.importorskip("pipekit")
+        pytest.importorskip("pipekit_ops")
         from geopatcher.integrations.pipekit import MergePatches
 
         field = RasterField(_scene())
@@ -410,7 +410,7 @@ class TestRewrapFill:
         assert np.isnan(float(out.fill_value))
 
     def test_merge_patches_on_a_band_collapsing_uint8_output(self) -> None:
-        pytest.importorskip("pipekit")
+        pytest.importorskip("pipekit_ops")
         from geopatcher.integrations.pipekit import MergePatches
 
         scene = GeoArray(

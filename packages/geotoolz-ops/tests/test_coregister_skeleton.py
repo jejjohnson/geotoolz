@@ -8,7 +8,7 @@ can't accidentally rename a public field.
 from __future__ import annotations
 
 import pytest
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops.compositing import BlendMatched, StackMatched
 from geoops.geom import coregister as cg
@@ -44,7 +44,7 @@ class TestSubnamespaceWiring:
 
 
 class TestOperatorContract:
-    """Every coregister op is a `pipekit.Operator` with a working
+    """Every coregister op is a `pipekit_ops.Operator` with a working
     `get_config`."""
 
     @pytest.mark.parametrize(

@@ -11,38 +11,38 @@ page first.
 
 ## Base
 
-::: pipekit.Operator
+::: pipekit_ops.Operator
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: pipekit.ConfigMixin
+::: pipekit_ops.ConfigMixin
     options:
       show_root_heading: true
 
 ## Linear composition
 
-::: pipekit.Sequential
+::: pipekit_ops.Sequential
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Graphs
 
-::: pipekit.Input
+::: pipekit_ops.Input
     options:
       show_root_heading: true
 
-::: pipekit.Node
+::: pipekit_ops.Node
     options:
       show_root_heading: true
 
-::: pipekit.Graph
+::: pipekit_ops.Graph
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: pipekit.Fanout
+::: pipekit_ops.Fanout
     options:
       show_root_heading: true
       show_signature_annotations: true
@@ -56,50 +56,50 @@ page first.
 
 ## Observers — identity with side effects
 
-::: pipekit.Tap
+::: pipekit_ops.Tap
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: pipekit.Snapshot
+::: pipekit_ops.Snapshot
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: pipekit.ShapeTrace
+::: pipekit_ops.ShapeTrace
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Control flow
 
-::: pipekit.Branch
+::: pipekit_ops.Branch
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: pipekit.Switch
+::: pipekit_ops.Switch
     options:
       show_root_heading: true
       show_signature_annotations: true
 
 ## Building blocks
 
-::: pipekit.Identity
+::: pipekit_ops.Identity
     options:
       show_root_heading: true
 
-::: pipekit.Const
-    options:
-      show_root_heading: true
-      show_signature_annotations: true
-
-::: pipekit.Lambda
+::: pipekit_ops.Const
     options:
       show_root_heading: true
       show_signature_annotations: true
 
-::: pipekit.Sink
+::: pipekit_ops.Lambda
+    options:
+      show_root_heading: true
+      show_signature_annotations: true
+
+::: pipekit_ops.Sink
     options:
       show_root_heading: true
       show_signature_annotations: true

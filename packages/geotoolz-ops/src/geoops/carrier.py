@@ -75,7 +75,7 @@ Example:
     An operator that keeps the carrier contract::
 
         import numpy as np
-        from pipekit import Operator
+        from pipekit_ops import Operator
 
         from geoops.carrier import mask_invalid_to_nan, over_frames, wrap_like
 

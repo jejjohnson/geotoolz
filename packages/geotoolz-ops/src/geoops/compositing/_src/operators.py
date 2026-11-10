@@ -1,7 +1,7 @@
 """Carrier-aware compositing operators for co-registered GeoArrays.
 
 All composites are N-ary reducers: they take their inputs as positional
-arguments, ``op(f1, f2, ...)``, so they wire into a ``pipekit.Graph`` as
+arguments, ``op(f1, f2, ...)``, so they wire into a ``pipekit_ops.Graph`` as
 ``op(Input("a"), Input("b"))``, or as one sequence, ``op([f1, f2])``
 (the multi-input convention, see ``docs/operators/concepts.md``). They are
 metadata-independent per-pixel reductions, so they accept plain
@@ -46,7 +46,7 @@ from typing import Any, ClassVar
 import numpy as np
 from geoarray import GeoArray
 from jaxtyping import Bool, Float, Shaped
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.bands import (
     BandRef,
@@ -842,7 +842,7 @@ class StackMatched(Operator):
     """Concatenate aligned tensors along the band axis.
 
     Inputs are positional, ``op(a, b, ...)`` -- so the operator wires into
-    a ``pipekit.Graph`` as ``StackMatched()(Input("a"), Input("b"))`` --
+    a ``pipekit_ops.Graph`` as ``StackMatched()(Input("a"), Input("b"))`` --
     or one ``Sequence[GeoArray]`` or ``Mapping[str, GeoArray]`` --
     typical when called on `MatchedPatch.members` -- or one ``(T, C, H, W)``
     stack whose frames are the inputs. All inputs must share spatial shape,
@@ -948,7 +948,7 @@ class BlendMatched(Operator):
       ``BlendMatched(method="ivw")((a, var_a), (b, var_b))``.
 
     Inputs are positional, ``op(a, b, ...)`` -- so the operator wires into
-    a ``pipekit.Graph`` as ``BlendMatched()(Input("a"), Input("b"))`` --
+    a ``pipekit_ops.Graph`` as ``BlendMatched()(Input("a"), Input("b"))`` --
     or one sequence or mapping of them, or one ``(T, C, H, W)`` stack whose
     frames are the inputs.
 

@@ -2,7 +2,7 @@
 
 A readable type is not a subclass. ``GeoImage`` is "a grid carrier with
 dims ``band y x``", and any carrier matches it when its pipekit adapter
-reports a fitting `pipekit.Signature` and its *kind reader* says it is a
+reports a fitting `pipekit_ops.Signature` and its *kind reader* says it is a
 grid: a `GeoArray`, or (with ``geotoolz-array[xarray]``) a lazy
 ``DataArray`` cube whose horizontal dims are ``lat lon``. Slicing a
 ``GeoImageSeries`` at one date simply is a ``GeoImage``.
@@ -27,7 +27,7 @@ import typing
 from collections.abc import Callable
 from typing import Annotated, Any, NamedTuple
 
-from pipekit import Signature, get_adapter
+from pipekit_ops import Signature, get_adapter
 
 from geoarray._src.errors import GeoArrayError
 

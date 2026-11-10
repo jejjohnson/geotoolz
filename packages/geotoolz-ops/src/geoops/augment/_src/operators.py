@@ -41,8 +41,8 @@ import numpy as np
 from affine import Affine
 from geoarray import GeoArray, PixelWindow
 from jaxtyping import Shaped
-from pipekit import Operator, Sequential
-from pipekit._base.operator import require_operator
+from pipekit_ops import Operator, Sequential
+from pipekit_ops._base.operator import require_operator
 
 from geoops._src.bands import band_count, resolve_bands
 from geoops._src.config import (
@@ -256,7 +256,7 @@ def _new_geoarray(
 class Compose(Sequential):
     """Apply augmentations sequentially behind a pipeline probability gate.
 
-    A :class:`pipekit.Sequential` whose whole chain runs with probability
+    A :class:`pipekit_ops.Sequential` whose whole chain runs with probability
     ``p`` and whose children can be seeded from one top-level seed.
 
     Seeding follows the module contract. When ``Compose`` is seeded — by
@@ -273,7 +273,7 @@ class Compose(Sequential):
     constructor-only are called plainly.
 
     ``get_config`` emits the children's nested configs (via
-    :class:`~pipekit.Sequential`) under ``augmentations``. ``Compose`` is
+    :class:`~pipekit_ops.Sequential`) under ``augmentations``. ``Compose`` is
     a container, so it is not ``forbid_in_yaml`` itself; a flagged child
     is found structurally by pipekit's walker.
 
@@ -1118,7 +1118,7 @@ class CutMix(Operator):
 
     Called as ``op(gt, *pool)`` -- the donors are positional carriers after
     the input (or one list of them, ``op(gt, [d1, d2])``), so the operator
-    wires into a ``pipekit.Graph`` as ``CutMix()(Input("x"), Input("d1"),
+    wires into a ``pipekit_ops.Graph`` as ``CutMix()(Input("x"), Input("d1"),
     Input("d2"))``. With no donors the input passes through unchanged.
 
     Every donor must share the input's pixel grid exactly

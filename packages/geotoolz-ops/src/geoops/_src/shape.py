@@ -408,7 +408,7 @@ def gather_inputs(
     """The inputs of an N-ary reducer called as ``op(a, b, ...)`` or ``op([a, b])``.
 
     The multi-input convention (#141): N-ary reducers take their carriers
-    as positional arguments, so they wire into a ``pipekit.Graph`` as
+    as positional arguments, so they wire into a ``pipekit_ops.Graph`` as
     ``op(Input("a"), Input("b"))``; a single list / tuple of them is
     accepted too. With ``pairs=True`` each input is a ``(carrier, extra)``
     pair, and a lone 2-tuple is one pair, not a sequence of two inputs

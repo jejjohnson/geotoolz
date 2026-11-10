@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from _helpers import toy_geoarray
 from geoarray import GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 from shapely.geometry import Point, box
 
 from geoops.geom.coregister import (

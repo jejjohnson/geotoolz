@@ -14,7 +14,7 @@ from zipfile import ZipFile
 
 import numpy as np
 from geoarray import GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.config import jsonable, nested_config
 from geoops._src.coupling import Coupling
@@ -745,7 +745,7 @@ class CombineMasks(Operator):
 
     Called with the masks as positional arguments, ``op(m1, m2, ...)``
     (GeoArrays or plain ndarrays) -- so it wires straight into a
-    ``pipekit.Graph`` as ``CombineMasks()(Input("a"), Input("b"))`` -- or
+    ``pipekit_ops.Graph`` as ``CombineMasks()(Input("a"), Input("b"))`` -- or
     with one sequence of them, ``op([m1, m2])``, or one ``(T, C, H, W)``
     stack whose frames are the masks. Every mask must sit on the first
     mask's pixel grid (``ValueError`` otherwise, see
@@ -812,7 +812,7 @@ class ApplyMask(Operator):
 
     Called as ``op(gt, mask)`` with the boolean mask carrier (GeoArray
     or ndarray) on ``gt``'s pixel grid (``ValueError`` otherwise), so it
-    wires into a ``pipekit.Graph`` as ``ApplyMask()(Input("x"),
+    wires into a ``pipekit_ops.Graph`` as ``ApplyMask()(Input("x"),
     Input("mask"))``. Alternatively configure a mask *operator* (e.g. a
     geometry mask) that builds the mask from ``gt`` and call ``op(gt)``.
 

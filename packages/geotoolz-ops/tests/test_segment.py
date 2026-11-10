@@ -9,7 +9,7 @@ import pytest
 import rasterio
 from _helpers import fill_pixel_mask, toy_fill, toy_geoarray
 from geoarray import GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 
 import geoops as gz
 from geoops._src.geo import affine_of

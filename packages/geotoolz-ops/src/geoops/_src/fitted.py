@@ -3,14 +3,14 @@
 Fitted operators (the ``normalize`` scalers, ``matched_filter.MatchedFilter``,
 ``restore.MNF``, ``learn.SklearnOp``) expose sklearn-style ``fit(x) -> self``
 and a pure ``transform(x)`` so they satisfy
-:class:`pipekit.protocols.FittableTransformer`. Fitted state lives in
+:class:`pipekit_ops.protocols.FittableTransformer`. Fitted state lives in
 trailing-underscore attributes (``mean_``, ``cov_op_``, ...) that are never
 constructor parameters, so ``get_config()`` -- which mirrors the
 constructor -- never serialises it.
 
 When an operator learns its state on the first call, ``_apply`` routes
 through :func:`fit_once`: the check-fit-publish sequence runs under a
-per-instance lock, so concurrent first calls under ``pipekit.ThreadMap`` fit
+per-instance lock, so concurrent first calls under ``pipekit_ops.ThreadMap`` fit
 exactly once and every call transforms with the same, fully published
 state. *Which* item the state is learned from is still whichever call
 takes the lock first; fit explicitly (``op.fit(x)``) before parallel use for

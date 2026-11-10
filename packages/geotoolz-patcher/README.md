@@ -54,9 +54,9 @@ pip install 'geotoolz-patcher[patch-full]'         # all of the above
 pip install 'geotoolz-patcher[pipekit]'            # pipekit operator-graph bridge
 ```
 
-> `pipekit` isn't on PyPI yet; the `[pipekit]` extra resolves via `uv sync
+> `pipekit-ops` isn't on PyPI yet; the `[pipekit]` extra resolves via `uv sync
 > --extra pipekit` against the GitHub source. Plain `pip install` of that
-> extra will start working once `pipekit` ships to PyPI.
+> extra will start working once `pipekit-ops` ships to PyPI.
 
 ## Quickstart
 

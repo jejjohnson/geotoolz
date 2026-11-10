@@ -11,7 +11,7 @@ import pytest
 import rasterio
 from _helpers import toy_fill, toy_geoarray
 from geoarray import GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 from shapely.geometry import MultiPolygon, Point, box
 
 from geoops._src.geo import affine_of

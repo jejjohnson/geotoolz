@@ -18,7 +18,7 @@ def test_version_attribute() -> None:
 
 def test_core_re_exports_at_top_level() -> None:
     """Public symbols should be reachable as ``gz.X`` (re-exported from pipekit)."""
-    import pipekit
+    import pipekit_ops
 
     pipekit_names = (
         "Operator",
@@ -38,8 +38,8 @@ def test_core_re_exports_at_top_level() -> None:
         "Sink",
     )
     for name in pipekit_names:
-        assert getattr(geoops, name) is getattr(pipekit, name), name
-    # ModelOp is geotoolz-specific (built on top of pipekit.Operator).
+        assert getattr(geoops, name) is getattr(pipekit_ops, name), name
+    # ModelOp is geotoolz-specific (built on top of pipekit_ops.Operator).
     from geoops.learn import ModelOp
 
     assert geoops.ModelOp is ModelOp
@@ -48,11 +48,11 @@ def test_core_re_exports_at_top_level() -> None:
 def test_from_state_refuses_forbid_in_yaml() -> None:
     """pipekit >= 0.0.2 refuses to rebuild a ``forbid_in_yaml`` operator.
 
-    Guards the pipekit pin: with 0.0.1 this "succeeded" and returned an
+    Guards the pipekit-ops pin: with 0.0.1 this "succeeded" and returned an
     operator whose ``geometries == '<list n=0>'``.
     """
     import pytest
-    from pipekit import Operator
+    from pipekit_ops import Operator
 
     from geoops.geom import Rasterize
 
@@ -96,7 +96,7 @@ def test_formerly_call_overriding_operators_support_graph_mode() -> None:
     """Regression for #135: these used to override ``__call__``."""
     import inspect
 
-    from pipekit import Input, Node
+    from pipekit_ops import Input, Node
 
     for op in _multi_input_operators():
         params = inspect.signature(op._apply).parameters.values()
@@ -171,7 +171,7 @@ def _public_modules() -> list[Any]:
 
 def test_public_operators_exported() -> None:
     """Every public Operator (and the SCL / QA constants) is top-level (#164)."""
-    from pipekit import Operator
+    from pipekit_ops import Operator
 
     assert len(geoops.__all__) == len(set(geoops.__all__))
     modules = _public_modules()

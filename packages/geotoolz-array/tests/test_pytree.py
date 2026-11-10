@@ -241,7 +241,7 @@ def test_to_jax_moves_stamps_of_a_carrier_built_on_jax(x64: ModuleType) -> None:
 
 
 def test_importing_geoarray_does_not_import_jax_and_jax_registers_later() -> None:
-    """The pytrees are registered when JAX is imported (pipekit.on_import, #528)."""
+    """The pytrees are registered when JAX is imported (pipekit_ops.on_import, #528)."""
     import subprocess
     import sys
 

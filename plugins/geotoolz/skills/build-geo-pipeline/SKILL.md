@@ -38,7 +38,7 @@ an object-store client — look it up:
    ```
 
 2. Compose what exists. If something is *almost* there, configure or wrap it
-   (a `pipekit.Lambda`, an operator parameter) before writing a replacement.
+   (a `pipekit_ops.Lambda`, an operator parameter) before writing a replacement.
 
 ## Which package does what
 
@@ -59,7 +59,7 @@ an object-store client — look it up:
 | credentials per bucket / container (SAS, keys, anonymous), GDAL options for them | `geotoolz-cloud` | `geocloud.credentials` (`set_credentials`, `load_credentials`, `gdal_access`) |
 
 Everything is `geoarray.GeoArray` in and out, and every operator is a
-`pipekit.Operator`, so steps chain with `gz.Sequential([...])` or `|`.
+`pipekit_ops.Operator`, so steps chain with `gz.Sequential([...])` or `|`.
 A georeader `GeoTensor` from older code converts without a copy with
 `geoarray.interop.georeader.from_georeader` (a lazy georeader reader with
 `source_from_georeader`); passing one in directly raises a `TypeError`.
@@ -140,10 +140,10 @@ pipeline.
 
 **pipekit `Operator` (how steps compose):**
 
-- **Subclass and implement.** Subclass `pipekit.Operator` and implement
+- **Subclass and implement.** Subclass `pipekit_ops.Operator` and implement
   `_apply`; never override `__call__`. It runs `_apply` on data and builds a
-  graph node on a `pipekit.Input`, so the step works eagerly, in `a | b`
-  and in a `pipekit.Graph`.
+  graph node on a `pipekit_ops.Input`, so the step works eagerly, in `a | b`
+  and in a `pipekit_ops.Graph`.
 - **Keyword-only constructor that holds configuration only.** Use
   `__init__(self, *, ...)` and store each argument under its own name.
   `get_config()` is then derived for you, must be JSON, and
@@ -193,7 +193,7 @@ rules, so your step keeps them the same way:
 
 ```python
 import numpy as np
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops.carrier import mask_invalid_to_nan, over_frames, wrap_like
 

@@ -1,6 +1,6 @@
 """Carrier-aware matched-filter Operators.
 
-Thin ``pipekit.Operator`` wrappers around the Tier-A primitives in
+Thin ``pipekit_ops.Operator`` wrappers around the Tier-A primitives in
 :mod:`geoops.matched_filter._src.array`. Matched-filter math is
 metadata-independent (covariance / Mahalanobis algebra over spectra),
 so every operator here accepts either a ``GeoArray`` or a plain
@@ -31,7 +31,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
 import numpy as np
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops.carrier import (
     Coupling,

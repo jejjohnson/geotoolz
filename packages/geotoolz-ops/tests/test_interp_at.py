@@ -225,7 +225,7 @@ def test_operator_reads_its_own_frame() -> None:
 
 
 def test_operator_runs_in_a_graph() -> None:
-    from pipekit import Graph, Input
+    from pipekit_ops import Graph, Input
 
     g = _ramp()
     pts = _at(g, [(2.2, 3.1)])
@@ -239,7 +239,7 @@ def test_operator_runs_in_a_graph() -> None:
 
 
 def test_operator_config_round_trips() -> None:
-    from pipekit import Operator
+    from pipekit_ops import Operator
 
     op = gz.InterpAt(method="nearest", along="level")
     assert op.get_config() == {"method": "nearest", "along": "level"}

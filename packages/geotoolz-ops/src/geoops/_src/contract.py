@@ -71,7 +71,7 @@ def assert_config_round_trips(op: Any) -> None:
     outcome for them. A config that is not JSON is a debug repr, allowed
     only on a ``forbid_in_yaml`` operator.
     """
-    from pipekit import dumps, loads
+    from pipekit_ops import dumps, loads
 
     cls = type(op)
     config = op.get_config()
@@ -101,7 +101,7 @@ def assert_config_round_trips(op: Any) -> None:
 
 def assert_graph_mode(op: Any, n_inputs: int = 1) -> None:
     """``op`` called on ``Input`` nodes records a graph ``Node``."""
-    from pipekit import Input, Node
+    from pipekit_ops import Input, Node
 
     node = op(*(Input(f"x{i}") for i in range(n_inputs)))
     assert isinstance(node, Node), (
@@ -346,7 +346,7 @@ def assert_backends(op: Any, sample: Any, *others: Any) -> None:
 
     - ``backends`` is a non-empty tuple of known backend names.
     - When JAX is installed: an operator that does not list ``"jax"``
-      refuses a JAX carrier with `pipekit.BackendError` naming itself; one
+      refuses a JAX carrier with `pipekit_ops.BackendError` naming itself; one
       that lists it matches its NumPy result on JAX carriers, returns JAX
       data, and traces once under ``jax.jit`` for two same-shape inputs
       on different grids (the transform is a leaf, never static).
@@ -363,7 +363,7 @@ def assert_backends(op: Any, sample: Any, *others: Any) -> None:
         *others: Further carriers of a multi-input operator, on ``sample``'s
             grid.
     """
-    from pipekit import BackendError, backend_of
+    from pipekit_ops import BackendError, backend_of
 
     name = type(op).__name__
     backends = op.backends

@@ -121,7 +121,7 @@ hard rules. The long form, with examples, is
 
 ### pipekit `Operator`: how pieces compose
 
-- **Subclass `pipekit.Operator` and implement `_apply`.** Never override
+- **Subclass `pipekit_ops.Operator` and implement `_apply`.** Never override
   `__call__`. It runs `_apply` on a value, and on an `Input` / `Node` it
   records a graph node, so the same operator works eagerly, in a
   `Sequential` (`a | b`) and in a `Graph`.
@@ -244,7 +244,7 @@ class automatically and checks:
 - a georeader `GeoTensor` refused, as the first carrier and as the
   second (gate GD1);
 - `backends` declared and kept: a NumPy-only operator refuses a JAX
-  carrier with `pipekit.BackendError`, and one that lists `"jax"` matches
+  carrier with `pipekit_ops.BackendError`, and one that lists `"jax"` matches
   its NumPy result and traces once under `jax.jit` (#532).
 
 A new operator is covered as soon as it exists. If it can't be built with no

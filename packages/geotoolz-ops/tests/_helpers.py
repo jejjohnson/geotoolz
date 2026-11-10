@@ -209,7 +209,7 @@ def uint16_dn_cube(n_bands: int = 2, *, size: int = 4, seed: int = 0) -> np.ndar
 
 
 def all_operator_classes() -> list[type]:
-    """Every ``pipekit.Operator`` subclass defined in ``geotoolz``.
+    """Every ``pipekit_ops.Operator`` subclass defined in ``geotoolz``.
 
     Imports every ``geotoolz`` submodule first (skipping ones whose
     optional extras are missing) so that lazily-registered subclasses
@@ -221,7 +221,7 @@ def all_operator_classes() -> list[type]:
     import importlib
     import pkgutil
 
-    from pipekit import Operator
+    from pipekit_ops import Operator
 
     import geoops
 

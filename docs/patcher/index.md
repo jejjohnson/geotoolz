@@ -39,9 +39,9 @@ pip install 'geotoolz-patcher[patch-full]'         # every Field adapter and run
 | `[jax]` | geotoolz-array[jax] | JAX batches: `PatchBatch.patches.to_jax()` after `geopatcher.run.batch_split` |
 | `[cog]` | geotoolz-cloud[cog] | `geopatcher.fields.CogField` |
 | `[patch-full]` | all of the above | everything except `[pipekit]` |
-| `[pipekit]` | pipekit | `geopatcher.integrations.pipekit` (`GridSampler`, `ApplyToChips`, `MergePatches`) |
+| `[pipekit]` | pipekit-ops | `geopatcher.integrations.pipekit` (`GridSampler`, `ApplyToChips`, `MergePatches`) |
 
-`pipekit` is not on PyPI yet: install the `[pipekit]` extra from a clone
+`pipekit-ops` is not on PyPI yet: install the `[pipekit]` extra from a clone
 with `uv sync --extra pipekit`. A missing extra fails at the point of use
 with an `ImportError` that names it.
 

@@ -161,7 +161,7 @@ def _all_module_scope_imports() -> dict[str, list[str]]:
 def test_scanner_sees_known_top_level_imports() -> None:
     # Guard against a scanner bug silently making the tests vacuous.
     imports = _all_module_scope_imports()
-    for expected in ("numpy", "scipy", "affine", "pipekit", "geoarray", "pandas"):
+    for expected in ("numpy", "scipy", "affine", "pipekit_ops", "geoarray", "pandas"):
         assert expected in imports, expected
 
 

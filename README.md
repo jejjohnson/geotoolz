@@ -56,7 +56,7 @@ itself becomes an operator: *tile → predict → stitch* is one more
 
 | Package (dist) | Import | One-liner | Docs |
 |---|---|---|---|
-| [`geotoolz-ops`](packages/geotoolz-ops) | `geoops` | Carrier-preserving `pipekit.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/operators/) |
+| [`geotoolz-ops`](packages/geotoolz-ops) | `geoops` | Carrier-preserving `pipekit_ops.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/operators/) |
 | [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher (Geometry × Sampler × Window × Aggregation): split a field into patches, run an operator per patch, stitch back | [Patcher →](https://jejjohnson.github.io/geotoolz/patcher/) |
 | [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files: STAC/CMR discovery → GeoParquet catalog → `GeoSlice` → loaders | [Catalog →](https://jejjohnson.github.io/geotoolz/catalog/) |
 | [`geotoolz-cloud`](packages/geotoolz-cloud) | `geocloud` | Cloud object storage for the stack: one process-wide obstore client pool, file verbs (ls / download / upload / copy / sync / sign), per-bucket credentials, and Cloud-Optimized GeoTIFF reads and validated writes | [Cloud →](https://jejjohnson.github.io/geotoolz/cloud/) |

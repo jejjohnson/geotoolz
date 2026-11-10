@@ -473,7 +473,7 @@ def test_rank_errors_name_mode_and_shape(
 # Fitted-operator contract (#143)
 # ----------------------------------------------------------------------------
 def test_sklearn_op_satisfies_fittable_transformer_and_predictor() -> None:
-    from pipekit.protocols import FittableTransformer, Predictor
+    from pipekit_ops.protocols import FittableTransformer, Predictor
 
     op = gz.learn.SklearnOp(estimator=PCA(n_components=1))
     assert isinstance(op, FittableTransformer)
@@ -553,7 +553,7 @@ class _SlowMeanCentre:
 
 def test_sklearn_op_refit_is_atomic_per_call_under_thread_map() -> None:
     """``refit`` fits + applies under a lock: no call sees another call's fit."""
-    from pipekit.parallel import ThreadMap
+    from pipekit_ops.parallel import ThreadMap
 
     rng = np.random.default_rng(2)
     scenes = [rng.normal(loc=10.0 * i, size=(2, 4, 4)) for i in range(8)]
@@ -570,7 +570,7 @@ def test_sklearn_op_refit_is_atomic_per_call_under_thread_map() -> None:
 
 
 def test_sklearn_op_fit_on_call_fits_once_under_thread_map() -> None:
-    from pipekit.parallel import ThreadMap
+    from pipekit_ops.parallel import ThreadMap
 
     rng = np.random.default_rng(3)
     scenes = [rng.normal(loc=10.0 * i, size=(2, 4, 4)) for i in range(8)]

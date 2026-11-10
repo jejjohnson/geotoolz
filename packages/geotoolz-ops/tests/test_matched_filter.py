@@ -652,7 +652,7 @@ def test_column_enhancement_obs_model_refuses_reload() -> None:
     """A dropped ``obs_model`` used to reload as a uniform target (#140)."""
     import json
 
-    from pipekit import Operator
+    from pipekit_ops import Operator
 
     from geoops.matched_filter import ColumnEnhancement
 
@@ -798,7 +798,7 @@ def test_target_pattern_on_geoarray_returns_plain_array(
 # Fitted-operator contract (#143)
 # ----------------------------------------------------------------------------
 def test_matched_filter_satisfies_fittable_transformer() -> None:
-    from pipekit.protocols import FittableTransformer
+    from pipekit_ops.protocols import FittableTransformer
 
     assert isinstance(gz.matched_filter.MatchedFilter(), FittableTransformer)
 
@@ -846,7 +846,7 @@ def test_matched_filter_first_call_fits_once_under_thread_map() -> None:
     import threading
     import time
 
-    from pipekit.parallel import ThreadMap
+    from pipekit_ops.parallel import ThreadMap
 
     rng = np.random.default_rng(4)
     target = np.array([0.5, 1.0])

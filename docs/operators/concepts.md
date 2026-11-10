@@ -183,7 +183,7 @@ Producers (`qa`, `mask`, `restore.OutlierMask`) and consumers
 Some operators learn state from data: the `normalize` scalers,
 `matched_filter.MatchedFilter`, `restore.MNF` and `learn.SklearnOp`.
 They share one contract (decision record #143) and satisfy
-`pipekit.protocols.FittableTransformer`.
+`pipekit_ops.protocols.FittableTransformer`.
 
 | Method | Does |
 |---|---|
@@ -218,7 +218,7 @@ denoised: np.ndarray = mnf.inverse(mnf(scene))                # (4, 32, 32) → 
   that state. `MatchedFilter(fit_on_call=True)` is the per-scene exception
   and stores nothing.
 - **Thread safety.** `transform` is read-only, so a fitted operator can be
-  shared across `pipekit.ThreadMap` workers. A first-call fit runs once
+  shared across `pipekit_ops.ThreadMap` workers. A first-call fit runs once
   under a lock, but which item it sees depends on timing. Call `fit(x)`
   before parallel use when the result must be deterministic.
 - **Pre-trained models.** `learn.ModelOp` wraps a trained model and never

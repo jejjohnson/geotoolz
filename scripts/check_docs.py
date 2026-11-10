@@ -46,7 +46,7 @@ STACK = (
     "geocloud",
     "geoproducts",
     "geoarray",
-    "pipekit",
+    "pipekit_ops",
 )
 SKIP_MARK = "<!-- docs-check: skip -->"
 # The stack's conventional aliases: a fence that uses one must import it.

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 import pandas as pd
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.config import as_tuple
 from geoops._src.geo import pixel_xy, reject_geotensor, require_geoarray

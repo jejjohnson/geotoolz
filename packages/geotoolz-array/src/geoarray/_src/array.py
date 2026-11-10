@@ -29,8 +29,8 @@ from typing import Any, cast
 
 import numpy as np
 import pyproj
-from pipekit import on_import
 from pipekit_array.dimarray import vmapped_dims
+from pipekit_ops import on_import
 
 from geoarray._src.attrs import FrozenAttrs, drop_band_keys, select_bands
 from geoarray._src.backend import (
@@ -1502,7 +1502,7 @@ def _unflatten(aux: tuple[Any, ...], leaves: Any) -> GeoArray:
 
 
 def _register_pytree(jax: Any) -> None:
-    """Register `GeoArray` with JAX (`pipekit.on_import` runs it once JAX loads)."""
+    """Register `GeoArray` with JAX (`pipekit_ops.on_import` runs it once JAX loads)."""
     from jax.tree_util import GetAttrKey
 
     def flatten_with_keys(g: GeoArray) -> tuple[Any, Any]:
