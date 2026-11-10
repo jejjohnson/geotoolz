@@ -15,7 +15,7 @@ import pytest
 import rasterio
 from _helpers import toy_geoarray
 from geoarray import FrozenAttrs, GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 
 import geoops as gz
 from geoops._src.geo import affine_of

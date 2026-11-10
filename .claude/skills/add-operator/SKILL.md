@@ -31,7 +31,7 @@ step-by-step.
 
 ## 3. Tier B — the Operator (`<family>/_src/operators.py`)
 
-- Subclass `pipekit.Operator`; **keyword-only** constructor using the
+- Subclass `pipekit_ops.Operator`; **keyword-only** constructor using the
   vocabulary table names (`red=`, `nir=`, `bands=`, `window=`, `size=`,
   `fill_value=`, `seed=`, …); store each argument on `self` under the same
   name so `get_config()` round-trips.

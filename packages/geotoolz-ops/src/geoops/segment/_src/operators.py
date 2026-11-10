@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import einx
 import numpy as np
 from jaxtyping import Bool
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.config import as_tuple, mapping_from_pairs, mapping_to_pairs
 from geoops._src.geo import require_grid_match

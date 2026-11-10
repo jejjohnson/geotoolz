@@ -21,7 +21,7 @@ from geoproducts.himawari import constants, recipes
 
 
 if TYPE_CHECKING:
-    from pipekit import Operator
+    from pipekit_ops import Operator
 
 
 __all__ = [

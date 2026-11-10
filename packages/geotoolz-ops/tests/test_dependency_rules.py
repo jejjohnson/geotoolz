@@ -94,7 +94,7 @@ ALLOWED: dict[str, str] = {
     "geoproducts": "geotoolz-products",
     "georeader": "georeader-spaceml",
     "geotoolz": "geotoolz",
-    "pipekit": "pipekit",
+    "pipekit_ops": "pipekit-ops",
     "pipekit_array": "pipekit-array",
     "pipekit_cycle": "pipekit-cycle",
     "pipekit_evaluate": "pipekit-evaluate",

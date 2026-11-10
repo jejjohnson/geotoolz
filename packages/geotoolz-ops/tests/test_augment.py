@@ -12,7 +12,7 @@ import pytest
 import rasterio
 from _helpers import fill_pixel_mask, toy_geoarray
 from geoarray import GeoArray, footprint
-from pipekit import Operator, Sequential
+from pipekit_ops import Operator, Sequential
 
 import geoops as gz
 from geoops import augment
@@ -797,7 +797,7 @@ def test_4d_time_stack() -> None:
     assert haze[0, 0, 0, 0] > haze[0, 1, 0, 0] > haze[0, 2, 0, 0]
 
 
-# --- #155: Compose is a gated pipekit.Sequential ---------------------------
+# --- #155: Compose is a gated pipekit_ops.Sequential ---------------------------
 
 
 class _InitSeededOp(Operator):

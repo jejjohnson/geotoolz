@@ -15,22 +15,22 @@ current).
 
 | Name | Kind | What it does |
 |---|---|---|
-| `Branch` | class | Re-exported from `pipekit`. |
+| `Branch` | class | Re-exported from `pipekit_ops`. |
 | `Carrier` | class | Re-exported from `typing`. |
-| `Const` | class | Re-exported from `pipekit`. |
-| `Fanout` | class | Re-exported from `pipekit`. |
-| `Graph` | class | Re-exported from `pipekit`. |
-| `Identity` | class | Re-exported from `pipekit`. |
-| `Input` | class | Re-exported from `pipekit`. |
-| `Lambda` | class | Re-exported from `pipekit`. |
-| `Node` | class | Re-exported from `pipekit`. |
-| `Operator` | class | Re-exported from `pipekit`. |
-| `Sequential` | class | Re-exported from `pipekit`. |
-| `ShapeTrace` | class | Re-exported from `pipekit`. |
-| `Sink` | class | Re-exported from `pipekit`. |
-| `Snapshot` | class | Re-exported from `pipekit`. |
-| `Switch` | class | Re-exported from `pipekit`. |
-| `Tap` | class | Re-exported from `pipekit`. |
+| `Const` | class | Re-exported from `pipekit_ops`. |
+| `Fanout` | class | Re-exported from `pipekit_ops`. |
+| `Graph` | class | Re-exported from `pipekit_ops`. |
+| `Identity` | class | Re-exported from `pipekit_ops`. |
+| `Input` | class | Re-exported from `pipekit_ops`. |
+| `Lambda` | class | Re-exported from `pipekit_ops`. |
+| `Node` | class | Re-exported from `pipekit_ops`. |
+| `Operator` | class | Re-exported from `pipekit_ops`. |
+| `Sequential` | class | Re-exported from `pipekit_ops`. |
+| `ShapeTrace` | class | Re-exported from `pipekit_ops`. |
+| `Sink` | class | Re-exported from `pipekit_ops`. |
+| `Snapshot` | class | Re-exported from `pipekit_ops`. |
+| `Switch` | class | Re-exported from `pipekit_ops`. |
+| `Tap` | class | Re-exported from `pipekit_ops`. |
 
 ### `geoops.augment`
 
@@ -71,7 +71,7 @@ current).
 | `band_axis` | function | Axis holding the bands of a 3-D or 4-D carrier: always ``-3``. |
 | `band_dim` | function | The dim an operator works over, from ``dim=`` or the deprecated ``axis=``. |
 | `band_names` | function | The carrier's band names, read from the first usable ``attrs`` key. |
-| `callable_name` | function | Re-exported from `pipekit`. |
+| `callable_name` | function | Re-exported from `pipekit_ops`. |
 | `carried_fill` | function | Fill value for an output that carries ``ref``'s values in ``dtype``. |
 | `cube_to_samples` | function | Flatten a cube into an ``(n_samples, n_bands)`` matrix. |
 | `dim_axis` | function | The (negative) position of ``dim`` in ``x``. |
@@ -85,7 +85,7 @@ current).
 | `mapping_from_pairs` | function | Accept a mapping or its ``[[key, value], ...]`` config form. |
 | `mapping_to_pairs` | function | Emit a mapping config value as ``[[key, value], ...]``. |
 | `mask_invalid_to_nan` | function | Float copy of ``x`` with every invalid pixel set to ``NaN`` in all bands. |
-| `nested_config` | function | Re-exported from `pipekit`. |
+| `nested_config` | function | Re-exported from `pipekit_ops`. |
 | `optional_name` | function | ``from module import name`` lazily, with the extra's install hint. |
 | `optional_root` | function | ``import a.b`` lazily: import ``module`` and return its top package ``a``. |
 | `over_frames` | function | Decorate an operator's ``_apply`` to run per frame on a time series. |
@@ -1412,13 +1412,13 @@ current).
 | `DIMS` | constant | `('time', 'band', 'y', 'x')` |
 | `FrozenAttrs` | class | An immutable, hashable mapping of string keys to frozen values. |
 | `GeoArray` | class | A georeferenced array whose data is a NumPy or a JAX array. |
-| `GeoArrayAdapter` | class | The `pipekit.NamedArrayAdapter` for `GeoArray`. |
+| `GeoArrayAdapter` | class | The `pipekit_ops.NamedArrayAdapter` for `GeoArray`. |
 | `GeoArrayError` | class | Base class of every error geoarray raises on its own account. |
 | `GeoArrayTraceError` | class | An operation needs concrete values but got JAX tracers. |
 | `GeoPoints` | class | Scattered samples on the ``obs`` dim: positions, optional z, time, valid. |
-| `GeoPointsAdapter` | class | The `pipekit.NamedArrayAdapter` for `GeoPoints`: xy, z, time, valid match. |
+| `GeoPointsAdapter` | class | The `pipekit_ops.NamedArrayAdapter` for `GeoPoints`: xy, z, time, valid match. |
 | `GeoSwath` | class | Data in sensor geometry: per-pixel lat/lon on the ``row col`` dims. |
-| `GeoSwathAdapter` | class | The `pipekit.NamedArrayAdapter` for `GeoSwath`: lat/lon must match exactly. |
+| `GeoSwathAdapter` | class | The `pipekit_ops.NamedArrayAdapter` for `GeoSwath`: lat/lon must match exactly. |
 | `Grid` | class | A pixel grid with no data: transform, CRS and spatial shape. |
 | `GridMismatchError` | class | Carriers that must share one pixel grid do not. |
 | `HostTransferWarning` | class | A JAX carrier's data was copied to the host for NumPy code. |
@@ -1512,7 +1512,7 @@ current).
 | `matches` | function | Whether carrier ``x`` is a ``t``: its kind, dims and required leaves. |
 | `register_kind_reader` | function | Register how carriers of ``carrier_type`` (and subclasses) read as a kind. |
 
-## Upstream: `pipekit`
+## Upstream: `pipekit_ops`
 
 The composition framework every operator subclasses. Use these
 instead of writing your own control flow, caching, observation,
@@ -1525,44 +1525,81 @@ upstream, not here.
 | `AssertDType` | class | Pass-through; raise `QCError` if ``getattr(x, 'dtype')`` mismatches. |
 | `AssertHasAttribute` | class | Pass-through; raise `QCError` if attribute missing (or value mismatches). |
 | `AssertShape` | class | Pass-through; raise `QCError` if ``getattr(x, 'shape')`` mismatches. |
+| `AssertSignature` | class | Pass-through; raise `QCError` unless the carrier's dims fit ``pattern``. |
+| `AssertThat` | class | Pass-through; raise `QCError` if ``pred(x)`` is falsy. |
+| `Assoc` | class | Add a key whose value is computed from the whole dict (toolz ``assoc``). |
 | `AsyncMap` | class | Apply ``op`` to each item of an iterable inside an async event loop. |
 | `BackendError` | class | Inputs on more than one backend, or a backend the code does not run on. |
 | `BatchedMap` | class | Split an iterable into batches and call ``op`` on each batch as a list. |
 | `Branch` | class | Binary conditional: run ``if_true`` or ``if_false`` based on a predicate. |
-| `Cache` | class | Memoise an inner operator by hashing its input and config. |
+| `Cache` | class | Memoise an inner operator by hashing its input and the inner pipeline. |
 | `Carrier` | class | Re-exported from `typing`. |
 | `CarryState` | class | Base class for state threaded through a stateful pipeline. |
 | `Coalesce` | class | Try each source in order; return the first output that satisfies ``is_ok``. |
+| `Concat` | class | Flatten exactly one level (toolz ``concat``). |
 | `ConfigMixin` | class | Auto-derive `get_config()` from `__init__` parameter names. |
 | `Const` | class | Return a fixed value, ignoring any input. |
+| `Count` | class | The number of items (toolz ``count``). |
+| `CountBy` | class | Count items per key, in first-seen order (toolz ``countby``). |
+| `DirectoryStore` | class | One file per key under ``root``, written atomically. |
+| `Dissoc` | class | Drop some keys; missing keys are ignored (toolz ``dissoc``). |
+| `Failed` | class | The slot of an item that failed under ``on_error="collect"``. |
 | `Fanout` | class | Apply each named operator to the same input; return a dict of outputs. |
+| `Filter` | class | Keep the items a predicate accepts (builtin ``filter``). |
 | `FittableTransformer` | class | Anything with sklearn-style ``fit`` + ``transform`` methods. |
+| `Fold` | class | Associative fold over chunks, reduced in parallel through `Map`. |
+| `Get` | class | Index into a mapping or sequence (toolz ``get``). |
+| `GetIn` | class | Walk a key path through nested containers (toolz ``get_in``). |
 | `Graph` | class | A symbolic operator graph with multiple inputs and outputs. |
+| `GroupBy` | class | Group items by a key, in first-seen order (toolz ``groupby``). |
 | `Histogram` | class | Controller that captures simple histograms by key. |
 | `Identity` | class | Explicit no-op. Returns its input unchanged. |
 | `Input` | class | A named entry point into a `Graph`. |
+| `LabelledAdapter` | class | An adapter that can set the labels of named dims (optional). |
 | `Lambda` | class | Wrap an arbitrary callable as an `Operator`. |
-| `Memoize` | class | Memoise an inner operator by hashing its input and config. |
+| `Log` | class | Pass the carrier through and write one ``logging`` record per call. |
+| `Map` | class | Apply ``op`` to every item, on any executor, with a bounded window. |
+| `MapError` | class | Every failure of a ``Map(on_error="collect")`` run, with the partial results. |
+| `Memoize` | class | Memoise an inner operator by hashing its input and the inner pipeline. |
+| `MemoryStore` | class | A dict guarded by a lock: shared by the threads of one process. |
+| `Merge` | class | Union of several mappings; later inputs win (toolz ``merge``). |
 | `MissingAdapterError` | class | A carrier from a known family arrived with no adapter registered. |
 | `NamedArrayAdapter` | class | What carrier-agnostic code needs from one carrier family. |
 | `Node` | class | A vertex in a `Graph`. |
+| `Not` | class | Negate a predicate; the operator form of `complement`. |
 | `Operator` | class | Base class for pipekit operators. |
+| `PartitionAll` | class | Split into tuples of ``n`` consecutive items (toolz ``partition_all``). |
+| `Pick` | class | Keep only some keys, in the order given. |
 | `Predictor` | class | Anything with a sklearn-style ``predict`` method. |
+| `Prefetch` | class | Run ``op`` up to ``depth`` items ahead of the consumer, in input order. |
 | `ProcessMap` | class | Apply ``op`` to each item of an iterable using a process pool. |
 | `Profile` | class | Controller that records per-step wall-clock timings. |
 | `QCError` | class | Raised when a QC assertion fails. Subclass of `AssertionError`. |
 | `Quarantine` | class | Non-raising QC: on failure log and return ``sentinel``; on success pass through. |
+| `RateLimit` | class | At most ``calls`` starts of ``op`` in any window of ``period`` seconds. |
+| `Reduce` | class | Left fold (``functools.reduce``), with the operator called on one pair. |
+| `Remove` | class | Drop the items a predicate accepts (toolz ``remove``). |
+| `Rename` | class | Rename keys; unlisted keys pass through and the order is kept. |
 | `Retry` | class | Retry an operator on transient failures with exponential backoff. |
 | `Sequential` | class | Apply a list of operators in order, threading the output of each into the next. |
 | `ShapeTrace` | class | Log ``shape`` / ``dtype`` of each carrier passing through. |
 | `Signature` | class | Immutable shape + dtype record. |
 | `Sink` | class | Apply a side-effecting write and pass the input through unchanged. |
 | `Snapshot` | class | Controller that captures intermediate carriers by name. |
+| `SortBy` | class | A stable sort by key (builtin ``sorted``). |
 | `StatefulOperator` | class | Marker base for operators whose ``_apply`` threads carry-state. |
+| `Store` | class | What `Cache` needs from a store: membership, load and save by key. |
 | `Switch` | class | Multi-way dispatch on ``key(carrier)``. |
+| `Take` | class | The first ``n`` items (toolz ``take``), for dry runs. |
 | `Tap` | class | Fire a callback on the carrier; return the carrier unchanged. |
 | `ThreadMap` | class | Apply ``op`` to each item of an iterable using a thread pool. |
+| `Timeout` | class | Raise `TimeoutError` if ``op`` has not returned after ``seconds``. |
 | `Try` | class | Run ``primary``; on caught exceptions run ``fallback``. |
+| `Unique` | class | The first occurrence of each item, or of each key (toolz ``unique``). |
+| `Until` | class | Apply ``op`` until ``pred`` holds, at most ``max_iter`` times. |
+| `UpdateIn` | class | Replace the value at a key path by ``op(value)`` (toolz ``update_in``). |
+| `ValMap` | class | Apply an operator to every value, keeping the keys (toolz ``valmap``). |
+| `Zip` | class | Align several iterables into tuples (builtin ``zip``), strict by default. |
 | `allowed` | function | Return the registered class names (``"module.Class"`` keys). |
 | `backend_name` | function | ``"jax"``, ``"dask"`` or ``"numpy"`` for raw data (tracers count as JAX). |
 | `backend_of` | function | The backend of a carrier or a raw array; ``None`` for any other value. |
@@ -1572,6 +1609,7 @@ upstream, not here.
 | `compose_left` | function | Left-to-right composition (pipeline order). |
 | `compute_output_signature` | function | Free-function dispatch to ``op.compute_output_signature``. |
 | `dumps` | function | JSON-encode an operator's state record. |
+| `executor_scope` | function | Bind the executor that ``Map(executor="scope")`` borrows inside the block. |
 | `from_state_sandboxed` | function | Build an operator tree from a state record, allowlisted classes only. |
 | `get_adapter` | function | The adapter for ``x``'s type, or ``None`` for an unnamed value. |
 | `juxt` | function | Return a callable that applies each operator to its input and tuples the results. |
@@ -1584,8 +1622,10 @@ upstream, not here.
 | `register_adapter` | function | Register ``adapter`` for ``carrier_type`` and its subclasses. |
 | `register_lazy_adapter` | function | Register ``loader`` for carrier types defined under ``module_prefix``. |
 | `signature_of` | function | ``x``'s `Signature` if it is a registered carrier; ``x`` itself otherwise. |
+| `store_scope` | function | Bind store names to stores inside the block. |
 | `unregister` | function | Remove ``cls`` from the sandboxed loader's allowlist. |
 | `unregister_adapter` | function | Remove the adapter registered for exactly ``carrier_type``, if any. |
+| `upgrade_state` | function | ``state`` with module names saved before pipekit 0.2.0 renamed. |
 
 ## Shared private toolkits
 

@@ -29,8 +29,8 @@ import geoarray
 import numpy as np
 from affine import Affine
 from geoarray import DIMS, FrozenAttrs, GeoArray, GeoPoints, GridMismatchError
-from pipekit import Operator, get_adapter
 from pipekit_array import array_namespace
+from pipekit_ops import Operator, get_adapter
 from pyproj import CRS
 from scipy.ndimage import shift as ndi_shift
 
@@ -3927,7 +3927,7 @@ class InterpAt(Operator):
     returns a `geoarray.GeoPoints` with the grid's values at the points
     (bilinear or nearest), ``valid=False`` and NaN off the grid or on
     nodata, and 0 on padded points so a masked cost stays finite. The
-    points are the second positional input, so a `pipekit.Graph` wires
+    points are the second positional input, so a `pipekit_ops.Graph` wires
     them from their own `Input`. Unlike the function, the operator never
     moves a NumPy grid to JAX for JAX points: pipekit refuses mixed
     backends, so call ``grid.to_jax()`` first.

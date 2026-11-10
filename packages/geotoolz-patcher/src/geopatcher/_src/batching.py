@@ -589,7 +589,7 @@ def _register_when_jax_loads() -> None:
         return
     _PYTREE_HOOKED = True
     # pipekit core comes with geoarray; importing geopatcher never imports JAX
-    from pipekit import on_import
+    from pipekit_ops import on_import
 
     on_import("jax", _register_pytree)
 

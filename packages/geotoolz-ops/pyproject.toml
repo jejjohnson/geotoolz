@@ -38,16 +38,17 @@ dependencies = [
     # pandas: `_src.labels` / `measure` / `feature` / `plume` region tables
     # and `radiometry` per-band fitted stats (not only vector code).
     "pandas>=2.1",
-    # The Operator / Sequential / Graph composition layer lives in pipekit
-    # (formerly geoops.core). Every per-domain operator subclasses
-    # `pipekit.Operator`. The workspace root's [tool.uv.sources] pins the
-    # dev-time git source. 0.1.4 adds `Operator.backends`, which every
-    # geoops operator declares and pipekit enforces (#532).
-    "pipekit>=0.1.4",
+    # The Operator / Sequential / Graph composition layer lives in
+    # pipekit-ops (formerly geoops.core, then the `pipekit` distribution
+    # before pipekit 0.2.0). Every per-domain operator subclasses
+    # `pipekit_ops.Operator`, which carries the `Operator.backends` every
+    # geoops operator declares and pipekit-ops enforces (#532). The
+    # workspace root's [tool.uv.sources] pins the dev-time git source.
+    "pipekit-ops>=0.2.1",
     # `KernelOp` and the dim-level functions: the index kernels run once
     # on NumPy, JAX and xarray carriers through it (#533). Pure Python on
-    # pipekit; xarray loads only when a DataArray arrives.
-    "pipekit-array>=0.0.6",
+    # pipekit-ops; xarray loads only when a DataArray arrives.
+    "pipekit-array>=0.1.1",
     # Universal tensor-notation layer: the `geoops.einx` operator
     # family AND the internal linear algebra of the Tier-A primitives
     # (matched_filter covariance/scoring, restore PCA, SRF fill

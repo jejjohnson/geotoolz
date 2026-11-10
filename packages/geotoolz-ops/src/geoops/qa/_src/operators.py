@@ -59,7 +59,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 from geoarray import GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.bands import resolve_band, strip_band_attrs
 from geoops._src.config import mapping_from_pairs, mapping_to_pairs

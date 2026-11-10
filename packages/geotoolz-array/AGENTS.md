@@ -147,7 +147,7 @@ ensemble draw) are kept for dim names, never function names.
 - JAX is optional. Import it through `_src/backend.py` (`import_jax`,
   `is_jax_array`, `is_tracer`); a NumPy-only install never loads it.
   Importing geoarray never imports JAX, even when it is installed (gate
-  G4, #528): the pytrees are registered by `pipekit.on_import("jax", …)`
+  G4, #528): the pytrees are registered by `pipekit_ops.on_import("jax", …)`
   the moment anything imports JAX. Never add an import-time `import jax`.
 - Transforms are (a, b, c, d, e, f), the `affine.Affine` / rasterio order,
   never GDAL's (c, a, b, f, d, e).

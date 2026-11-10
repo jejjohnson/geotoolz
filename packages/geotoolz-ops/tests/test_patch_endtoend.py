@@ -18,7 +18,7 @@ import numpy as np
 import rasterio
 from geoarray import GeoArray
 from geopatcher import RasterField, SpatialPatcher, spatial
-from pipekit import Lambda
+from pipekit_ops import Lambda
 
 from geoops import Sequential
 from geoops._src.geo import affine_of

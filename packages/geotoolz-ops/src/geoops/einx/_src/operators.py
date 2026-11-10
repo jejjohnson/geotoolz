@@ -37,7 +37,7 @@ import einx as _einx
 import numpy as np
 from affine import Affine
 from geoarray import GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.config import mapping_from_pairs, mapping_to_pairs
 from geoops._src.coupling import Coupling

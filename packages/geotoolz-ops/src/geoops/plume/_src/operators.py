@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 import numpy as np
 import pandas as pd
 from geoarray import GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 from pyproj import CRS, Transformer
 
 from geoops.carrier import (

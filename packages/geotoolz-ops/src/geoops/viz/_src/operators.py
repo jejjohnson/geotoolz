@@ -43,7 +43,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 from geoarray import GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.bands import BandRef, band_names
 from geoops._src.config import (

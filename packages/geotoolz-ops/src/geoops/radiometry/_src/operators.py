@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 import pandas as pd
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.bands import resolve_wavelengths, strip_band_attrs
 from geoops._src.config import as_tuple, jsonable

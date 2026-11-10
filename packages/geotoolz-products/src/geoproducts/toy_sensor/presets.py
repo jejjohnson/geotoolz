@@ -15,7 +15,7 @@ from geoproducts.toy_sensor import constants
 
 
 if TYPE_CHECKING:
-    from pipekit import Operator
+    from pipekit_ops import Operator
 
 
 def NDVI() -> Operator:

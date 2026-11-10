@@ -17,7 +17,7 @@ from geoarray.interop.georeader import (
     to_georeader,
 )
 from georeader.rasterio_reader import RasterioReader
-from pipekit import Identity, Operator, Sequential
+from pipekit_ops import Identity, Operator, Sequential
 from pyproj import CRS
 from rasterio.transform import from_origin
 from rasterio.windows import Window

@@ -2,7 +2,7 @@
 
 ``docs/capabilities.md`` lists each public object of the five packages once,
 at its deepest public home, with the first line of its docstring, followed by
-the public API of the upstream composition framework (pipekit) and the shared
+the public API of the upstream composition framework (pipekit_ops) and the shared
 private toolkits contributors build on. Agents and people search
 it before writing a helper ("reuse before you write", ``AGENTS.md``).
 
@@ -22,7 +22,7 @@ a reader whose extra is missing refuses to import.
 ``--check`` also fails when two packages export the same bare name for
 different objects, outside the patterns the layout allows on purpose
 (``ALLOWED_SHARED_NAMES`` below), or when a package exports a name that
-pipekit already exports for something else.
+pipekit_ops already exports for something else (outside the same allowlist).
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ PACKAGES = {
 
 # Upstream frameworks whose public API is listed (and whose names our
 # packages must not shadow): the Operator / Sequential / Graph core.
-UPSTREAM = ("pipekit",)
+UPSTREAM = ("pipekit_ops",)
 
 # Shared private toolkits: modules whose helpers every family / reader of the
 # package builds on. Listed by path, read with ``ast`` (nothing imported).
@@ -67,6 +67,11 @@ TOOLKITS = {
 # Bare names two packages may both export, and why. Everything else that
 # collides across packages fails ``--check``.
 ALLOWED_SHARED_NAMES: dict[str, str] = {
+    "Fold": (
+        "two folds at two levels: pipekit_ops.Fold reduces chunks associatively "
+        "in parallel; geopatcher.temporal.aggregation.Fold is a stateful left "
+        "fold across temporal patches"
+    ),
     "download": (
         "one verb at two levels: geocloud.files.download fetches any URI; each "
         "sensor's `aws.download` takes that sensor's file records"
@@ -196,6 +201,8 @@ def collect() -> tuple[dict[str, dict[str, list[tuple[str, str, str]]]], list[st
     for package in UPSTREAM:
         upstream = importlib.import_module(package)
         for name in upstream.__all__:
+            if name in ALLOWED_SHARED_NAMES:
+                continue
             for path, obj in by_name.get(name, {}).items():
                 if obj is not getattr(upstream, name):
                     collisions.append(f"{name}: {path} shadows {package}.{name}")
@@ -298,7 +305,7 @@ def render() -> tuple[str, list[str]]:
 
 def _public_operators() -> dict[str, list[tuple[str, type]]]:
     """Every public geoops operator class, by family, sorted by name."""
-    from pipekit import Operator
+    from pipekit_ops import Operator
 
     import geoops
 
@@ -328,7 +335,7 @@ def render_backends() -> str:
         "",
         "Where each public operator runs: its `backends` class attribute.",
         "An operator refuses a carrier on a backend it does not list with",
-        "`pipekit.BackendError` before it runs, so a JAX carrier is never",
+        "`pipekit_ops.BackendError` before it runs, so a JAX carrier is never",
         "moved to NumPy silently: call `to_numpy()` first, or `to_jax()`",
         "after the NumPy-only steps. Operators that list `jax` match their",
         "NumPy result on a JAX carrier and trace once under `jax.jit` for",

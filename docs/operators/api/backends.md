@@ -4,7 +4,7 @@
 
 Where each public operator runs: its `backends` class attribute.
 An operator refuses a carrier on a backend it does not list with
-`pipekit.BackendError` before it runs, so a JAX carrier is never
+`pipekit_ops.BackendError` before it runs, so a JAX carrier is never
 moved to NumPy silently: call `to_numpy()` first, or `to_jax()`
 after the NumPy-only steps. Operators that list `jax` match their
 NumPy result on a JAX carrier and trace once under `jax.jit` for

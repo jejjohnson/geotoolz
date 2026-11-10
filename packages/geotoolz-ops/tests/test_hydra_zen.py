@@ -18,7 +18,7 @@ import pytest
 
 hydra_zen = pytest.importorskip("hydra_zen")
 
-from pipekit import Identity, Operator, Sequential, ShapeTrace
+from pipekit_ops import Identity, Operator, Sequential, ShapeTrace
 
 
 class _Scale(Operator):

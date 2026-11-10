@@ -16,7 +16,7 @@ from geoproducts._src.extras import require
 
 
 if TYPE_CHECKING:
-    from pipekit import Operator
+    from pipekit_ops import Operator
 
 
 __all__ = ["Recipe", "geotoolz_module", "parallax_correct", "rgb_recipe"]

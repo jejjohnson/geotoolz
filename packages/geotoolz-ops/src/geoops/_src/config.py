@@ -18,7 +18,7 @@ from pathlib import PurePath
 from typing import Any
 
 import numpy as np
-from pipekit._base.operator import callable_name, nested_config
+from pipekit_ops._base.operator import callable_name, nested_config
 
 
 # ``nested_config`` (pipekit's canonical ``{"class", "config"}`` payload for an

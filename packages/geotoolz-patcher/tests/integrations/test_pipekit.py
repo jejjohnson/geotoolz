@@ -9,7 +9,7 @@ import pytest
 
 
 pytest.importorskip(
-    "pipekit",
+    "pipekit_ops",
     reason="geopatcher.integrations.pipekit requires the [pipekit] extra",
 )
 
@@ -19,7 +19,7 @@ import pickle
 import numpy as np
 import rasterio
 from geoarray import GeoArray
-from pipekit import Graph, Input, Lambda, Operator, Sequential, check_pickleable
+from pipekit_ops import Graph, Input, Lambda, Operator, Sequential, check_pickleable
 
 from geopatcher import Patch, RasterField, SpatialPatcher, spatial
 from geopatcher.config import axis_envelope, from_config

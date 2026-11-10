@@ -500,7 +500,7 @@ _SCALERS = [
 
 @pytest.mark.parametrize(("cls", "fitted"), _SCALERS)
 def test_scalers_satisfy_fittable_transformer(cls, fitted) -> None:
-    from pipekit.protocols import FittableTransformer
+    from pipekit_ops.protocols import FittableTransformer
 
     op = cls()
     assert isinstance(op, FittableTransformer)
@@ -557,7 +557,7 @@ def test_scaler_fit_on_call_fits_once_under_thread_map(cls, fitted) -> None:
     import threading
     import time
 
-    from pipekit.parallel import ThreadMap
+    from pipekit_ops.parallel import ThreadMap
 
     rng = np.random.default_rng(0)
     scenes = [rng.normal(loc=i, scale=i + 1, size=(2, 6, 6)) for i in range(8)]

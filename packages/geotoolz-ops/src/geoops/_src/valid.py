@@ -40,8 +40,8 @@ from typing import Any
 import numpy as np
 from geoarray import GeoArray
 from jaxtyping import Bool, Float
-from pipekit import get_adapter
 from pipekit_array import array_namespace
+from pipekit_ops import get_adapter
 
 from geoops._src.geo import reject_geotensor
 from geoops._src.wrap import INHERIT, FillValue, wrap_like

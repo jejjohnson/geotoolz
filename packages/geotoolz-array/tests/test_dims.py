@@ -12,9 +12,9 @@ from typing import Any
 import numpy as np
 import pipekit_array as pa
 import pytest
-from pipekit import get_adapter
 from pipekit_array import DimArray, KernelOp
 from pipekit_array.testing import check_adapter, check_kernel_op
+from pipekit_ops import get_adapter
 
 import geoarray
 from geoarray import GeoArray, GeoArrayAdapter, GridMismatchError, LabelError
@@ -343,7 +343,7 @@ def test_geometry_on_a_batched_carrier_names_map_over() -> None:
 
 def test_summary_has_dims(x64: ModuleType) -> None:
     """PK-K4 on a GeoArray pipeline."""
-    from pipekit import Sequential
+    from pipekit_ops import Sequential
 
     g = _scene((4, 3, 8, 6), dims="time band y x", coords=(BANDS,))
     pipe = Sequential([pa.Sel(dim="band", label="B8"), pa.Reduce("mean", dim="time")])

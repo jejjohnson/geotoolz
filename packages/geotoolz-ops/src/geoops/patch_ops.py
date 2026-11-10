@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from geoarray import GeoArray
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from geoops._src.blending import triangular_weights
 from geoops._src.coupling import Coupling

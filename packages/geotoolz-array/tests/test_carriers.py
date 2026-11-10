@@ -8,8 +8,8 @@ from typing import Any
 import numpy as np
 import pipekit_array as pa
 import pytest
-from pipekit import get_adapter
 from pipekit_array import DimArray, KernelOp
+from pipekit_ops import get_adapter
 
 import geoarray
 from geoarray import (

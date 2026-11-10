@@ -224,7 +224,7 @@ Issue node IDs are resolved via `gh api repos/:owner/:repo/issues/<N> --jq .node
 
 ## Operator parameter vocabulary
 
-Every `pipekit.Operator` constructor is keyword-only, and one concept has one
+Every `pipekit_ops.Operator` constructor is keyword-only, and one concept has one
 parameter name across every family (`dim`, `bands`, `window`, `size`,
 `fill_value`, `seed`, …). The full table lives with the rest of the geotoolz
 package rules in
@@ -259,13 +259,8 @@ Commit messages follow the [Conventional Commits](https://www.conventionalcommit
 
 ## Bumping the pipekit pin
 
-`pipekit` is pulled from GitHub (not PyPI) and pinned to a commit in the root
-`pyproject.toml` under `[tool.uv.sources]`, so the `Operator` contract geotoolz
-is written against is the one that is installed and tested. To move it:
+`pipekit-ops` (with `pipekit-array` and `pipekit-train`) is pulled from GitHub (not PyPI) and pinned to a release tag in the root `pyproject.toml` under `[tool.uv.sources]`, so the `Operator` contract geotoolz is written against is the one that is installed and tested. To move it:
 
-1. Pick the commit of a pipekit release tag (`git rev-list -n1 pipekit-vX.Y.Z`
-   in a pipekit clone) and set it as `rev = "<sha>"`, updating the trailing
-   `# pipekit-vX.Y.Z` comment.
-2. Raise the `pipekit>=X.Y.Z` floor in `packages/geotoolz-ops/pyproject.toml` and
-   `packages/geotoolz-patcher/pyproject.toml` if the new release is required.
-3. Run `uv lock --upgrade-package pipekit`, then the full pre-commit checklist.
+1. Pick a pipekit release tag and set it as `tag = "<tag>"` on all three sources. They must share one tag: pipekit's packages point at each other at the same commit, so per-package tags make uv report conflicting URLs for `pipekit-ops`.
+2. Raise the `pipekit-ops>=X.Y.Z` floor in `packages/geotoolz-array/pyproject.toml`, `packages/geotoolz-ops/pyproject.toml` and `packages/geotoolz-patcher/pyproject.toml` (and the `pipekit-array` / `pipekit-train` floors) if the new release is required.
+3. Run `uv lock --upgrade-package pipekit-ops`, then the full pre-commit checklist.

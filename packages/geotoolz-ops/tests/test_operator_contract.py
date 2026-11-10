@@ -1,4 +1,4 @@
-"""Package-wide ``pipekit.Operator`` contract tests.
+"""Package-wide ``pipekit_ops.Operator`` contract tests.
 
 Walks every ``geotoolz`` operator class and checks, without optional
 extras such as hydra-zen, that:
@@ -8,7 +8,7 @@ extras such as hydra-zen, that:
 * ``get_config()`` is strict JSON (no NaN / inf) and names only
   constructor parameters;
 * calling the operator on ``Input`` nodes builds a graph ``Node``, and
-  every multi-input operator (#141) runs inside a ``pipekit.Graph`` as
+  every multi-input operator (#141) runs inside a ``pipekit_ops.Graph`` as
   ``op(Input("a"), Input("b"))`` with the eager result, and rejects a
   second carrier on another pixel grid with an error naming itself.
 * on a 4-D ``(T, C, H, W)`` time stack the operator returns the per-frame
@@ -39,7 +39,7 @@ import numpy as np
 import pytest
 from _helpers import all_operator_classes, fill_pixel_mask
 from geoarray import GeoArray
-from pipekit import Input, Operator
+from pipekit_ops import Input, Operator
 
 from geoops._src.contract import (
     assert_backends,
@@ -953,7 +953,7 @@ def test_multi_input_operator_runs_in_a_graph(cls: type) -> None:
     The multi-input convention (#141): every carrier is a positional
     argument, so a graph wires each one from its own ``Input``.
     """
-    from pipekit import Graph
+    from pipekit_ops import Graph
 
     values = _graph_values(cls)
     inputs = {f"x{i}": Input(f"x{i}") for i in range(len(values))}
@@ -1366,7 +1366,7 @@ def test_constructor_held_geotensor_is_refused(
 
 def test_phase_align_is_terminal_only_without_apply() -> None:
     """``PhaseAlign(apply=False)`` returns a shift tuple (#142 review)."""
-    from pipekit import Identity, Sequential
+    from pipekit_ops import Identity, Sequential
 
     from geoops.geom import PhaseAlign
 
@@ -1393,7 +1393,7 @@ def test_phase_align_is_terminal_only_without_apply() -> None:
 def test_tuple_returning_composites_are_terminal_only_when_flagged(
     cls_path: str, kwargs: dict[str, Any]
 ) -> None:
-    from pipekit import Identity, Sequential
+    from pipekit_ops import Identity, Sequential
 
     import geoops as gz
 
@@ -2038,7 +2038,7 @@ def test_assert_backends_catches_a_false_jax_claim() -> None:
 def test_a_numpy_operator_refuses_a_jax_carrier() -> None:
     """The refusal names the operator and says how to convert (#532)."""
     jax = pytest.importorskip("jax")
-    from pipekit import BackendError
+    from pipekit_ops import BackendError
 
     from geoops.restore import DespeckleLee
 

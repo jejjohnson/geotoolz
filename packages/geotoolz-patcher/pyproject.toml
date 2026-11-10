@@ -53,7 +53,7 @@ dependencies = [
     # `run.batch_split` groups, pads and masks with `pipekit_array.batch`
     # (imported when it runs); geotoolz-array already depends on it, so this
     # declares the import rather than adding an install.
-    "pipekit-array>=0.0.6",
+    "pipekit-array>=0.1.1",
 ]
 
 [project.optional-dependencies]
@@ -87,16 +87,16 @@ patch-full = [
     "geotoolz-array[jax]>=0.3.0",
     "geotoolz-cloud[cog]>=0.6",
 ]
-# Operator-graph bridge: pull in `pipekit` and the ~125-LOC wrappers in
+# Operator-graph bridge: pull in `pipekit-ops` and the ~125-LOC wrappers in
 # `geopatcher.integrations.pipekit` (GridSampler / ApplyToChips / MergePatches).
 # The patcher core stays framework-free; only this integration module
-# imports `pipekit.Operator`.
-pipekit = ["pipekit>=0.0.2"]
+# imports `pipekit_ops.Operator`.
+pipekit = ["pipekit-ops>=0.2.1"]
 # Training-data bridge: `geopatcher.integrations.train.XarrayWindowDataset`, a
 # pipekit-train `TrainingDataset` of windows from lazy xarray / Zarr stores.
 # It rides the Equinox adapter's Grain path, so the extra pulls that adapter
 # (jax, equinox, optax, grain, orbax) with pipekit-train.
-train = ["pipekit-train[equinox]>=0.0.2", "xarray>=2024.1", "zarr>=3.0"]
+train = ["pipekit-train[equinox]>=0.2.0", "xarray>=2024.1", "zarr>=3.0"]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/geotoolz"
