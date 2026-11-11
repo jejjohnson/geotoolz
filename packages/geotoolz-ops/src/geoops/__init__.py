@@ -177,6 +177,7 @@ from geoops.geom.coregister import (
     RasterToPointCloud,
     RasterToPoints,
     RasterToRasterLike,
+    SwathToGrid,
     VectorToRasterAgg,
 )
 from geoops.indices import (
@@ -701,6 +702,7 @@ __all__ = [
     "StretchToUint8",
     "StructureTensor",
     "SunAngleJitter",
+    "SwathToGrid",
     "Switch",
     "Tap",
     "Threshold",

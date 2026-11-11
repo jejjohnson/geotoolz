@@ -1,7 +1,8 @@
 """The slim base install (#538): `import geoops` needs none of the heavy extras.
 
-GDAL (rasterio), the vector stack (geopandas, shapely), scikit-image and
-georeader sit behind ``[raster]``, ``[vector]``, ``[morph]`` and ``[sensors]``;
+GDAL (rasterio), the vector stack (geopandas, shapely), scikit-image,
+georeader and functax sit behind ``[raster]``, ``[vector]``, ``[morph]``,
+``[sensors]`` and ``[interp]``;
 an operator imports them when it runs, and says which extra is missing.
 
 Each check runs in a fresh interpreter: modules other tests imported cannot be
@@ -22,6 +23,8 @@ HEAVY = {
     "vector": ("geopandas", "shapely"),
     "morph": ("skimage",),
     "sensors": ("georeader",),
+    # functax's NumPy base comes with geoarray; its plans need JAX.
+    "interp": ("jax", "jaxlib", "equinox", "lineax"),
 }
 
 _BLOCK = """
@@ -52,6 +55,8 @@ band = GeoArray(
     np.random.default_rng(1).random((16, 16)).astype("float32"),
     T, 32630, dims="y x", fill_value=np.nan,
 )
+gappy = np.where(np.eye(16, dtype=bool), np.nan, np.asarray(band))
+xy, z = np.zeros((3, 2)), np.ones(3)
 """
 
 
@@ -128,9 +133,18 @@ CASES = [
     # #643: interp_at reads through a functax plan, which needs JAX.
     (
         "interp",
-        ("jax", "jaxlib", "equinox", "lineax"),
+        HEAVY["interp"],
         "gz.geom.interp_at(band, GeoPoints(np.zeros(1), xy=np.zeros((1, 2)),"
         " dims='obs', crs=band.crs))",
+    ),
+    # #645: the functax plans behind the gap fills and the IDW gridders
+    # (a fill runs only where there is a gap).
+    ("interp", HEAVY["interp"], "gz.restore.GapFillIDW()(gappy)"),
+    ("interp", HEAVY["interp"], "gz.restore.GapFillLaplacian()(gappy)"),
+    (
+        "interp",
+        HEAVY["interp"],
+        "gz.geom.coregister.PointCloudToRaster(method='idw')((xy, z), band)",
     ),
 ]
 

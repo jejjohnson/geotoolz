@@ -1,8 +1,9 @@
 """Tier-A primitives for image restoration.
 
-All functions in this module are pure NumPy / SciPy on plain
-``ndarray`` inputs. Spatial filters (despeckle, destripe, denoise,
-gap fill, outliers) take ``(..., H, W)`` arrays, filter the trailing two
+All functions in this module take and return plain ``ndarray``s and
+run on NumPy / SciPy, except the gap fills, which run on functax plans
+(the ``[interp]`` extra, imported lazily). Spatial filters (despeckle,
+destripe, denoise, gap fill, outliers) take ``(..., H, W)`` arrays, filter the trailing two
 axes and return an array of the same shape. The spectral transforms take
 an array with a band axis (``(bands, H, W)`` by default):
 :func:`pca_denoise` returns a same-shaped reconstruction, while
@@ -26,7 +27,6 @@ import einx
 import numpy as np
 from jaxtyping import Bool, Float, Num, Shaped
 from scipy import ndimage
-from scipy.spatial import cKDTree
 
 from geoops._src.samples import (
     SampleLayout,
@@ -34,6 +34,7 @@ from geoops._src.samples import (
     sample_layout,
     samples_to_cube,
 )
+from geoops._src.scattered import functax_module, inverse_distance, x64
 
 
 _EPSILON = 1e-12
@@ -809,14 +810,66 @@ def _iter_planes(
     return [(idx, values[idx]) for idx in np.ndindex(values.shape[:-2])]
 
 
+def _inclusive(radius: float) -> float:
+    """The plan radius that keeps neighbours at ``d <= radius`` (functax counts ``d < r``)."""
+    return float(np.nextafter(max(float(radius), 0.0), np.inf))
+
+
+def _lattice_neighbours(radius: float) -> int:
+    """How many other pixels lie within ``radius`` of a pixel: k for the plan."""
+    reach = int(np.floor(max(radius, 0.0)))
+    offsets = np.arange(-reach, reach + 1)
+    d2 = offsets[:, None] ** 2 + offsets[None, :] ** 2
+    return max(int(np.count_nonzero(d2 <= radius**2)) - 1, 1)
+
+
+def _fill_from_valid(
+    values: Float[np.ndarray, "*batch h w"],
+    *,
+    k: int,
+    power: float,
+    radius: float | None,
+    feature: str,
+) -> Float[np.ndarray, "*batch h w"]:
+    """Each plane's gaps read from its finite pixels through one IDW plan.
+
+    Sources are the V finite pixel centres, targets the G gap pixels, in
+    pixel units; the plan maps the (V,) finite values to the (G,) gaps, which
+    are written back. Gaps with no neighbour within ``radius`` stay NaN.
+    """
+    out = values.copy()
+    for idx, plane in _iter_planes(values):
+        missing = ~np.isfinite(plane)
+        if not missing.any() or missing.all():
+            continue
+        filled, _ = inverse_distance(
+            np.argwhere(~missing).astype(float),
+            plane[~missing],
+            np.argwhere(missing).astype(float),
+            k=k,
+            power=power,
+            radius=radius,
+            feature=feature,
+        )
+        plane_out = plane.copy()
+        plane_out[missing] = filled
+        if idx is None:
+            out = plane_out
+        else:
+            out[idx] = plane_out
+    return out
+
+
 def gap_fill_nearest(
     arr: Num[np.ndarray, "*batch h w"], *, max_distance: int | None = None
 ) -> Float[np.ndarray, "*batch h w"]:
     """Fill NaNs from the nearest finite neighbour.
 
-    Uses :func:`scipy.ndimage.distance_transform_edt` per 2-D plane.
-    Pixels whose nearest finite neighbour is farther than
-    ``max_distance`` (when given) are left as NaN.
+    Reads each gap from its nearest finite pixel through a one-neighbour
+    ``functax.interp.InverseDistance`` plan per 2-D plane (the ``[interp]``
+    extra). Where several finite pixels are equally near, the plan's k-d
+    tree picks one of them. Pixels whose nearest finite neighbour is
+    farther than ``max_distance`` (when given) are left as NaN.
 
     Args:
         arr: Array of shape ``(..., H, W)``. Planes are processed
@@ -829,23 +882,10 @@ def gap_fill_nearest(
         Filled array with the same shape as ``arr``.
     """
     values = np.asarray(arr, dtype=float)
-    out = values.copy()
-    for idx, plane in _iter_planes(values):
-        mask = ~np.isfinite(plane)
-        if not mask.any() or mask.all():
-            continue
-        distances, nearest = ndimage.distance_transform_edt(
-            mask, return_distances=True, return_indices=True
-        )
-        filled = plane[tuple(nearest)]
-        if max_distance is not None:
-            filled = np.where(distances <= max_distance, filled, np.nan)
-        result = np.where(mask, filled, plane)
-        if idx is None:
-            out = result
-        else:
-            out[idx] = result
-    return out
+    radius = None if max_distance is None else _inclusive(max_distance)
+    return _fill_from_valid(
+        values, k=1, power=1.0, radius=radius, feature="gap_fill_nearest"
+    )
 
 
 def gap_fill_idw(
@@ -853,19 +893,23 @@ def gap_fill_idw(
 ) -> Float[np.ndarray, "*batch h w"]:
     r"""Fill NaNs with inverse-distance weighted finite neighbours.
 
-    For each NaN pixel ``p``, finds all finite neighbours within
+    For each NaN pixel ``p``, takes all finite neighbours within
     ``radius`` pixels (Euclidean) and replaces it with
     :math:`\hat{p} = \sum_i w_i x_i / \sum_i w_i` where
     :math:`w_i = 1 / \max(d_i, \epsilon)^{\text{power}}`. NaNs whose
     neighbourhood is empty are left as NaN.
 
-    Powers ``>= 64`` numerically converge to nearest-neighbour weights
-    but risk overflow, so the function short-circuits to
-    :func:`gap_fill_nearest` in that case.
+    The weights come from one ``functax.interp.InverseDistance`` plan per
+    2-D plane (the ``[interp]`` extra), from the finite pixels to the gaps,
+    with ``k`` the number of pixels within ``radius`` so the neighbourhood is
+    the whole disc.
+
+    Powers ``>= 64`` numerically converge to nearest-neighbour weights,
+    so the function short-circuits to :func:`gap_fill_nearest` in that case.
 
     Args:
         arr: Array of shape ``(..., H, W)``. Planes are processed
-            independently with a per-plane k-d tree.
+            independently.
         power: IDW exponent. ``2.0`` is the standard choice; larger
             values bias toward nearer neighbours.
         radius: Maximum search radius in pixels.
@@ -876,95 +920,99 @@ def gap_fill_idw(
     if power >= _IDW_POWER_THRESHOLD:
         return gap_fill_nearest(arr, max_distance=radius)
     values = np.asarray(arr, dtype=float)
+    return _fill_from_valid(
+        values,
+        k=_lattice_neighbours(radius),
+        power=power,
+        radius=_inclusive(radius),
+        feature="gap_fill_idw",
+    )
+
+
+def _warn_iterations(iterations: int | None, what: str) -> None:
+    """``iterations`` is accepted for one release and ignored."""
+    if iterations is not None:
+        warnings.warn(
+            f"{what}(iterations=...) is deprecated and has no effect: the "
+            "Laplace fill is now solved exactly by functax.project.fill_gaps. "
+            "Drop the argument.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+
+
+def _fill_gaps(
+    arr: Num[np.ndarray, "*batch h w"], method: str, feature: str
+) -> Float[np.ndarray, "*batch h w"]:
+    """``functax.project.fill_gaps`` on every 2-D plane with gaps."""
+    values = np.asarray(arr, dtype=float)
     out = values.copy()
-    for idx, plane in _iter_planes(values):
-        missing = ~np.isfinite(plane)
-        if not missing.any() or missing.all():
-            continue
-        valid = np.argwhere(np.isfinite(plane))
-        tree = cKDTree(valid)
-        plane_out = plane.copy()
-        for row, col in np.argwhere(missing):
-            neighbours = tree.query_ball_point([row, col], r=radius)
-            if not neighbours:
+    planes = [(i, p) for i, p in _iter_planes(values) if not np.isfinite(p).all()]
+    if not planes:
+        return out
+    project = functax_module("project", feature=feature)
+    with x64(feature):
+        for idx, plane in planes:
+            observed = np.isfinite(plane)
+            if not observed.any():
                 continue
-            coords = valid[neighbours]
-            dist = np.linalg.norm(coords - np.array([row, col]), axis=1)
-            weights = 1.0 / np.maximum(dist, _EPSILON) ** power
-            plane_out[row, col] = np.sum(
-                weights * plane[coords[:, 0], coords[:, 1]]
-            ) / np.sum(weights)
-        if idx is None:
-            out = plane_out
-        else:
-            out[idx] = plane_out
+            filled = np.array(
+                project.fill_gaps(plane, mask=observed, method=method),
+                dtype=float,
+            )
+            if idx is None:
+                out = filled
+            else:
+                out[idx] = filled
     return out
 
 
 def gap_fill_laplacian(
-    arr: Num[np.ndarray, "*batch h w"], *, iterations: int = 200
+    arr: Num[np.ndarray, "*batch h w"], *, iterations: int | None = None
 ) -> Float[np.ndarray, "*batch h w"]:
-    r"""Fill NaNs by iteratively solving a discrete Laplace equation.
+    r"""Fill NaNs by solving a discrete Laplace equation.
 
-    Iterates the 4-neighbour averaging
-    :math:`u^{(k+1)}_{i,j} = \tfrac{1}{4}(u^{(k)}_{i-1,j} +
-    u^{(k)}_{i+1,j} + u^{(k)}_{i,j-1} + u^{(k)}_{i,j+1})` over the
-    missing pixels while clamping the finite pixels to their original
-    values. Converges to the harmonic interpolant in the limit. The
-    initial guess is :func:`gap_fill_nearest` for fast convergence.
+    Solves :math:`\Delta u = 0` on the missing pixels with the finite
+    pixels as Dirichlet values, through ``functax.project.fill_gaps``
+    (the ``[interp]`` extra): the five-point Laplacian with edge-repeat
+    boundaries (the ghost pixel past the raster edge is the edge pixel), solved
+    by conjugate gradients to √ε. This is the limit the Jacobi sweeps of
+    earlier releases converged to.
 
     Args:
-        arr: Array of shape ``(..., H, W)``.
-        iterations: Number of Jacobi sweeps. Increase for larger gaps.
+        arr: Array of shape ``(..., H, W)``. Planes are processed
+            independently; an all-NaN plane stays NaN.
+        iterations: Deprecated and ignored (the solve is exact); passing it
+            warns.
 
     Returns:
         Filled array with the same shape as ``arr``; the original
         finite pixels are preserved exactly.
     """
-    values = np.asarray(arr, dtype=float)
-    out = gap_fill_nearest(values)
-    missing = ~np.isfinite(values)
-    # Pad with edge-repeat so the 4-neighbour stencil at the raster
-    # boundary uses the nearest interior pixel rather than wrapping to
-    # the opposite edge (np.roll would impose periodic boundaries).
-    pad_width = [(0, 0)] * (out.ndim - 2) + [(1, 1), (1, 1)]
-    for _ in range(iterations):
-        padded = np.pad(out, pad_width, mode="edge")
-        avg = (
-            padded[..., :-2, 1:-1]
-            + padded[..., 2:, 1:-1]
-            + padded[..., 1:-1, :-2]
-            + padded[..., 1:-1, 2:]
-        ) / 4.0
-        out = np.where(missing, avg, values)
-    return out
+    _warn_iterations(iterations, "gap_fill_laplacian")
+    return _fill_gaps(arr, "laplace", "gap_fill_laplacian")
 
 
 def gap_fill_biharmonic(
     arr: Num[np.ndarray, "*batch h w"],
 ) -> Float[np.ndarray, "*batch h w"]:
-    """Fill NaNs with a smooth biharmonic-style two-pass Laplacian fill.
+    r"""Fill NaNs by biharmonic inpainting.
 
-    Approximates biharmonic inpainting (which solves
-    :math:`\\Delta^2 u = 0` on the masked region) with a cheap two-pass
-    surrogate: a harmonic fill via :func:`gap_fill_laplacian`, then a
-    short Gaussian smooth to relax the gradient discontinuity at the
-    mask boundary. The original finite pixels are preserved exactly.
-
-    Note: this is *not* the canonical biharmonic inpainting from
-    scikit-image; it is intentionally dependency-light. For sharper
-    boundary continuity, use ``skimage.restoration.inpaint_biharmonic``.
+    Solves :math:`\Delta^2 u = 0` on the missing pixels with the finite
+    pixels as Dirichlet values, through ``functax.project.fill_gaps``
+    (the ``[interp]`` extra, same edge-repeat Laplacian as
+    :func:`gap_fill_laplacian`). Smoother across the mask boundary than the
+    harmonic fill: the gradient is continuous there too.
 
     Args:
-        arr: Array of shape ``(..., H, W)``.
+        arr: Array of shape ``(..., H, W)``. Planes are processed
+            independently; an all-NaN plane stays NaN.
 
     Returns:
         Filled array with the same shape as ``arr``; the original
         finite pixels are preserved exactly.
     """
-    values = np.asarray(arr, dtype=float)
-    smooth = gaussian_denoise(gap_fill_laplacian(values), sigma=1.0)
-    return np.where(np.isfinite(values), values, smooth)
+    return _fill_gaps(arr, "biharmonic", "gap_fill_biharmonic")
 
 
 def outlier_mask(

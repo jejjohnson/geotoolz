@@ -17,13 +17,14 @@ from geoarray import DIMS, GeoArray
 from geoops._src.engine import to_engine
 from geoops._src.geo import affine_of
 from geoops._src.optional import import_optional
+from geoops._src.scattered import inverse_distance
 from geoops._src.shape import require_ndim
 from geoops.geom._src.array import resolve_resampling
 
 
 if TYPE_CHECKING:
     from affine import Affine
-    from jaxtyping import Float, Num
+    from jaxtyping import Bool, Float, Num
     from scipy.spatial import KDTree
 
 from geoops._src.optional import optional_name, optional_root
@@ -247,23 +248,27 @@ def points_to_raster_binned(
 
 def points_to_raster_idw(
     points_xy: Float[np.ndarray, "n 2"],
-    point_values: Num[np.ndarray, " n"],
+    point_values: Num[np.ndarray, "*batch n"],
     *,
     dst_shape: tuple[int, int],
     dst_transform: Affine,
     k: int = 8,
     power: float = 2.0,
     max_radius: float | None = None,
-) -> Float[np.ndarray, "h w"]:
+    valid: Bool[np.ndarray, " n"] | None = None,
+) -> Float[np.ndarray, "*batch h w"]:
     """Inverse-distance-weight scattered points onto a regular grid.
 
-    Each pixel center takes the IDW mean of its ``k`` nearest points
-    (KDTree), with weights ``1 / max(d ** power, 1e-12)``.
+    Each pixel centre takes the IDW mean of its ``k`` nearest points,
+    ``ŷ = ∑ⱼ wⱼ yⱼ`` with ``wⱼ ∝ max(dⱼ, 10⁻¹²)⁻ᵖ``, through
+    ``functax.interp.InverseDistance`` (`geoops._src.scattered`): a pixel
+    centre on a point takes that point's value.
 
     Args:
         points_xy: Point coordinates as an ``(N, 2)`` XY array in the
             destination grid's CRS.
-        point_values: Parallel ``(N,)`` array of measurement values.
+        point_values: ``(N,)`` or ``(*batch, N)`` measurement values, the
+            points last.
         dst_shape: Destination spatial shape ``(H, W)``.
         dst_transform: Affine transform of the destination grid (must
             be axis-aligned).
@@ -271,42 +276,36 @@ def points_to_raster_idw(
         power: Inverse-distance exponent.
         max_radius: Optional distance ceiling in CRS units; pixels whose
             nearest point is farther than this are ``NaN``.
+        valid: Optional ``(N,)`` mask; ``False`` points are left out.
 
     Returns:
-        The ``float64`` ``(H, W)`` grid; all-``NaN`` for an empty cloud.
+        The ``float64`` ``(*batch, H, W)`` grid; all-``NaN`` for an empty
+        cloud.
 
     Raises:
         ValueError: If ``dst_transform`` has rotation / shear terms.
+        ImportError: Without the ``[interp]`` extra (functax).
     """
-    from scipy.spatial import KDTree
-
     _require_axis_aligned(dst_transform, "points_to_raster_idw")
     xy = np.asarray(points_xy, dtype=np.float64)
-    values = np.asarray(point_values)
+    values = np.asarray(point_values, dtype=np.float64)
     h, w = dst_shape
-    # Empty cloud → all-NaN raster (well-defined rather than a KDTree
-    # crash on zero-row input).
-    if xy.shape[0] == 0:
-        return np.full((h, w), np.nan, dtype=np.float64)
-
-    tree = KDTree(xy)
-    eff_k = min(k, xy.shape[0])
-    distances, indices = tree.query(_pixel_center_xy(dst_transform, (h, w)), k=eff_k)
-    if eff_k == 1:
-        distances = distances[:, None]
-        indices = indices[:, None]
-
-    sampled = values[indices]  # (H*W, eff_k)
-    weights = 1.0 / np.maximum(distances**power, 1e-12)
-    num = (sampled * weights).sum(axis=1)
-    den = weights.sum(axis=1)
-    result = (num / den).reshape(h, w).astype(np.float64)
-
+    # Empty cloud → all-NaN raster (well-defined rather than an empty search).
+    if xy.shape[0] == 0 or (valid is not None and not np.any(valid)):
+        return np.full((*values.shape[:-1], h, w), np.nan, dtype=np.float64)
+    result, nearest = inverse_distance(
+        xy,
+        values,
+        _pixel_center_xy(dst_transform, (h, w)),
+        k=k,
+        power=power,
+        source_valid=valid,
+        feature="points_to_raster_idw",
+    )
     if max_radius is not None:
         # Mask pixels whose nearest point exceeds the radius.
-        nearest_dist = distances[:, 0].reshape(h, w)
-        result = np.where(nearest_dist > max_radius, np.nan, result)
-    return result
+        result = np.where(nearest > max_radius, np.nan, result)
+    return result.reshape(*values.shape[:-1], h, w)
 
 
 def raster_to_point_cloud(
@@ -321,8 +320,9 @@ def raster_to_point_cloud(
 ) -> Float[np.ndarray, "*batch n"]:
     """Sample raster values onto each point in a point cloud.
 
-    ``"nearest"`` and ``"idw"`` query a KDTree built on the pixel
-    centers; ``"bilinear"`` interpolates between pixel centers with
+    ``"nearest"`` and ``"idw"`` read the pixel centres through the
+    ``functax.interp.InverseDistance`` plan of `points_to_raster_idw`
+    (``"nearest"`` is its one-neighbour case); ``"bilinear"`` interpolates between pixel centers with
     ``xarray.DataArray.interp`` (points outside the pixel-center hull
     are ``NaN``).
 
@@ -348,6 +348,8 @@ def raster_to_point_cloud(
     Raises:
         ValueError: If the raster is not 2-D / 3-D or its affine has
             rotation / shear terms.
+        ImportError: ``"nearest"`` / ``"idw"`` without the ``[interp]``
+            extra (functax).
     """
     arr = np.asarray(raster_values)
     xy = np.asarray(cloud_xy, dtype=np.float64)[:, :2]
@@ -358,34 +360,19 @@ def raster_to_point_cloud(
     if xy.shape[0] == 0:
         return np.zeros((*arr.shape[:-2], 0), dtype=arr.dtype)
 
-    tree = _pixel_center_tree(raster_transform, arr.shape)
-    # Clamp k to the number of available pixels — querying KDTree with
-    # k > N returns placeholder out-of-bounds indices that would crash
-    # the `flat[indices]` lookup.
-    eff_k = min(k, tree.n)
-    distances, indices = tree.query(xy, k=eff_k)
-    # `KDTree.query` returns 1-D arrays for k=1; promote to (N, 1) so
-    # the IDW path is uniform.
-    if eff_k == 1:
-        distances = distances[:, None]
-        indices = indices[:, None]
-
-    # Flatten the spatial dims for fancy-index lookup:
-    # (H, W) → (H*W,) and (C, H, W) → (C, H*W); gather → (..., N, k).
+    # nearest is IDW on one neighbour; k is clamped to the H * W pixels
     flat = arr.reshape(*arr.shape[:-2], -1)
-    gathered = flat[..., indices]
-
-    if method == "nearest" or eff_k == 1:
-        result = gathered[..., 0].astype(np.float64)
-    else:
-        weights = 1.0 / np.maximum(distances**power, 1e-12)
-        num = (gathered * weights).sum(axis=-1)
-        den = weights.sum(axis=-1)
-        result = (num / den).astype(np.float64)
-
+    result, nearest = inverse_distance(
+        _pixel_center_xy(raster_transform, arr.shape),
+        flat,
+        xy,
+        k=1 if method == "nearest" else k,
+        power=power,
+        feature="raster_to_point_cloud",
+    )
     # Out-of-radius gate: use the *closest* pixel's distance.
     if max_radius is not None:
-        result[..., distances[:, 0] > max_radius] = np.nan
+        result[..., nearest > max_radius] = np.nan
     return result
 
 

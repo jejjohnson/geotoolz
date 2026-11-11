@@ -83,6 +83,7 @@ Anything two or more families need lives in `geoops/_src/`:
 | `fitted.py` | `fit_once` / `fit_lock` for fit/transform operators |
 | `config.py` | `get_config()` coercion (`jsonable`, `as_tuple`, …) |
 | `optional.py` | `import_optional` for extras-gated dependencies |
+| `scattered.py` | `inverse_distance`: IDW of scattered sources onto targets through one `functax.interp.InverseDistance` plan (the `[interp]` extra, under `jax.enable_x64`); `functax_module` for other functax imports |
 
 ## Operator parameter vocabulary
 

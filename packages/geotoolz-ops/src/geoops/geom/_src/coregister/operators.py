@@ -25,6 +25,7 @@ from geoops._src.coupling import Coupling
 from geoops._src.geo import affine_of, require_geoarray
 from geoops._src.optional import import_optional, optional_name
 from geoops._src.shape import require_ndim
+from geoops._src.valid import invalid_values
 from geoops._src.wrap import wrap_like
 from geoops.geom._src.coregister.array import (
     _require_axis_aligned,
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import shapely.geometry.base
-    from geoarray import GeoArray
+    from geoarray import GeoArray, GeoSwath
 
 
 def _geoarray_to_dataarray(tensor: GeoArray, op_name: str) -> Any:
@@ -268,12 +269,12 @@ def _binned_fill(stat: str) -> float:
 class PointsToRaster(Operator):
     """Bin a vector cube of point measurements onto a target raster grid.
 
-    Implementation uses ``scipy.stats.binned_statistic_2d`` with the
-    ``like`` raster's pixel-edge grid as bins. The ``"idw"`` method
-    (inverse-distance weighting via KDTree) is reserved for a
-    follow-up; today only ``"binned_stat"`` is implemented and
-    construction with ``method="idw"`` raises NotImplementedError
-    at call time so YAML round-trip still works.
+    ``"binned_stat"`` uses ``scipy.stats.binned_statistic_2d`` with the
+    ``like`` raster's pixel-edge grid as bins. ``"idw"`` takes, at each
+    pixel centre, the inverse-distance weighted mean of the ``k`` nearest
+    points (``functax.interp.InverseDistance``, the ``[interp]`` extra),
+    as `PointCloudToRaster` does; a pixel centre on a point takes that
+    point's value.
 
     The ``points`` input accepts:
 
@@ -293,12 +294,16 @@ class PointsToRaster(Operator):
 
     Args:
         method: Reduction strategy — ``"binned_stat"`` (scipy
-            ``binned_statistic_2d``, default) or ``"idw"`` (deferred).
+            ``binned_statistic_2d``, default) or ``"idw"``.
         stat: For ``"binned_stat"``: one of ``"mean"``, ``"median"``,
             ``"sum"``, ``"count"``, ``"max"``, ``"min"``.
         attribute: For GeoDataFrame inputs, the column to bin.
             Required for GeoDataFrame; ignored for xvec-indexed
             DataArray.
+        power: For ``"idw"``: inverse-distance exponent.
+        k: For ``"idw"``: how many nearest points contribute to each pixel.
+        max_radius: For ``"idw"``: distance ceiling in CRS units; pixels
+            whose nearest point is farther are NaN.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -313,22 +318,25 @@ class PointsToRaster(Operator):
         method: Literal["binned_stat", "idw"] = "binned_stat",
         stat: Literal["mean", "median", "sum", "count", "max", "min"] = "mean",
         attribute: str | None = None,
+        power: float = 2.0,
+        k: int = 8,
+        max_radius: float | None = None,
     ) -> None:
         if method not in {"binned_stat", "idw"}:
             raise ValueError(
                 f"PointsToRaster.method must be 'binned_stat' or 'idw'; got {method!r}"
             )
+        if k < 1:
+            raise ValueError(f"k must be >= 1; got {k}")
         self.method = method
         self.stat = stat
         self.attribute = attribute
+        self.power = power
+        self.k = k
+        self.max_radius = max_radius
 
     def _apply(self, points: Any, like: GeoArray) -> GeoArray:
         require_geoarray(like, "PointsToRaster", arg="like")
-        if self.method == "idw":
-            raise NotImplementedError(
-                "PointsToRaster(method='idw') is not yet implemented; "
-                "use method='binned_stat' for now."
-            )
         # Reject non-axis-aligned target rasters — bin edges derived
         # from only a/c and e/f would silently drop rotation/shear.
         _require_axis_aligned(like, "PointsToRaster")
@@ -338,6 +346,17 @@ class PointsToRaster(Operator):
         xs, ys, values = _points_with_values(
             points, attribute=self.attribute, like_crs=like.crs
         )
+        if self.method == "idw":
+            result = points_to_raster_idw(
+                np.column_stack([xs, ys]),
+                values,
+                dst_shape=like.shape[-2:],
+                dst_transform=affine_of(like),
+                k=self.k,
+                power=self.power,
+                max_radius=self.max_radius,
+            )
+            return wrap_like(like, result, fill_value=np.nan)
         result = points_to_raster_binned(
             np.column_stack([xs, ys]),
             values,
@@ -571,8 +590,10 @@ class PointCloudToRaster(Operator):
 
     Args:
         method: ``"binned_stat"`` (scipy ``binned_statistic_2d`` —
-            fast, no smoothing) or ``"idw"`` (KDTree-backed inverse-
-            distance weighting, smoother but slower).
+            fast, no smoothing) or ``"idw"`` (inverse-distance weighting
+            of the ``k`` nearest points through
+            ``functax.interp.InverseDistance``, the ``[interp]`` extra;
+            smoother but slower).
         stat: For ``"binned_stat"``: one of ``"mean"``, ``"median"``,
             ``"sum"``, ``"count"``, ``"max"``, ``"min"``.
         power: For ``"idw"``: inverse-distance exponent.
@@ -634,6 +655,136 @@ class PointCloudToRaster(Operator):
             max_radius=self.max_radius,
         )
         return wrap_like(like, result, fill_value=np.nan)
+
+
+class SwathToGrid(Operator):
+    """Grid a swath onto a target raster grid by inverse-distance weighting.
+
+    ```
+    # Shapes: C bands; Nr × Nc swath (row, col); Ny′ × Nx′ target grid; Q = k
+
+    to_grid = SwathToGrid(method="idw", k=4, power=2.0)
+    # f̂(x*) = ∑ⱼ wⱼ yⱼ over the Q nearest valid swath pixels, wⱼ ∝ max(dⱼ, ε)⁻ᵖ
+    gridded = to_grid(swath, like)        # (C, Nr, Nc) -> (C, Ny′, Nx′)
+    ```
+
+    Each swath pixel is a source at its geolocation (``swath.lon``,
+    ``swath.lat``, transformed from ``swath.crs`` into ``like.crs``); each
+    target is a pixel centre of ``like``. One plan,
+    ``functax.interp.InverseDistance(k, power).plan(sources, targets)``
+    (the ``[interp]`` extra), reads every band, with distances measured in
+    the target CRS's units (``ε = 10⁻¹²``, so a pixel centre on a swath
+    pixel takes its value). ``"nearest"`` is the ``k = 1`` case.
+
+    Nodata: a swath pixel that is invalid in any band (non-finite or the
+    swath's fill) or has a non-finite geolocation is skipped, so its
+    targets read their ``k`` nearest *valid* pixels instead. A target
+    whose nearest valid pixel is farther than ``max_radius`` is ``NaN``,
+    the output's fill.
+
+    This is the cross-track resampler `BowtieCorrection` leaves to a
+    later step: grid its output with this operator.
+
+    Args:
+        method: ``"idw"`` (default) or ``"nearest"``.
+        k: For ``"idw"``: swath pixels per target.
+        power: For ``"idw"``: inverse-distance exponent.
+        max_radius: Distance ceiling in the target CRS's units, or ``None``.
+
+    Raises:
+        ValueError: An unknown ``method`` or ``k < 1``; at call time, a
+            swath that is not ``(row, col)`` or ``(band, row, col)`` with
+            one geolocation, or a target grid with rotation / shear.
+        TypeError: ``swath`` is not a `geoarray.GeoSwath`, or ``like`` is
+            not a georeferenced ``GeoArray``.
+        ImportError: Without the ``[interp]`` extra (functax).
+
+    Examples:
+        >>> to_grid = gz.geom.coregister.SwathToGrid(method="idw", k=4)
+        >>> gridded = to_grid(swath, like)  # GeoArray on like's grid
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # swath pixels interpolated onto the grid
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"space"}, reach=None, kind="conversion"
+    )
+
+    def __init__(
+        self,
+        *,
+        method: Literal["idw", "nearest"] = "idw",
+        k: int = 4,
+        power: float = 2.0,
+        max_radius: float | None = None,
+    ) -> None:
+        if method not in {"idw", "nearest"}:
+            raise ValueError(
+                f"SwathToGrid.method must be 'idw' or 'nearest'; got {method!r}"
+            )
+        if k < 1:
+            raise ValueError(f"k must be >= 1; got {k}")
+        self.method = method
+        self.k = k
+        self.power = power
+        self.max_radius = max_radius
+
+    def _apply(self, swath: GeoSwath, like: GeoArray) -> GeoArray:
+        from geoarray import GeoSwath
+
+        if not isinstance(swath, GeoSwath):
+            raise TypeError(
+                "SwathToGrid expects a geoarray.GeoSwath (data with per-pixel "
+                f"lat/lon); got {type(swath).__name__}."
+            )
+        require_geoarray(like, "SwathToGrid", arg="like")
+        _require_axis_aligned(like, "SwathToGrid")
+        values = np.asarray(swath, dtype=np.float64)
+        require_ndim(values, (2, 3), "SwathToGrid")
+        if np.ndim(swath.lat) != 2:
+            raise ValueError(
+                "SwathToGrid grids one granule: lat/lon must be (row, col); got "
+                f"{np.shape(swath.lat)}"
+            )
+        x, y = _swath_xy(swath, like.crs)
+        invalid = invalid_values(swath, fill_value=swath.fill_value)
+        if invalid.ndim == 3:
+            invalid = invalid.any(axis=0)
+        valid = ~invalid & np.isfinite(x) & np.isfinite(y)
+        result = points_to_raster_idw(
+            np.column_stack([x.ravel(), y.ravel()]),
+            values.reshape(*values.shape[:-2], -1),
+            dst_shape=like.shape[-2:],
+            dst_transform=affine_of(like),
+            k=1 if self.method == "nearest" else self.k,
+            power=self.power,
+            max_radius=self.max_radius,
+            valid=valid.ravel(),
+        )
+        return wrap_like(
+            like,
+            result,
+            fill_value=np.nan,
+            attrs=dict(swath.attrs),
+            coords=[c for c in swath.coords if c.dim == "band"],
+        )
+
+
+def _swath_xy(swath: Any, crs: Any) -> tuple[np.ndarray, np.ndarray]:
+    """The swath's pixel geolocation as (x, y) in ``crs`` (as given without a CRS)."""
+    lon = np.asarray(swath.lon, dtype=np.float64)
+    lat = np.asarray(swath.lat, dtype=np.float64)
+    if swath.crs is None or crs is None:
+        return lon, lat
+    import pyproj
+
+    src = pyproj.CRS.from_user_input(swath.crs)
+    dst = pyproj.CRS.from_user_input(crs)
+    if src == dst:
+        return lon, lat
+    transformer = pyproj.Transformer.from_crs(src, dst, always_xy=True)
+    x, y = transformer.transform(lon, lat)
+    return np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
 
 
 def _cloud_to_xy_values(cloud: Any) -> tuple[np.ndarray, np.ndarray]:

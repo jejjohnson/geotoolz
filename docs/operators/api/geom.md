@@ -89,6 +89,8 @@ The stencil is a functax plan (`functax.interp.Linear` or `Nearest` on the grid'
 `geom.coregister` aligns one source onto another's support — the
 coregistration callables for `geopatcher.matched.MatchedField`:
 `RasterToRasterLike`, `RasterToPoints` / `PointsToRaster` (`[vector-cube]`
-extra), `RasterToPointCloud` / `PointCloudToRaster`, `VectorToRasterAgg`.
+extra), `RasterToPointCloud` / `PointCloudToRaster`, `VectorToRasterAgg`, and
+`SwathToGrid`, which grids a `GeoSwath` onto a raster grid. The IDW and
+nearest paths run on functax plans (`[interp]` extra).
 
 ::: geoops.geom.coregister

@@ -31,6 +31,7 @@ declares ``fill_value=False`` (saturation flags live in
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
 import numpy as np
@@ -661,7 +662,8 @@ class NLMeans(Operator):
 class GapFillIDW(Operator):
     """Fill NaNs with inverse-distance weighted finite neighbours.
 
-    Wraps :func:`~geoops.restore._src.array.gap_fill_idw`. NaNs whose
+    Wraps :func:`~geoops.restore._src.array.gap_fill_idw` (functax plans,
+    the ``[interp]`` extra). NaNs whose
     neighbourhood within ``radius`` contains no finite pixels are left
     unfilled — chain with :class:`GapFillNearest` for unconditional fill.
     Nodata elements (fill value or non-finite) are the gaps: the output
@@ -694,18 +696,15 @@ class GapFillIDW(Operator):
 
 
 class GapFillInpaintBiharmonic(Operator):
-    """Smoothly inpaint NaN gaps with a biharmonic-style fill.
+    """Smoothly inpaint NaN gaps with a biharmonic fill (Δ²u = 0).
 
-    Wraps :func:`~geoops.restore._src.array.gap_fill_biharmonic`,
-    which already preserves the original finite pixels — the operator
-    just round-trips carrier metadata.
+    Wraps :func:`~geoops.restore._src.array.gap_fill_biharmonic`
+    (``functax.project.fill_gaps``, the ``[interp]`` extra), which solves
+    Δ²u = 0 in the holes and preserves the original finite pixels — the
+    operator just round-trips carrier metadata.
     Nodata elements (fill value or non-finite) are the gaps: the output
     there is the filled value, *not* the fill value; only gaps left
     unfilled hold the output fill.
-
-    Caveat: this is a dependency-light surrogate, not the canonical
-    scikit-image biharmonic inpainting; it can be slow for very large
-    masks because it iterates the Laplace solver internally.
 
     Examples:
         >>> gz.restore.GapFillInpaintBiharmonic()(scene)
@@ -722,39 +721,48 @@ class GapFillInpaintBiharmonic(Operator):
 class GapFillLaplacian(Operator):
     """Fill NaNs by solving a discrete Laplace equation.
 
-    Wraps :func:`~geoops.restore._src.array.gap_fill_laplacian`. The
-    harmonic interpolant — smooth, but linearly biased toward the mean
-    of the boundary. Pair with :class:`GaussianDenoise` for a smoother
-    transition near the mask edge.
+    Wraps :func:`~geoops.restore._src.array.gap_fill_laplacian`
+    (``functax.project.fill_gaps``, the ``[interp]`` extra). The
+    harmonic interpolant, solved exactly — smooth, but linearly biased
+    toward the mean of the boundary. Pair with :class:`GaussianDenoise`
+    for a smoother transition near the mask edge.
     Nodata elements (fill value or non-finite) are the gaps: the output
     there is the filled value, *not* the fill value; only gaps left
     unfilled hold the output fill.
 
     Args:
-        iterations: Number of Jacobi sweeps. Increase for larger gaps.
+        iterations: Deprecated and ignored: the fill is an exact solve,
+            not a fixed number of Jacobi sweeps. Passing it warns.
 
     Examples:
-        >>> gz.restore.GapFillLaplacian(iterations=500)(scene)
+        >>> gz.restore.GapFillLaplacian()(scene)
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
     # a diffusion across each hole
     coupling: ClassVar[Coupling] = Coupling(couples={"space"}, reach=None)
 
-    def __init__(self, *, iterations: int = 200) -> None:
+    def __init__(self, *, iterations: int | None = None) -> None:
+        if iterations is not None:
+            warnings.warn(
+                "GapFillLaplacian(iterations=...) is deprecated and has no "
+                "effect: the Laplace fill is now solved exactly by "
+                "functax.project.fill_gaps. Drop the argument.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self.iterations = iterations
 
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        return _gap_fill(
-            gt, lambda a: gap_fill_laplacian(a, iterations=self.iterations)
-        )
+        return _gap_fill(gt, gap_fill_laplacian)
 
 
 class GapFillNearest(Operator):
     """Fill NaNs from the nearest finite neighbour.
 
-    Wraps :func:`~geoops.restore._src.array.gap_fill_nearest`. Fast
-    and unconditional unless ``max_distance`` is set.
+    Wraps :func:`~geoops.restore._src.array.gap_fill_nearest` (functax
+    plans, the ``[interp]`` extra). Unconditional unless ``max_distance``
+    is set.
     Nodata elements (fill value or non-finite) are the gaps: the output
     there is the filled value, *not* the fill value; only gaps left
     unfilled hold the output fill.

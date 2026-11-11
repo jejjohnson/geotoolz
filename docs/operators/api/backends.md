@@ -11,7 +11,7 @@ NumPy result on a JAX carrier and trace once under `jax.jit` for
 same-shape inputs on different grids (the contract test checks
 both).
 
-57 of 276 operators run on JAX today.
+57 of 277 operators run on JAX today.
 
 | Family | Operator | Backends |
 |---|---|---|
@@ -90,6 +90,7 @@ both).
 | `geom` | `SegmentStitch` | numpy |
 | `geom` | `SlidingWindow` | numpy |
 | `geom` | `Stitch` | numpy |
+| `geom` | `SwathToGrid` | numpy |
 | `geom` | `Tile` | numpy |
 | `geom` | `VectorToRasterAgg` | numpy |
 | `geom` | `Vectorize` | numpy |

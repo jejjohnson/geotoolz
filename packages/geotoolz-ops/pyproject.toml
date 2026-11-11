@@ -122,9 +122,12 @@ netcdf = ["geotoolz-cloud[netcdf]>=0.6"]
 # Zarr sink (`io.WriteZarr`); targets the zarr-python 3 API
 # (`Group.create_array`).
 zarr = ["zarr>=3"]
-# functax interpolation plans (JAX): `geom.interp_at` / `InterpAt` read a
-# grid at points through a functax plan, which brings H and its adjoint.
-interp = ["functax[jax]>=0.0.6"]
+# functax plans (JAX; SciPy for the k-d tree that `InverseDistance.plan`
+# builds on the host): `geom.interp_at` / `InterpAt` read a grid at points
+# through a plan, which brings H and its adjoint; `geom.coregister.SwathToGrid`,
+# the IDW and nearest paths of `PointsToRaster` / `PointCloudToRaster` /
+# `RasterToPointCloud`, and the `restore.GapFill*` operators.
+interp = ["functax[jax,scipy]>=0.0.6"]
 # Every extra above.
 all = [
     "geotoolz-ops[raster,vector,morph,sensors,viz,learn,hydra,patch,vector-cube,cloud,hdf5,hdf4,netcdf,zarr,interp]",
@@ -203,6 +206,8 @@ ignore = ["E402", "E721", "E731", "E741", "F722"]
 "src/geoops/plume/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "src/geoops/restore/**/*.py" = ["RUF001", "RUF002", "RUF003", "E501"]
 "tests/test_restore.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_functax_equivalence.py" = ["RUF001", "RUF002", "RUF003"]
+"tests/test_swath_to_grid.py" = ["RUF001", "RUF002", "RUF003"]
 
 # Reuse guard rails (see AGENTS.md, "Reuse before you write"): other
 # packages are used through their public API, and object-store clients
