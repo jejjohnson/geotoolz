@@ -14,7 +14,7 @@ honestly: what ran, what passed, what was skipped.
 uv run --group lint ruff check .          # entire repo, incl. every tests/
 uv run --group lint ruff format --check .
 make typecheck                            # ty, from each package directory
-make test                                 # fast tier, all five packages (what CI runs)
+make test                                 # whole fast tier (CI runs it per package, only the affected ones)
 ```
 
 While iterating, run the tests (with coverage) of the package you touched

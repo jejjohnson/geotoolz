@@ -344,6 +344,21 @@ All of these must pass, from the repo root:
 5. After changing a public API: `make capabilities` (CI checks
    `docs/capabilities.md` is current).
 
+CI ("Tests", `ci.yml`) runs the fast tier as one parallel job per package,
+each from the package's own directory so its own pytest and coverage gate
+applies. On a pull request only the packages the change can affect run, on
+Python 3.13: shared config (`pyproject.toml`, `uv.lock`, `ci.yml`) runs all of
+them, any change under a package runs that package, a change to its `src/` or
+`pyproject.toml` also runs the packages that import it (transitively, the graph
+is in the `changes` job) and, for any package, `geotoolz-ops` (its
+dependency-rule test reads every package) and `geotoolz` (its import-contract
+test lints every package). Docs, READMEs and scripts run the "docs checks" job
+(capability index, docs examples, docs-path tests) and no package tests;
+notebooks alone run nothing. On `main` every package runs on 3.12 and 3.13.
+The "Tests passed" check summarises the matrix. Reproduce one job with
+`cd packages/<package> && uv run pytest -v` (plus the marker the package's step
+in `ci.yml` uses).
+
 When a change touches packaging, extras or imports, also check what CI's
 `base-install.yml` checks (the package with no extras installed), and make
 sure every new file is tracked: `git status` must not show it as ignored.
