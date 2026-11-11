@@ -245,7 +245,7 @@ def test_a_nearest_tie_goes_to_the_lower_pixel() -> None:
 def test_the_nodata_check_scales_with_the_points_not_the_grid(
     with_frame: bool, x64: ModuleType
 ) -> None:
-    """Only the M × S gathered taps are checked for nodata, never all N pixels."""
+    """Only the M·S gathered taps are checked for nodata, never all N pixels."""
     import re
 
     n_rows, n_cols = 40, 50
