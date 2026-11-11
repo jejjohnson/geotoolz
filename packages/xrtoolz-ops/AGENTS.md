@@ -110,8 +110,16 @@ cd packages/xrtoolz-ops && uv run pytest tests/grad/test_spherical.py -v
 ### Test tiers
 
 Tests are markered `slow` / `integration` (strict markers, registered in
-each package's `pyproject.toml`). Automatic CI runs only the fast tier;
-the slow and integration tiers run manually via the "Extended Tests"
+each package's `pyproject.toml`). Automatic CI runs only the fast tier, as
+one parallel job per package, each from its own directory so its pytest and
+coverage config applies. On a pull request it runs only the packages the change
+can affect, on Python 3.13: `xrtoolz-products` also runs `xrtoolz-ops` and
+`xrtoolz`, `xrtoolz-ops` also runs `xrtoolz`, any package change or a change to
+`scripts/` or `docs/api/families.md` also runs `xrtoolz-ops` (its
+dependency-rule and family-parity tests scan every package), shared config
+(`pyproject.toml`, `uv.lock`, `.python-version`, `ci.yml`) runs everything, and
+docs or notebooks alone run nothing. On `main` every package runs on 3.12 and
+3.13. The "Tests passed" check summarises the matrix. The slow and integration tiers run manually via the "Extended Tests"
 workflow (`workflow_dispatch`) or `make test-slow`. Never add a slow or
 network-touching test without one of these markers.
 
