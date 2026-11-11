@@ -4132,6 +4132,7 @@ class InterpAt(Operator):
         self._check_inputs(grid, points)
         check_args(grid, points, self.method)
         interp = functax_module("interp", feature="geoops.geom.InterpAt.plan")
+        import jax  # functax_module has checked that the [interp] extra is in
 
         # the key reads the positions and validity on the host: concrete only
         inputs = (grid.transform, points.xy, points.valid)
