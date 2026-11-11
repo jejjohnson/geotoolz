@@ -83,7 +83,9 @@ Anything two or more families need lives in `geoops/_src/`:
 | `fitted.py` | `fit_once` / `fit_lock` for fit/transform operators |
 | `config.py` | `get_config()` coercion (`jsonable`, `as_tuple`, …) |
 | `optional.py` | `import_optional` for extras-gated dependencies |
-| `scattered.py` | `inverse_distance`: IDW of scattered sources onto targets through one `functax.interp.InverseDistance` plan (the `[interp]` extra, under `jax.enable_x64`); `functax_module` for other functax imports |
+| `scattered.py` | the one home for functax (the `[interp]` extra): `functax_module` (lazy import with the install hint) and `x64` (`jax.enable_x64`) for every caller (`interp_at`, `InterpAt`, `Reproject(engine="interp")`, the gridders, the gap fills); `inverse_distance`, IDW of scattered sources through one `functax.interp.InverseDistance` plan; `fill_gaps_plane`, `functax.project.fill_gaps` jitted once per process |
+
+**JAX and `jit`.** Library code stays un-jitted: the caller jits once, at the top of their own program, so a geoops function traces into it. The one exception is a function that takes NumPy (or xarray) and returns NumPy, so no caller can trace through it; it may keep one cached `jax.jit` of its JAX core, built once per process, and must still check its extra on every call. That jit lives in `geoops._src.scattered` (today only `fill_gaps_plane`); add any new one there.
 
 ## Operator parameter vocabulary
 

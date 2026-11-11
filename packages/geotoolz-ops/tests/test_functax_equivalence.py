@@ -333,3 +333,29 @@ def test_gap_fills_reproduce_a_linear_ramp(method: str) -> None:
     arr = ramp.copy()
     arr[4:11, 5:14] = np.nan
     np.testing.assert_allclose(fill(arr), ramp, rtol=0, atol=1e-6)
+
+
+def test_fill_gaps_is_compiled_once_and_still_names_a_missing_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One cached jit per process; the extra is checked on every call anyway."""
+    import importlib
+
+    from geoops._src import scattered
+    from geoops.restore import gap_fill_laplacian
+
+    arr = _gappy(frac=0.2)
+    want = gap_fill_laplacian(arr)
+    assert scattered._compiled_fill_gaps() is scattered._compiled_fill_gaps()
+    np.testing.assert_array_equal(gap_fill_laplacian(arr), want)
+
+    real_import_module = importlib.import_module
+
+    def without_functax(name: str, package: str | None = None):
+        if name.split(".")[0] == "functax":
+            raise ImportError(f"simulated missing {name}")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", without_functax)
+    with pytest.raises(ImportError, match=r"pip install 'geotoolz-ops\[interp\]'"):
+        gap_fill_laplacian(arr)

@@ -34,7 +34,7 @@ from geoops._src.samples import (
     sample_layout,
     samples_to_cube,
 )
-from geoops._src.scattered import functax_module, inverse_distance, x64
+from geoops._src.scattered import fill_gaps_plane, inverse_distance
 
 
 _EPSILON = 1e-12
@@ -944,26 +944,21 @@ def _warn_iterations(iterations: int | None, what: str) -> None:
 def _fill_gaps(
     arr: Num[np.ndarray, "*batch h w"], method: str, feature: str
 ) -> Float[np.ndarray, "*batch h w"]:
-    """``functax.project.fill_gaps`` on every 2-D plane with gaps."""
+    """``functax.project.fill_gaps``, compiled once, on every 2-D plane with gaps."""
     values = np.asarray(arr, dtype=float)
     out = values.copy()
     planes = [(i, p) for i, p in _iter_planes(values) if not np.isfinite(p).all()]
     if not planes:
         return out
-    project = functax_module("project", feature=feature)
-    with x64(feature):
-        for idx, plane in planes:
-            observed = np.isfinite(plane)
-            if not observed.any():
-                continue
-            filled = np.array(
-                project.fill_gaps(plane, mask=observed, method=method),
-                dtype=float,
-            )
-            if idx is None:
-                out = filled
-            else:
-                out[idx] = filled
+    for idx, plane in planes:
+        observed = np.isfinite(plane)
+        if not observed.any():
+            continue
+        filled = fill_gaps_plane(plane, observed, method=method, feature=feature)
+        if idx is None:
+            out = filled
+        else:
+            out[idx] = filled
     return out
 
 
