@@ -101,7 +101,9 @@ def warp(
     fill = gt.fill_value
     if values.dtype.kind in "fc":
         fill = fill if floating and fill is not None else float("nan")
-    elif fill is None:
-        fill = 0
-    out = jnp.where(valid, values, jnp.asarray(fill, dtype=values.dtype))
+    # an integer carrier without a fill cannot mark nodata, and 0 may be data:
+    # unsupported targets read 0 (as the GDAL engine writes them) and no value
+    # is declared nodata
+    written = 0 if fill is None else fill
+    out = jnp.where(valid, values, jnp.asarray(written, dtype=values.dtype))
     return out.reshape(*data.shape[:-2], *target.shape), fill
