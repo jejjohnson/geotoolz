@@ -241,7 +241,7 @@ current).
 | `RasterToPointCloud` | class | Sample raster values onto each node of a point cloud. |
 | `RasterToPoints` | class | Extract raster values at a vector cube of points. |
 | `RasterToRasterLike` | class | Align one raster onto another's CRS + grid in a single op. |
-| `SwathToGrid` | class | Grid a swath onto a target raster grid by inverse-distance weighting. |
+| `SwathToGrid` | class | Grid a swath onto a target grid by inverse-distance weighting. |
 | `VectorToRasterAgg` | class | Rasterize a vector layer with an aggregation policy for overlaps. |
 
 ### `geoops.indices`

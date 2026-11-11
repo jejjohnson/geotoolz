@@ -90,7 +90,8 @@ The stencil is a functax plan (`functax.interp.Linear` or `Nearest` on the grid'
 coregistration callables for `geopatcher.matched.MatchedField`:
 `RasterToRasterLike`, `RasterToPoints` / `PointsToRaster` (`[vector-cube]`
 extra), `RasterToPointCloud` / `PointCloudToRaster`, `VectorToRasterAgg`, and
-`SwathToGrid`, which grids a `GeoSwath` onto a raster grid. The IDW and
+`SwathToGrid(target=grid)`, which grids a `GeoSwath` onto a `geoarray.Grid`
+(pass `raster.grid` to match a raster). The IDW and
 nearest paths run on functax plans (`[interp]` extra).
 
 ::: geoops.geom.coregister

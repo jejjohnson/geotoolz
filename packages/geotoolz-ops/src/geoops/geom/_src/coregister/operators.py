@@ -16,9 +16,12 @@ See ``docs/catalog/design/query-matchup.md`` §5.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
+import geoarray
 import numpy as np
+from geoarray import FrozenAttrs, GeoArray
 from pipekit_ops import Operator
 
 from geoops._src.coupling import Coupling
@@ -41,7 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import shapely.geometry.base
-    from geoarray import GeoArray, GeoSwath
+    from geoarray import GeoSwath
 
 
 def _geoarray_to_dataarray(tensor: GeoArray, op_name: str) -> Any:
@@ -658,19 +661,19 @@ class PointCloudToRaster(Operator):
 
 
 class SwathToGrid(Operator):
-    """Grid a swath onto a target raster grid by inverse-distance weighting.
+    """Grid a swath onto a target grid by inverse-distance weighting.
 
     ```
     # Shapes: C bands; Nr × Nc swath (row, col); Ny′ × Nx′ target grid; Q = k
 
-    to_grid = SwathToGrid(method="idw", k=4, power=2.0)
+    to_grid = SwathToGrid(target=grid, method="idw", k=4, power=2.0)
     # f̂(x*) = ∑ⱼ wⱼ yⱼ over the Q nearest valid swath pixels, wⱼ ∝ max(dⱼ, ε)⁻ᵖ
-    gridded = to_grid(swath, like)        # (C, Nr, Nc) -> (C, Ny′, Nx′)
+    gridded = to_grid(swath)              # (C, Nr, Nc) -> (C, Ny′, Nx′)
     ```
 
     Each swath pixel is a source at its geolocation (``swath.lon``,
-    ``swath.lat``, transformed from ``swath.crs`` into ``like.crs``); each
-    target is a pixel centre of ``like``. One plan,
+    ``swath.lat``, transformed from ``swath.crs`` into ``target.crs``); each
+    target is a pixel centre of ``target``. One plan,
     ``functax.interp.InverseDistance(k, power).plan(sources, targets)``
     (the ``[interp]`` extra), reads every band, with distances measured in
     the target CRS's units (``ε = 10⁻¹²``, so a pixel centre on a swath
@@ -682,29 +685,34 @@ class SwathToGrid(Operator):
     whose nearest valid pixel is farther than ``max_radius`` is ``NaN``,
     the output's fill.
 
-    The output takes only its grid (transform, CRS, ``(y, x)`` shape) from
-    ``like``; its band dim, band coordinates and attrs are the swath's.
+    The output's grid (transform, CRS, ``(y, x)`` shape) is ``target``; its
+    leading dims, their coordinates and its attrs are the swath's. To grid
+    onto a raster's grid, pass ``target=raster.grid``.
 
     This is the cross-track resampler `BowtieCorrection` leaves to a
     later step: grid its output with this operator.
 
     Args:
+        target: The output grid, a `geoarray.Grid` (transform, CRS and
+            shape, no pixels; hashable configuration), or its
+            ``get_config()``.
         method: ``"idw"`` (default) or ``"nearest"``.
         k: For ``"idw"``: swath pixels per target.
         power: For ``"idw"``: inverse-distance exponent.
         max_radius: Distance ceiling in the target CRS's units, or ``None``.
 
     Raises:
-        ValueError: An unknown ``method`` or ``k < 1``; at call time, a
-            swath that is not ``(row, col)`` or ``(band, row, col)`` with
-            one geolocation, or a target grid with rotation / shear.
-        TypeError: ``swath`` is not a `geoarray.GeoSwath`, or ``like`` is
-            not a georeferenced ``GeoArray``.
+        ValueError: An unknown ``method``, ``k < 1`` or a ``target`` with
+            rotation / shear; at call time, a swath that is not
+            ``(row, col)`` or ``(band, row, col)`` with one geolocation.
+        TypeError: ``target`` is not a `geoarray.Grid`; at call time,
+            ``swath`` is not a `geoarray.GeoSwath`.
         ImportError: Without the ``[interp]`` extra (functax).
 
     Examples:
-        >>> to_grid = gz.geom.coregister.SwathToGrid(method="idw", k=4)
-        >>> gridded = to_grid(swath, like)  # GeoArray on like's grid
+        >>> grid = ga.Grid((10.0, 0.0, 500000.0, 0.0, -10.0, 4e6), "EPSG:32629", (8, 10))
+        >>> to_grid = gz.geom.coregister.SwathToGrid(target=grid, method="idw", k=4)
+        >>> gridded = to_grid(swath)  # GeoArray on grid
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -716,32 +724,39 @@ class SwathToGrid(Operator):
     def __init__(
         self,
         *,
+        target: geoarray.Grid | Mapping[str, Any],
         method: Literal["idw", "nearest"] = "idw",
         k: int = 4,
         power: float = 2.0,
         max_radius: float | None = None,
     ) -> None:
+        if isinstance(target, Mapping):
+            # a Grid's get_config, as from_state and YAML hand it back
+            target = geoarray.Grid.from_config(dict(target.items()))
+        if not isinstance(target, geoarray.Grid):
+            raise TypeError(
+                f"SwathToGrid.target is a geoarray.Grid, got {type(target).__name__}"
+            )
+        # pixel centres from the a/c and e/f terms only, as for PointCloudToRaster
+        _require_axis_aligned(target.transform, "SwathToGrid")
         if method not in {"idw", "nearest"}:
             raise ValueError(
                 f"SwathToGrid.method must be 'idw' or 'nearest'; got {method!r}"
             )
         if k < 1:
             raise ValueError(f"k must be >= 1; got {k}")
+        self.target = target
         self.method = method
         self.k = k
         self.power = power
         self.max_radius = max_radius
 
-    def _apply(self, swath: GeoSwath, like: GeoArray) -> GeoArray:
-        from geoarray import GeoSwath
-
-        if not isinstance(swath, GeoSwath):
+    def _apply(self, swath: GeoSwath) -> GeoArray:
+        if not isinstance(swath, geoarray.GeoSwath):
             raise TypeError(
                 "SwathToGrid expects a geoarray.GeoSwath (data with per-pixel "
                 f"lat/lon); got {type(swath).__name__}."
             )
-        require_geoarray(like, "SwathToGrid", arg="like")
-        _require_axis_aligned(like, "SwathToGrid")
         values = np.asarray(swath, dtype=np.float64)
         require_ndim(values, (2, 3), "SwathToGrid")
         if np.ndim(swath.lat) != 2:
@@ -749,7 +764,8 @@ class SwathToGrid(Operator):
                 "SwathToGrid grids one granule: lat/lon must be (row, col); got "
                 f"{np.shape(swath.lat)}"
             )
-        x, y = _swath_xy(swath, like.crs)
+        target = self.target
+        x, y = _swath_xy(swath, target.crs)
         invalid = invalid_values(swath, fill_value=swath.fill_value)
         if invalid.ndim == 3:
             invalid = invalid.any(axis=0)
@@ -757,23 +773,34 @@ class SwathToGrid(Operator):
         result = points_to_raster_idw(
             np.column_stack([x.ravel(), y.ravel()]),
             values.reshape(*values.shape[:-2], -1),
-            dst_shape=like.shape[-2:],
-            dst_transform=affine_of(like),
+            dst_shape=target.shape,
+            dst_transform=target.affine,
             k=1 if self.method == "nearest" else self.k,
             power=self.power,
             max_radius=self.max_radius,
             valid=valid.ravel(),
         )
-        # the grid is like's; the non-spatial dims and their coords the swath's
+        # no carrier holds the target grid, so the output is built on it: the
+        # grid is target's; the leading dims, their coords and attrs the swath's
         leading = tuple(swath.dims[:-2])
-        return wrap_like(
-            like,
+        return GeoArray(
             result,
+            target.transform,
+            target.crs,
             fill_value=np.nan,
-            attrs=dict(swath.attrs),
+            attrs=FrozenAttrs(dict(swath.attrs)),
             dims=(*leading, "y", "x"),
-            coords=[c for c in swath.coords if c.dim in leading],
+            coords=tuple(c for c in swath.coords if c.dim in leading),
         )
+
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "target": self.target.get_config(),
+            "method": self.method,
+            "k": self.k,
+            "power": self.power,
+            "max_radius": self.max_radius,
+        }
 
 
 def _swath_xy(swath: Any, crs: Any) -> tuple[np.ndarray, np.ndarray]:

@@ -140,6 +140,8 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     "einx._src.operators.Einx": {"op": "rearrange", "pattern": "c h w -> c w h"},
     "feature._src.operators.HoughCircles": {"radii": [3, 5]},
     "geom._src.coregister.operators.VectorToRasterAgg": {"agg": "count"},
+    # a Grid holds no pixels, so it is configuration (#645)
+    "geom._src.coregister.operators.SwathToGrid": lambda: {"target": _grid().grid},
     "geom._src.operators.BowtieCorrection": {
         "detectors_per_scan": 4,
         "max_scan_angle_deg": 55.0,
@@ -929,16 +931,14 @@ def test_every_multi_input_operator_is_classified() -> None:
 
 #: Operators that already took two positional carriers before #141 and are
 #: covered by their own test modules (coregistration, dNBR, overlays, the
-#: matched-filter stages that take a fitted background), `InterpAt`,
-#: whose second input is points, not a carrier on the first one's grid, and
-#: `SwathToGrid`, whose first input is a swath and second the target grid.
+#: matched-filter stages that take a fitted background), and `InterpAt`,
+#: whose second input is points, not a carrier on the first one's grid.
 POSITIONAL_PAIR_OPERATORS: tuple[str, ...] = (
     "geom._src.coregister.operators.PointCloudToRaster",
     "geom._src.coregister.operators.PointsToRaster",
     "geom._src.coregister.operators.RasterToPointCloud",
     "geom._src.coregister.operators.RasterToPoints",
     "geom._src.coregister.operators.RasterToRasterLike",
-    "geom._src.coregister.operators.SwathToGrid",
     "geom._src.coregister.operators.VectorToRasterAgg",
     "geom._src.operators.InterpAt",
     "indices._src.operators.dNBR",
