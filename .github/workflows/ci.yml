@@ -10,121 +10,342 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run for its previous commit; runs on
+# main are never cancelled, so every merged commit is tested.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Decide which packages' tests to run, and on which Python versions.
+  #
+  # On main every package runs on 3.12 and 3.13. On a pull request only the
+  # packages its changes can affect run, on 3.13:
+  #   - shared config (pyproject.toml, uv.lock, this workflow) runs every
+  #     package;
+  #   - any change under a package runs that package; a change to its src or
+  #     pyproject.toml also runs every package whose src or tests depend on it,
+  #     transitively (the graph is written out in the script below, from the
+  #     packages' dependencies and their sibling imports);
+  #   - a change to any package's src or pyproject.toml also runs
+  #     geotoolz-ops (its dependency-rule test reads every package) and the
+  #     geotoolz umbrella (its import-contract test lints every package);
+  #   - docs, READMEs, scripts and any package's src run the docs checks
+  #     (capability index, docs examples, docs-path tests), which are not
+  #     tests of any one package;
+  #   - notebooks alone run nothing.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      any: ${{ steps.select.outputs.any }}
+      checks: ${{ steps.select.outputs.checks }}
+    steps:
+      - name: Classify changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            shared:
+              - pyproject.toml
+              - uv.lock
+              - conftest.py
+              - .python-version
+              - .github/workflows/ci.yml
+            scan:
+              - packages/*/src/**
+              - packages/*/pyproject.toml
+            docs:
+              - docs/**
+              - README.md
+              - packages/*/README.md
+              - scripts/**
+            array:
+              - packages/geotoolz-array/**
+            array_lib:
+              - packages/geotoolz-array/src/**
+              - packages/geotoolz-array/pyproject.toml
+            cloud:
+              - packages/geotoolz-cloud/**
+            cloud_lib:
+              - packages/geotoolz-cloud/src/**
+              - packages/geotoolz-cloud/pyproject.toml
+            patcher:
+              - packages/geotoolz-patcher/**
+            patcher_lib:
+              - packages/geotoolz-patcher/src/**
+              - packages/geotoolz-patcher/pyproject.toml
+            ops:
+              - packages/geotoolz-ops/**
+            ops_lib:
+              - packages/geotoolz-ops/src/**
+              - packages/geotoolz-ops/pyproject.toml
+            catalog:
+              - packages/geotoolz-catalog/**
+            catalog_lib:
+              - packages/geotoolz-catalog/src/**
+              - packages/geotoolz-catalog/pyproject.toml
+            products:
+              - packages/geotoolz-products/**
+            products_lib:
+              - packages/geotoolz-products/src/**
+              - packages/geotoolz-products/pyproject.toml
+            umbrella:
+              - packages/geotoolz/**
+            umbrella_lib:
+              - packages/geotoolz/src/**
+              - packages/geotoolz/pyproject.toml
+      - name: Select packages and Python versions
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          SHARED: ${{ steps.filter.outputs.shared }}
+          SCAN: ${{ steps.filter.outputs.scan }}
+          DOCS: ${{ steps.filter.outputs.docs }}
+          ARRAY: ${{ steps.filter.outputs.array }}
+          ARRAY_LIB: ${{ steps.filter.outputs.array_lib }}
+          CLOUD: ${{ steps.filter.outputs.cloud }}
+          CLOUD_LIB: ${{ steps.filter.outputs.cloud_lib }}
+          PATCHER: ${{ steps.filter.outputs.patcher }}
+          PATCHER_LIB: ${{ steps.filter.outputs.patcher_lib }}
+          OPS: ${{ steps.filter.outputs.ops }}
+          OPS_LIB: ${{ steps.filter.outputs.ops_lib }}
+          CATALOG: ${{ steps.filter.outputs.catalog }}
+          CATALOG_LIB: ${{ steps.filter.outputs.catalog_lib }}
+          PRODUCTS: ${{ steps.filter.outputs.products }}
+          PRODUCTS_LIB: ${{ steps.filter.outputs.products_lib }}
+          UMBRELLA: ${{ steps.filter.outputs.umbrella }}
+          UMBRELLA_LIB: ${{ steps.filter.outputs.umbrella_lib }}
+        run: |
+          all="geotoolz-array geotoolz-cloud geotoolz-patcher geotoolz-ops geotoolz-catalog geotoolz-products geotoolz"
+
+          # Packages whose src (or declared dependencies) another package
+          # imports: a change to one reaches everything that lists it.
+          declare -A RUNTIME=(
+            [geotoolz-array]=""
+            [geotoolz-cloud]="geotoolz-array"
+            [geotoolz-patcher]="geotoolz-array geotoolz-cloud"
+            [geotoolz-ops]="geotoolz-array geotoolz-cloud geotoolz-patcher"
+            [geotoolz-catalog]="geotoolz-array geotoolz-cloud geotoolz-patcher"
+            [geotoolz-products]="geotoolz-array geotoolz-cloud geotoolz-ops"
+            [geotoolz]="geotoolz-array geotoolz-cloud geotoolz-patcher geotoolz-ops geotoolz-catalog geotoolz-products"
+          )
+          # Packages only a package's tests import (pytest.importorskip): their
+          # own runtime closure counts, but they do not make the importer's
+          # dependents affected.
+          declare -A TESTS=(
+            [geotoolz-array]="geotoolz-ops"
+            [geotoolz-patcher]="geotoolz-ops"
+            [geotoolz-products]="geotoolz-ops"
+          )
+
+          # closure NAME...: the packages, and everything they import at run time.
+          closure() {
+            local seen=" " todo=("$@") p d
+            while ((${#todo[@]})); do
+              p=${todo[0]}; todo=("${todo[@]:1}")
+              [[ "$seen" == *" $p "* ]] && continue
+              seen+="$p "
+              for d in ${RUNTIME[$p]}; do todo+=("$d"); done
+            done
+            echo "$seen"
+          }
+
+          if [[ "$EVENT" != "pull_request" ]]; then
+            packages="$all"
+            pythons="3.12 3.13"
+            checks=true
+          elif [[ "$SHARED" == "true" ]]; then
+            packages="$all"
+            pythons="3.13"
+            checks=true
+          else
+            # A package's own tests run for any change under it; the packages
+            # that import it run only when its src or pyproject.toml change.
+            declare -A own=(
+              [geotoolz-array]=$ARRAY [geotoolz-cloud]=$CLOUD [geotoolz-patcher]=$PATCHER
+              [geotoolz-ops]=$OPS [geotoolz-catalog]=$CATALOG [geotoolz-products]=$PRODUCTS
+              [geotoolz]=$UMBRELLA
+            )
+            declare -A lib=(
+              [geotoolz-array]=$ARRAY_LIB [geotoolz-cloud]=$CLOUD_LIB [geotoolz-patcher]=$PATCHER_LIB
+              [geotoolz-ops]=$OPS_LIB [geotoolz-catalog]=$CATALOG_LIB [geotoolz-products]=$PRODUCTS_LIB
+              [geotoolz]=$UMBRELLA_LIB
+            )
+            packages=""
+            for z in $all; do
+              if [[ "${own[$z]}" == "true" ]]; then
+                packages+=" $z"
+                continue
+              fi
+              # What a change can reach this package through: its own closure
+              # and the closure of the packages its tests import.
+              reach=$(closure "$z" ${TESTS[$z]})
+              for c in $all; do
+                if [[ "${lib[$c]}" == "true" && "$reach" == *" $c "* ]]; then
+                  packages+=" $z"
+                  break
+                fi
+              done
+            done
+            if [[ "$SCAN" == "true" ]]; then
+              packages+=" geotoolz-ops geotoolz"
+            fi
+            pythons="3.13"
+            checks=false
+            if [[ "$SCAN" == "true" || "$DOCS" == "true" ]]; then
+              checks=true
+            fi
+          fi
+          matrix=$(jq -cn --arg pkgs "$packages" --arg pys "$pythons" '
+            ($pkgs | split(" ") | map(select(length > 0)) | unique) as $p
+            | ($pys | split(" ")) as $v
+            | {include: [$p[] as $pkg | $v[] as $py | {package: $pkg, python: $py}]}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          if [[ $(jq '.include | length' <<< "$matrix") -gt 0 ]]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "checks=$checks" >> "$GITHUB_OUTPUT"
+          echo "Selected: $matrix (docs checks: $checks)"
+
+  # One job per package and Python version, in parallel. Each package runs from
+  # its own directory, so its pytest and coverage config (markers, bench
+  # ignores, filterwarnings, its own `fail_under` floor on its own source)
+  # applies unchanged. Fast tier only: `slow` / `integration` tests run
+  # manually via the "Extended Tests" workflow, never automatically.
   test:
+    name: test (${{ matrix.package }}, ${{ matrix.python }})
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
     runs-on: ubuntu-latest
     # An explicit `shell: bash` runs steps with `-o pipefail` (the implicit
-    # default is plain `bash -e`), so a failing pytest still fails the
-    # no-skip steps below through their `| tee`.
+    # default is plain `bash -e`), so a failing pytest still fails the no-skip
+    # check below through its `| tee`.
     defaults:
       run:
         shell: bash
     strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ matrix.python }}
       - name: Install dependencies
         run: uv sync --all-packages --all-groups --all-extras
-      # docs/capabilities.md lists every public name; it must match the code,
-      # and no two packages may export one bare name for different objects.
-      # Needs every extra (geoproducts.carbonmapper refuses to import without
-      # its own), so it runs here rather than in the docs job.
-      - name: Capability index is current
-        if: matrix.python-version == '3.12'
-        run: uv run python scripts/capabilities.py --check
-      # Every Python example in the docs, notebooks and READMEs parses and
-      # names only stack objects that exist (scripts/check_docs.py).
-      - name: Docs examples are current
-        if: matrix.python-version == '3.12'
-        run: uv run python scripts/check_docs.py
-      # Fast tier only — `slow` / `integration` tests run manually via the
-      # "Extended Tests" workflow (workflow_dispatch), never automatically.
-      # Each package runs from its own directory so its pytest + coverage
-      # config (markers, gates, bench ignores) applies unchanged.
-      - name: Test geotoolz-ops
-        run: uv run pytest -v -m "not slow and not integration"
-        working-directory: packages/geotoolz-ops
-      - name: Test geotoolz (umbrella)
-        run: uv run pytest -v
-        working-directory: packages/geotoolz
-      # The all-extras run of the patcher suite (jax included): every
-      # extras-gated test must actually run here, so a skip (a missing
-      # extra, a broken importorskip) fails the job. base-install.yml
-      # covers the no-extras end.
-      - name: Test geotoolz-patcher (all extras, no skips)
-        run: |
-          uv run pytest -v -rs | tee pytest.log
-          if grep -q "^SKIPPED" pytest.log; then
-            echo "::error::geotoolz-patcher tests skipped in the all-extras run"
-            exit 1
-          fi
-        working-directory: packages/geotoolz-patcher
-      # The all-extras run of the catalog suite: every extras-gated test must
-      # actually run here, so a skip (a missing extra, a broken importorskip)
-      # fails the job. base-install.yml covers the no-extras end.
-      - name: Test geotoolz-catalog (all extras, no skips)
-        run: |
-          uv run pytest -v -rs | tee pytest.log
-          if grep -q "^SKIPPED" pytest.log; then
-            echo "::error::geotoolz-catalog tests skipped in the all-extras run"
-            exit 1
-          fi
-        working-directory: packages/geotoolz-catalog
+      # Every package except the umbrella and ops runs its all-extras suite with
+      # no skips allowed: an extras-gated test must actually run here, so a
+      # skip (a missing extra, a broken importorskip) fails the job.
+      # base-install.yml covers the no-extras end.
+      - name: Test ${{ matrix.package }}
+        working-directory: packages/${{ matrix.package }}
         env:
-          HYPOTHESIS_PROFILE: ci
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          noskip=false
+          case "$PACKAGE" in
+            geotoolz-ops) args=(-v -m "not slow and not integration") ;;
+            geotoolz) args=(-v) ;;
+            geotoolz-products)
+              # `slow` (wheel build), `live` (real APIs) and `integration`
+              # (real public downloads) stay out of the fast tier.
+              args=(-v -rs -m "not slow and not live and not integration")
+              noskip=true ;;
+            geotoolz-catalog)
+              export HYPOTHESIS_PROFILE=ci
+              args=(-v -rs)
+              noskip=true ;;
+            *)
+              args=(-v -rs)
+              noskip=true ;;
+          esac
+          if [[ "$noskip" == "true" ]]; then
+            uv run pytest "${args[@]}" | tee pytest.log
+            if grep -q "^SKIPPED" pytest.log; then
+              echo "::error::$PACKAGE tests skipped in the all-extras run"
+              exit 1
+            fi
+          else
+            uv run pytest "${args[@]}"
+          fi
       # Time handling must not depend on the runner's local zone (#235):
       # rerun the catalog suite once in a zone with a UTC offset and DST.
       - name: Test geotoolz-catalog (TZ=America/New_York)
-        if: matrix.python-version == '3.13'
+        if: matrix.package == 'geotoolz-catalog' && matrix.python == '3.13'
         run: uv run pytest -q --no-cov
         working-directory: packages/geotoolz-catalog
         env:
           TZ: America/New_York
-      # The all-extras run of the products suite: every extras-gated test
-      # (obstore pool, geotoolz presets) must run, so a skip fails the job.
-      # `slow` (wheel build), `live` (real APIs) and `integration` (real
-      # public downloads) stay out of the fast tier.
-      - name: Test geotoolz-products (all extras, no skips)
-        run: |
-          uv run pytest -v -rs -m "not slow and not live and not integration" | tee pytest.log
-          if grep -q "^SKIPPED" pytest.log; then
-            echo "::error::geotoolz-products tests skipped in the all-extras run"
-            exit 1
-          fi
-        working-directory: packages/geotoolz-products
-      # The all-extras run of the cloud suite: the COG tests need the
-      # [cog] extra, so a skip fails the job.
-      - name: Test geotoolz-cloud (all extras, no skips)
-        run: |
-          uv run pytest -v -rs | tee pytest.log
-          if grep -q "^SKIPPED" pytest.log; then
-            echo "::error::geotoolz-cloud tests skipped in the all-extras run"
-            exit 1
-          fi
-        working-directory: packages/geotoolz-cloud
-      # The all-extras run of the array suite: the JAX tests need [jax], so
-      # a skip fails the job.
-      - name: Test geotoolz-array (all extras, no skips)
-        run: |
-          uv run pytest -v -rs | tee pytest.log
-          if grep -q "^SKIPPED" pytest.log; then
-            echo "::error::geotoolz-array tests skipped in the all-extras run"
-            exit 1
-          fi
-        working-directory: packages/geotoolz-array
       - name: Upload coverage report
-        if: matrix.python-version == '3.12'
+        if: matrix.python == '3.13' && matrix.package != 'geotoolz'
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-report
-          path: packages/*/coverage.xml
+          name: coverage-${{ matrix.package }}
+          path: packages/${{ matrix.package }}/coverage.xml
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12'
+        if: matrix.python == '3.13' && matrix.package != 'geotoolz'
         uses: codecov/codecov-action@v7
         with:
-          files: packages/geotoolz-ops/coverage.xml,packages/geotoolz-patcher/coverage.xml,packages/geotoolz-catalog/coverage.xml,packages/geotoolz-products/coverage.xml,packages/geotoolz-cloud/coverage.xml,packages/geotoolz-array/coverage.xml
+          files: packages/${{ matrix.package }}/coverage.xml
+          flags: ${{ matrix.package }}
           fail_ci_if_error: false
+
+  # The checks that read the docs and every package at once, so they belong to
+  # no one package's job. They need every extra installed (geoproducts'
+  # carbonmapper refuses to import without its own), so they run here rather
+  # than in the docs job.
+  docs-checks:
+    name: docs checks
+    needs: changes
+    if: needs.changes.outputs.checks == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --all-packages --all-groups --all-extras
+      # docs/capabilities.md lists every public name; it must match the code,
+      # and no two packages may export one bare name for different objects.
+      - name: Capability index is current
+        run: uv run python scripts/capabilities.py --check
+      # Every Python example in the docs, notebooks and READMEs parses and
+      # names only stack objects that exist (scripts/check_docs.py).
+      - name: Docs examples are current
+        run: uv run python scripts/check_docs.py
+      # The three suites that scan the docs tree for stale paths and names.
+      - name: Docs-path tests
+        run: |
+          for package in geotoolz-ops geotoolz-catalog geotoolz-patcher; do
+            (cd "packages/$package" && uv run pytest -q --no-cov tests/test_docs_paths.py)
+          done
+
+  # One stable check that summarises the matrix: it passes when every selected
+  # job passed, or when the change needed none.
+  tests-passed:
+    name: Tests passed
+    if: always()
+    needs: [changes, test, docs-checks]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the test jobs
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          TEST: ${{ needs.test.result }}
+          DOCS_CHECKS: ${{ needs.docs-checks.result }}
+        run: |
+          echo "changes: $CHANGES, test: $TEST, docs checks: $DOCS_CHECKS"
+          [[ "$CHANGES" == "success" ]] || exit 1
+          [[ "$TEST" == "success" || "$TEST" == "skipped" ]] || exit 1
+          [[ "$DOCS_CHECKS" == "success" || "$DOCS_CHECKS" == "skipped" ]] || exit 1
