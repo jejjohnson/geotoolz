@@ -165,3 +165,64 @@ class TestGrid:
             Grid(T, None, (-1, 2))
         with pytest.raises(TypeError, match="W must be an integer"):
             Grid(T, None, (1, 2.0))  # type: ignore[arg-type]
+
+
+class TestFunctaxKernels:
+    """The affine kernels are functax's (#643): same numbers, no JAX import."""
+
+    def test_to_pixel_equals_the_closed_form_bit_for_bit(self) -> None:
+        from geoarray import to_pixel
+
+        rng = np.random.default_rng(0)
+        transform = np.array([20.0, 3.0, 600000.0, -2.0, -20.0, 3550000.0])
+        xy = rng.uniform([600000.0, 3538000.0], [612000.0, 3550000.0], (500, 2))
+        # the body of geoarray's to_pixel before #643
+        a, b, c, d, e, f = transform
+        det = a * e - b * d
+        dx, dy = xy[:, 0] - c, xy[:, 1] - f
+        col = (e * dx - b * dy) / det - 0.5
+        row = (-d * dx + a * dy) / det - 0.5
+        np.testing.assert_array_equal(to_pixel(transform, xy), np.stack([row, col], -1))
+
+    def test_to_functax_is_the_affine_grid(self, x64: object) -> None:
+        pytest.importorskip("functax.interp")
+        grid = Grid((20.0, 0.0, 600000.0, 0.0, -20.0, 3550000.0), "EPSG:32613", (4, 5))
+        affine = grid.to_functax()
+        assert affine.shape == (4, 5)
+        assert np.asarray(affine.transform).tolist() == list(grid.transform)
+
+    def test_a_numpy_only_install_runs_the_kernels_without_jax(self) -> None:
+        import subprocess
+        import sys
+        import textwrap
+
+        code = textwrap.dedent(
+            """
+            import importlib.abc, sys
+
+            class Block(importlib.abc.MetaPathFinder):
+                def find_spec(self, name, path=None, target=None):
+                    if name.split(".")[0] in ("jax", "jaxlib"):
+                        raise ImportError(name)
+
+            sys.meta_path.insert(0, Block())
+            import numpy as np
+            import geoarray
+            from geoarray import Grid, to_pixel
+
+            grid = Grid((20.0, 0.0, 0.0, 0.0, -20.0, 0.0), None, (4, 4))
+            assert grid.window((20.0, -60.0, 40.0, -20.0)).shape == (2, 1)
+            rc = to_pixel(np.asarray(grid.transform), np.array([[10.0, -10.0]]))
+            assert rc.tolist() == [[0.0, 0.0]], rc
+            assert "jax" not in sys.modules
+            try:
+                grid.to_functax()
+            except ImportError as exc:
+                print(exc)
+            """
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, check=False
+        )
+        assert out.returncode == 0, out.stderr[-2000:]
+        assert "functax[jax]" in out.stdout

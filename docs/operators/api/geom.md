@@ -79,6 +79,7 @@ not depend on the padding. It runs on NumPy and under `jax.jit` /
 `jax.grad`; `InterpAt` is the same function as an operator, with the
 points as its second input. It moved here from geoarray (GA-B6), which
 keeps `geoarray.to_pixel` for the coordinate maths.
+The stencil is a functax plan (`functax.interp.Linear` or `Nearest` on the grid's `AffineGrid`, with `extent="cells"` and `boundary="edge"`), so H has a tested adjoint, and both need the `[interp]` extra; a NumPy grid is read on JAX in 64-bit mode and comes back as NumPy.
 
 ::: geoops.geom
 

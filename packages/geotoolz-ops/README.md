@@ -224,6 +224,7 @@ a base install and raise an `ImportError` naming the extra when called.
 | `vector-cube` | `xvec` (+ `xarray`) | `geom.coregister.RasterToPoints` / `PointsToRaster`, bilinear point sampling |
 | `hydra` | `hydra-zen` | YAML `builds()` / `instantiate()` round-trips |
 | `patch` | `geotoolz-patcher[pipekit]` | `geoops.patch_ops` (tile → map → stitch, label-aware samplers) |
+| `interp` | `functax[jax]` (JAX, Equinox, lineax) | `geom.interp_at` / `InterpAt` (H(x) as a functax plan) |
 <!-- /extras-table -->
 
 Product readers (`ProductReader`, `toy_sensor`, `goes`, `himawari`,

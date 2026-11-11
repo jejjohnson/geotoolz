@@ -122,9 +122,12 @@ netcdf = ["geotoolz-cloud[netcdf]>=0.6"]
 # Zarr sink (`io.WriteZarr`); targets the zarr-python 3 API
 # (`Group.create_array`).
 zarr = ["zarr>=3"]
+# functax interpolation plans (JAX): `geom.interp_at` / `InterpAt` read a
+# grid at points through a functax plan, which brings H and its adjoint.
+interp = ["functax[jax]>=0.0.6"]
 # Every extra above.
 all = [
-    "geotoolz-ops[raster,vector,morph,sensors,viz,learn,hydra,patch,vector-cube,cloud,hdf5,hdf4,netcdf,zarr]",
+    "geotoolz-ops[raster,vector,morph,sensors,viz,learn,hydra,patch,vector-cube,cloud,hdf5,hdf4,netcdf,zarr,interp]",
 ]
 
 [project.urls]

@@ -77,6 +77,18 @@ jobs:
               assert "geotoolz-ops[sensors]" in str(exc), exc
           else:
               raise AssertionError("Reproject ran without georeader")
+          # interp_at reads through a functax plan: JAX, the [interp] extra
+          from geoarray import GeoPoints
+
+          points = GeoPoints(
+              np.zeros(1), xy=np.zeros((1, 2)), dims="obs", crs=gt.crs
+          )
+          try:
+              gz.geom.interp_at(gt, points)
+          except ImportError as exc:
+              assert "geotoolz-ops[interp]" in str(exc), exc
+          else:
+              raise AssertionError("interp_at ran without functax[jax]")
           print("geotoolz-ops base install OK")
           EOF
 

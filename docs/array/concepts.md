@@ -204,6 +204,8 @@ which blends the four pixels around each point, is `geoops.geom.interp_at`
 run your function on their data; geoarray computes nothing of its own.
 `to_pixel`, `pixel_coords` and `footprint(crs=…)` compute coordinates, not
 values.
+functax owns the affine kernels: `to_pixel` is `functax.geometry.to_pixel`, re-exported, and `Grid.window` calls `functax.geometry.window`.
+functax's base install is NumPy-only and imports JAX only when a JAX array arrives, so geoarray still installs and imports without JAX; `Grid.to_functax()` hands the grid to functax's plans, which need `functax[jax]`.
 
 `sample` and `member` are dim names, not functions: a `sample` is one
 item of an ML batch, a `member` one draw of an ensemble, and `obs` one
