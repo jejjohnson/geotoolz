@@ -185,6 +185,7 @@ def wrap_like(
     band_names: Sequence[str] | None = None,
     coords: Sequence[Any] | None = None,
     crs: Any = INHERIT,
+    dims: Sequence[str] | None = None,
 ) -> GeoArray | np.ndarray:
     """Rewrap a computed array to match the carrier of ``ref``.
 
@@ -226,6 +227,9 @@ def wrap_like(
         crs: CRS for the output (anything ``geoarray.as_crs`` accepts), for
             outputs on a grid in another CRS (a warp). :data:`INHERIT`
             (default) keeps ``ref.crs``.
+        dims: The output's dims, for an output whose non-spatial dims come
+            from another carrier than ``ref`` (a swath gridded onto ``ref``'s
+            grid). ``None`` (default) keeps ``ref``'s while the rank holds.
 
     Returns:
         A new GeoArray with ``ref``'s CRS when ``ref`` is a GeoArray,
@@ -273,7 +277,8 @@ def wrap_like(
         fill_value = fill_for(values.dtype, ref.fill_value)
     # the input's dims while the rank holds; the 0.2 layout otherwise
     # (geoops reads the band axis as -3 until its kernels take dim=, W3)
-    dims = ref.dims if values.ndim == ref.ndim else DIMS[-values.ndim :]
+    if dims is None:
+        dims = ref.dims if values.ndim == ref.ndim else DIMS[-values.ndim :]
     extra = {} if coords is None else {"coords": tuple(coords)}
     wrapped = ref.with_data(
         values,

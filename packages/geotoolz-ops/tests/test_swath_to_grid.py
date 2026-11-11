@@ -98,3 +98,29 @@ def test_swath_to_grid_refuses_a_raster_and_bad_settings() -> None:
         SwathToGrid(k=0)
     with pytest.raises(TypeError, match="GeoSwath"):
         SwathToGrid()(_like(), _like())
+
+
+def test_the_bands_and_their_coords_come_from_the_swath_not_the_target() -> None:
+    """A 3-D target with dims (time, y, x) lends its grid only, not its dims."""
+    from geoarray.coords import SpectralAxis
+
+    swath = _swath()
+    swath = GeoSwath(
+        np.asarray(swath),
+        swath.lat,
+        swath.lon,
+        dims="band row col",
+        coords=(SpectralAxis(("b0", "b1")),),
+        crs="EPSG:32629",
+        fill_value=np.nan,
+    )
+    like = GeoArray(
+        np.zeros((3, 8, 10)), _UTM, "EPSG:32629", dims="time y x", fill_value=0.0
+    )
+    out = SwathToGrid(k=4)(swath, like)
+    assert out.dims == ("band", "y", "x")
+    assert out.labels("band") == ("b0", "b1")
+    assert out.shape == (2, 8, 10)
+    np.testing.assert_array_equal(np.asarray(out.transform), np.asarray(like.transform))
+    two_d = SwathToGrid(k=4)(swath, _like())
+    np.testing.assert_allclose(np.asarray(out), np.asarray(two_d), atol=1e-12)

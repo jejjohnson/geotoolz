@@ -682,6 +682,9 @@ class SwathToGrid(Operator):
     whose nearest valid pixel is farther than ``max_radius`` is ``NaN``,
     the output's fill.
 
+    The output takes only its grid (transform, CRS, ``(y, x)`` shape) from
+    ``like``; its band dim, band coordinates and attrs are the swath's.
+
     This is the cross-track resampler `BowtieCorrection` leaves to a
     later step: grid its output with this operator.
 
@@ -761,12 +764,15 @@ class SwathToGrid(Operator):
             max_radius=self.max_radius,
             valid=valid.ravel(),
         )
+        # the grid is like's; the non-spatial dims and their coords the swath's
+        leading = tuple(swath.dims[:-2])
         return wrap_like(
             like,
             result,
             fill_value=np.nan,
             attrs=dict(swath.attrs),
-            coords=[c for c in swath.coords if c.dim == "band"],
+            dims=(*leading, "y", "x"),
+            coords=[c for c in swath.coords if c.dim in leading],
         )
 
 
