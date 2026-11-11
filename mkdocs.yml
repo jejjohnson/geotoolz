@@ -48,6 +48,10 @@ plugins:
               returns_named_value: false
             show_source: true
             show_root_heading: true
+            # geoarray re-exports functax's affine kernels (`to_pixel`);
+            # griffe must load functax to resolve those aliases.
+            preload_modules:
+              - functax
   - mkdocs-jupyter:
       execute: false
       ignore_h1_titles: true
