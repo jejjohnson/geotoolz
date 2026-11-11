@@ -241,3 +241,38 @@ def test_wrap_like_keeps_an_explicit_fill_verbatim() -> None:
     assert (
         wrap_like(ref, np.zeros((4, 4), np.uint8), fill_value=None).fill_value is None
     )
+
+
+@pytest.fixture
+def x64():
+    """JAX with ``jax_enable_x64`` on for one test, restored afterwards."""
+    jax = pytest.importorskip("jax")
+    previous = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    yield jax
+    jax.config.update("jax_enable_x64", previous)
+
+
+def test_wrap_like_keeps_jax_data_and_traces(x64) -> None:
+    """A JAX result on a JAX carrier stays on JAX, under jit too (#654)."""
+    jax = x64
+    jnp = jax.numpy
+    ref = _scene(2).to_jax()
+    eager = wrap_like(ref, jnp.asarray(ref.data) * 2.0)
+    assert type(eager.data).__module__.startswith("jax")
+    np.testing.assert_array_equal(np.asarray(eager.data), np.asarray(ref.data) * 2.0)
+
+    @jax.jit
+    def doubled(data):
+        return wrap_like(ref.with_data(data), data * 2.0).data
+
+    np.testing.assert_array_equal(
+        np.asarray(doubled(ref.data)), np.asarray(ref.data) * 2.0
+    )
+
+
+def test_wrap_like_takes_a_new_crs() -> None:
+    ref = _scene(1)
+    out = wrap_like(ref, np.asarray(ref.data), crs="EPSG:4326")
+    assert out.crs.to_epsg() == 4326 and ref.crs.to_epsg() != 4326
+    assert wrap_like(ref, np.asarray(ref.data)).crs == ref.crs

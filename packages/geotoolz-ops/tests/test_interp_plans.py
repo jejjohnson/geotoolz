@@ -90,6 +90,39 @@ def test_the_plan_is_built_once_per_grid_and_points(x64: ModuleType) -> None:
     assert op.plan(grid.shift_origin((20.0, 0.0)), _points()) is not first
 
 
+def test_a_plan_built_inside_a_trace_is_not_cached(x64: ModuleType) -> None:
+    """Only the data is traced; the grid and points are concrete constants."""
+    jax = x64
+    grid = GeoArray(_field(), T, CRS, dims="y x").to_jax()
+    points = _points().to_jax()
+    op = gz.InterpAt()
+    traced = jax.jit(lambda data: op(grid.with_data(data), points).data)(grid.data)
+    # a plan cached by the trace would hold its leaked tracers
+    plan = op.plan(grid, points)
+    assert not any(
+        isinstance(leaf, jax.core.Tracer) for leaf in jax.tree_util.tree_leaves(plan)
+    )
+    np.testing.assert_allclose(
+        np.asarray(op(grid, points).data), np.asarray(traced), atol=1e-12
+    )
+
+
+def test_a_traced_validity_mask_is_not_read_on_the_host(x64: ModuleType) -> None:
+    jax = x64
+    grid = GeoArray(_field(), T, CRS, dims="y x").to_jax()
+    points = _points().to_jax()
+    op = gz.InterpAt()
+
+    def read(valid: Any) -> Any:
+        moved = GeoPoints(points.data, xy=points.xy, valid=valid, dims="obs", crs=CRS)
+        return op(grid, moved).data
+
+    traced = jax.jit(read)(points.valid)
+    np.testing.assert_allclose(
+        np.asarray(traced), np.asarray(op(grid, points).data), atol=1e-12
+    )
+
+
 def test_the_adjoint_passes_the_dot_product_test(x64: ModuleType) -> None:
     """⟨H y, r⟩ = ⟨y, Hᵀ r⟩ with H = plan.operator() and Hᵀ its transpose."""
     jnp = x64.numpy
@@ -268,3 +301,19 @@ def test_the_config_round_trips_through_hydra_zen_yaml(engine: str) -> None:
     restored = hydra_zen.instantiate(OmegaConf.create(text))
     assert isinstance(restored, gz.geom.Reproject)
     assert restored.get_config() == op.get_config()
+
+
+def test_a_pixel_with_one_nodata_band_is_nodata_in_every_band() -> None:
+    """valid_mask's rule: any band at nodata makes the pixel nodata; frames apart."""
+    data = np.stack([np.stack([_field(), _field() + 5.0]) for _ in range(2)])
+    data[0, 0, 7, 9] = -9999.0  # frame 0, band 0 only
+    scene = GeoArray(data, T, CRS, dims="time band y x", fill_value=-9999.0)
+    target = Grid(T, CRS, (H, W))  # the source grid itself
+    out = np.asarray(
+        gz.geom.Reproject(target=target, resampling="nearest", engine="interp")(
+            scene
+        ).data
+    )
+    assert out[0, :, 7, 9].tolist() == [-9999.0, -9999.0]
+    np.testing.assert_array_equal(out[1, :, 7, 9], data[1, :, 7, 9])
+    np.testing.assert_array_equal(out[0, :, 7, 10], data[0, :, 7, 10])

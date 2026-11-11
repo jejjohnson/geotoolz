@@ -16,8 +16,6 @@ import numpy as np
 import pyproj
 from geoarray import GeoArray, Grid
 
-from geoops._src.valid import invalid_elements
-
 
 __all__ = ["target_coordinates", "warp"]
 
@@ -52,9 +50,11 @@ def warp(
 ) -> tuple[Any, Any]:
     """f̂(X_*) = H y on every frame and band, and the fill of the result.
 
-    Nodata (non-finite or the fill) is zeroed before the plan and a target
-    pixel that reads it with a non-zero weight is written with the fill, as
-    is one off the source grid. A float input keeps its dtype; an integer
+    A source pixel is nodata when any of its bands is non-finite or the
+    fill (`GeoArray.valid_mask`, each frame on its own). Nodata is zeroed
+    before the plan, and a target pixel that reads it with a non-zero
+    weight is written with the fill in every band, as is one off the
+    source grid. A float input keeps its dtype; an integer
     one keeps it under ``nearest`` and becomes float64 otherwise.
 
     Args:
@@ -79,7 +79,14 @@ def warp(
     data = jnp.asarray(gt.data)
     # y: every frame and band flattened once, (..., H, W) -> (..., N)
     flat = data.reshape(*data.shape[:-2], gt.height * gt.width)
-    usable = ~invalid_elements(flat, gt.fill_value)
+    # a pixel is nodata when any of its bands is (valid_mask's rule); frames
+    # (time) stay apart, so each frame reads its own valid pixels
+    valid_pixels = jnp.asarray(gt.valid_mask(keep_time=True))
+    for axis, dim in enumerate(gt.dims[:-2]):
+        if dim != "time":
+            valid_pixels = jnp.expand_dims(valid_pixels, axis)
+    pixels = valid_pixels.reshape(*valid_pixels.shape[:-2], gt.height * gt.width)
+    usable = jnp.broadcast_to(pixels, flat.shape)
     clean = jnp.where(usable, flat, jnp.zeros((), flat.dtype))
     # f̂ = H 𝒮(y) for every frame and band at once
     values = plan(clean)

@@ -454,8 +454,9 @@ class Reproject(Operator):
                 transform: Any = np.asarray(target.transform)
             else:
                 transform = jax.numpy.asarray(target.transform, dtype=jax.numpy.float64)
-        out = gt.with_data(values, transform=transform, fill_value=fill)
-        return out.replace(crs=target.crs)
+        return wrap_like(
+            gt, values, transform=transform, fill_value=fill, crs=target.crs
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -4102,7 +4103,8 @@ class InterpAt(Operator):
         the operator also masks points that read nodata.
 
         Built once per (grid, points) and cached (the 16 most recent) when
-        both are concrete; under ``jit`` it is built in the trace. A plan
+        both are concrete and it is built outside a trace; under ``jit`` it
+        is built in the trace and not kept. A plan
         on a NumPy grid is built in JAX's 64-bit mode and holds float64
         weights, so apply it with ``jax_enable_x64`` on.
 
@@ -4131,7 +4133,9 @@ class InterpAt(Operator):
         check_args(grid, points, self.method)
         interp = functax_module("interp", feature="geoops.geom.InterpAt.plan")
 
-        concrete = not (is_tracer(grid.transform) or is_tracer(points.xy))
+        # the key reads the positions and validity on the host: concrete only
+        inputs = (grid.transform, points.xy, points.valid)
+        concrete = not any(is_tracer(leaf) for leaf in inputs)
         key = self._plan_key(grid, points) if concrete else None
         if key is not None and key in self._plans:
             self._plans.move_to_end(key)
@@ -4139,7 +4143,10 @@ class InterpAt(Operator):
         host = grid.backend == "numpy" and backend_of(points.xy) != "jax"
         with x64("geoops.geom.InterpAt.plan") if host else nullcontext():
             plan = plan_at(interp, grid, points, self.method)
-        if key is not None:
+        # inside a trace even concrete inputs give a plan of tracers, which
+        # must not outlive it: keep only plans whose leaves are all concrete
+        leaves = jax.tree_util.tree_leaves(plan)
+        if key is not None and not any(is_tracer(leaf) for leaf in leaves):
             self._plans[key] = plan
             while len(self._plans) > self._MAX_PLANS:
                 self._plans.popitem(last=False)

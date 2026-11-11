@@ -25,7 +25,8 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 import numpy as np
-from geoarray import DIMS, FrozenAttrs, GeoArray, GeoArrayAdapter
+from geoarray import DIMS, FrozenAttrs, GeoArray, GeoArrayAdapter, as_crs
+from pipekit_ops import backend_of
 
 from geoops._src.bands import (
     BAND_NAME_KEYS,
@@ -183,8 +184,12 @@ def wrap_like(
     transform: Affine | Any | None = None,
     band_names: Sequence[str] | None = None,
     coords: Sequence[Any] | None = None,
+    crs: Any = INHERIT,
 ) -> GeoArray | np.ndarray:
     """Rewrap a computed array to match the carrier of ``ref``.
+
+    On a JAX carrier a JAX result stays JAX (under ``jax.jit`` too); every
+    other result becomes a NumPy array, as on a NumPy carrier.
 
     Args:
         ref: The operator's input carrier -- a `geoarray.GeoArray` or any
@@ -218,6 +223,9 @@ def wrap_like(
             size; an operator that reorders or picks entries of a dim (band
             selection) passes them re-indexed, or the old labels would name
             the wrong pixels.
+        crs: CRS for the output (anything ``geoarray.as_crs`` accepts), for
+            outputs on a grid in another CRS (a warp). :data:`INHERIT`
+            (default) keeps ``ref.crs``.
 
     Returns:
         A new GeoArray with ``ref``'s CRS when ``ref`` is a GeoArray,
@@ -233,7 +241,10 @@ def wrap_like(
     if not isinstance(ref, GeoArray):
         return np.asarray(out)
 
-    values = np.asarray(out)
+    # a JAX result on a JAX carrier stays JAX (np.asarray would copy it to the
+    # host, and fail on a tracer); anything else is NumPy, as before
+    on_jax = ref.backend == "jax" and backend_of(out) == "jax"
+    values = out if on_jax else np.asarray(out)
     ref_shape = tuple(ref.shape)
     if transform is None:
         if values.shape[-2:] != ref_shape[-2:]:
@@ -242,7 +253,7 @@ def wrap_like(
                 f"{ref_shape[-2:]} -> {values.shape[-2:]}; pass transform= "
                 "for outputs on a new grid."
             )
-        transform = np.asarray(ref.transform)
+        transform = ref.transform if on_jax else np.asarray(ref.transform)
     out_bands = band_count(values.shape)
     if attrs is None:
         new_attrs = rewrap_attrs(
@@ -264,7 +275,7 @@ def wrap_like(
     # (geoops reads the band axis as -3 until its kernels take dim=, W3)
     dims = ref.dims if values.ndim == ref.ndim else DIMS[-values.ndim :]
     extra = {} if coords is None else {"coords": tuple(coords)}
-    return ref.with_data(
+    wrapped = ref.with_data(
         values,
         transform=transform,
         fill_value=fill_value,
@@ -272,6 +283,7 @@ def wrap_like(
         dims=dims,
         **extra,
     )
+    return wrapped if crs is INHERIT else wrapped.replace(crs=as_crs(crs))
 
 
 def rewrap_dims(

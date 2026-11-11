@@ -239,3 +239,30 @@ def test_a_nearest_tie_goes_to_the_lower_pixel() -> None:
         grid, GeoPoints(np.zeros(3), xy=xy, dims="obs", crs=CRS), method="nearest"
     )
     assert out.data.tolist() == [0.0, 1.0, 2.0]
+
+
+@pytest.mark.parametrize("with_frame", [False, True])
+def test_the_nodata_check_scales_with_the_points_not_the_grid(
+    with_frame: bool, x64: ModuleType
+) -> None:
+    """Only the M·S gathered taps are checked for nodata, never all N pixels."""
+    import re
+
+    n_rows, n_cols = 40, 50
+    data = np.random.default_rng(8).uniform(size=(3, n_rows, n_cols))
+    grid = GeoArray(data, NORTH_UP, CRS, fill_value=-9999.0, dims="time y x")
+    rc = np.array([[1.2, 3.4], [10.5, 20.5], [30.1, 2.9], [5.0, 44.4], [0.0, 0.0]])
+    points = GeoPoints(np.zeros(5), xy=_xy(NORTH_UP, rc), dims="obs", crs=CRS)
+    frame = np.array([0, 2, 1, 1, 0]) if with_frame else None
+
+    def read(values: Any) -> Any:
+        return interp_at(grid.to_jax().with_data(values), points, frame=frame).data
+
+    jaxpr = str(x64.make_jaxpr(read)(x64.numpy.asarray(data)))
+    checks = [
+        line
+        for line in jaxpr.splitlines()
+        if re.search(r"\b(is_finite|ne)\b", line)
+        and re.search(rf"\[[\d,]*\b{n_rows * n_cols}\]", line)
+    ]
+    assert checks == []
