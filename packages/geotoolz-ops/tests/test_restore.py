@@ -134,7 +134,7 @@ def test_gap_fill_laplacian_uses_local_not_periodic_neighbours() -> None:
     arr = np.zeros((5, 5), dtype=float)
     arr[:, -1] = 100.0  # right column has high values
     arr[0, 0] = np.nan  # NaN at the top-left corner
-    filled = gap_fill_laplacian(arr, iterations=500)
+    filled = gap_fill_laplacian(arr)
     # Local neighbours of (0, 0) are arr[0, 1] = 0 and arr[1, 0] = 0;
     # wrap-around neighbours would include arr[0, -1] = 100.
     assert filled[0, 0] < 1.0
@@ -191,7 +191,8 @@ def test_gap_fill_nearest_and_idw_fill_missing_pixel() -> None:
     arr = np.array([[1.0, 2.0], [3.0, np.nan]])
     nearest = gap_fill_nearest(arr)
     idw = gap_fill_idw(arr, power=2.0, radius=2)
-    assert nearest[1, 1] == 3.0
+    # (0, 1) and (1, 0) are both 1 px away: the fill is one of the two
+    assert nearest[1, 1] in (2.0, 3.0)
     assert np.isfinite(idw[1, 1])
 
 
@@ -449,7 +450,9 @@ def test_fill_pixels_are_gaps_for_gap_fill(make_op) -> None:
     expected = np.asarray(make_op()(_nan_at(values, fill)))
     np.testing.assert_allclose(out, expected)
     assert np.all(np.isfinite(out[:, fill]))
-    assert np.all((out[:, fill] >= 1.0) & (out[:, fill] <= 2.0))
+    if not isinstance(make_op(), GapFillInpaintBiharmonic):
+        # Δu = 0 obeys the maximum principle; Δ²u = 0 may overshoot
+        assert np.all((out[:, fill] >= 1.0) & (out[:, fill] <= 2.0))
     np.testing.assert_array_equal(out[:, ~fill], values[:, ~fill])
 
 
@@ -805,16 +808,17 @@ def test_fit_pca_explained_variance_matches_sklearn() -> None:
     np.testing.assert_allclose(components * signs, reference.components_.T, atol=1e-10)
 
 
-def test_gap_fill_laplacian_operator_exposes_iterations() -> None:
+def test_gap_fill_laplacian_iterations_is_deprecated_and_ignored() -> None:
     arr = np.zeros((9, 9))
     arr[:, 7:] = 10.0
     arr[2:7, 2:7] = np.nan
-    one = np.asarray(GapFillLaplacian(iterations=1)(arr))
-    many = np.asarray(GapFillLaplacian(iterations=500)(arr))
-    np.testing.assert_array_equal(one, gap_fill_laplacian(arr, iterations=1))
-    np.testing.assert_array_equal(many, gap_fill_laplacian(arr, iterations=500))
-    assert not np.allclose(one, many)
-    assert GapFillLaplacian(iterations=7).get_config() == {"iterations": 7}
+    with pytest.warns(DeprecationWarning, match="fill_gaps"):
+        op = GapFillLaplacian(iterations=1)
+    with pytest.warns(DeprecationWarning, match="fill_gaps"):
+        primitive = gap_fill_laplacian(arr, iterations=1)
+    np.testing.assert_array_equal(np.asarray(op(arr)), gap_fill_laplacian(arr))
+    np.testing.assert_array_equal(primitive, gap_fill_laplacian(arr))
+    assert GapFillLaplacian().get_config() == {"iterations": None}
 
 
 # ----------------------------------------------------------------------------

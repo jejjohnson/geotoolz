@@ -140,6 +140,8 @@ CTOR_KWARGS: dict[str, dict[str, Any] | Callable[[], dict[str, Any]]] = {
     "einx._src.operators.Einx": {"op": "rearrange", "pattern": "c h w -> c w h"},
     "feature._src.operators.HoughCircles": {"radii": [3, 5]},
     "geom._src.coregister.operators.VectorToRasterAgg": {"agg": "count"},
+    # a Grid holds no pixels, so it is configuration (#645)
+    "geom._src.coregister.operators.SwathToGrid": lambda: {"target": _grid().grid},
     "geom._src.operators.BowtieCorrection": {
         "detectors_per_scan": 4,
         "max_scan_angle_deg": 55.0,

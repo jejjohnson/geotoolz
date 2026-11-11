@@ -25,7 +25,7 @@ from typing import Any
 from geoarray import SPATIAL_DIMS, GeoArray, GeoPoints
 from pipekit_ops import backend_of
 
-from geoops._src.optional import import_optional
+from geoops._src.scattered import functax_module, x64
 
 
 __all__ = ["interp_at"]
@@ -41,21 +41,6 @@ def is_tracer(x: Any) -> bool:
     """Whether ``x`` is a JAX tracer (JAX is already imported for JAX data)."""
     jax = sys.modules.get("jax")
     return jax is not None and isinstance(x, jax.core.Tracer)
-
-
-def functax_interp(feature: str) -> ModuleType:
-    """``functax.interp``, or an ``ImportError`` naming the ``[interp]`` extra."""
-    return import_optional("functax.interp", "interp", feature=feature)
-
-
-def x64_mode(jax: ModuleType) -> Any:
-    """A context with 64-bit JAX on: functax's ``AffineGrid`` is float64."""
-    enable = getattr(jax, "enable_x64", None)
-    if enable is not None:
-        return enable(True)
-    from jax.experimental import enable_x64  # JAX before ``jax.enable_x64``
-
-    return enable_x64()
 
 
 def interp_at(
@@ -150,7 +135,7 @@ def interp_with_plan(
     ``plan`` is `plan_at`'s for this grid and these points (`InterpAt`
     passes its cached one); ``None`` builds it.
     """
-    interp = functax_interp("geoops.geom.interp_at")
+    interp = functax_module("interp", feature="geoops.geom.interp_at")
     import jax
 
     if grid.backend == "numpy" and backend_of(points.xy) == "jax":
@@ -167,7 +152,7 @@ def interp_with_plan(
         values, observed = _read(interp, grid, points, method, frame, along, plan)
     else:
         # a NumPy grid is read on JAX in 64-bit mode, then comes back
-        with x64_mode(jax):
+        with x64("geoops.geom.interp_at"):
             values, observed = _read(interp, grid, points, method, frame, along, plan)
             values, observed = jax.device_get((values, observed))
     leading = tuple(

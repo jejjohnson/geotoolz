@@ -38,6 +38,7 @@ class TestSubnamespaceWiring:
             "PointsToRaster",
             "RasterToPointCloud",
             "PointCloudToRaster",
+            "SwathToGrid",
             "VectorToRasterAgg",
         }
         assert set(cg.__all__) == expected
@@ -89,11 +90,11 @@ class TestValidation:
 
 
 class TestSwathStubsRemoved:
-    """The never-implemented swath operators are not public API (#162)."""
+    """The never-implemented swath stubs are not public API (#162); `SwathToGrid`
+    came back implemented on a functax plan (#645)."""
 
-    @pytest.mark.parametrize("name", ["SwathToGrid", "GridToSwath"])
-    def test_not_exported(self, name: str) -> None:
-        assert not hasattr(cg, name)
+    def test_not_exported(self) -> None:
+        assert not hasattr(cg, "GridToSwath")
 
     def test_no_swath_to_grid_primitive(self) -> None:
         from geoops.geom._src.coregister import array

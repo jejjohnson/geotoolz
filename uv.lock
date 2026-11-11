@@ -1252,6 +1252,9 @@ jax = [
     { name = "jaxtyping" },
     { name = "lineax" },
 ]
+scipy = [
+    { name = "scipy" },
+]
 
 [[package]]
 name = "geopandas"
@@ -1763,7 +1766,7 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
-    { name = "functax", extra = ["jax"] },
+    { name = "functax", extra = ["jax", "scipy"] },
     { name = "geopandas" },
     { name = "georeader-spaceml" },
     { name = "geotoolz-array", extra = ["georeader"] },
@@ -1793,7 +1796,7 @@ hydra = [
     { name = "hydra-zen" },
 ]
 interp = [
-    { name = "functax", extra = ["jax"] },
+    { name = "functax", extra = ["jax", "scipy"] },
 ]
 learn = [
     { name = "joblib" },
@@ -1858,7 +1861,7 @@ typecheck = [
 requires-dist = [
     { name = "affine", specifier = ">=2.4" },
     { name = "einx", specifier = ">=0.4" },
-    { name = "functax", extras = ["jax"], marker = "extra == 'interp'", git = "https://github.com/jejjohnson/functax?tag=v0.0.6" },
+    { name = "functax", extras = ["jax", "scipy"], marker = "extra == 'interp'", git = "https://github.com/jejjohnson/functax?tag=v0.0.6" },
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=0.14" },
     { name = "georeader-spaceml", marker = "extra == 'sensors'", specifier = ">=2.1" },
     { name = "geotoolz-array", editable = "packages/geotoolz-array" },

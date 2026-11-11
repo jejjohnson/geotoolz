@@ -170,15 +170,21 @@ class TestPointsToRaster:
         with pytest.raises(ValueError, match="must be 'binned_stat' or 'idw'"):
             PointsToRaster(method="kdtree")  # type: ignore[arg-type]
 
-    def test_idw_not_implemented(self) -> None:
+    def test_idw_returns_the_idw_grid(self) -> None:
+        """Today (before #645) ``method="idw"`` raised; it now grids the points."""
+        pytest.importorskip("functax")
         like = _gt(np.zeros((4, 4), dtype=np.float32))
-        op = PointsToRaster(method="idw")
         gpd = pytest.importorskip("geopandas")
         df = gpd.GeoDataFrame(
-            {"v": [1.0]}, geometry=[Point(PX_X(0), PX_Y(0))], crs="EPSG:32629"
+            {"v": [1.0, 3.0]},
+            geometry=[Point(PX_X(0), PX_Y(0)), Point(PX_X(3), PX_Y(0))],
+            crs="EPSG:32629",
         )
-        with pytest.raises(NotImplementedError, match=r"idw.* not yet"):
-            op(df, like)
+        out = np.asarray(PointsToRaster(method="idw", attribute="v", k=2)(df, like))
+        assert out.shape == (4, 4)
+        # a pixel centre on a point takes its value; in between, the IDW mean
+        assert out[0, 0] == 1.0 and out[0, 3] == 3.0
+        assert 1.0 < out[0, 1] < out[0, 2] < 3.0
 
     def test_bin_mean_geodataframe(self) -> None:
         gpd = pytest.importorskip("geopandas")

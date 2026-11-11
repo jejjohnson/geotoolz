@@ -18,6 +18,7 @@ from geoops.geom._src.coregister import (
     RasterToPointCloud,
     RasterToPoints,
     RasterToRasterLike,
+    SwathToGrid,
     VectorToRasterAgg,
 )
 
@@ -28,5 +29,6 @@ __all__ = [
     "RasterToPointCloud",
     "RasterToPoints",
     "RasterToRasterLike",
+    "SwathToGrid",
     "VectorToRasterAgg",
 ]

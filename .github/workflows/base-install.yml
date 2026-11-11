@@ -44,6 +44,7 @@ jobs:
           for module in (
               "matplotlib", "sklearn", "joblib", "zarr", "xvec", "hydra_zen",
               "rasterio", "geopandas", "shapely", "skimage", "georeader",
+              "jax",
           ):
               assert importlib.util.find_spec(module) is None, f"{module} installed"
 

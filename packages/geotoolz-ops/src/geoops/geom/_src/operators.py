@@ -51,6 +51,7 @@ from geoops._src.geo import (
     require_geoarray,
     require_grid_match,
 )
+from geoops._src.scattered import functax_module, x64
 from geoops._src.shape import BAND_AXIS, over_frames, require_ndim, single_band
 from geoops._src.valid import (
     carried_fill,
@@ -80,11 +81,9 @@ from geoops.geom._src.array import (
 )
 from geoops.geom._src.sampling import (
     check_args,
-    functax_interp,
     interp_with_plan,
     is_tracer,
     plan_at,
-    x64_mode,
 )
 from geoops.geom._src.stencils import difference_offsets
 from geoops.geom._src.warp import target_coordinates, warp
@@ -448,7 +447,7 @@ class Reproject(Operator):
             coordinates = target_coordinates(target, gt.crs)
             self._coordinates[gt.crs] = coordinates
         host = gt.backend == "numpy"
-        with x64_mode(jax) if host else nullcontext():
+        with x64("geoops.geom.Reproject") if host else nullcontext():
             values, fill = warp(gt, target, scheme, boundary, coordinates)
             if host:
                 values = jax.device_get(values)
@@ -1563,7 +1562,8 @@ class BowtieCorrection(Operator):
 
     **Output grid.** Same shape, transform and CRS as the input; only
     along-track values change. Columns are never moved (cross-track pixel
-    growth is left for a swath-to-grid resampler) and the along-track
+    growth is left for a swath-to-grid resampler: grid the corrected swath
+    with :class:`~geoops.geom.coregister.SwathToGrid`) and the along-track
     extent is conserved.
 
     **Assumptions / limitations.** Spherical Earth, circular orbit at a
@@ -4131,8 +4131,8 @@ class InterpAt(Operator):
         """
         self._check_inputs(grid, points)
         check_args(grid, points, self.method)
-        interp = functax_interp("geoops.geom.InterpAt.plan")
-        import jax
+        interp = functax_module("interp", feature="geoops.geom.InterpAt.plan")
+        import jax  # functax_module has checked that the [interp] extra is in
 
         # the key reads the positions and validity on the host: concrete only
         inputs = (grid.transform, points.xy, points.valid)
@@ -4142,7 +4142,7 @@ class InterpAt(Operator):
             self._plans.move_to_end(key)
             return self._plans[key]
         host = grid.backend == "numpy" and backend_of(points.xy) != "jax"
-        with x64_mode(jax) if host else nullcontext():
+        with x64("geoops.geom.InterpAt.plan") if host else nullcontext():
             plan = plan_at(interp, grid, points, self.method)
         # inside a trace even concrete inputs give a plan of tracers, which
         # must not outlive it: keep only plans whose leaves are all concrete

@@ -220,6 +220,8 @@ def test_heavy_optional_backends_are_extras_not_base() -> None:
         ("shapely", "vector"),
         ("scikit-image", "morph"),
         ("georeader-spaceml", "sensors"),
+        # the functax plans (#645)
+        ("functax", "interp"),
     ]:
         assert dist not in base, dist
         assert dist in extras.get(extra, set()), (dist, extra)

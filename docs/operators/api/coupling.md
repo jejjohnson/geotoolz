@@ -27,7 +27,7 @@ declare.
 | Class | Operators |
 |---|---|
 | pointwise | 99 |
-| spatial | 95 |
+| spatial | 96 |
 | spectral | 35 |
 | spectro-temporal | 14 |
 | spatio-temporal | 11 |
@@ -113,6 +113,7 @@ declare.
 | `geom` | `SegmentStitch` | pointwise | space join |  |  |  |
 | `geom` | `SlidingWindow` | pointwise | space split |  |  | fan-out |
 | `geom` | `Stitch` | pointwise | space join |  |  |  |
+| `geom` | `SwathToGrid` | spatial |  | global |  | conversion |
 | `geom` | `Tile` | pointwise | space split |  |  | fan-out |
 | `geom` | `VectorToRasterAgg` | spatial |  | global |  | conversion |
 | `geom` | `Vectorize` | spatial |  | global |  | conversion |
