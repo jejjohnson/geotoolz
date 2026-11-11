@@ -455,8 +455,9 @@ class Reproject(Operator):
                 transform: Any = np.asarray(target.transform)
             else:
                 transform = jax.numpy.asarray(target.transform, dtype=jax.numpy.float64)
-        out = gt.with_data(values, transform=transform, fill_value=fill)
-        return out.replace(crs=target.crs)
+        return wrap_like(
+            gt, values, transform=transform, fill_value=fill, crs=target.crs
+        )
 
     def get_config(self) -> dict[str, Any]:
         return {
