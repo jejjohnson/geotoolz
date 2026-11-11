@@ -4133,7 +4133,9 @@ class InterpAt(Operator):
         interp = functax_interp("geoops.geom.InterpAt.plan")
         import jax
 
-        concrete = not (is_tracer(grid.transform) or is_tracer(points.xy))
+        # the key reads the positions and validity on the host: concrete only
+        inputs = (grid.transform, points.xy, points.valid)
+        concrete = not any(is_tracer(leaf) for leaf in inputs)
         key = self._plan_key(grid, points) if concrete else None
         if key is not None and key in self._plans:
             self._plans.move_to_end(key)
