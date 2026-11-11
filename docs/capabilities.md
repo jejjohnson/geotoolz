@@ -1448,7 +1448,7 @@ current).
 | `stack_items` | function | Re-exported from `pipekit_array`. |
 | `take_along` | function | Re-exported from `pipekit_array`. |
 | `to_dimarray` | function | A carrier's data, dims and labels as a ``pipekit_array.DimArray``; no grid. |
-| `to_pixel` | function | Map coordinates ``(x, y)`` to fractional pixel ``(row, col)`` centres. |
+| `to_pixel` | function | Re-exported from `functax`. |
 | `transpose` | function | Re-exported from `pipekit_array`. |
 | `write_window` | function | A copy of ``g`` with ``values`` written into ``window``. |
 

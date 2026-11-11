@@ -41,7 +41,7 @@ sys.meta_path.insert(0, Block())
 
 _SCENE = """
 import numpy as np
-from geoarray import GeoArray
+from geoarray import GeoArray, GeoPoints
 
 T = (10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0)
 scene = GeoArray(
@@ -124,6 +124,13 @@ CASES = [
         "raster",
         HEAVY["raster"],
         "gz.geom.coregister.VectorToRasterAgg(agg='count')(None, band)",
+    ),
+    # #643: interp_at reads through a functax plan, which needs JAX.
+    (
+        "interp",
+        ("jax", "jaxlib", "equinox", "lineax"),
+        "gz.geom.interp_at(band, GeoPoints(np.zeros(1), xy=np.zeros((1, 2)),"
+        " dims='obs', crs=band.crs))",
     ),
 ]
 

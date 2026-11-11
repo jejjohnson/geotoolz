@@ -142,7 +142,7 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 | `geoarray.coords` | say what a dim means: `SpectralAxis`, `VariableAxis`, `VerticalAxis`, `TimeAxis`, `PixelGrid`, … | [Reference](api/coords.md) |
 | `geoarray.types` | name common shapes (`GeoImage`, `GeoMapSeries`, `GeoTracks`, …) and check them with `check_dims` | [Reference](api/types.md) |
 | `isel`, `sel`, `reduce`, `map_over`, `concat`, `combine`, … | pipekit-array's dim-level functions, on every named carrier; a pipekit-array `KernelOp` runs on carriers too | [Concepts](concepts.md#one-set-of-dim-level-functions) |
-| `to_pixel` | map coordinates to fractional pixels; H(x) itself is `geoops.geom.interp_at` | [When to jit](how-to/when-to-jit.md) |
+| `to_pixel` | map coordinates to fractional pixels (functax's kernel, re-exported); H(x) itself is `geoops.geom.interp_at` | [When to jit](how-to/when-to-jit.md) |
 | `to_xarray`, `from_xarray`, `to_dataset`, `to_datatree` | cross to xarray losslessly (`[xarray]`) | [Cross to xarray](how-to/xarray.md) |
 | `Grid` | describe a pixel grid without data: `bounds`, `res`, `shift`, `crop`, `from_bounds`, `isclose`, `get_config` | [Reference](api.md#grid) |
 | `PixelWindow` | name a rectangle of pixels, rasterio's `Window` without rasterio; `Grid.window` / `Grid.bounds_of` convert to and from map bounds | [Reference](api.md#pixelwindow) |

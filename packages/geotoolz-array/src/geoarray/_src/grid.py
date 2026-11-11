@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 import pyproj
 from affine import Affine
+from functax.geometry import window as functax_window
 
 from geoarray._src.backend import namespace
 
@@ -175,26 +176,6 @@ def _snap(value: float, atol: float) -> float:
     """``value`` rounded to the nearest integer when within ``atol`` of it."""
     nearest = round(value)
     return float(nearest) if abs(value - nearest) <= atol else value
-
-
-def _invert(transform: Transform) -> Transform:
-    """The inverse affine: map coordinates → (column, row).
-
-    Raises:
-        ValueError: The transform is singular (a·e − b·d = 0).
-    """
-    a, b, c, d, e, f = transform
-    det = a * e - b * d
-    if det == 0.0:
-        raise ValueError(f"a singular transform cannot be inverted: {transform}")
-    return (
-        e / det,
-        -b / det,
-        (b * f - c * e) / det,
-        -d / det,
-        a / det,
-        (c * d - a * f) / det,
-    )
 
 
 @dataclass(frozen=True)
@@ -413,11 +394,16 @@ class Grid:
 
         Corners within ``atol`` pixels of a pixel edge snap to it, so bounds
         on the grid map to exactly the pixels inside them. The window may
-        extend outside the grid; `PixelWindow.intersection` clips it.
+        extend outside the grid; `PixelWindow.intersection` clips it. The
+        kernel is functax's (`functax.geometry.window`).
 
         Args:
             bounds: ``(x_min, y_min, x_max, y_max)`` in this grid's CRS.
             atol: Snapping tolerance, in pixels.
+
+        Raises:
+            ValueError: ``bounds`` has a min above its max, or the transform
+                is singular (functax's ``GeometryError``, a ``ValueError``).
 
         Example:
             >>> transform = (20.0, 0.0, 600000.0, 0.0, -20.0, 3550000.0)
@@ -425,16 +411,25 @@ class Grid:
             >>> grid.window((600100, 3549000, 600400, 3549900))
             PixelWindow(col_off=5, row_off=5, width=15, height=45)
         """
-        x_min, y_min, x_max, y_max = (float(v) for v in bounds)
-        corners = ((x_min, y_min), (x_min, y_max), (x_max, y_min), (x_max, y_max))
-        ia, ib, ic, id_, ie, if_ = _invert(self.transform)
-        cols = [ia * x + ib * y + ic for x, y in corners]
-        rows = [id_ * x + ie * y + if_ for x, y in corners]
-        r0 = math.floor(_snap(min(rows), atol))
-        r1 = math.ceil(_snap(max(rows), atol))
-        c0 = math.floor(_snap(min(cols), atol))
-        c1 = math.ceil(_snap(max(cols), atol))
-        return PixelWindow(col_off=c0, row_off=r0, width=c1 - c0, height=r1 - r0)
+        rows, cols = functax_window(self, bounds, atol=atol)
+        return PixelWindow.from_slices(rows, cols)
+
+    def to_functax(self) -> Any:
+        """This grid as a functax ``AffineGrid``: the transform and the shape.
+
+        The CRS stays here, since functax never sees one. The ``AffineGrid``
+        is an Equinox module, so this needs the ``functax[jax]`` extra (JAX
+        with ``jax_enable_x64``; ``geotoolz-ops[interp]`` brings it) and
+        raises functax's ``MissingExtraError`` (an ``ImportError``) without.
+
+        Example:
+            >>> grid = Grid((20.0, 0.0, 0.0, 0.0, -20.0, 0.0), "EPSG:32613", (2, 3))
+            >>> grid.to_functax().shape  # doctest: +SKIP
+            (2, 3)
+        """
+        from functax.geometry import AffineGrid
+
+        return AffineGrid.from_affine(self.transform, self.shape)
 
     def crop(self, window: PixelWindow) -> Grid:
         """The grid of ``window``: its origin and its shape.

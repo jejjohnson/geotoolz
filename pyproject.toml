@@ -35,6 +35,11 @@ geotoolz-array = { workspace = true }
 pipekit-ops = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-ops", tag = "pipekit-ops-v0.2.1" }
 pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", tag = "pipekit-ops-v0.2.1" }
 pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", tag = "pipekit-ops-v0.2.1" }
+# functax (interpolation plans with adjoints, the affine raster kernels) is
+# not on PyPI either, so it comes from GitHub at a release tag. Its base
+# install is NumPy-only (geoarray's affine kernels); `functax[jax]` brings
+# the plans (geoops' `interp` extra).
+functax = { git = "https://github.com/jejjohnson/functax", tag = "v0.0.6" }
 
 [build-system]
 requires = ["hatchling"]
@@ -62,7 +67,7 @@ dev = [
     # round-trips, xvec point extraction, netCDF4 / zarr I/O, obstore
     # pooling) come with them, so a plain `uv sync` runs the same fast
     # tier as CI's `--all-extras`.
-    "geotoolz-ops[hydra,vector-cube,netcdf,zarr]",
+    "geotoolz-ops[hydra,vector-cube,netcdf,zarr,interp]",
     # Reference solar geometry for radiometry.ComputeSZA (no geotoolz
     # extra declares it).
     "pysolar>=0.11",

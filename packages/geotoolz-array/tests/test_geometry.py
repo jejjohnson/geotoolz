@@ -147,8 +147,15 @@ class TestWindows:
 
     def test_singular_transform(self) -> None:
         grid = Grid((0.0, 0.0, 0.0, 0.0, 0.0, 0.0), None, (2, 2))
-        with pytest.raises(ValueError, match="singular"):
+        # functax's GeometryError, a ValueError (#643)
+        with pytest.raises(ValueError, match="invertible"):
             grid.window((0, 0, 1, 1))
+
+    def test_bounds_with_min_above_max_are_refused(self) -> None:
+        # before #643 the corners were sorted, so swapped bounds gave the
+        # window of the sorted ones; functax's window refuses them
+        with pytest.raises(ValueError, match="min ≤ max"):
+            self.grid.window((600400, 3549000, 600100, 3549900))
 
     def test_rotated_grid_window_covers_the_corners(self) -> None:
         grid = Grid((10.0, 10.0, 0.0, 10.0, -10.0, 0.0), None, (10, 10))

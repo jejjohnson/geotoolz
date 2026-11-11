@@ -4,19 +4,28 @@
 observation operator H(x) of data assimilation and of training against
 in-situ data. Bilinear weights blend the four pixels around each point, so
 it computes new values and lives in geoops; `geoarray.to_pixel`, which maps
-positions to pixels, is coordinate maths and stays in geoarray. Written once
-against the array namespace, it runs on NumPy and under ``jit`` / ``grad``
-on JAX.
+positions to pixels, is coordinate maths and stays in geoarray.
+
+The stencil is a functax plan (#643): ``Linear`` or ``Nearest`` on the
+grid's ``AffineGrid``, with the policies that are this function's
+convention (``outside="nan"``, ``extent="cells"``, ``boundary="edge"``).
+The plan carries H and its adjoint; this module adds the nodata rule, the
+per-point frames and the `GeoPoints` wrapping. functax plans are JAX, so
+this needs the ``[interp]`` extra; a NumPy grid is read on JAX in 64-bit
+mode and comes back as NumPy. It runs under ``jit`` / ``grad`` on JAX.
 """
 
 from __future__ import annotations
 
 import sys
 import warnings
+from types import ModuleType
 from typing import Any
 
-from geoarray import SPATIAL_DIMS, GeoArray, GeoPoints, to_pixel
+from geoarray import SPATIAL_DIMS, GeoArray, GeoPoints
 from pipekit_ops import backend_of
+
+from geoops._src.optional import import_optional
 
 
 __all__ = ["interp_at"]
@@ -34,6 +43,21 @@ def _is_tracer(x: Any) -> bool:
     return jax is not None and isinstance(x, jax.core.Tracer)
 
 
+def _functax_interp(feature: str) -> ModuleType:
+    """``functax.interp``, or an ``ImportError`` naming the ``[interp]`` extra."""
+    return import_optional("functax.interp", "interp", feature=feature)
+
+
+def _x64(jax: ModuleType) -> Any:
+    """A context with 64-bit JAX on: functax's ``AffineGrid`` is float64."""
+    enable = getattr(jax, "enable_x64", None)
+    if enable is not None:
+        return enable(True)
+    from jax.experimental import enable_x64  # JAX before ``jax.enable_x64``
+
+    return enable_x64()
+
+
 def interp_at(
     grid: GeoArray,
     points: GeoPoints,
@@ -44,9 +68,13 @@ def interp_at(
 ) -> GeoPoints:
     """H(x): ``grid`` read at the positions of ``points``.
 
-    Bilinear sampling clips the neighbour indices to [0, R − 2] × [0, C − 2]
-    (exact on the last row and column) and the weights to [0, 1] (the half
-    pixel at the border takes the edge value). A point outside the grid's
+    The read-out is a functax plan on the grid (`functax.interp.Linear` or
+    `Nearest`). A point is inside when its fractional pixel position lies in
+    [−½, R − ½] × [−½, C − ½] (``extent="cells"``), and taps past the last
+    row or column read the edge pixel (``boundary="edge"``), so the half
+    pixel at the border takes the edge value. Nearest-neighbour ties (a
+    position exactly half way between two pixel centres) go to the lower
+    pixel, as functax's ``Nearest`` does. A point outside the grid's
     extent, at a non-finite position, or reading a nodata pixel (non-finite
     or the grid's fill, in any band, with a non-zero weight) gives NaN and
     ``valid=False``; nodata never blends into a value. A padded point
@@ -73,6 +101,7 @@ def interp_at(
     Raises:
         ValueError: The CRSs differ, the grid is batched, or ``method`` is
             unknown.
+        ImportError: functax's plans are missing (the ``[interp]`` extra).
 
     Example:
         >>> import numpy as np
@@ -99,81 +128,26 @@ def interp_at(
         raise ValueError(
             f"interp_at: method is 'bilinear' or 'nearest', got {method!r}"
         )
+    interp = _functax_interp("geoops.geom.interp_at")
+    import jax
+
     if grid.backend == "numpy" and backend_of(points.xy) == "jax":
         # compute where the positions live; eagerly that hides a host-to-
         # device copy (C1's deprecation), under a trace the grid is a constant
         if not _is_tracer(points.xy):
             warnings.warn(_PROMOTION_WARNING, DeprecationWarning, stacklevel=2)
         grid = grid.to_jax()
-    xp = grid.xp
-    xy = xp.asarray(points.xy)
-    given = (
-        xp.asarray(points.valid)
-        if points.valid is not None
-        else xp.ones(points.size, dtype=bool)
-    )
-    # a missing position is not an observation at some other place
-    located = given & xp.all(xp.isfinite(xy), axis=-1)
-    # padded or missing positions are read at the origin, and masked after
-    safe_xy = xp.where(located[:, None], xy, 0.0)
-    rc = to_pixel(xp.asarray(grid.transform), safe_xy)
-    r, c = rc[:, 0], rc[:, 1]
-    height, width = grid.height, grid.width
-    inside = (r >= -0.5) & (r <= height - 0.5) & (c >= -0.5) & (c <= width - 0.5)
-    data = grid.data
-    if frame is not None:
-        if along not in grid.dims:
-            raise ValueError(
-                f"interp_at: frame indexes {along!r}, not a dim of {grid.dims}"
-            )
-        data = xp.moveaxis(data, grid.dims.index(along), 0)
-    fill = grid.fill_value
-
-    def usable(v: Any) -> Any:
-        """Neighbour values that are data: finite and not the fill."""
-        ok = xp.isfinite(v) if v.dtype.kind in "fc" else xp.ones(v.shape, dtype=bool)
-        if fill is not None and fill == fill:
-            ok = ok & (v != fill)
-        return ok
-
-    if method == "nearest":
-        ri = xp.clip(xp.round(r), 0, height - 1).astype(int)
-        ci = xp.clip(xp.round(c), 0, width - 1).astype(int)
-        values = _gather(data, ri, ci, frame, xp)
-        supported = usable(values)
-        values = xp.where(supported, values, xp.zeros_like(values))
+    if frame is not None and along not in grid.dims:
+        raise ValueError(
+            f"interp_at: frame indexes {along!r}, not a dim of {grid.dims}"
+        )
+    if grid.backend == "jax":
+        values, observed = _read(interp, grid, points, method, frame, along)
     else:
-        r0 = xp.clip(xp.floor(r), 0, max(height - 2, 0)).astype(int)
-        c0 = xp.clip(xp.floor(c), 0, max(width - 2, 0)).astype(int)
-        r1 = xp.minimum(r0 + 1, height - 1)
-        c1 = xp.minimum(c0 + 1, width - 1)
-        # w_r = r − r₀, w_c = c − c₀, clipped to [0, 1] at the border
-        wr = xp.clip(r - r0, 0.0, 1.0)
-        wc = xp.clip(c - c0, 0.0, 1.0)
-        corners = [
-            (_gather(data, ri, ci, frame, xp), w)
-            for ri, ci, w in (
-                (r0, c0, (1 - wr) * (1 - wc)),
-                (r0, c1, (1 - wr) * wc),
-                (r1, c0, wr * (1 - wc)),
-                (r1, c1, wr * wc),
-            )
-        ]
-        # a nodata neighbour with weight > 0 leaves the point unsupported;
-        # with weight 0 it is ignored (and zeroed, so 0 · NaN never spreads)
-        supported = xp.ones(corners[0][0].shape, dtype=bool)
-        for v, w in corners:
-            supported = supported & (usable(v) | (w == 0))
-        # Σₖ wₖ vₖ: (1 − w_r)(1 − w_c) v₀₀ + (1 − w_r) w_c v₀₁ + w_r (1 − w_c) v₁₀ + …
-        values = sum(w * xp.where(usable(v), v, xp.zeros_like(v)) for v, w in corners)
-    # a point is data when every band it reads is (valid_mask's rule)
-    lead_axes = tuple(range(supported.ndim - 1))
-    supported = xp.all(supported, axis=lead_axes) if lead_axes else supported
-    observed = located & inside & supported
-    floating = values if values.dtype.kind in "fc" else values.astype(float)
-    nan = xp.asarray(float("nan"), dtype=floating.dtype)
-    values = xp.where(observed, floating, nan)
-    values = xp.where(given, values, xp.zeros_like(values))
+        # a NumPy grid is read on JAX in 64-bit mode, then comes back
+        with _x64(jax):
+            values, observed = _read(interp, grid, points, method, frame, along)
+            values, observed = jax.device_get((values, observed))
     leading = tuple(
         d
         for d in grid.dims
@@ -195,10 +169,87 @@ def interp_at(
     )
 
 
-def _gather(data: Any, rows: Any, cols: Any, frame: Any, xp: Any) -> Any:
-    """``data[..., rows[k], cols[k]]`` for each point k, as ``(..., obs)``."""
+def _plan(
+    interp: ModuleType, grid: GeoArray, xy: Any, located: Any, method: str
+) -> Any:
+    """The functax plan H of ``grid`` read at ``xy`` ``(obs, 2)``: interp_at's.
+
+    ``Linear`` (bilinear) or ``Nearest`` on the grid's ``AffineGrid``, with
+    ``outside="nan"`` (rows off the grid invalid, zero weights),
+    ``extent="cells"`` (the domain is the pixels' union, half a pixel past
+    the edge centres) and ``boundary="edge"`` (taps past the edge read it).
+    Built from the carrier's transform leaf, so it traces under ``jit``.
+    """
+    import jax.numpy as jnp
+    from functax.geometry import AffineGrid, Points
+
+    scheme = interp.Linear() if method == "bilinear" else interp.Nearest()
+    policies = interp.Policies(
+        outside="nan", missing="propagate", boundary="edge", extent="cells"
+    )
+    source = AffineGrid(jnp.asarray(grid.transform), (grid.height, grid.width))
+    return scheme.plan(source, Points(xy, valid=located), policies=policies)
+
+
+def _read(
+    interp: ModuleType,
+    grid: GeoArray,
+    points: GeoPoints,
+    method: str,
+    frame: Any,
+    along: str,
+) -> tuple[Any, Any]:
+    """The values ``(..., obs)`` and ``valid`` ``(obs,)`` of H(x), on JAX."""
+    import jax.numpy as jnp
+
+    xy = jnp.asarray(points.xy)
+    given = (
+        jnp.asarray(points.valid)
+        if points.valid is not None
+        else jnp.ones(points.size, dtype=bool)
+    )
+    # a missing position is not an observation at some other place
+    located = given & jnp.all(jnp.isfinite(xy), axis=-1)
+    # padded or missing positions are read at the origin, and masked after
+    safe_xy = jnp.where(located[:, None], xy, 0.0)
+    stencil = _plan(interp, grid, safe_xy, located, method).read
+    data = jnp.asarray(grid.data)
+    if frame is not None:
+        data = jnp.moveaxis(data, grid.dims.index(along), 0)
+    # y: the grid flattened row-major, (..., y, x) -> (..., N)
+    flat = data.reshape(*data.shape[:-2], grid.height * grid.width)
     if frame is None:
-        return data[..., rows, cols]
-    # data is (frame, ..., y, x): each point reads its own frame
-    picked = data[xp.asarray(frame), ..., rows, cols]
-    return xp.moveaxis(picked, 0, -1)
+        # y[..., iₘₛ]: the raw values of every tap, (..., M, S)
+        taps = flat[..., stencil.indices]
+    else:
+        # each point reads its own frame: y[frame[m], ..., iₘₛ], (..., M, S)
+        rows = jnp.asarray(frame)[:, None]
+        taps = jnp.moveaxis(flat[rows, ..., stencil.indices], (0, 1), (-2, -1))
+    fill = grid.fill_value
+    # taps that are data: finite and not the fill (M·S checks, not N)
+    taps_usable = (
+        jnp.isfinite(taps)
+        if taps.dtype.kind in "fc"
+        else jnp.ones(taps.shape, dtype=bool)
+    )
+    if fill is not None and fill == fill:
+        taps_usable = taps_usable & (taps != fill)
+    # nodata is zeroed, so 0 · NaN never spreads; it is masked below
+    clean = jnp.where(taps_usable, taps, jnp.zeros((), taps.dtype))
+    # f̂ₘ = Σₛ wₘₛ yₘₛ, the stencil's weights on the gathered taps
+    values = jnp.einsum("...ms,ms->...m", clean, stencil.weights)
+    if method == "nearest" and flat.dtype.kind in "fc":
+        # one tap of weight 1: the pixel's own value, in the grid's dtype
+        values = values.astype(flat.dtype)
+    # a nodata tap with weight > 0 leaves the point unsupported; with
+    # weight 0 it is ignored
+    supported = jnp.all(taps_usable | (stencil.weights == 0), axis=-1)
+    # a point is data when every band it reads is (valid_mask's rule)
+    lead_axes = tuple(range(supported.ndim - 1))
+    supported = jnp.all(supported, axis=lead_axes) if lead_axes else supported
+    observed = located & stencil.valid & supported
+    floating = values if values.dtype.kind in "fc" else values.astype(float)
+    nan = jnp.asarray(float("nan"), dtype=floating.dtype)
+    values = jnp.where(observed, floating, nan)
+    values = jnp.where(given, values, jnp.zeros_like(values))
+    return values, observed

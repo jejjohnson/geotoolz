@@ -3,7 +3,8 @@
 The georeferenced array every package of the stack will share. The root
 [`AGENTS.md`](../../AGENTS.md) applies too; this file adds what is specific
 to `geoarray`. It is the bottom of the workspace: it depends on numpy,
-pyproj, affine, pipekit core (pure Python) and pipekit-array only, and
+pyproj, affine, pipekit core (pure Python), pipekit-array and functax's
+NumPy-only base only, and
 never imports another workspace package or rasterio. georeader is imported by one module only, the `[georeader]`
 adapter `_src/georeader.py`, and lazily (ruff's `TID251` rejects it
 anywhere else).
@@ -25,8 +26,10 @@ anywhere else).
   copy, add an adapter fast path instead.
 - **`Grid`, `PixelWindow`** (`_src/grid.py`) — a pixel grid without data,
   and a rectangle of pixels (named apart from geopatcher's window
-  *functions*, in rasterio's `Window` field order); all affine maths
-  lives here.
+  *functions*, in rasterio's `Window` field order). functax owns the
+  affine kernels (`functax.geometry`): `to_pixel` is its re-export and
+  `Grid.window` calls its `window`; the slice maths of transforms
+  (`shift_scale_transform`) lives here.
 - **`FrozenAttrs`** (`_src/attrs.py`) — hashable metadata, and the
   per-band rules (`PER_BAND_KEYS`, `select_bands`, `concat_bands`) that
   keep every per-band key one entry per band.
