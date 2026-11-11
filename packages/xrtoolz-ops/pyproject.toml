@@ -80,10 +80,22 @@ wavelets = [
 ]
 
 # ``pip install xrtoolz-ops[image]`` — image-processing backends for
-# biharmonic inpainting and structural image metrics. Imported lazily so
-# core interpolation and metrics remain usable without scikit-image.
+# structural image metrics. Imported lazily so core interpolation and
+# metrics remain usable without scikit-image.
 image = [
     "scikit-image>=0.21",
+]
+
+# ``pip install xrtoolz-ops[functax]`` — functax plans behind the gap fills
+# and inverse-distance gridding in :mod:`xrops.interpolate`
+# (``fillnan_laplacian``, ``fillnan_biharmonic``, ``fillnan_rbf``,
+# ``fillnan_idw``, ``idw_to_points``, ``idw_to_grid``). functax runs on JAX
+# and builds its neighbour trees with SciPy, so the extra brings both;
+# imported when used, so the base install stays without JAX (geostack gate
+# B1). functax is pre-PyPI: uv resolves it from the git tag in the root
+# [tool.uv.sources], and a pip install names that git URL as well (README).
+functax = [
+    "functax[jax,scipy]>=0.0.6",
 ]
 
 # ``pip install xrtoolz-ops[maps]`` — cartopy for projected map panels
@@ -131,6 +143,8 @@ dev = [
     "loguru>=0.7.3",
     # For the tests of the [sklearn] extra (xrops.learn, presets, knn/KDE).
     "scikit-learn>=1.4",
+    # For the tests of the [functax] extra (the gap fills and IDW).
+    "functax[jax,scipy]>=0.0.6",
 ]
 lint = [
     "ruff>=0.15.10",

@@ -51,7 +51,8 @@ Optional extras pull in heavier backends only where they are used:
 |---|---|---|
 | `maps` | cartopy | Projected map panels — `SpatialMapPanel(projection=...)`, `make_axes(projection=...)`, coastlines in `EventVerificationPanel` |
 | `wavelets` | PyWavelets | `transforms.wavelet` (`cwt`, `dwt`) |
-| `image` | scikit-image | Biharmonic inpainting, structural image metrics |
+| `image` | scikit-image | Structural image metrics |
+| `functax` | functax (with JAX and SciPy; pre-PyPI, so a pip install also names `"functax[jax,scipy] @ git+https://github.com/jejjohnson/functax.git@v0.0.6"`) | The Laplace, biharmonic, global RBF and Euclidean IDW gap fills in `xrops.interpolate` |
 | `vector` | geopandas, shapely, rasterio | `geo` vector ↔ raster bridge (`vectorize`, `rasterize`, `footprint`, …) |
 
 ```bash

@@ -2,11 +2,13 @@
 
 Spatial NaN filling uses :func:`scipy.interpolate.griddata` (linear,
 nearest, or cubic). Temporal NaN filling delegates to xarray's native
-``interpolate_na``. ``fillnan_laplacian`` performs iterative harmonic
-relaxation. ``fillnan_biharmonic`` wraps scikit-image's optional
-biharmonic inpainter. ``fillnan_rbf`` uses
-:class:`scipy.interpolate.RBFInterpolator` for smooth, globally-aware
-infilling.
+``interpolate_na``. ``fillnan_laplacian`` and ``fillnan_biharmonic`` solve
+Δu = 0 and Δ²u = 0 in the holes with ``functax.project.fill_gaps`` (the
+``[functax]`` extra); ``boundary="wrap"`` keeps the NumPy red/black SOR
+until functax has a periodic fill. ``fillnan_rbf`` uses functax's ``RBF``
+plan for a global polyharmonic interpolant and
+:class:`scipy.interpolate.RBFInterpolator` for a local one (``neighbors``)
+or any other kernel.
 
 These deliberately avoid heavy C++ dependencies (``pyinterp``,
 ``xesmf``); for ESMF-conservative regridding, use those libraries
@@ -22,9 +24,13 @@ import xarray as xr
 from jaxtyping import Float
 from scipy.interpolate import RBFInterpolator, griddata
 
+from xrops.interpolate._src._functax import (
+    POLYHARMONIC_ORDERS,
+    fill_gaps_slice,
+    polyharmonic_rbf,
+)
 from xrops.interpolate._src.knn import fillnan_idw
 from xrops.utils._src.finite import _finite_mask, _floating_output_dtype
-from xrops.utils._src.optional_imports import _require_optional
 from xrops.utils._src.validation import _require_dims
 
 
@@ -35,16 +41,6 @@ __all__ = [
     "fillnan_spatial",
     "fillnan_temporal",
 ]
-
-
-def _require_inpaint_biharmonic():
-    restoration = _require_optional(
-        "skimage.restoration",
-        extra="image",
-        feature="fillnan_biharmonic",
-        package="scikit-image",
-    )
-    return restoration.inpaint_biharmonic
 
 
 def fillnan_spatial(
@@ -235,6 +231,7 @@ def _fillnan_laplacian_slice(
     relaxation: float,
     boundary: str,
 ) -> tuple[np.ndarray, int]:
+    """Red/black SOR for ∇²u = 0 in the holes; the ``boundary="wrap"`` path."""
     finite = np.isfinite(arr)
     if finite.all() or not finite.any():
         return arr, 0
@@ -273,18 +270,26 @@ def fillnan_laplacian(
     lon: str = "lon",
     lat: str = "lat",
 ) -> xr.DataArray:
-    """Fill NaN cells via iterative harmonic relaxation.
+    """Fill non-finite cells with the harmonic field: ∇²u = 0 in the holes.
 
-    Solves ∇²u = 0 on the masked region with Dirichlet boundary values
-    from finite cells. Iteration stops when the maximum absolute update
-    over missing cells is below ``tol`` or after ``max_iter`` iterations.
-    All-NaN and all-finite slices pass through unchanged.
+    The finite cells are Dirichlet values and the edges mirror (Neumann).
+    With ``boundary="reflect"`` the five-point system is solved by
+    ``functax.project.fill_gaps(method="laplace")`` (conjugate gradients to
+    √ε in float64, the ``[functax]`` extra), so ``max_iter``, ``tol`` and
+    ``relaxation`` are validated but do not enter the solve. With
+    ``boundary="wrap"`` the longitude axis is periodic, which functax's fill
+    does not offer yet, so red/black SOR on NumPy runs instead: it stops
+    when the largest update over the holes is below ``tol`` or after
+    ``max_iter`` sweeps. All-NaN and all-finite slices pass through
+    unchanged.
 
     Args:
         da: Input DataArray with at least ``lat`` and ``lon`` dims.
-        max_iter: Maximum red/black Gauss-Seidel sweeps.
-        tol: Absolute convergence tolerance for missing-cell updates.
-        relaxation: SOR relaxation factor. ``1.0`` is Gauss-Seidel.
+        max_iter: Maximum red/black Gauss-Seidel sweeps (``"wrap"`` only).
+        tol: Absolute convergence tolerance for missing-cell updates
+            (``"wrap"`` only).
+        relaxation: SOR relaxation factor. ``1.0`` is Gauss-Seidel
+            (``"wrap"`` only).
         boundary: ``"reflect"`` for Neumann edges, or ``"wrap"`` to wrap
             longitude edges while reflecting latitude edges.
         lon: Name of the longitude dimension.
@@ -293,10 +298,19 @@ def fillnan_laplacian(
     Returns:
         Same-shaped DataArray with NaNs filled slice-by-slice along any
         leading dimensions.
+
+    Raises:
+        ImportError: If ``boundary="reflect"`` and the ``[functax]`` extra
+            is missing.
     """
     _validate_laplacian_args(max_iter, tol, relaxation, boundary)
 
     def _fill_slice(arr: np.ndarray) -> np.ndarray:
+        if boundary == "reflect":
+            finite = np.isfinite(arr)
+            if finite.all() or not finite.any():
+                return arr
+            return fill_gaps_slice(arr, finite, "laplace", feature="fillnan_laplacian")
         filled, _ = _fillnan_laplacian_slice(
             arr,
             max_iter=max_iter,
@@ -326,11 +340,13 @@ def fillnan_biharmonic(
     mask: xr.DataArray | None = None,
     split_into_regions: bool = True,
 ) -> xr.DataArray:
-    """Fill NaNs in a 2-D lon/lat field by biharmonic inpainting.
+    """Fill NaNs in a 2-D lon/lat field by biharmonic inpainting: Δ²u = 0.
 
-    Operates slice-by-slice along any leading dimensions and wraps
-    :func:`skimage.restoration.inpaint_biharmonic`. The optional ``mask``
-    follows scikit-image semantics: ``True`` marks pixels to fill.
+    Operates slice-by-slice along any leading dimensions with
+    ``functax.project.fill_gaps(method="biharmonic")`` (the ``[functax]``
+    extra): the masked pixels solve Δ²u = 0 with mirror edges and the other
+    pixels as boundary values. The optional ``mask`` follows scikit-image
+    semantics: ``True`` marks pixels to fill.
 
     Args:
         da: Input DataArray with at least ``lon`` and ``lat`` dims.
@@ -338,15 +354,16 @@ def fillnan_biharmonic(
         lat: Name of the latitude dimension.
         mask: Optional explicit boolean mask. If ``None``, NaNs in ``da``
             are filled.
-        split_into_regions: Forwarded to scikit-image. When ``True``, each
-            connected masked region is solved independently.
+        split_into_regions: Kept for compatibility with the scikit-image
+            backend; functax solves every masked region in one system, so
+            it does not change the result.
 
     Returns:
         Same-shaped DataArray with masked pixels inpainted. Fully masked
         slices pass through unchanged.
 
     Raises:
-        ImportError: If scikit-image is not installed.
+        ImportError: If the ``[functax]`` extra is not installed.
         ValueError: If ``da`` or ``mask`` is missing the spatial dimensions.
     """
     _require_dims(da, lon, lat, name="da")
@@ -364,10 +381,6 @@ def fillnan_biharmonic(
         if not mask_bool.any() or mask_bool.all():
             return arr.astype(output_dtype, copy=True)
 
-        # Only import scikit-image when we actually inpaint, so users without
-        # the [image] extra still get fully-finite / empty-mask passthrough.
-        inpaint_biharmonic = _require_inpaint_biharmonic()
-
         # Extend the solver mask to cover any non-finite pixels outside the
         # caller's mask — using NaNs as zero-valued boundary conditions would
         # bias the solve. After the solve we restore those positions back to
@@ -375,14 +388,12 @@ def fillnan_biharmonic(
         # set of cells whose values we modify.
         nonfinite_outside_mask = ~_finite_mask(arr) & ~mask_bool
         solver_mask = mask_bool | nonfinite_outside_mask
-        arr_filled = arr.astype(np.float64, copy=True)
-        # Inside the solver mask the value is unused but must be finite.
-        arr_filled[solver_mask] = 0.0
-        out = inpaint_biharmonic(
-            arr_filled,
-            solver_mask,
-            split_into_regions=split_into_regions,
-            channel_axis=None,
+        if solver_mask.all():
+            msg = "fillnan_biharmonic needs a finite pixel outside the fill mask"
+            raise ValueError(msg)
+        # fill_gaps never reads the values inside the solver mask.
+        out = fill_gaps_slice(
+            arr, ~solver_mask, "biharmonic", feature="fillnan_biharmonic"
         )
         out = np.asarray(out, dtype=output_dtype)
         # Restore everything outside the caller's mask (including unrelated
@@ -412,9 +423,29 @@ def fillnan_rbf(
 ) -> xr.DataArray:
     """Fill NaNs using a radial-basis-function interpolator.
 
-    Uses :class:`scipy.interpolate.RBFInterpolator`. More expensive than
-    ``fillnan_spatial`` but extrapolates smoothly and respects the
-    global shape of the signal.
+    More expensive than ``fillnan_spatial`` but extrapolates smoothly and
+    respects the global shape of the signal. With ``neighbors=None`` and a
+    polyharmonic ``kernel`` (``"linear"``, ``"thin_plate_spline"``,
+    ``"cubic"``, ``"quintic"``) the global interpolant is functax's ``RBF``
+    plan (the ``[functax]`` extra), with SciPy's default polynomial tail.
+    A local interpolant (``neighbors`` set) or any other kernel uses
+    :class:`scipy.interpolate.RBFInterpolator`, until functax has a local
+    RBF.
+
+    Args:
+        da: Input DataArray with at least ``lon`` and ``lat`` dims.
+        kernel: A :class:`scipy.interpolate.RBFInterpolator` kernel name.
+        neighbors: Nearest samples per evaluation point, or ``None`` for
+            the global interpolant over every finite sample.
+        lon: Name of the longitude coordinate.
+        lat: Name of the latitude coordinate.
+
+    Returns:
+        Same-shaped DataArray with NaNs filled; observed values untouched.
+
+    Raises:
+        ImportError: If the global polyharmonic path needs the
+            ``[functax]`` extra and it is missing.
     """
     lon_vals = da[lon].values
     lat_vals = da[lat].values
@@ -426,13 +457,18 @@ def fillnan_rbf(
             return arr
         samples = np.column_stack([lon_grid[finite].ravel(), lat_grid[finite].ravel()])
         values = arr[finite].ravel()
-        rbf = RBFInterpolator(samples, values, kernel=kernel, neighbors=neighbors)
         # Only patch missing positions; leave observed values untouched.
         missing = ~finite
         missing_points = np.column_stack(
             [lon_grid[missing].ravel(), lat_grid[missing].ravel()]
         )
         out = arr.copy()
+        if neighbors is None and kernel in POLYHARMONIC_ORDERS:
+            out[missing] = polyharmonic_rbf(
+                samples, values, missing_points, order=POLYHARMONIC_ORDERS[kernel]
+            )
+            return out
+        rbf = RBFInterpolator(samples, values, kernel=kernel, neighbors=neighbors)
         out[missing] = rbf(missing_points)
         return out
 

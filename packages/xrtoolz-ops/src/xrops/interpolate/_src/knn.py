@@ -1,4 +1,11 @@
-"""k-nearest-neighbour inverse-distance interpolation."""
+"""k-nearest-neighbour inverse-distance interpolation.
+
+The Euclidean metric runs on functax's ``InverseDistance`` plan (the
+``[functax]`` extra). The haversine metric stays on a scikit-learn
+``BallTree`` (the ``[sklearn]`` extra) until functax weighs neighbours by
+great-circle distance: its ``"chord"`` metric finds the same neighbours but
+weighs them by the chord 2 sin(θ/2) rather than the angle θ.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +15,7 @@ import numpy as np
 import xarray as xr
 from jaxtyping import Float
 
+from xrops.interpolate._src._functax import inverse_distance
 from xrops.interpolate._src.binning import Grid
 from xrops.interpolate._src.spatial import _build_tree, _to_metric_xy
 from xrops.utils._src.finite import (
@@ -30,7 +38,11 @@ def _idw_kernel(
     max_distance: float | None,
     eps: float,
 ) -> Float[np.ndarray, "query"]:
-    """Evaluate the inverse-distance weighted mean at query coordinates."""
+    """Evaluate the inverse-distance weighted mean at query coordinates.
+
+    The scikit-learn kernel behind ``metric="haversine"``; the Euclidean
+    metric runs on functax (:func:`inverse_distance`).
+    """
     if queries.size == 0:
         return np.empty(0, dtype=float)
 
@@ -109,11 +121,17 @@ def idw_to_points(
             for great-circle distances.
         max_distance: Optional neighbour cutoff. For ``metric="haversine"``,
             this is interpreted in radians (approximately ``km / 6371``).
-        eps: Small non-negative offset for non-exact distance weights.
+        eps: Small non-negative distance floor: under the Euclidean metric
+            the weights are ``1 / max(d, eps) ** power``, under the haversine
+            metric ``1 / (d + eps) ** power``.
 
     Returns:
         NumPy array matching the broadcast shape of ``dst_lons`` and
         ``dst_lats``.
+
+    Raises:
+        ImportError: If the ``[functax]`` extra (Euclidean) or the
+            ``[sklearn]`` extra (haversine) is missing.
     """
     _validate_idw_args(k, power, metric, max_distance, eps)
     src_lon, src_lat, src_value = _prepare_sources(src_lons, src_lats, src_values)
@@ -129,6 +147,17 @@ def idw_to_points(
 
     src_xy = _to_metric_xy(src_lon, src_lat, metric)
     query_xy = _to_metric_xy(dst_lon[finite_queries], dst_lat[finite_queries], metric)
+    if metric == "euclidean":
+        out[finite_queries] = inverse_distance(
+            src_xy,
+            src_value,
+            query_xy,
+            k=k,
+            power=power,
+            max_distance=max_distance,
+            eps=eps,
+        )
+        return out
     tree = _build_tree(src_xy, metric)
     out[finite_queries] = _idw_kernel(
         tree,
@@ -170,7 +199,7 @@ def idw_to_grid(
             for great-circle distances.
         max_distance: Optional neighbour cutoff. For ``metric="haversine"``,
             this is interpreted in radians.
-        eps: Small non-negative offset for non-exact distance weights.
+        eps: Small non-negative distance floor, as in :func:`idw_to_points`.
 
     Returns:
         DataArray with ``("lat", "lon")`` dimensions on ``grid``.
@@ -215,6 +244,9 @@ def fillnan_idw(
     space (column/row positions), not coordinate-value space.
     This differs from :func:`idw_to_points` and :func:`idw_to_grid`, whose
     Euclidean mode uses source and target lon/lat coordinate values directly.
+    The Euclidean metric runs on functax's ``InverseDistance`` plan (the
+    ``[functax]`` extra), the haversine metric on scikit-learn (the
+    ``[sklearn]`` extra).
 
     Args:
         da: Input DataArray with ``lat`` and ``lon`` dimensions.
@@ -227,7 +259,7 @@ def fillnan_idw(
         max_distance: Optional neighbour cutoff. For ``metric="haversine"``,
             this is interpreted in radians; for ``"euclidean"``, in index
             units.
-        eps: Small non-negative offset for non-exact distance weights.
+        eps: Small non-negative distance floor, as in :func:`idw_to_points`.
 
     Returns:
         Same-shaped DataArray with NaNs filled where finite neighbours are
@@ -255,20 +287,25 @@ def fillnan_idw(
                 "haversine",
             )
             tree = _build_tree(src_xy, "haversine")
+            filled = _idw_kernel(
+                tree,
+                arr[finite].astype(float, copy=False),
+                query_xy,
+                k,
+                power,
+                max_distance,
+                eps,
+            )
         else:
-            src_xy = np.column_stack([cols[finite], rows[finite]])
-            query_xy = np.column_stack([cols[~finite], rows[~finite]])
-            tree = _build_tree(src_xy, "euclidean")
-
-        filled = _idw_kernel(
-            tree,
-            arr[finite].astype(float, copy=False),
-            query_xy,
-            k,
-            power,
-            max_distance,
-            eps,
-        )
+            filled = inverse_distance(
+                np.column_stack([cols[finite], rows[finite]]),
+                arr[finite],
+                np.column_stack([cols[~finite], rows[~finite]]),
+                k=k,
+                power=power,
+                max_distance=max_distance,
+                eps=eps,
+            )
         out = arr.copy()
         out[~finite] = filled
         return out

@@ -50,6 +50,12 @@ prior = regrid(inventory)
 
 ## Gap-filling
 
+The Laplace, biharmonic, global RBF and inverse-distance fills run on [functax](https://github.com/jejjohnson/functax) plans, the same engine as geoops's fills, so a cube pipeline and a raster pipeline give the same answer. functax runs on JAX, so these fills need the `functax` extra (`uv add 'xrtoolz-ops[functax]'` in a project that pins functax in `[tool.uv.sources]`, or, with pip, `'xrtoolz-ops[functax]'` plus `'functax[jax,scipy] @ git+https://github.com/jejjohnson/functax.git@v0.0.6'`, since functax is not on PyPI); the base install stays without JAX, and each fill raises an `ImportError` naming the extra when it is missing.
+
+- `FillNaNLaplacian` and `FillNaNBiharmonic` solve Δu = 0 and Δ²u = 0 in the holes with `functax.project.fill_gaps`, with mirror edges and the finite cells as boundary values. `boundary="wrap"` (a periodic longitude) still runs the NumPy red/black SOR, as functax's fill has no periodic edge yet.
+- `FillNaNRBF` with `neighbors=None` and a polyharmonic kernel (`"linear"`, `"thin_plate_spline"`, `"cubic"`, `"quintic"`) uses `functax.interp.RBF`; a local interpolant (`neighbors` set, the default) stays on SciPy's `RBFInterpolator` until functax has a local RBF.
+- `FillNaNIDW`, `IDWToGrid` and `IDWToPoints` use `functax.interp.InverseDistance` under `metric="euclidean"`. `metric="haversine"` stays on scikit-learn's `BallTree` (the `sklearn` extra), since functax's spherical search weighs neighbours by chord length rather than great-circle angle.
+
 ::: xrops.interpolate.operators.FillNaNSpatial
 
 ::: xrops.interpolate.operators.FillNaNTemporal

@@ -81,7 +81,7 @@ Design rules:
 | `xrft` | Fourier transforms on xarray |
 | `xskillscore` | Verification metrics |
 
-xrops's calculus is `xrops.grad`, on geoops's difference kernels (`geotoolz-ops`, which also brings einx); no xrtoolz package depends on JAX. PyTorch and sklearn *models* remain non-dependencies — `ModelOp` uses duck typing so the user installs only what they need.
+xrops's calculus is `xrops.grad`, on geoops's difference kernels (`geotoolz-ops`, which also brings einx); no xrtoolz base install depends on JAX. JAX arrives only with the `xrtoolz-ops[functax]` extra, behind the gap fills and IDW; AGENTS.md ("JAX and `jax.jit`") says where a jit is allowed. PyTorch and sklearn *models* remain non-dependencies — `ModelOp` uses duck typing so the user installs only what they need.
 
 ## Common Commands
 

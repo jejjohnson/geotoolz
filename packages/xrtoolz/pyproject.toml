@@ -28,6 +28,7 @@ dependencies = [
 [project.optional-dependencies]
 wavelets = ["xrtoolz-ops[wavelets]"]
 image = ["xrtoolz-ops[image]"]
+functax = ["xrtoolz-ops[functax]"]
 maps = ["xrtoolz-ops[maps]"]
 sklearn = ["xrtoolz-ops[sklearn]"]
 vector = ["xrtoolz-ops[vector]"]
