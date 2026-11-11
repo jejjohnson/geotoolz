@@ -218,28 +218,26 @@ def _read(
         data = jnp.moveaxis(data, grid.dims.index(along), 0)
     # y: the grid flattened row-major, (..., y, x) -> (..., N)
     flat = data.reshape(*data.shape[:-2], grid.height * grid.width)
+    if frame is None:
+        # y[..., iₘₛ]: the raw values of every tap, (..., M, S)
+        taps = flat[..., stencil.indices]
+    else:
+        # each point reads its own frame: y[frame[m], ..., iₘₛ], (..., M, S)
+        rows = jnp.asarray(frame)[:, None]
+        taps = jnp.moveaxis(flat[rows, ..., stencil.indices], (0, 1), (-2, -1))
     fill = grid.fill_value
-    # samples that are data: finite and not the fill
-    usable = (
-        jnp.isfinite(flat)
-        if flat.dtype.kind in "fc"
-        else jnp.ones(flat.shape, dtype=bool)
+    # taps that are data: finite and not the fill (M·S checks, not N)
+    taps_usable = (
+        jnp.isfinite(taps)
+        if taps.dtype.kind in "fc"
+        else jnp.ones(taps.shape, dtype=bool)
     )
     if fill is not None and fill == fill:
-        usable = usable & (flat != fill)
+        taps_usable = taps_usable & (taps != fill)
     # nodata is zeroed, so 0 · NaN never spreads; it is masked below
-    clean = jnp.where(usable, flat, jnp.zeros((), flat.dtype))
-    if frame is None:
-        # f̂ = H y over the leading dims, and the usable flag of every tap
-        values = stencil.apply(clean)
-        taps_usable = usable[..., stencil.indices]
-    else:
-        # each point reads its own frame: y[frame[m], ..., i_ms], (..., M, S)
-        rows = jnp.asarray(frame)[:, None]
-        gathered = jnp.moveaxis(clean[rows, ..., stencil.indices], (0, 1), (-2, -1))
-        taps_usable = jnp.moveaxis(usable[rows, ..., stencil.indices], (0, 1), (-2, -1))
-        # f̂ₘ = Σₛ wₘₛ y[frame[m], iₘₛ]
-        values = jnp.einsum("...ms,ms->...m", gathered, stencil.weights)
+    clean = jnp.where(taps_usable, taps, jnp.zeros((), taps.dtype))
+    # f̂ₘ = Σₛ wₘₛ yₘₛ, the stencil's weights on the gathered taps
+    values = jnp.einsum("...ms,ms->...m", clean, stencil.weights)
     if method == "nearest" and flat.dtype.kind in "fc":
         # one tap of weight 1: the pixel's own value, in the grid's dtype
         values = values.astype(flat.dtype)
