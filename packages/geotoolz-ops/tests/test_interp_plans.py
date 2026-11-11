@@ -317,3 +317,15 @@ def test_a_pixel_with_one_nodata_band_is_nodata_in_every_band() -> None:
     assert out[0, :, 7, 9].tolist() == [-9999.0, -9999.0]
     np.testing.assert_array_equal(out[1, :, 7, 9], data[1, :, 7, 9])
     np.testing.assert_array_equal(out[0, :, 7, 10], data[0, :, 7, 10])
+
+
+def test_an_integer_raster_without_a_fill_keeps_its_zeros_valid() -> None:
+    """No fill declared: 0 is data, so the warp must not make it nodata."""
+    data = np.arange(H * W, dtype=np.int16).reshape(H, W) % 4  # many valid zeros
+    scene = GeoArray(data, T, CRS, dims="y x")
+    target = Grid(T, CRS, (H, W))  # the source grid itself
+    out = gz.geom.Reproject(target=target, resampling="nearest", engine="interp")(scene)
+    assert out.fill_value is None
+    assert out.data.dtype == np.int16
+    np.testing.assert_array_equal(np.asarray(out.data), data)
+    assert bool(np.all(np.asarray(out.valid_mask())))
