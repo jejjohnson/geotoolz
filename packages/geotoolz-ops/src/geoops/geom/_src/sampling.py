@@ -37,18 +37,18 @@ _PROMOTION_WARNING = (
 )
 
 
-def _is_tracer(x: Any) -> bool:
+def is_tracer(x: Any) -> bool:
     """Whether ``x`` is a JAX tracer (JAX is already imported for JAX data)."""
     jax = sys.modules.get("jax")
     return jax is not None and isinstance(x, jax.core.Tracer)
 
 
-def _functax_interp(feature: str) -> ModuleType:
+def functax_interp(feature: str) -> ModuleType:
     """``functax.interp``, or an ``ImportError`` naming the ``[interp]`` extra."""
     return import_optional("functax.interp", "interp", feature=feature)
 
 
-def _x64(jax: ModuleType) -> Any:
+def x64_mode(jax: ModuleType) -> Any:
     """A context with 64-bit JAX on: functax's ``AffineGrid`` is float64."""
     enable = getattr(jax, "enable_x64", None)
     if enable is not None:
@@ -115,6 +115,12 @@ def interp_at(
         >>> out.data.tolist(), out.valid.tolist()
         ([0.0, nan], [True, False])
     """
+    check_args(grid, points, method)
+    return interp_with_plan(grid, points, method, frame=frame, along=along)
+
+
+def check_args(grid: GeoArray, points: GeoPoints, method: str) -> None:
+    """Raise unless `interp_at` can read ``grid`` at ``points`` by ``method``."""
     if grid.crs != points.crs:
         raise ValueError(
             f"interp_at: the grid is in {grid.crs} and the points in {points.crs}; "
@@ -128,13 +134,29 @@ def interp_at(
         raise ValueError(
             f"interp_at: method is 'bilinear' or 'nearest', got {method!r}"
         )
-    interp = _functax_interp("geoops.geom.interp_at")
+
+
+def interp_with_plan(
+    grid: GeoArray,
+    points: GeoPoints,
+    method: str,
+    *,
+    frame: Any = None,
+    along: str = "time",
+    plan: Any = None,
+) -> GeoPoints:
+    """`interp_at` after its argument checks, reading through ``plan`` if given.
+
+    ``plan`` is `plan_at`'s for this grid and these points (`InterpAt`
+    passes its cached one); ``None`` builds it.
+    """
+    interp = functax_interp("geoops.geom.interp_at")
     import jax
 
     if grid.backend == "numpy" and backend_of(points.xy) == "jax":
         # compute where the positions live; eagerly that hides a host-to-
         # device copy (C1's deprecation), under a trace the grid is a constant
-        if not _is_tracer(points.xy):
+        if not is_tracer(points.xy):
             warnings.warn(_PROMOTION_WARNING, DeprecationWarning, stacklevel=2)
         grid = grid.to_jax()
     if frame is not None and along not in grid.dims:
@@ -142,11 +164,11 @@ def interp_at(
             f"interp_at: frame indexes {along!r}, not a dim of {grid.dims}"
         )
     if grid.backend == "jax":
-        values, observed = _read(interp, grid, points, method, frame, along)
+        values, observed = _read(interp, grid, points, method, frame, along, plan)
     else:
         # a NumPy grid is read on JAX in 64-bit mode, then comes back
-        with _x64(jax):
-            values, observed = _read(interp, grid, points, method, frame, along)
+        with x64_mode(jax):
+            values, observed = _read(interp, grid, points, method, frame, along, plan)
             values, observed = jax.device_get((values, observed))
     leading = tuple(
         d
@@ -191,15 +213,12 @@ def _plan(
     return scheme.plan(source, Points(xy, valid=located), policies=policies)
 
 
-def _read(
-    interp: ModuleType,
-    grid: GeoArray,
-    points: GeoPoints,
-    method: str,
-    frame: Any,
-    along: str,
-) -> tuple[Any, Any]:
-    """The values ``(..., obs)`` and ``valid`` ``(obs,)`` of H(x), on JAX."""
+def _located(points: GeoPoints) -> tuple[Any, Any, Any]:
+    """``given``, ``located`` and the positions to plan at, on JAX.
+
+    A padded point (``valid=False``) or a non-finite position is not
+    located, and is planned at the origin so nothing NaN enters the plan.
+    """
     import jax.numpy as jnp
 
     xy = jnp.asarray(points.xy)
@@ -212,7 +231,34 @@ def _read(
     located = given & jnp.all(jnp.isfinite(xy), axis=-1)
     # padded or missing positions are read at the origin, and masked after
     safe_xy = jnp.where(located[:, None], xy, 0.0)
-    stencil = _plan(interp, grid, safe_xy, located, method).read
+    return given, located, safe_xy
+
+
+def plan_at(interp: ModuleType, grid: GeoArray, points: GeoPoints, method: str) -> Any:
+    """The functax plan H that `interp_at` reads ``grid`` at ``points`` with.
+
+    Runs on JAX: a NumPy grid's caller enters 64-bit mode first.
+    """
+    _, located, safe_xy = _located(points)
+    return _plan(interp, grid, safe_xy, located, method)
+
+
+def _read(
+    interp: ModuleType,
+    grid: GeoArray,
+    points: GeoPoints,
+    method: str,
+    frame: Any,
+    along: str,
+    plan: Any = None,
+) -> tuple[Any, Any]:
+    """The values ``(..., obs)`` and ``valid`` ``(obs,)`` of H(x), on JAX."""
+    import jax.numpy as jnp
+
+    given, located, safe_xy = _located(points)
+    if plan is None:
+        plan = _plan(interp, grid, safe_xy, located, method)
+    stencil = plan.read
     data = jnp.asarray(grid.data)
     if frame is not None:
         data = jnp.moveaxis(data, grid.dims.index(along), 0)

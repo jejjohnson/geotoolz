@@ -20,7 +20,7 @@ from pipekit_array import array_namespace
 
 from geoops._src.blending import triangular_weights
 from geoops._src.geotensor import reject_geotensor
-from geoops._src.optional import optional_name
+from geoops._src.optional import import_optional, optional_name
 from geoops.geom._src.stencils import (
     METHODS,
     Method,
@@ -66,6 +66,55 @@ def resolve_resampling(name: str | Resampling) -> Resampling:
     if isinstance(name, Resampling):
         return name
     return Resampling[_RASTERIO_ALIASES.get(name, name)]
+
+
+# `resampling=` names for the functax engine (`Reproject(engine="interp")`):
+# the functax scheme, its arguments, and the boundary its taps read past the
+# edge with (a B-spline's prefilter needs the mirror boundary). "average"
+# would be functax's Conservative, whose cells across two CRSs need a
+# curvilinear target and host-side polygon clipping: not wired here.
+_FUNCTAX_SCHEMES: dict[str, tuple[str, dict[str, Any], str]] = {
+    "nearest": ("Nearest", {}, "edge"),
+    "bilinear": ("Linear", {}, "edge"),
+    "cubic": ("Cubic", {}, "edge"),
+    "cubic_spline": ("BSpline", {"order": 3}, "mirror"),
+}
+
+
+def interp_resampling(name: str) -> str:
+    """The canonical ``resampling`` name for the functax engine, or ValueError.
+
+    Accepts the aliases ``"linear"`` and ``"bicubic"``; imports nothing.
+
+    Example:
+        >>> interp_resampling("linear")
+        'bilinear'
+    """
+    canonical = _RASTERIO_ALIASES.get(name, name)
+    if canonical not in _FUNCTAX_SCHEMES:
+        raise ValueError(
+            "engine='interp' resamples with "
+            f"{sorted(_FUNCTAX_SCHEMES)} (or 'linear', 'bicubic'), got {name!r}; "
+            "use engine='gdal' for the others"
+        )
+    return canonical
+
+
+def resolve_scheme(name: str) -> tuple[Any, str]:
+    """The functax scheme of a ``resampling`` name, and its edge boundary.
+
+    ``nearest`` is ``Nearest``, ``bilinear`` ``Linear``, ``cubic`` ``Cubic``
+    (Keys, a = −½) and ``cubic_spline`` ``BSpline(3)``.
+
+    Raises:
+        ValueError: The name has no functax scheme here.
+        ImportError: functax's plans are missing (the ``[interp]`` extra).
+    """
+    scheme, kwargs, boundary = _FUNCTAX_SCHEMES[interp_resampling(name)]
+    interp = import_optional(
+        "functax.interp", "interp", feature="geoops.geom.Reproject(engine='interp')"
+    )
+    return getattr(interp, scheme)(**kwargs), boundary
 
 
 def resolve_interpolation(name: str) -> str:

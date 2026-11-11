@@ -22,7 +22,9 @@ hydra-zen ``builds()`` cannot recreate them from ``get_config()``.
 from __future__ import annotations
 
 import warnings
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, cast
 
 import geoarray
@@ -30,7 +32,7 @@ import numpy as np
 from affine import Affine
 from geoarray import DIMS, FrozenAttrs, GeoArray, GeoPoints, GridMismatchError
 from pipekit_array import array_namespace
-from pipekit_ops import Operator, get_adapter
+from pipekit_ops import Operator, backend_of, get_adapter
 from pyproj import CRS
 from scipy.ndimage import shift as ndi_shift
 
@@ -66,16 +68,26 @@ from geoops.geom._src.array import (
     difference,
     feather_weights,
     gradient_2d,
+    interp_resampling,
     is_north_up,
     resolve_interpolation,
     resolve_resampling,
+    resolve_scheme,
     scan_angles,
     scan_pixel_growth,
     target_slices,
     valid_pixel_mask,
 )
-from geoops.geom._src.sampling import interp_at
+from geoops.geom._src.sampling import (
+    check_args,
+    functax_interp,
+    interp_with_plan,
+    is_tracer,
+    plan_at,
+    x64_mode,
+)
 from geoops.geom._src.stencils import difference_offsets
+from geoops.geom._src.warp import target_coordinates, warp
 
 
 _RAY_DISCRIMINANT_TOLERANCE = 1.0e-6
@@ -276,26 +288,45 @@ def _nan_first(stack: np.ndarray, axis: int = 0) -> np.ndarray:
 
 
 class Reproject(Operator):
-    """Reproject a `GeoArray` to a destination CRS (and optional resolution).
+    """Reproject a `GeoArray` to a destination CRS or onto a target grid.
 
-    Thin Operator wrapping :func:`georeader.read.read_to_crs`. The
-    destination grid is anchored to the input's bounding box reprojected
-    into ``dst_crs``; the resolution defaults to the input's pixel size
-    expressed in the destination CRS.
+    Two engines. ``engine="gdal"`` (the default) wraps
+    :func:`georeader.read.read_to_crs`: the destination grid is anchored to
+    the input's bounding box reprojected into ``dst_crs``, and the
+    resolution defaults to the input's pixel size expressed in the
+    destination CRS; it runs on NumPy only, and a JAX carrier raises
+    `pipekit_ops.BackendError`. ``engine="interp"`` warps onto ``target``
+    through a functax plan (the ``[interp]`` extra): the target pixel
+    centres go through pyproj to the source CRS once, a scheme plans the
+    read-out H on the source grid, and every frame and band is H y. It runs
+    on NumPy and on JAX, under ``jax.jit`` / ``eqx.filter_jit`` too, and the
+    centres are computed once per source CRS and reused.
 
     Geo-dependent: requires a georeferenced ``GeoArray`` input
     (transform + CRS); plain arrays raise ``TypeError``.
 
     Args:
         dst_crs: Target CRS as a string (EPSG code, WKT, PROJ string, or
-            anything :class:`pyproj.CRS.from_user_input` accepts).
+            anything :class:`pyproj.CRS.from_user_input` accepts). Give
+            ``dst_crs`` or ``target``, not both.
         resolution: Optional ``(pixel_size_x, pixel_size_y)`` in
-            destination-CRS units. ``None`` lets georeader derive it
-            from the source pixel size. Honoured even when ``dst_crs``
-            equals the input CRS (the call then acts as a resample).
+            destination-CRS units, with ``dst_crs``. ``None`` lets georeader
+            derive it from the source pixel size. Honoured even when
+            ``dst_crs`` equals the input CRS (the call then acts as a
+            resample).
         resampling: One of ``"nearest"``, ``"bilinear"`` /
             ``"linear"``, ``"cubic"`` / ``"bicubic"``,
             ``"cubic_spline"``, ``"lanczos"``, ``"average"``, ``"mode"``.
+            ``engine="interp"`` takes the first four: functax's
+            ``Nearest``, ``Linear``, ``Cubic`` (Keys, a = −½) and
+            ``BSpline(3)``.
+        engine: ``"gdal"`` or ``"interp"``.
+        target: The output grid (a hashable `geoarray.Grid`, CRS
+            included, or its ``get_config()``), instead of ``dst_crs``;
+            ``engine="interp"`` needs it.
+            Target pixels off the source grid, or reading its nodata with a
+            non-zero weight, hold the fill (NaN for a float input without
+            one).
 
     Examples:
         >>> import geoops as gz
@@ -304,6 +335,14 @@ class Reproject(Operator):
         ...     dst_crs="EPSG:4326", resampling="bilinear"
         ... )
         >>> geographic = reproj(utm_scene)
+        >>> # The same warp onto a fixed grid, on JAX and under jit.
+        >>> import equinox as eqx
+        >>> import geoarray as ga
+        >>> target = ga.Grid((0.001, 0.0, -104.0, 0.0, -0.001, 32.0), "EPSG:4326", (500, 500))
+        >>> warp = eqx.filter_jit(
+        ...     gz.geom.Reproject(target=target, resampling="bilinear", engine="interp")
+        ... )
+        >>> frames = warp(utm_scene.to_jax())  # (T, C, H, W) -> (T, C, 500, 500)
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -315,21 +354,67 @@ class Reproject(Operator):
     def __init__(
         self,
         *,
-        dst_crs: str,
+        dst_crs: str | None = None,
         resolution: tuple[float, float] | None = None,
         resampling: str = "bilinear",
+        engine: Literal["gdal", "interp"] = "gdal",
+        target: geoarray.Grid | Mapping[str, Any] | None = None,
     ) -> None:
+        if isinstance(target, Mapping):
+            # a Grid's get_config, as from_state and YAML hand it back
+            target = geoarray.Grid.from_config(dict(target.items()))
+        if engine not in ("gdal", "interp"):
+            raise ValueError(f"Reproject.engine is 'gdal' or 'interp', got {engine!r}")
+        if (dst_crs is None) == (target is None):
+            raise ValueError("Reproject takes dst_crs or target, not both or neither")
+        if target is not None and resolution is not None:
+            raise ValueError("Reproject: target fixes the resolution; drop resolution")
+        if target is not None and not isinstance(target, geoarray.Grid):
+            raise TypeError(
+                f"Reproject.target is a geoarray.Grid, got {type(target).__name__}"
+            )
+        if engine == "interp":
+            if target is None:
+                raise ValueError("Reproject(engine='interp') needs target=")
+            interp_resampling(resampling)
         self.dst_crs = dst_crs
         self.resolution = resolution
         self.resampling = resampling
+        self.engine = engine
+        self.target = target
+        # runtime only: X_* = φ(target centres) per source CRS, not config
+        self._coordinates: dict[Any, np.ndarray] = {}
+
+    def _check_backends(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+        # the functax engine runs on NumPy and JAX; GDAL on NumPy only
+        if self.engine == "gdal":
+            super()._check_backends(args, kwargs)
 
     def _apply(self, gt: GeoArray) -> GeoArray:
+        if self.engine == "interp":
+            require_geoarray(gt, "Reproject")
+            return self._warp(gt)
         read = optional_name(
             "georeader", "read", "sensors", feature="geoops.geom.Reproject"
         )
         require_geoarray(gt, "Reproject")
         resampling = resolve_resampling(self.resampling)
         engine_gt = to_engine(gt)
+        if self.target is not None:
+            window_type = optional_name(
+                "rasterio.windows", "Window", "raster", feature="geoops.geom.Reproject"
+            )
+            target = self.target
+            return adopt_attrs(
+                gt,
+                read.read_reproject(
+                    engine_gt,
+                    dst_crs=None if target.crs is None else target.crs.to_string(),
+                    dst_transform=target.affine,
+                    window_out=window_type(0, 0, target.width, target.height),
+                    resampling=resampling,
+                ),
+            )
         if self.resolution is None:
             return adopt_attrs(
                 gt, read.read_to_crs(engine_gt, self.dst_crs, resampling=resampling)
@@ -351,11 +436,35 @@ class Reproject(Operator):
             ),
         )
 
+    def _warp(self, gt: GeoArray) -> GeoArray:
+        """The functax engine: f̂(X_*) = H y onto ``target``."""
+        target = self.target
+        assert target is not None  # the constructor requires it
+        scheme, boundary = resolve_scheme(self.resampling)
+        import jax
+
+        coordinates = self._coordinates.get(gt.crs)
+        if coordinates is None:
+            coordinates = target_coordinates(target, gt.crs)
+            self._coordinates[gt.crs] = coordinates
+        host = gt.backend == "numpy"
+        with x64_mode(jax) if host else nullcontext():
+            values, fill = warp(gt, target, scheme, boundary, coordinates)
+            if host:
+                values = jax.device_get(values)
+                transform: Any = np.asarray(target.transform)
+            else:
+                transform = jax.numpy.asarray(target.transform, dtype=jax.numpy.float64)
+        out = gt.with_data(values, transform=transform, fill_value=fill)
+        return out.replace(crs=target.crs)
+
     def get_config(self) -> dict[str, Any]:
         return {
             "dst_crs": self.dst_crs,
             "resolution": (None if self.resolution is None else list(self.resolution)),
             "resampling": self.resampling,
+            "engine": self.engine,
+            "target": None if self.target is None else self.target.get_config(),
         }
 
 
@@ -3935,6 +4044,12 @@ class InterpAt(Operator):
     The declared coupling (spatial, reach 1) is bilinear's; ``"nearest"``
     reads one pixel, so for it the declaration is an upper bound.
 
+    ``plan(grid, points)`` returns the functax plan H the operator reads
+    with: ``H(y)`` on the grid flattened to ``(..., N)`` gives the values at
+    the points, and ``H.adjoint(r)`` (or ``H.operator().transpose()``) sends
+    point residuals back onto the grid, Hᵀ r. The operator builds a plan
+    once per (grid, points) on concrete inputs and reuses it.
+
     Args:
         method: ``"bilinear"`` (blends the four pixels around each point)
             or ``"nearest"``.
@@ -3971,8 +4086,74 @@ class InterpAt(Operator):
             )
         self.method = method
         self.along = along
+        # runtime only: the plans of the last few (grid, points), not config
+        self._plans: OrderedDict[tuple[Any, ...], Any] = OrderedDict()
 
-    def _apply(self, grid: GeoArray, points: GeoPoints, frame: Any = None) -> GeoPoints:
+    _MAX_PLANS: ClassVar[int] = 16
+
+    def plan(self, grid: GeoArray, points: GeoPoints) -> Any:
+        """H, the functax plan this operator reads ``grid`` at ``points`` with.
+
+        f̂ = H y for y the grid flattened row-major to ``(..., N)``, N = H·W,
+        with NaN at points off the grid; ``plan.adjoint(r)`` is Hᵀ r, and
+        ``plan.operator()`` is H as an (M, N) lineax operator (its
+        ``transpose()`` is (N, M)). Padded or non-finite points read
+        nothing. The nodata rule is the operator's, not the plan's: calling
+        the operator also masks points that read nodata.
+
+        Built once per (grid, points) and cached (the 16 most recent) when
+        both are concrete; under ``jit`` it is built in the trace. A plan
+        on a NumPy grid is built in JAX's 64-bit mode and holds float64
+        weights, so apply it with ``jax_enable_x64`` on.
+
+        Args:
+            grid: The carrier ``(..., y, x)``; only its grid matters.
+            points: Where to read, in ``grid``'s CRS.
+
+        Returns:
+            A ``functax.interp.Plan`` with M = ``points.size`` rows.
+
+        Raises:
+            ImportError: functax's plans are missing (the ``[interp]`` extra).
+
+        Example:
+            >>> import numpy as np
+            >>> from geoarray import GeoArray, GeoPoints
+            >>> import geoops as gz
+            >>> t = (1.0, 0.0, 0.0, 0.0, -1.0, 4.0)
+            >>> g = GeoArray(np.arange(16.0).reshape(4, 4), t, None, dims="y x")
+            >>> p = GeoPoints(np.zeros(1), xy=np.array([[1.0, 3.0]]), dims="obs", crs=None)
+            >>> H = gz.InterpAt().plan(g, p)  # (1, 16)
+            >>> np.asarray(H(g.data.reshape(-1))).tolist()  # doctest: +SKIP
+            [2.5]
+        """
+        self._check_inputs(grid, points)
+        check_args(grid, points, self.method)
+        interp = functax_interp("geoops.geom.InterpAt.plan")
+        import jax
+
+        concrete = not (is_tracer(grid.transform) or is_tracer(points.xy))
+        key = self._plan_key(grid, points) if concrete else None
+        if key is not None and key in self._plans:
+            self._plans.move_to_end(key)
+            return self._plans[key]
+        host = grid.backend == "numpy" and backend_of(points.xy) != "jax"
+        with x64_mode(jax) if host else nullcontext():
+            plan = plan_at(interp, grid, points, self.method)
+        if key is not None:
+            self._plans[key] = plan
+            while len(self._plans) > self._MAX_PLANS:
+                self._plans.popitem(last=False)
+        return plan
+
+    def _plan_key(self, grid: GeoArray, points: GeoPoints) -> tuple[Any, ...]:
+        """What a plan depends on: the grid and the positions and validity."""
+        xy = np.asarray(points.xy)
+        valid = None if points.valid is None else np.asarray(points.valid).tobytes()
+        return (grid.grid, xy.shape, xy.dtype.str, xy.tobytes(), valid)
+
+    @staticmethod
+    def _check_inputs(grid: Any, points: Any) -> None:
         require_geoarray(grid, "InterpAt")
         reject_geotensor(points, "InterpAt")
         if not isinstance(points, GeoPoints):
@@ -3980,4 +4161,9 @@ class InterpAt(Operator):
                 f"InterpAt reads a grid at a geoarray.GeoPoints, "
                 f"got {type(points).__name__}"
             )
-        return interp_at(grid, points, self.method, frame=frame, along=self.along)
+
+    def _apply(self, grid: GeoArray, points: GeoPoints, frame: Any = None) -> GeoPoints:
+        plan = self.plan(grid, points)
+        return interp_with_plan(
+            grid, points, self.method, frame=frame, along=self.along, plan=plan
+        )
