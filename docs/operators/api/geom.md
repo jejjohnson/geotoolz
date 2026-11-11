@@ -17,7 +17,7 @@ multi-source matchups live in the `geom.coregister` subnamespace
 
 ## Projection operator choices
 
-- `Reproject` changes CRS and optionally resolution.
+- `Reproject` changes CRS and optionally resolution, or warps onto a `target` grid. `engine="gdal"` (the default) runs georeader on NumPy; `engine="interp"` (the `[interp]` extra) warps onto `target` through a functax plan, on NumPy and on JAX under `jit`, with `nearest`, `bilinear`, `cubic` or `cubic_spline`.
 - `ReprojectLike` matches another `GeoArray`'s CRS, transform, and shape.
 - `ResampleLike` is the same grid-matching surface for resolution/alignment work where the CRS is already compatible.
 - `CropToBounds` delegates to `georeader.read.read_from_bounds(..., boundless=False)`: the pixel window is rounded outward, so every pixel the bounds touch (even partially) is kept, and the result is clipped to the carrier.
@@ -79,6 +79,7 @@ not depend on the padding. It runs on NumPy and under `jax.jit` /
 `jax.grad`; `InterpAt` is the same function as an operator, with the
 points as its second input. It moved here from geoarray (GA-B6), which
 keeps `geoarray.to_pixel` for the coordinate maths.
+`InterpAt.plan(grid, points)` returns that plan, H, built once per grid and points: `plan.adjoint(r)` and `plan.operator().transpose()` send point residuals back onto the grid as Hᵀ r.
 The stencil is a functax plan (`functax.interp.Linear` or `Nearest` on the grid's `AffineGrid`, with `extent="cells"` and `boundary="edge"`), so H has a tested adjoint, and both need the `[interp]` extra; a NumPy grid is read on JAX in 64-bit mode and comes back as NumPy.
 
 ::: geoops.geom

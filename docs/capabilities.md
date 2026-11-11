@@ -193,7 +193,7 @@ current).
 | `PhaseAlign` | class | Sub-pixel image registration via phase cross-correlation. |
 | `Rasterize` | class | Rasterize geometries onto the input `GeoArray`'s grid. |
 | `RasterizeLike` | class | Rasterize geometries onto a stored reference grid. |
-| `Reproject` | class | Reproject a `GeoArray` to a destination CRS (and optional resolution). |
+| `Reproject` | class | Reproject a `GeoArray` to a destination CRS or onto a target grid. |
 | `ReprojectLike` | class | Reproject a `GeoArray` onto another `GeoArray`'s CRS + grid. |
 | `Resample` | class | Resample a `GeoArray` to a target spatial resolution. |
 | `ResampleLike` | class | Resample a `GeoArray` onto another `GeoArray`'s spatial grid. |
