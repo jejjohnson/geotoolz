@@ -268,3 +268,19 @@ def test_the_config_round_trips_through_hydra_zen_yaml(engine: str) -> None:
     restored = hydra_zen.instantiate(OmegaConf.create(text))
     assert isinstance(restored, gz.geom.Reproject)
     assert restored.get_config() == op.get_config()
+
+
+def test_a_pixel_with_one_nodata_band_is_nodata_in_every_band() -> None:
+    """valid_mask's rule: any band at nodata makes the pixel nodata; frames apart."""
+    data = np.stack([np.stack([_field(), _field() + 5.0]) for _ in range(2)])
+    data[0, 0, 7, 9] = -9999.0  # frame 0, band 0 only
+    scene = GeoArray(data, T, CRS, dims="time band y x", fill_value=-9999.0)
+    target = Grid(T, CRS, (H, W))  # the source grid itself
+    out = np.asarray(
+        gz.geom.Reproject(target=target, resampling="nearest", engine="interp")(
+            scene
+        ).data
+    )
+    assert out[0, :, 7, 9].tolist() == [-9999.0, -9999.0]
+    np.testing.assert_array_equal(out[1, :, 7, 9], data[1, :, 7, 9])
+    np.testing.assert_array_equal(out[0, :, 7, 10], data[0, :, 7, 10])
