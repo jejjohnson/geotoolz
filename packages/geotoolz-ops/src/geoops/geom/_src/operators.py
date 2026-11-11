@@ -4103,7 +4103,8 @@ class InterpAt(Operator):
         the operator also masks points that read nodata.
 
         Built once per (grid, points) and cached (the 16 most recent) when
-        both are concrete; under ``jit`` it is built in the trace. A plan
+        both are concrete and it is built outside a trace; under ``jit`` it
+        is built in the trace and not kept. A plan
         on a NumPy grid is built in JAX's 64-bit mode and holds float64
         weights, so apply it with ``jax_enable_x64`` on.
 
@@ -4143,7 +4144,10 @@ class InterpAt(Operator):
         host = grid.backend == "numpy" and backend_of(points.xy) != "jax"
         with x64_mode(jax) if host else nullcontext():
             plan = plan_at(interp, grid, points, self.method)
-        if key is not None:
+        # inside a trace even concrete inputs give a plan of tracers, which
+        # must not outlive it: keep only plans whose leaves are all concrete
+        leaves = jax.tree_util.tree_leaves(plan)
+        if key is not None and not any(is_tracer(leaf) for leaf in leaves):
             self._plans[key] = plan
             while len(self._plans) > self._MAX_PLANS:
                 self._plans.popitem(last=False)

@@ -90,6 +90,23 @@ def test_the_plan_is_built_once_per_grid_and_points(x64: ModuleType) -> None:
     assert op.plan(grid.shift_origin((20.0, 0.0)), _points()) is not first
 
 
+def test_a_plan_built_inside_a_trace_is_not_cached(x64: ModuleType) -> None:
+    """Only the data is traced; the grid and points are concrete constants."""
+    jax = x64
+    grid = GeoArray(_field(), T, CRS, dims="y x").to_jax()
+    points = _points().to_jax()
+    op = gz.InterpAt()
+    traced = jax.jit(lambda data: op(grid.with_data(data), points).data)(grid.data)
+    # a plan cached by the trace would hold its leaked tracers
+    plan = op.plan(grid, points)
+    assert not any(
+        isinstance(leaf, jax.core.Tracer) for leaf in jax.tree_util.tree_leaves(plan)
+    )
+    np.testing.assert_allclose(
+        np.asarray(op(grid, points).data), np.asarray(traced), atol=1e-12
+    )
+
+
 def test_a_traced_validity_mask_is_not_read_on_the_host(x64: ModuleType) -> None:
     jax = x64
     grid = GeoArray(_field(), T, CRS, dims="y x").to_jax()
