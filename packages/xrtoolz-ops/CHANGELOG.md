@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-ops-v0.5.0...xrtoolz-ops-v0.5.1) (2026-11-12)
+
+
+### Features
+
+* **interpolate:** run the gap fills and IDW on functax plans ([#401](https://github.com/jejjohnson/xrtoolz/issues/401)) ([d81a2e8](https://github.com/jejjohnson/xrtoolz/commit/d81a2e8ae91fdf9cf34024604e4120b5a1c21125))
+
 ## [0.5.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-ops-v0.4.0...xrtoolz-ops-v0.5.0) (2026-10-30)
 
 

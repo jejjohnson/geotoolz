@@ -28,6 +28,13 @@
 
 * `xrtoolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xrtoolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
 
+## [0.4.1](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.4.0...xrtoolz-v0.4.1) (2026-11-12)
+
+
+### Features
+
+* **interpolate:** run the gap fills and IDW on functax plans ([#401](https://github.com/jejjohnson/xrtoolz/issues/401)) ([d81a2e8](https://github.com/jejjohnson/xrtoolz/commit/d81a2e8ae91fdf9cf34024604e4120b5a1c21125))
+
 ## [0.4.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.3.0...xrtoolz-v0.4.0) (2026-10-30)
 
 
