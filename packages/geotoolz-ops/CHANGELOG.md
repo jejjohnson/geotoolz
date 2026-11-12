@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.18.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.18.0...geotoolz-ops-v0.18.1) (2026-11-11)
+
+
+### Features
+
+* **array:** take the affine kernels and interp_at's stencil from functax ([#653](https://github.com/jejjohnson/geotoolz/issues/653)) ([2e8b434](https://github.com/jejjohnson/geotoolz/commit/2e8b434902b5743714f2373c832f076f6144f893)), closes [#643](https://github.com/jejjohnson/geotoolz/issues/643)
+* **ops:** expose InterpAt's functax plan and warp Reproject through functax ([#654](https://github.com/jejjohnson/geotoolz/issues/654)) ([7930279](https://github.com/jejjohnson/geotoolz/commit/79302795683c8d449477666d6fb1d8c164ec4e3e))
+* **ops:** grid swaths and fill gaps on functax plans ([#655](https://github.com/jejjohnson/geotoolz/issues/655)) ([a567b68](https://github.com/jejjohnson/geotoolz/commit/a567b686c9bcee6f74a03d792e063a5cf66dd662))
+
 ## [0.18.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.17.0...geotoolz-ops-v0.18.0) (2026-11-04)
 
 

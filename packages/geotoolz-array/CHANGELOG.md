@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.4.0...geotoolz-array-v0.4.1) (2026-11-11)
+
+
+### Features
+
+* **array:** take the affine kernels and interp_at's stencil from functax ([#653](https://github.com/jejjohnson/geotoolz/issues/653)) ([2e8b434](https://github.com/jejjohnson/geotoolz/commit/2e8b434902b5743714f2373c832f076f6144f893)), closes [#643](https://github.com/jejjohnson/geotoolz/issues/643)
+
 ## [0.4.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.3.2...geotoolz-array-v0.4.0) (2026-11-04)
 
 
