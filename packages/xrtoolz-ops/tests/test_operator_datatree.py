@@ -1,7 +1,7 @@
 """Tests for the xarray-aware :class:`xrops.Operator`.
 
 Covers the three ``__call__`` dispatch modes added on top of
-``pipekit.Operator``:
+``pipekit_ops.Operator``:
 
 1. Symbolic ``Node`` construction passes through to pipekit unchanged.
 2. ``DataTree`` arguments map ``_apply`` over every leaf, returning a
@@ -19,7 +19,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import xarray as xr
-from pipekit import Graph, Input, Node, Sequential
+from pipekit_ops import Graph, Input, Node, Sequential
 
 from xrops import Operator
 

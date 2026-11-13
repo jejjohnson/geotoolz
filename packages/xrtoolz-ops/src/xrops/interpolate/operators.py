@@ -2,9 +2,9 @@
 
 Each class is a thin adapter: store configuration, implement
 ``_apply``, return a JSON-serializable ``get_config``. They all inherit
-from :class:`pipekit.Operator`, so they compose with
-:class:`~pipekit.Sequential`, the ``|`` pipe, and the functional
-:class:`~pipekit.Graph` API.
+from :class:`pipekit_ops.Operator`, so they compose with
+:class:`~pipekit_ops.Sequential`, the ``|`` pipe, and the functional
+:class:`~pipekit_ops.Graph` API.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 import numpy as np
 import xarray as xr
-from pipekit import Signature
+from pipekit_ops import Signature
 
 from xrops._src import signature as _sig
 from xrops._src.operator import Operator

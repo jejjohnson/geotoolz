@@ -217,7 +217,7 @@ def test_output_dim_collision_with_sample_dim_rejected() -> None:
 
 
 def test_works_inside_graph(da_2d: xr.DataArray) -> None:
-    from pipekit import Graph, Input
+    from pipekit_ops import Graph, Input
 
     inp = Input("x")
     out = ModelOp(_DummyModel())(inp)

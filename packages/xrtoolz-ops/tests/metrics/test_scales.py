@@ -344,7 +344,7 @@ def test_evaluate_by_region_get_config_json_safe(
 
 
 def test_works_inside_graph(lead_time_pair: tuple[xr.Dataset, xr.Dataset]) -> None:
-    from pipekit import Graph, Input
+    from pipekit_ops import Graph, Input
 
     ds_p, ds_r = lead_time_pair
     p = Input("p")

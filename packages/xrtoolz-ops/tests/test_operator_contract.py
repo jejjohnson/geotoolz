@@ -7,10 +7,10 @@ import inspect
 import pkgutil
 
 import numpy as np
-import pipekit
+import pipekit_ops
 import pytest
 import xarray as xr
-from pipekit.adapters import BackendError
+from pipekit_ops.adapters import BackendError
 
 import xrops
 from xrops.metrics import RMSE
@@ -27,11 +27,11 @@ def _public_operators() -> list[type]:
         module = importlib.import_module(info.name)
         for name in getattr(module, "__all__", ()):
             obj = getattr(module, name, None)
-            if inspect.isclass(obj) and issubclass(obj, pipekit.Operator):
+            if inspect.isclass(obj) and issubclass(obj, pipekit_ops.Operator):
                 found[f"{obj.__module__}.{obj.__qualname__}"] = obj
     for name in xrops.__all__:
         obj = getattr(xrops, name)
-        if inspect.isclass(obj) and issubclass(obj, pipekit.Operator):
+        if inspect.isclass(obj) and issubclass(obj, pipekit_ops.Operator):
             found[f"{obj.__module__}.{obj.__qualname__}"] = obj
     return list(found.values())
 

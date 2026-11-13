@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
-from pipekit import Sequential
+from pipekit_ops import Sequential
 
 from xrops.transforms.operators import (
     DCT,

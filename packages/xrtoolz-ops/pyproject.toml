@@ -47,18 +47,18 @@ dependencies = [
     # The shared bridges (geostack OP-O2, OP-O3): to_rows / from_rows and
     # the DataArray adapter. xrops.learn builds on pipekit_array.Estimator;
     # its scikit-learn is the [sklearn] extra.
-    "pipekit-array[xarray]>=0.0.8",
+    "pipekit-array[xarray]>=0.1.1",
     # The diagnostic difference kernels under xrops.grad (geostack OP-O7):
     # the slim geoops base (numpy, scipy, pandas, pyproj, einx; no GDAL).
-    "geotoolz-ops>=0.17",
+    "geotoolz-ops>=0.18.1",
     # GeoArray per item for xrops.lift (geostack OP-O4); geoops brings it too.
-    "geotoolz-array>=0.3",
+    "geotoolz-array>=0.4.1",
     "matplotlib>=3.8",
-    # The Operator / Sequential / Graph composition layer lives in pipekit
-    # (formerly xrops.core). Every per-domain operator subclasses
-    # `pipekit.Operator`; the dependency is load-bearing. See
+    # The Operator / Sequential / Graph composition layer lives in
+    # pipekit-ops (formerly xrops.core). Every per-domain operator subclasses
+    # `pipekit_ops.Operator`; the dependency is load-bearing. See
     # [tool.uv.sources] below for the dev-time source.
-    "pipekit>=0.0.1",
+    "pipekit-ops>=0.2.1",
     # The data-acquisition layer (CMEMS/CDS/AEMET readers) and the shared
     # typed request vocabulary + CF Variable registry live in the
     # `xrtoolz-products` workspace member, which imports as `xrproducts`.
@@ -123,7 +123,7 @@ vector = [
 # (knn, kde_to_grid). Imported when used, so the base install stays without
 # it (geostack gate B1).
 sklearn = [
-    "pipekit-array[sklearn]>=0.0.8",
+    "pipekit-array[sklearn]>=0.1.1",
     "scikit-learn>=1.4",
 ]
 

@@ -119,8 +119,8 @@ class XarrayEstimator(Operator):
         feature_dim: The name of a new output dim, for estimators whose
             output columns are not the input's features (``"component"``
             for PCA). ``predict_proba`` defaults to ``"class"``.
-        nan_policy: ``"propagate"``, ``"raise"``, ``"mask_samples"`` or
-            ``"mask_features"``, as in `pipekit_array.Estimator`.
+        nan_policy: ``"propagate"``, ``"raise"``, ``"mask_samples"``,
+            ``"mask_features"`` or ``"mask"``, as in `pipekit_array.Estimator`.
         method: What calling the operator runs once fitted:
             ``"transform"``, ``"predict"`` or ``"predict_proba"``.
         tree_mode: What fitting on a DataTree means: ``"per_node"`` fits

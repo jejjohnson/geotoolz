@@ -12,7 +12,7 @@ import json
 import numpy as np
 import pytest
 import xarray as xr
-from pipekit import Sequential
+from pipekit_ops import Sequential
 
 from xrops import ApplyToEach, Augment, Operator
 

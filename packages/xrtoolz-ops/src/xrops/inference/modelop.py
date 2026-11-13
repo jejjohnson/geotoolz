@@ -1,7 +1,7 @@
 """``ModelOp`` and friends — Layer-1 wrappers for trained ML models.
 
 ``ModelOp`` is a framework-agnostic adapter that turns any callable
-model into an :class:`~pipekit.Operator`. It marshals data
+model into an :class:`~pipekit_ops.Operator`. It marshals data
 between :mod:`xarray` and raw arrays, dispatches to a configurable
 method (``predict`` / ``predict_proba`` / ``transform`` / ...), and
 wraps the result back into an :class:`xarray.DataArray` that carries
@@ -28,7 +28,7 @@ _XR_TYPES = (xr.DataArray, xr.Dataset)
 
 
 class ModelOp(Operator):
-    """Wrap a trained model as an :class:`~pipekit.Operator`.
+    """Wrap a trained model as an :class:`~pipekit_ops.Operator`.
 
     The wrapped model is expected to expose a method named ``method``
     (default ``"predict"``) that maps a 2-D ``(n_samples, n_features)``

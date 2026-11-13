@@ -1,4 +1,4 @@
-"""xarray-specific operator combinators built on `pipekit.Operator`.
+"""xarray-specific operator combinators built on `pipekit_ops.Operator`.
 
 Two utilities that come up repeatedly when building diagnostic
 pipelines over `xr.Dataset` carriers:
@@ -8,10 +8,10 @@ pipelines over `xr.Dataset` carriers:
 - :class:`ApplyToEach` — re-instantiate a prototype operator once per
   value of a chosen kwarg and merge all results together.
 
-Each combinator subclasses `pipekit.Operator`, so it composes inside
-``pipekit.Sequential`` chains and ``pipekit.Graph`` DAGs. The generic
+Each combinator subclasses `pipekit_ops.Operator`, so it composes inside
+``pipekit_ops.Sequential`` chains and ``pipekit_ops.Graph`` DAGs. The generic
 observation combinator (``Tap``) lives in pipekit itself — import it
-directly from ``xrops`` (which re-exports it) or from ``pipekit``.
+directly from ``xrops`` (which re-exports it) or from ``pipekit_ops``.
 
 **Serialization caveat.** ``Augment`` and ``ApplyToEach`` carry nested
 ``Operator`` state. Their :meth:`Operator.get_config` outputs are
@@ -37,7 +37,7 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 
 import xarray as xr
-from pipekit import Operator as _PipekitOperator
+from pipekit_ops import Operator as _PipekitOperator
 
 from xrops._src.operator import Operator
 

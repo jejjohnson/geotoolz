@@ -141,7 +141,7 @@ def test_works_with_arbitrary_operator(coarse_ds):
     The wrapped object doesn't have to be a ``ModelOp`` — any Operator
     or plain callable works.
     """
-    from pipekit import Operator
+    from pipekit_ops import Operator
 
     class TinyResize(Operator):
         def __init__(self, lon, lat):

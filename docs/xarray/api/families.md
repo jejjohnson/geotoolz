@@ -15,7 +15,7 @@ geoops and xrops are organised in families. A family name used by both means the
 | `augment` |  | Remote-sensing-safe data augmentations | — |
 | `budgets` |  | — | Conservation-budget diagnostics — V4.2 / V4.3 |
 | `cf` |  | — | CF conventions — coordinate validation, time decoding, and renaming |
-| `compositing` |  | Explicit compositing operators for co-registered GeoArray stacks | — |
+| `compositing` |  | Compositing operators for co-registered GeoArray stacks, and the | — |
 | `einx` |  | `geoops.einx` — universal tensor notation over GeoArray carriers | — |
 | `extremes` |  | — | Extreme-value helpers — block maxima/minima, peaks-over-threshold, point processes |
 | `feature` |  | Sparse feature, edge, texture, and Hough operators | — |

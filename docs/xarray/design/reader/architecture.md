@@ -51,7 +51,7 @@ left to right, data flows from "what exists" to "a patched result":
  │  GeoSlice │ rows │   → xr.Dataset   │ ds │ metrics …  │ds │  stitch    │
  └───────────┘      └──────────────────┘    └────────────┘   └────────────┘
        │                    ▲                                 carrier:
-       │  query(GeoSlice)   │  open(Request)                  pipekit.Operator
+       │  query(GeoSlice)   │  open(Request)                  pipekit_ops.Operator
        └────────┬───────────┘
                 │  Request ⇄ GeoSlice bridge
                 ▼
@@ -413,7 +413,7 @@ three current adapters satisfy.
 
 ## pipekit bridge
 
-`xrreader.ops` (gated behind `[pipekit]`) wraps a read into a `pipekit.Operator`,
+`xrreader.ops` (gated behind `[pipekit]`) wraps a read into a `pipekit_ops.Operator`,
 so acquisition becomes the **source node** of a pipeline graph and the whole
 read → process → patch flow is one composable object:
 
@@ -446,7 +446,7 @@ Two design points carry over from `pipekit` conventions:
 
 - **Idempotent downloads.** `Download` writes to a deterministic
   `cache_path(source, dataset_id, request)`; if the file already exists it is
-  returned without re-fetching. Wrapping `Open` in `pipekit.Cache` memoizes the
+  returned without re-fetching. Wrapping `Open` in `pipekit_ops.Cache` memoizes the
   in-memory dataset by config hash.
 - **Stays serializable.** The ops carry only `source_id` plus a frozen
   `Credentials` dataclass and build the live service client lazily inside

@@ -45,7 +45,7 @@ class _ValidationPanel(Operator):
     The base ``__call__``:
 
     - dispatches to graph construction if any positional arg is a
-      :class:`~pipekit.Node` (inherited from :class:`Operator`),
+      :class:`~pipekit_ops.Node` (inherited from :class:`Operator`),
     - otherwise creates a Figure + Axes, applies ``style`` if set,
       delegates to :meth:`_build`, applies the title, optionally
       saves and/or shows the figure, and returns it.

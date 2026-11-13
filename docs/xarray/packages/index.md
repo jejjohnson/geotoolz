@@ -15,7 +15,7 @@ works on its own.
 ## Which import do I use?
 
 Import each package under its own name — `import xrops`, `from xrops import grad`,
-`from xrops import Operator`, `from xrops.learn import XarrayEstimator`, `from pipekit import Signature`. There are no compatibility paths: the old
+`from xrops import Operator`, `from xrops.learn import XarrayEstimator`, `from pipekit_ops import Signature`. There are no compatibility paths: the old
 `xrtoolz.*` modules (and the `xrtoolz.calc`, `xrtoolz.einx`,
 `xrtoolz.utils.XarrayEstimator` and `xrtoolz.transforms.SklearnOp`
 re-exports) were removed when the operators moved to `xrops`.

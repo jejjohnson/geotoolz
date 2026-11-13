@@ -8,7 +8,7 @@ import xarray as xr
 
 
 pytest.importorskip("sklearn")
-import pipekit
+import pipekit_ops
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LinearRegression, LogisticRegression
@@ -157,7 +157,7 @@ def test_mismatched_grids_and_kinds_name_the_problem() -> None:
     with pytest.raises(ValueError, match="tree_mode"):
         XarrayEstimator(PCA(2), sample_dims="time", tree_mode="concat_features")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="nan_policy"):
-        XarrayEstimator(PCA(2), sample_dims="time", nan_policy="mask")  # type: ignore[arg-type]
+        XarrayEstimator(PCA(2), sample_dims="time", nan_policy="drop")  # type: ignore[arg-type]
     ds = xr.Dataset({"u": da, "v": da})
     fitted = XarrayEstimator(StandardScaler(), sample_dims="time").fit(ds)
     with pytest.raises(ValueError, match="fitted on variables"):
@@ -213,8 +213,8 @@ def test_dask_input_is_computed_for_the_fit() -> None:
 def test_it_is_an_operator_that_composes() -> None:
     da = _cube()
     est = XarrayEstimator(PCA(2), sample_dims="time", feature_dim="component").fit(da)
-    assert isinstance(est, pipekit.FittableTransformer) and est.forbid_in_yaml
-    xr.testing.assert_allclose(pipekit.Sequential([est])(da), est.transform(da))
+    assert isinstance(est, pipekit_ops.FittableTransformer) and est.forbid_in_yaml
+    xr.testing.assert_allclose(pipekit_ops.Sequential([est])(da), est.transform(da))
 
 
 def test_the_accessor_forwards() -> None:

@@ -10,8 +10,8 @@ version: 0.3.0
 > `xrtoolz.Operator`. The architecture differs slightly from the
 > original sketch: since the composition core lives in carrier-agnostic
 > `pipekit`, the DataTree branch lives on an xarray-aware
-> `xrtoolz.Operator` subclass rather than on `pipekit.Operator`
-> itself. `pipekit.Sequential` and `pipekit.Graph` thread the
+> `xrtoolz.Operator` subclass rather than on `pipekit_ops.Operator`
+> itself. `pipekit_ops.Sequential` and `pipekit_ops.Graph` thread the
 > resulting `DataTree`s through without changes — they are
 > carrier-agnostic.
 >

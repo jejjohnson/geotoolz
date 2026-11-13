@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
-from pipekit import Graph, Input, Sequential
+from pipekit_ops import Graph, Input, Sequential
 
 from xrops.anomaly.operators import CalculateClimatology, RemoveClimatology
 from xrops.cf.operators import (

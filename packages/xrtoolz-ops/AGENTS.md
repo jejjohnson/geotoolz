@@ -23,18 +23,18 @@ The packages (distribution name → import name):
 | Layer | Name | Contents |
 |-------|------|----------|
 | 0 | Primitives | Pure functions: `(xr.Dataset, ...) → xr.Dataset` |
-| 1 | Operators | `pipekit.Operator` subclasses with uniform `__call__` interface, `pipekit.Sequential` chains |
-| 2 | Graph | `pipekit.Graph` DAG API (`Input`, `Node`, `Graph`), `ModelOp` inference wrappers |
+| 1 | Operators | `pipekit_ops.Operator` subclasses with uniform `__call__` interface, `pipekit_ops.Sequential` chains |
+| 2 | Graph | `pipekit_ops.Graph` DAG API (`Input`, `Node`, `Graph`), `ModelOp` inference wrappers |
 
 ### Package structure
 
-Each package lives in `packages/<distribution>/src/<import name>/` with its own `pyproject.toml` and `tests/`; the workspace root ships no code (the top-level `pyproject.toml` only configures `[tool.uv.workspace]` plus shared dev/lint/typecheck/docs groups and git sources for `pipekit`/`xrproducts`). The operators live in `packages/xrtoolz-ops/src/xrops/`; `xrops/__init__.py` exports `Operator` and its own combinators. Import the composition primitives (`Sequential`, `Graph`, `Input`, `Node`, `Tap`) from `pipekit`, `Signature` from `pipekit`, and `Operator` from `xrops` (defined in `xrops._src.operator`).
+Each package lives in `packages/<distribution>/src/<import name>/` with its own `pyproject.toml` and `tests/`; the workspace root ships no code (the top-level `pyproject.toml` only configures `[tool.uv.workspace]` plus shared dev/lint/typecheck/docs groups and git sources for `pipekit-ops`/`pipekit-array`/`geotoolz-ops`). The operators live in `packages/xrtoolz-ops/src/xrops/`; `xrops/__init__.py` exports `Operator` and its own combinators. Import the composition primitives (`Sequential`, `Graph`, `Input`, `Node`, `Tap`) from `pipekit_ops`, `Signature` from `pipekit_ops`, and `Operator` from `xrops` (defined in `xrops._src.operator`).
 
 ### Submodule layout
 
 | Path | Scope |
 |------|-------|
-| `xrops.combinators` | `Augment`, `ApplyToEach` — xarray-Dataset-specific combinators built on `pipekit.Operator` |
+| `xrops.combinators` | `Augment`, `ApplyToEach` — xarray-Dataset-specific combinators built on `pipekit_ops.Operator` |
 | `xrops.geom` | Geometry — subsetting (bbox, time, region, variables), CRS and reprojection, local frames, mosaics, vector↔raster bridge, footprints, region registry |
 | `xrops.mask` | Land/ocean/country masks, mask application, canonical regimes |
 | `xrops.anomaly` | Climatologies, anomalies, mean removal |

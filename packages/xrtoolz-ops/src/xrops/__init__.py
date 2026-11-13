@@ -8,8 +8,8 @@ Each family is a subpackage: :mod:`xrops.anomaly`, :mod:`xrops.atm`,
 :mod:`xrops.transforms`, :mod:`xrops.utils`, :mod:`xrops.viz` and
 :mod:`xrops.wavelets`. The composition layer
 (``Sequential``, ``Graph``, ``Input``, ``Tap``) and ``Signature`` are
-:mod:`pipekit`; :class:`Operator` is the xarray-aware base every xrops
-operator subclasses (``DataTree`` dispatch on top of ``pipekit.Operator``).
+:mod:`pipekit_ops`; :class:`Operator` is the xarray-aware base every xrops
+operator subclasses (``DataTree`` dispatch on top of ``pipekit_ops.Operator``).
 """
 
 from xrops._src.lift import Lift, lift

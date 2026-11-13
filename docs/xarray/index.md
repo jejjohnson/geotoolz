@@ -37,9 +37,9 @@ domain.
 uv add xrtoolz          # recommended (resolves pipekit from its source)
 ```
 
-`xrtoolz` depends on [`pipekit`](https://github.com/jejjohnson/pipekit),
+`xrtoolz` depends on [`pipekit-ops`](https://github.com/jejjohnson/pipekit),
 which is pre-PyPI and resolved via `[tool.uv.sources]`. A plain
-`pip install` will fail until `pipekit` reaches PyPI — use `uv`:
+`pip install` will fail until `pipekit-ops` reaches PyPI — use `uv`:
 
 ```bash
 uv pip install "git+https://github.com/jejjohnson/xrtoolz@main"
@@ -65,7 +65,7 @@ Compute geostrophic surface currents from sea-surface height, then map them
 — as a single pipeline:
 
 ```python
-from pipekit import Sequential
+from pipekit_ops import Sequential
 from xrops.anomaly import RemoveMean
 from xrops.ocn import Streamfunction, GeostrophicVelocities
 from xrops.viz.validation import SpatialMapPanel

@@ -28,7 +28,7 @@ whole `Sequential` / `Graph` stays lazy until you ask for a result:
 
 ```python
 import xarray as xr
-from pipekit import Sequential
+from pipekit_ops import Sequential
 from xrops.anomaly import RemoveMean
 from xrops.ocn.operators import Streamfunction, GeostrophicVelocities
 

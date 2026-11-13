@@ -16,7 +16,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 import xarray as xr
-from pipekit import Operator as _PipekitOperator
+from pipekit_ops import Operator as _PipekitOperator
 
 from xrops._src.operator import Operator
 

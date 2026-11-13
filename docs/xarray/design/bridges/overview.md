@@ -40,7 +40,7 @@ its respective backend. None of them reimplement the backend.
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  Layer 2 — Graph                                                  │
-│  pipekit.Graph DAGs, ModelOp inference wrappers                   │
+│  pipekit_ops.Graph DAGs, ModelOp inference wrappers                   │
 ├──────────────────────────────────────────────────────────────────┤
 │  Layer 1 — Operators                                              │
 │  xrtoolz.Operator subclasses; Sequential chains                  │

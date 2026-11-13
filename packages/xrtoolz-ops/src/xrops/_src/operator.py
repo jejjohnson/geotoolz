@@ -1,6 +1,6 @@
 """xarray-aware :class:`Operator` — adds ``DataTree`` dispatch on top of pipekit.
 
-``pipekit.Operator`` is carrier-agnostic and only knows two call modes:
+``pipekit_ops.Operator`` is carrier-agnostic and only knows two call modes:
 eager ``_apply`` and symbolic ``Node``-construction. Earth-science data
 also flows through ``xarray.DataTree`` (multi-group / multi-resolution
 hierarchies). Rather than asking every diagnostic operator to opt in to
@@ -12,7 +12,7 @@ The dispatch order matches the design doc (see
 ``docs/design/xarray-native-primitives.md``):
 
 1. **Symbolic graph mode** — any ``Node`` argument routes to
-   ``pipekit.Operator.__call__`` (which builds a ``Node`` recording this
+   ``pipekit_ops.Operator.__call__`` (which builds a ``Node`` recording this
    operator and its parents).
 2. **DataTree mode** — any ``DataTree`` argument: call ``_apply_tree``,
    whose default applies ``xr.map_over_datasets`` to thread ``_apply``
@@ -20,7 +20,7 @@ The dispatch order matches the design doc (see
    (e.g. to fit one model across nodes) override ``_apply_tree``.
    ``xarray`` enforces the multi-input structural-match requirement;
    mixing a ``DataTree`` with a plain ``Dataset`` raises.
-3. **Eager mode** — fall through to ``pipekit.Operator.__call__``,
+3. **Eager mode** — fall through to ``pipekit_ops.Operator.__call__``,
    which runs ``_apply`` directly on the carrier(s).
 
 Consequence: every operator that inherits from this class — every
@@ -40,8 +40,8 @@ import functools
 from typing import Any, ClassVar
 
 import xarray as xr
-from pipekit import Node, Operator as _PipekitOperator, backend_of
-from pipekit.adapters import BackendError
+from pipekit_ops import Node, Operator as _PipekitOperator, backend_of
+from pipekit_ops.adapters import BackendError
 
 
 def _leaves(value: Any) -> Any:
@@ -52,10 +52,10 @@ def _leaves(value: Any) -> Any:
 
 
 class Operator(_PipekitOperator):
-    """``pipekit.Operator`` plus xarray ``DataTree`` dispatch.
+    """``pipekit_ops.Operator`` plus xarray ``DataTree`` dispatch.
 
     Subclasses implement ``_apply(carrier, *extra)`` exactly as they
-    would against ``pipekit.Operator`` — the override only affects
+    would against ``pipekit_ops.Operator`` — the override only affects
     ``__call__`` dispatch, not ``_apply``.
 
     Example:
@@ -124,7 +124,7 @@ class Operator(_PipekitOperator):
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Make each ``compute_output_signature`` override pass an unknown on.
 
-        An upstream step that does not track shape (a nested `pipekit.Graph`,
+        An upstream step that does not track shape (a nested `pipekit_ops.Graph`,
         whose output is a dict) hands ``None`` to the next step; the operator
         then has nothing to transform and reports ``None`` too, rather than
         failing on ``None.dims``.

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import xarray as xr
-from pipekit import Operator
+from pipekit_ops import Operator
 
 from xrops._src.signature import make
 from xrops.anomaly.operators import CalculateClimatology
@@ -148,7 +148,7 @@ def test_calculate_climatology_smoothed_uses_canonical_dim() -> None:
 
 
 def test_an_unknown_input_signature_passes_through_every_operator() -> None:
-    from pipekit import Graph, Input
+    from pipekit_ops import Graph, Input
 
     from xrops.interpolate.operators import ResampleTime
 

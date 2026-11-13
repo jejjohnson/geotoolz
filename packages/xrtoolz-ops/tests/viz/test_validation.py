@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import xarray as xr
-from pipekit import Graph, Input, Sequential
+from pipekit_ops import Graph, Input, Sequential
 
 from xrops.viz.validation import (
     EulerianLagrangianPanel,

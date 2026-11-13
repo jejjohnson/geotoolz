@@ -6,7 +6,7 @@ import importlib
 import inspect
 import pkgutil
 
-import pipekit
+import pipekit_ops
 
 import xrops
 
@@ -19,7 +19,7 @@ def _public_operators() -> dict[str, type]:
         module = importlib.import_module(info.name)
         for name in getattr(module, "__all__", ()):
             obj = getattr(module, name, None)
-            if inspect.isclass(obj) and issubclass(obj, pipekit.Operator):
+            if inspect.isclass(obj) and issubclass(obj, pipekit_ops.Operator):
                 found[f"{obj.__module__}.{obj.__qualname__}"] = obj
     return found
 

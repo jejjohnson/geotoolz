@@ -12,7 +12,7 @@ operator (compose ``patcher | Downscale(model) | unpatcher``).
 
 The wrapped ``model`` is duck-typed: it can be a
 :class:`~xrops.inference.modelop.ModelOp`, any other
-:class:`~pipekit.Operator`, or a plain callable that maps an
+:class:`~pipekit_ops.Operator`, or a plain callable that maps an
 input container (Dataset / DataArray / array) to an output container.
 No framework imports here (D4).
 """

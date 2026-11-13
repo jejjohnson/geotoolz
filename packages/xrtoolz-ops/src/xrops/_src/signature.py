@@ -1,6 +1,6 @@
-"""Dims-by-name helpers over `pipekit.Signature` for xrops's shape inference.
+"""Dims-by-name helpers over `pipekit_ops.Signature` for xrops's shape inference.
 
-`pipekit.Signature` keeps its dims as ordered ``(name, size)`` pairs; xrops
+`pipekit_ops.Signature` keeps its dims as ordered ``(name, size)`` pairs; xrops
 operators read and rewrite them by name. These helpers hold that idiom in
 one place. They are lenient where the operators need it: ``replace_dims``,
 ``rename_dims`` and ``drop_dims`` ignore names the signature lacks, so a
@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
-from pipekit import Signature
+from pipekit_ops import Signature
 
 
 def sizes(sig: Signature) -> dict[str, int | None]:
@@ -23,7 +23,7 @@ def sizes(sig: Signature) -> dict[str, int | None]:
 
 
 def make(dims: Mapping[Any, int | None], dtype: Any = None) -> Signature:
-    """A `pipekit.Signature` from ``{name: size}`` (``None`` for unknown).
+    """A `pipekit_ops.Signature` from ``{name: size}`` (``None`` for unknown).
 
     ``dtype`` may be anything `numpy.dtype` accepts and is stored as its
     canonical name (``"float32"``); other tags are kept as ``str(dtype)``.

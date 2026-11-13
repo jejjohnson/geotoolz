@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pipekit import Signature
+from pipekit_ops import Signature
 
 from xrops._src import signature as _sig
 from xrops._src.operator import Operator

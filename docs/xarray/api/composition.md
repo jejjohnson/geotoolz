@@ -5,11 +5,11 @@ The composition primitives are carrier-agnostic and live in
 `Operator` base and the Dataset combinators are `xrops`:
 
 ```python
-from pipekit import Sequential, Graph, Input, Node
+from pipekit_ops import Sequential, Graph, Input, Node
 from xrops import Augment, Operator
 ```
 
-`xrops.Operator` is a thin xarray-aware subclass of `pipekit.Operator`
+`xrops.Operator` is a thin xarray-aware subclass of `pipekit_ops.Operator`
 that adds `xarray.DataTree` dispatch to `__call__` — every operator in the
 library inherits it, so all of them map leaf-wise over a `DataTree` for
 free. The xarray-Dataset-specific combinators (`Augment`, `ApplyToEach`)
@@ -17,7 +17,7 @@ live in `xrops.combinators`.
 
 !!! example "Linear and DAG composition, same operators"
     ```python
-    from pipekit import Sequential, Graph, Input
+    from pipekit_ops import Sequential, Graph, Input
     from xrops.anomaly import RemoveMean
     from xrops.ocn import Streamfunction, GeostrophicVelocities
 
@@ -38,23 +38,23 @@ live in `xrops.combinators`.
 
 ## Sequential pipelines
 
-::: pipekit.Sequential
+::: pipekit_ops.Sequential
 
 ## Functional Graph API
 
-::: pipekit.Input
+::: pipekit_ops.Input
 
-::: pipekit.Node
+::: pipekit_ops.Node
 
-::: pipekit.Graph
+::: pipekit_ops.Graph
 
 ## Observation taps
 
-`Tap` is a generic pass-through observer from `pipekit` — it runs a
+`Tap` is a generic pass-through observer from `pipekit_ops` — it runs a
 side-effecting callback (logging, plotting, assertions) without altering
 the data flowing through.
 
-::: pipekit.Tap
+::: pipekit_ops.Tap
 
 ## xarray-Dataset combinators
 
@@ -70,4 +70,4 @@ variable independently.
 
 `Signature` is pipekit's shape descriptor (ordered `(name, size)` dims and a dtype), used by `compute_output_signature` for static shape inference across a pipeline.
 
-::: pipekit.Signature
+::: pipekit_ops.Signature

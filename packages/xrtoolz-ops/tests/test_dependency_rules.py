@@ -81,6 +81,7 @@ ALLOWED: dict[str, str] = {
     "pipekit_evaluate": "pipekit-evaluate",
     "pipekit_experiment": "pipekit-experiment",
     "pipekit_jax": "pipekit-jax",
+    "pipekit_ops": "pipekit-ops",
     "pipekit_train": "pipekit-train",
     "xrops": "xrtoolz-ops",
     "xrproducts": "xrtoolz-products",

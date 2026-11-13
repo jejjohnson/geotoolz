@@ -25,7 +25,7 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
-from pipekit import Signature
+from pipekit_ops import Signature
 
 from xrops._src import signature as _sig
 from xrops._src.operator import Operator

@@ -2,10 +2,10 @@
 
 This module implements the lead-time slice of validation.md §1
 ("Scales of Evaluation"). The :class:`SkillByLeadTime` operator
-applies any inner metric (an :class:`pipekit.Operator`) per
+applies any inner metric (an :class:`pipekit_ops.Operator`) per
 lead-time slice, returning skill as a function of forecast horizon.
 
-The inner-metric type is :class:`~pipekit.Operator` rather than
+The inner-metric type is :class:`~pipekit_ops.Operator` rather than
 a bare callable so :meth:`get_config` can introspect the full skill
 configuration (per V1.1 acceptance criteria).
 """
