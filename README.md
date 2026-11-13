@@ -18,7 +18,7 @@
 > packages that interlock end-to-end, with the Operator / Sequential / Graph
 > composition core supplied by [pipekit](https://github.com/jejjohnson/pipekit).
 
-<p align="center"><img src="docs/assets/diagrams/geostack-intro.png" alt="The geostack stage by stage: search an archive, catalog it, save what you need, stream windows lazily, split into overlapping patches, apply an operator per patch, combine with a window-weighted merge, write a COG or zarr" width="100%"></p>
+<p align="center"><img src="docs/assets/diagrams/geostack-intro.png" alt="The geostack stage by stage: search an archive, catalog it, save what you need, stream windows lazily, split into overlapping patches, apply an operator per patch, combine with a window-weighted merge, write a COG or zarr; two proposed stages, drawn dashed, commit the result as a version and publish a record of it" width="100%"></p>
 
 ## Where it comes from
 
@@ -32,6 +32,12 @@ lazy windows because the scene does not fit in memory. After you combine,
 you **write** a georeferenced result. Every step belongs to one package
 (the band under the figure), and neighbouring steps hand one another
 typed objects rather than file paths.
+
+Two further stages are proposed and drawn dashed: **commit** the result as
+a version that appears all at once
+([#665](https://github.com/jejjohnson/geotoolz/issues/665)), and **publish** a
+record of it to a product catalog, where the next search can find it
+([#671](https://github.com/jejjohnson/geotoolz/issues/671)).
 
 ## 30-second pitch
 

@@ -12,14 +12,16 @@
 </head>
 <body>
 <div id="diagram">
-  <svg id="art" width="1840" height="790" viewBox="0 0 1840 790" xmlns="http://www.w3.org/2000/svg"></svg>
+  <svg id="art" width="2290" height="790" viewBox="0 0 2290 790" xmlns="http://www.w3.org/2000/svg"></svg>
 </div>
 <script>
 "use strict";
 // The xarray "split · apply · combine" figure, extended with the steps a
 // geospatial pipeline needs before and after it: search an archive,
 // index it, save what matters, stream it lazily — then split, apply,
-// combine, and write. Everything is drawn here so the PNG is reproducible.
+// combine, and write. Two proposed stages follow, drawn dashed: commit the
+// result as a version, and publish a record of it. Everything is drawn here
+// so the PNG is reproducible.
 const NS = "http://www.w3.org/2000/svg";
 const svg = document.getElementById("art");
 function el(tag, attrs, parent = svg) {
@@ -45,10 +47,11 @@ const PKG = {
   read: ["#23978a", "#e2f4f1", "#12403a"],
   cut: ["#3f6fb5", "#e7effb", "#1b2f50"],
   compute: ["#cf9418", "#fdf3da", "#4a3506"],
+  keep: ["#b4534a", "#fbeceb", "#4a1f1b"],
 };
 
 // ---- layout ---------------------------------------------------------
-const X0 = 20, CW = 225, NCOL = 8;
+const X0 = 20, CW = 225, NCOL = 10;
 const cx = (i) => X0 + CW * (i + 0.5);
 const edge = (i) => X0 + CW * i;               // left edge of column i
 const ROW = [292, 412, 532];                   // patch rows (split → combine)
@@ -62,6 +65,8 @@ const STAGES = [
   ["Apply", "operator per patch"],
   ["Combine", "window-weighted merge"],
   ["Write", "COG · zarr"],
+  ["Commit", "a version, all at once"],
+  ["Publish", "a record others can find"],
 ];
 
 // defs: arrowheads + window shading
@@ -84,9 +89,9 @@ el("stop", { offset: "0", "stop-color": "#fef3c7" }, lg2);
 el("stop", { offset: "1", "stop-color": "#f4b740" }, lg2);
 
 // ---- title ----------------------------------------------------------
-text(920, 44, "The geostack: search · catalog · save · stream · split · apply · combine · write",
+text(1145, 44, "The geostack: search · catalog · save · stream · split · apply · combine · write · commit · publish",
      { "font-size": 30, "font-weight": 800, fill: INK });
-text(920, 76, "xarray's split → apply → combine, with the steps a geospatial pipeline needs before and after it",
+text(1145, 76, "xarray's split → apply → combine, with the steps a geospatial pipeline needs before and after it",
      { "font-size": 16, fill: MUTED });
 
 // ---- column headings ------------------------------------------------
@@ -207,6 +212,36 @@ function patch(x, y, s, k, mode) {
   text(cx(7), y + h + 30, "CRS · transform · fill kept", { "font-size": 13, fill: MUTED });
 })();
 
+// ---- 9 · Commit (proposed): the write becomes a version --------------
+(() => {
+  const x = cx(8), y = MID - 10, gap = 48;
+  [-1, 0, 1].forEach((k) => {
+    if (k < 1) el("line", { x1: x + k * gap + 12, y1: y, x2: x + (k + 1) * gap - 12, y2: y, stroke: PKG.keep[0], "stroke-width": 2.5 });
+    el("circle", { cx: x + k * gap, cy: y, r: 12, fill: k === 1 ? PKG.keep[0] : "#ffffff", stroke: PKG.keep[0], "stroke-width": 2.5 });
+  });
+  el("rect", { x: x + gap - 34, y: y - 52, width: 68, height: 24, rx: 12, fill: PKG.keep[1], stroke: PKG.keep[0], "stroke-width": 1.5 });
+  text(x + gap, y - 35, "main", { "font-size": 13, "font-weight": 600, fill: PKG.keep[2] });
+  el("line", { x1: x + gap, y1: y - 28, x2: x + gap, y2: y - 13, stroke: PKG.keep[0], "stroke-width": 2 });
+  text(x + gap, y + 34, "snapshot id", { "font-size": 12.5, class: "mono", fill: MUTED });
+  text(x, y + 118, "one transaction · Icechunk", { "font-size": 13, fill: MUTED });
+})();
+
+// ---- 10 · Publish (proposed): one row in a product catalog ----------
+(() => {
+  const w = 160, h = 25, x0 = cx(9) - w / 2, y0 = MID - 72;
+  el("rect", { x: x0, y: y0, width: w, height: h, rx: 4, fill: "#f3f4f6", stroke: "#9ca3af" });
+  text(x0 + w / 2, y0 + 17, "footprint · snapshot · recipe", { "font-size": 11.5, fill: MUTED });
+  ["ndvi_2024-04", "ndvi_2024-05", "ndvi_2024-06"].forEach((d, k) => {
+    const hit = k === 2;
+    const y = y0 + (k + 1) * (h + 3);
+    el("rect", { x: x0, y, width: w, height: h, rx: 4, fill: hit ? PKG.keep[1] : "#ffffff",
+                 stroke: hit ? PKG.keep[0] : "#d1d5db", "stroke-width": hit ? 2 : 1 });
+    text(x0 + 10, y + 17, d, { "font-size": 11.5, "text-anchor": "start", class: "mono", fill: hit ? PKG.keep[2] : MUTED });
+    el("rect", { x: x0 + 132, y: y + 6, width: 13, height: 13, rx: 2, fill: hit ? "url(#result)" : "none", stroke: hit ? "#cf9418" : "#cbd5e1" });
+  });
+  text(cx(9), y0 + 4 * (h + 3) + 22, "the next search starts here", { "font-size": 13, fill: MUTED });
+})();
+
 // ---- arrows ---------------------------------------------------------
 for (let i = 1; i <= 3; i++) arrow(edge(i) - 24, MID, edge(i) + 26, MID);
 // stream → split: one per window/patch, fanning out
@@ -223,12 +258,15 @@ for (let i = 1; i <= 3; i++) arrow(edge(i) - 24, MID, edge(i) + 26, MID);
                stroke: KEY[k].stroke, "stroke-width": 2.5, "marker-end": `url(#ah-${k})` });
 });
 arrow(edge(7) - 26, MID, edge(7) + 30, MID);
+arrow(edge(8) - 26, MID, edge(8) + 30, MID);
+arrow(edge(9) - 26, MID, edge(9) + 22, MID);
 
 // ---- package band ---------------------------------------------------
-function band(i0, i1, key, label) {
+function band(i0, i1, key, label, proposed = false) {
   const [stroke, fill, ink] = PKG[key];
   const x = edge(i0) + 8, w = CW * (i1 - i0 + 1) - 16;
-  el("rect", { x, y: 638, width: w, height: 46, rx: 12, fill, stroke, "stroke-width": 1.8 });
+  const dash = proposed ? { "stroke-dasharray": "6 5" } : {};
+  el("rect", { x, y: 638, width: w, height: 46, rx: 12, fill, stroke, "stroke-width": 1.8, ...dash });
   text(x + w / 2, 667, label, { "font-size": 15, "font-weight": 700, fill: ink });
 }
 band(0, 2, "find", "geotoolz-catalog  ·  geocatalog");
@@ -237,21 +275,25 @@ band(4, 4, "cut", "geopatcher");
 band(5, 5, "compute", "geoops");
 band(6, 6, "cut", "geopatcher");
 band(7, 7, "compute", "geoops.io");
+band(8, 8, "keep", "Icechunk", true);
+band(9, 9, "keep", "product catalog", true);
 
 // ---- legend ---------------------------------------------------------
 (() => {
   const y = 735;
-  el("rect", { x: 330, y: y - 26, width: 1180, height: 54, rx: 10, fill: "#ffffff", stroke: "#d1d5db", "stroke-width": 1.5 });
-  text(400, y + 6, "Legend", { "font-size": 18, "font-weight": 700, fill: INK });
+  el("rect", { x: 435, y: y - 26, width: 1420, height: 54, rx: 10, fill: "#ffffff", stroke: "#d1d5db", "stroke-width": 1.5 });
+  text(505, y + 6, "Legend", { "font-size": 18, "font-weight": 700, fill: INK });
   [["A", "Patch A"], ["B", "Patch B"], ["C", "Patch C"]].forEach(([k, lab], j) => {
-    const x = 480 + j * 165;
+    const x = 585 + j * 165;
     el("rect", { x, y: y - 15, width: 138, height: 32, rx: 8, fill: KEY[k].fill, stroke: KEY[k].stroke, "stroke-width": 1.5 });
     text(x + 69, y + 6, lab, { "font-size": 15, fill: KEY[k].stroke, "font-weight": 600 });
   });
-  el("rect", { x: 990, y: y - 13, width: 28, height: 26, rx: 4, fill: "none", stroke: PKG.find[0], "stroke-width": 2, "stroke-dasharray": "5 4" });
-  text(1030, y + 6, "AOI · catalog hit", { "font-size": 14, "text-anchor": "start", fill: MUTED });
-  el("rect", { x: 1190, y: y - 13, width: 28, height: 26, fill: "url(#result)", stroke: "#cf9418" });
-  text(1230, y + 6, "operator output", { "font-size": 14, "text-anchor": "start", fill: MUTED });
+  el("rect", { x: 1095, y: y - 13, width: 28, height: 26, rx: 4, fill: "none", stroke: PKG.find[0], "stroke-width": 2, "stroke-dasharray": "5 4" });
+  text(1135, y + 6, "AOI · catalog hit", { "font-size": 14, "text-anchor": "start", fill: MUTED });
+  el("rect", { x: 1295, y: y - 13, width: 28, height: 26, fill: "url(#result)", stroke: "#cf9418" });
+  text(1335, y + 6, "operator output", { "font-size": 14, "text-anchor": "start", fill: MUTED });
+  el("rect", { x: 1495, y: y - 13, width: 28, height: 26, rx: 6, fill: PKG.keep[1], stroke: PKG.keep[0], "stroke-width": 1.8, "stroke-dasharray": "6 5" });
+  text(1535, y + 6, "proposed, not shipped", { "font-size": 14, "text-anchor": "start", fill: MUTED });
 })();
 
 document.body.dataset.ready = "1";

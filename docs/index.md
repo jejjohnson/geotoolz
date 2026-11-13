@@ -5,7 +5,7 @@
 > Sequential / Graph composition core supplied by
 > [pipekit](https://github.com/jejjohnson/pipekit).
 
-![The geostack stage by stage: search an archive, catalog it, save what you need, stream windows lazily, split into overlapping patches, apply an operator per patch, combine with a window-weighted merge, write a COG or zarr](assets/diagrams/geostack-intro.png)
+![The geostack stage by stage: search an archive, catalog it, save what you need, stream windows lazily, split into overlapping patches, apply an operator per patch, combine with a window-weighted merge, write a COG or zarr; two proposed stages, drawn dashed, commit the result as a version and publish a record of it](assets/diagrams/geostack-intro.png)
 
 ## Where it comes from
 
@@ -17,6 +17,12 @@ Before you can split a scene you have to **search** an archive for it,
 crawl, **save** (stage) only the files that matter, and **stream** them as
 lazy windows because the scene does not fit in memory. After you combine,
 you **write** a georeferenced result.
+
+Two further stages are proposed and drawn dashed: **commit** the result as
+a version that appears all at once
+([#665](https://github.com/jejjohnson/geotoolz/issues/665)), and **publish** a
+record of it to a product catalog, where the next search can find it
+([#671](https://github.com/jejjohnson/geotoolz/issues/671)).
 
 Most codebases rebuild that loop per project, so every step is hard-wired
 to the next. The geostack gives each step its own package and one small,
