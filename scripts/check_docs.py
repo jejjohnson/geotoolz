@@ -67,7 +67,14 @@ def _sources() -> list[Path]:
         (ROOT / "docs").rglob("*.ipynb")
     )
     files += [ROOT / "README.md", *sorted((ROOT / "packages").glob("*/README.md"))]
-    return [f for f in files if "capabilities.md" not in f.name]
+    # The xarray lane's design pages (moved in from xrtoolz) sketch code in
+    # pseudocode, and they are not site pages yet.
+    xr_design = ROOT / "docs" / "xarray" / "design"
+    return [
+        f
+        for f in files
+        if "capabilities.md" not in f.name and not f.is_relative_to(xr_design)
+    ]
 
 
 def _fences(path: Path) -> Iterator[Example]:

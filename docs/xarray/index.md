@@ -1,0 +1,101 @@
+# xrtoolz
+
+> Composable operators for geoprocessing Earth System Data Cubes.
+
+`xrtoolz` gives every preprocessing, physics, inference, and evaluation
+step a single shape — an **`Operator`**: a callable that maps
+`xarray` in to `xarray` out, carries its configuration, and reports its
+shape signature. Operators chain linearly with `Sequential` or wire into a
+DAG with the functional `Graph` API — *the same operator works in both*.
+
+The carrier-agnostic composition core lives in
+[`pipekit`](https://github.com/jejjohnson/pipekit); `xrtoolz` adds the
+xarray-specific operator families on top, organised by Earth-science
+domain.
+
+## Why xrtoolz
+
+- **One abstraction, three layers.** Pure functions (Layer 0) → `Operator`
+  wrappers (Layer 1) → `Graph` DAGs (Layer 2). Drop down a layer whenever
+  you need the raw function; stay up high to compose.
+- **Domain-organised.** Generic geoprocessing in [`geo`](api/geo/coords.md);
+  true physics in [`ocn`](api/ocn.md) / `atm` / `rs`; numerics in
+  [`calc`](api/calc.md) / [`transforms`](api/transforms.md) /
+  [`interpolate`](api/interpolate.md); evaluation in
+  [`metrics`](api/metrics.md) / [`budgets`](api/budgets.md).
+- **Typed to the core.** Operators speak `xr.Dataset` / `xr.DataArray`; the
+  private numpy kernels behind them are
+  [jaxtyped](design/conventions/array-typing.md) so array shapes are part of
+  the signature.
+- **Bring your own model.** [`ModelOp`](api/inference.md) wraps a trained
+  sklearn / JAX / framework-agnostic model as an operator — the ML backend
+  is imported lazily, so you only install what you use.
+
+## Install
+
+```bash
+uv add xrtoolz          # recommended (resolves pipekit from its source)
+```
+
+`xrtoolz` depends on [`pipekit-ops`](https://github.com/jejjohnson/pipekit),
+which is pre-PyPI and resolved via `[tool.uv.sources]`. A plain
+`pip install` will fail until `pipekit-ops` reaches PyPI — use `uv`:
+
+```bash
+uv pip install "git+https://github.com/jejjohnson/xrtoolz@main"
+```
+
+Optional extras pull in heavier backends only where they are used:
+
+| Extra | Pulls in | Needed for |
+|---|---|---|
+| `maps` | cartopy | Projected map panels — `SpatialMapPanel(projection=...)`, `make_axes(projection=...)`, coastlines in `EventVerificationPanel` |
+| `wavelets` | PyWavelets | `transforms.wavelet` (`cwt`, `dwt`) |
+| `image` | scikit-image | Structural image metrics |
+| `functax` | functax (with JAX and SciPy; pre-PyPI, so a pip install also names `"functax[jax,scipy] @ git+https://github.com/jejjohnson/functax.git@v0.0.6"`) | The Laplace, biharmonic, global RBF and Euclidean IDW gap fills in `xrops.interpolate` |
+| `vector` | geopandas, shapely, rasterio | `geo` vector ↔ raster bridge (`vectorize`, `rasterize`, `footprint`, …) |
+
+```bash
+uv add "xrtoolz[maps]"
+```
+
+## Quickstart
+
+Compute geostrophic surface currents from sea-surface height, then map them
+— as a single pipeline:
+
+```python
+from pipekit_ops import Sequential
+from xrops.anomaly import RemoveMean
+from xrops.ocn import Streamfunction, GeostrophicVelocities
+from xrops.viz.validation import SpatialMapPanel
+
+pipeline = Sequential(
+    RemoveMean(dim=("lat", "lon")),  # subtract the spatial mean
+    Streamfunction(),            # ψ = g·η / f
+    GeostrophicVelocities(),     # (u_g, v_g) from ψ
+)
+
+currents = pipeline(ds)          # xr.Dataset in → xr.Dataset out
+fig = SpatialMapPanel(variable="u")(currents)
+```
+
+The same three operators can be wired as a DAG with `Graph` when you need
+branching or shared intermediates — see
+[Composition](api/composition.md).
+
+## Where to go next
+
+<div class="grid cards" markdown>
+
+- :material-cube-outline: **[Core Concepts](api/composition.md)** —
+  `Operator`, `Sequential`, `Graph`, and the combinators.
+- :material-book-open-variant: **[Tutorials](notebooks/operators_pipeline_demo.ipynb)** —
+  executable notebooks for pipelines, ocean kinematics, gridding, and
+  validation.
+- :material-api: **[API Reference](api/index.md)** — every public symbol,
+  grouped by subject.
+- :material-drawing: **[Design](design/README.md)** — architecture,
+  boundaries, conventions, and roadmap.
+
+</div>

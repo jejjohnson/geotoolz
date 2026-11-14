@@ -61,7 +61,7 @@ check-env-%:
 # ---------------------------------------------------------------------------
 # Phony declarations
 # ---------------------------------------------------------------------------
-.PHONY: help install lint imports format typecheck test test-all test-slow test-cov \
+.PHONY: help install lint imports format typecheck test test-all test-slow test-doctest test-cov \
         precommit build clean version docs docs-check docs-serve docs-deploy \
         gh-labels gh-sub gh-block gh-show
 
@@ -131,6 +131,8 @@ typecheck: ## 🔬 Type-check with ty (all packages)
 	cd packages/geotoolz-products && uv run --group typecheck ty check src/geoproducts
 	cd packages/geotoolz-cloud && uv run --group typecheck ty check src/geocloud
 	cd packages/geotoolz-array && uv run --group typecheck ty check src/geoarray
+	cd packages/xrtoolz-products && uv run --group typecheck ty check src/xrproducts
+	cd packages/xrtoolz-ops && uv run --group typecheck ty check src/xrops
 	@printf "$(GREEN)>>> ✅ Type check passed!$(RESET)\n"
 
 # ===========================================================================
@@ -146,6 +148,9 @@ test: ## 🧪 Run fast tests across all packages (no coverage)
 	cd packages/geotoolz-products && uv run pytest -v -o addopts=--strict-markers -m "not slow and not live and not integration"
 	cd packages/geotoolz-cloud && uv run pytest -v -o addopts=--strict-markers
 	cd packages/geotoolz-array && uv run pytest -v -o addopts=--strict-markers
+	cd packages/xrtoolz-products && uv run pytest -v -o addopts=--strict-markers -m "not slow and not integration"
+	cd packages/xrtoolz-ops && uv run pytest -v -o addopts=--strict-markers -m "not slow and not integration"
+	cd packages/xrtoolz && uv run pytest -v -o addopts=--strict-markers -m "not slow and not integration"
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
 test-all: ## 🧪 Run ALL tests including slow/integration (no coverage)
@@ -156,13 +161,21 @@ test-all: ## 🧪 Run ALL tests including slow/integration (no coverage)
 	cd packages/geotoolz-products && uv run pytest -v -o addopts=--strict-markers -m "not live"
 	cd packages/geotoolz-cloud && uv run pytest -v -o addopts=--strict-markers
 	cd packages/geotoolz-array && uv run pytest -v -o addopts=--strict-markers
+	cd packages/xrtoolz-products && uv run pytest -v -o addopts=--strict-markers
+	cd packages/xrtoolz-ops && uv run pytest -v -o addopts=--strict-markers
+	cd packages/xrtoolz && uv run pytest -v -o addopts=--strict-markers
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
-test-slow: ## 🐢 Run only the slow/integration tiers (geotoolz, geotoolz-products; no coverage)
+test-slow: ## 🐢 Run only the slow/integration tiers (no coverage)
 	@printf "$(YELLOW)>>> Running slow/integration tests (no coverage)...$(RESET)\n"
 	cd packages/geotoolz-ops && uv run pytest -v -o addopts=--strict-markers -m "slow or integration"
 	cd packages/geotoolz-products && uv run pytest -v -o addopts=--strict-markers -m "slow or integration"
+	cd packages/xrtoolz-products && (uv run pytest -v -o addopts=--strict-markers -m "slow or integration" || [ $$? -eq 5 ])
+	cd packages/xrtoolz-ops && (uv run pytest -v -o addopts=--strict-markers -m "slow or integration" || [ $$? -eq 5 ])
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
+
+test-doctest: ## 📚 Run the xrops docstring examples (doctests): xrops.Operator, xrops.grad
+	cd packages/xrtoolz-ops && uv run pytest --doctest-modules src/xrops/_src src/xrops/grad --no-cov -q
 
 test-cov: ## 📊 Run fast tests with coverage reports (same tier as CI)
 	@printf "$(YELLOW)>>> Running tests with coverage...$(RESET)\n"
@@ -172,6 +185,9 @@ test-cov: ## 📊 Run fast tests with coverage reports (same tier as CI)
 	cd packages/geotoolz-products && uv run pytest -v -m "not slow and not live and not integration"
 	cd packages/geotoolz-cloud && uv run pytest -v
 	cd packages/geotoolz-array && uv run pytest -v
+	cd packages/xrtoolz-products && uv run pytest -v -m "not slow and not integration"
+	cd packages/xrtoolz-ops && uv run pytest -v -m "not slow and not integration"
+	cd packages/xrtoolz && uv run pytest -v -m "not slow and not integration"
 	@printf "$(GREEN)>>> ✅ Coverage reports generated!$(RESET)\n"
 
 # ===========================================================================
