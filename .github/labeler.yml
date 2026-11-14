@@ -62,6 +62,48 @@
       - "src/**/_models/**"
       - "src/**/_src/models*.py"
 
+# --- Package scopes: one pkg:* label per workspace package -----------------
+
+"pkg:geotoolz":
+  - changed-files:
+    - any-glob-to-any-file: "packages/geotoolz/**"
+
+"pkg:geotoolz-array":
+  - changed-files:
+    - any-glob-to-any-file: "packages/geotoolz-array/**"
+
+"pkg:geotoolz-ops":
+  - changed-files:
+    - any-glob-to-any-file: "packages/geotoolz-ops/**"
+
+"pkg:geotoolz-patcher":
+  - changed-files:
+    - any-glob-to-any-file: "packages/geotoolz-patcher/**"
+
+"pkg:geotoolz-catalog":
+  - changed-files:
+    - any-glob-to-any-file: "packages/geotoolz-catalog/**"
+
+"pkg:geotoolz-cloud":
+  - changed-files:
+    - any-glob-to-any-file: "packages/geotoolz-cloud/**"
+
+"pkg:geotoolz-products":
+  - changed-files:
+    - any-glob-to-any-file: "packages/geotoolz-products/**"
+
+"pkg:xrtoolz":
+  - changed-files:
+    - any-glob-to-any-file: "packages/xrtoolz/**"
+
+"pkg:xrtoolz-ops":
+  - changed-files:
+    - any-glob-to-any-file: "packages/xrtoolz-ops/**"
+
+"pkg:xrtoolz-products":
+  - changed-files:
+    - any-glob-to-any-file: "packages/xrtoolz-products/**"
+
 # --- Default / legacy labels retained for Dependabot compatibility ---------
 
 "dependencies":
