@@ -10,9 +10,26 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run for its previous commit; runs on
+# main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Whether the site can change: docs/, mkdocs.yml, any package's src
+  # (mkdocstrings renders the docstrings), changelogs or READMEs
+  # (scripts/ci_select.py).
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   build:
     name: mkdocs build --strict
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

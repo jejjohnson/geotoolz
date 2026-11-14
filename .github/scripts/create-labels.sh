@@ -2,7 +2,7 @@
 #
 # Bootstrap the standard label taxonomy for this template.
 #
-# Creates labels for: type / area / layer / wave / priority.
+# Creates labels for: type / area / pkg / layer / wave / priority.
 # Idempotent — uses `gh label create --force` so re-runs are safe.
 #
 # Usage:
@@ -52,6 +52,18 @@ create "area:docs"        "1d76db" "Docs + notebooks"
 create "area:code"        "c2e0c6" "Source-code changes (catch-all fallback)"
 # Edit / extend for your project. Common domain-specific areas:
 #   area:algorithmic, area:integration, area:performance, area:security
+
+echo "Creating pkg:* labels (one per workspace package)..."
+create "pkg:geotoolz" "5319e7" "geotoolz umbrella (installs the geotoolz packages)"
+create "pkg:geotoolz-array" "0e8a16" "geotoolz-array (geoarray)"
+create "pkg:geotoolz-ops" "1d76db" "geotoolz-ops (geoops)"
+create "pkg:geotoolz-patcher" "fbca04" "geotoolz-patcher (geopatcher)"
+create "pkg:geotoolz-catalog" "d93f0b" "geotoolz-catalog (geocatalog)"
+create "pkg:geotoolz-cloud" "c5def5" "geotoolz-cloud (geocloud)"
+create "pkg:geotoolz-products" "f9d0c4" "geotoolz-products (geoproducts)"
+create "pkg:xrtoolz" "b60205" "xrtoolz umbrella (installs the xarray lane)"
+create "pkg:xrtoolz-ops" "006b75" "xrtoolz-ops (xrops)"
+create "pkg:xrtoolz-products" "5d4037" "xrtoolz-products (xrproducts)"
 
 echo "Creating Dependabot / misc labels..."
 create "dependencies" "ededed" "Pull requests that update a dependency file"
