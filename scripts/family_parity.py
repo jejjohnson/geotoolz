@@ -5,7 +5,7 @@ geoops and xrops are organised in families (``geoops.geom``, ``xrops.geom``,
 user finds reprojection, rasterizing and masking in the same place on both
 sides. ``SAME_JOB`` records that job for every shared name; the check fails
 when a shared family has no entry, when an entry names a family that is no
-longer shared, or when ``docs/api/families.md`` is stale.
+longer shared, or when ``docs/xarray/api/families.md`` is stale.
 
     uv run python scripts/family_parity.py            # rewrite the table
     uv run python scripts/family_parity.py --check    # fail if stale or broken
@@ -24,7 +24,7 @@ from loguru import logger
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PAGE = ROOT / "docs" / "api" / "families.md"
+PAGE = ROOT / "docs" / "xarray" / "api" / "families.md"
 PACKAGES = ("geoops", "xrops")
 
 #: the job every family name shared by geoops and xrops means on both lanes
@@ -99,7 +99,7 @@ def table(
 
 @app.default
 def main(*, check: bool = False) -> None:
-    """Write ``docs/api/families.md``, or with ``--check`` fail if it is stale.
+    """Write ``docs/xarray/api/families.md``, or with ``--check`` fail if it is stale.
 
     Args:
         check: Verify instead of writing; exit 1 on a parity problem or a

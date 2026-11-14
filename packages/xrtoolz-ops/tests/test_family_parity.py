@@ -22,7 +22,7 @@ def test_every_shared_family_names_its_job() -> None:
 def test_the_checked_in_table_is_current() -> None:
     geo, xr = fp.families("geoops"), fp.families("xrops")
     assert fp.PAGE.read_text(encoding="utf-8") == fp.table(geo, xr, fp.SAME_JOB), (
-        "docs/api/families.md is stale: run scripts/family_parity.py"
+        "docs/xarray/api/families.md is stale: run scripts/family_parity.py"
     )
 
 
