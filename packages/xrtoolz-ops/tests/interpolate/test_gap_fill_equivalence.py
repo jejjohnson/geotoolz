@@ -78,13 +78,15 @@ CUBE_CASES = {
         {"kernel": "quintic", "neighbors": None},
         1e-8,
     ),
-    # still SciPy (functax has no local RBF), so exact
-    "rbf_tps_local": (fillnan_rbf, {"neighbors": 16}, 0.0),
-    # still scikit-learn (functax weighs by chord, not great-circle angle)
+    # still SciPy (functax has no local RBF): the same code, so only the
+    # round-off of another SciPy release (measured 2.4e-15)
+    "rbf_tps_local": (fillnan_rbf, {"neighbors": 16}, 1e-12),
+    # still scikit-learn (functax weighs by chord, not great-circle angle):
+    # only the round-off of another release
     "idw_haversine": (
         fillnan_idw,
         {"k": 6, "metric": "haversine", "max_distance": float(np.deg2rad(12.0))},
-        0.0,
+        1e-12,
     ),
 }
 
@@ -142,8 +144,8 @@ def test_fillnan_idw_euclidean_matches_b3855d7_off_ties(
         ("points_euclidean", {}, 1e-10),
         ("points_cutoff", {"k": 5, "power": 1.0, "max_distance": 1.5}, 1e-10),
         ("points_exact", {"k": 4, "eps": 0.0}, 1e-10),
-        # still scikit-learn, so exact
-        ("points_haversine", {"k": 6, "metric": "haversine"}, 0.0),
+        # still scikit-learn: only the round-off of another release
+        ("points_haversine", {"k": 6, "metric": "haversine"}, 1e-12),
     ],
 )
 def test_idw_to_points_matches_b3855d7(case: str, kwargs: dict, atol: float) -> None:
