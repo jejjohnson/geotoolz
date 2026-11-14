@@ -1,0 +1,81 @@
+name: Changes
+
+# What a change runs, for every workflow that calls this one: which packages
+# to test, base-install and typecheck, and whether the docs build, the
+# repository checks and the packaging check run. The rules and the package
+# graph live in scripts/ci_select.py (`uv run python scripts/ci_select.py
+# --base origin/main` shows a branch's selection locally).
+
+on:
+  workflow_call:
+    outputs:
+      matrix:
+        description: "The test matrix: {include: [{package, python}]}"
+        value: ${{ jobs.select.outputs.matrix }}
+      any:
+        description: Whether the test matrix is non-empty
+        value: ${{ jobs.select.outputs.any }}
+      packages:
+        description: The packages to test, as a JSON list
+        value: ${{ jobs.select.outputs.packages }}
+      base:
+        description: The packages whose base install to check, as a JSON list
+        value: ${{ jobs.select.outputs.base }}
+      typecheck:
+        description: The packages to type-check, as a JSON list
+        value: ${{ jobs.select.outputs.typecheck }}
+      docs:
+        description: Whether the docs site must build
+        value: ${{ jobs.select.outputs.docs }}
+      checks:
+        description: Whether the repository checks run
+        value: ${{ jobs.select.outputs.checks }}
+      build:
+        description: Whether the packaging check runs
+        value: ${{ jobs.select.outputs.build }}
+
+permissions:
+  contents: read
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      any: ${{ steps.select.outputs.any }}
+      packages: ${{ steps.select.outputs.packages }}
+      base: ${{ steps.select.outputs.base }}
+      typecheck: ${{ steps.select.outputs.typecheck }}
+      docs: ${{ steps.select.outputs.docs }}
+      checks: ${{ steps.select.outputs.checks }}
+      build: ${{ steps.select.outputs.build }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      # The files the pull request changes against its base branch (a stacked
+      # PR's base too), with the old name of each renamed file.
+      - name: List the changed files
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/changed.txt"
+          wc -l < "$RUNNER_TEMP/changed.txt"
+      - name: Select what runs
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          args=(--event "$EVENT")
+          if [[ "$EVENT" == "pull_request" ]]; then
+            args+=(--files-from "$RUNNER_TEMP/changed.txt")
+          fi
+          uv run --no-project --with cyclopts --with loguru \
+            python scripts/ci_select.py "${args[@]}"

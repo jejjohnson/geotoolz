@@ -13,8 +13,23 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run for its previous commit; runs on
+# main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Which packages' base installs this change can break (scripts/ci_select.py).
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   geotoolz-base:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.base), 'geotoolz-ops')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -99,6 +114,8 @@ jobs:
   # the test suite passes with every extras-gated test skipping cleanly.
   # (ci.yml runs the same suite with every extra installed.)
   geotoolz-catalog-base:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.base), 'geotoolz-catalog')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -198,6 +215,8 @@ jobs:
   # suite passes with every extras-gated test skipping cleanly. (ci.yml
   # runs the same suite with every extra installed.)
   geotoolz-patcher-base:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.base), 'geotoolz-patcher')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -287,6 +306,8 @@ jobs:
   # test suite passes with every extras-gated test skipping cleanly.
   # Crucially, geotoolz itself is absent: readers never depend on it.
   geotoolz-products-base:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.base), 'geotoolz-products')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -379,6 +400,8 @@ jobs:
   # every module imports, and COG reads fail only when used, naming the
   # `[cog]` extra; the test suite passes with the COG tests skipping.
   geotoolz-cloud-base:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.base), 'geotoolz-cloud')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -423,6 +446,8 @@ jobs:
   # `[georeader]` extra (gate GC3); the test suite passes with the JAX,
   # shapely, georeader and oracle tests skipping.
   geotoolz-array-base:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.base), 'geotoolz-array')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -483,3 +508,39 @@ jobs:
       - name: Test geotoolz-array (base install)
         working-directory: packages/geotoolz-array
         run: uv run --no-sync pytest -q --no-cov
+
+  # `pip install xrtoolz-ops` without extras: viz, metrics and ocn import
+  # without cartopy (the optional `[maps]` extra), and the base pulls neither
+  # JAX nor scikit-learn (geostack gate B1). einx is allowed: geoops's
+  # kernels under xrops.grad need it.
+  xrtoolz-ops-base:
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.base), 'xrtoolz-ops')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: Install xrtoolz-ops (base, no extras)
+        run: uv sync --locked --package xrtoolz-ops --no-default-groups
+      - name: Import and smoke test
+        run: |
+          uv run --no-sync python - <<'EOF'
+          import importlib
+          import importlib.util
+
+          assert importlib.util.find_spec("cartopy") is None, "cartopy installed"
+          leaked = [
+              m for m in ("jax", "sklearn", "finitediffx")
+              if importlib.util.find_spec(m) is not None
+          ]
+          assert not leaked, f"{leaked} installed"
+          for module in (
+              "xrops.viz", "xrops.viz.validation", "xrops.metrics", "xrops.ocn",
+              "xrops.interpolate", "xrops.transforms", "xrops.learn",
+              "xrops.utils", "xrops.grad",
+          ):
+              importlib.import_module(module)
+          print("xrtoolz-ops base install OK")
+          EOF

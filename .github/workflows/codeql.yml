@@ -5,12 +5,25 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # Nothing to analyse in a change that is only docs, notebooks or Markdown;
+    # main and the weekly run still analyse everything.
+    paths-ignore:
+      - docs/**
+      - notebooks/**
+      - "**/*.md"
+      - "**/*.ipynb"
   schedule:
     - cron: "30 1 * * 1"
 
 permissions:
   security-events: write
   contents: read
+
+# A new push to a pull request cancels the run for its previous commit; runs on
+# main are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   analyze:

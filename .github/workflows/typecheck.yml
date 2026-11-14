@@ -17,8 +17,20 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Which packages this change can affect (scripts/ci_select.py).
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   typecheck:
+    needs: changes
+    if: needs.changes.outputs.typecheck != '[]'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -26,21 +38,18 @@ jobs:
           python-version: "3.12"
       - name: Install typecheck dependencies
         run: uv sync --group typecheck
-      - name: Typecheck geotoolz-ops
-        run: uv run --group typecheck ty check src/geoops
-        working-directory: packages/geotoolz-ops
-      - name: Typecheck geotoolz-patcher
-        run: uv run --group typecheck ty check src/geopatcher
-        working-directory: packages/geotoolz-patcher
-      - name: Typecheck geotoolz-catalog
-        run: uv run --group typecheck ty check src/geocatalog
-        working-directory: packages/geotoolz-catalog
-      - name: Typecheck geotoolz-products
-        run: uv run --group typecheck ty check src/geoproducts
-        working-directory: packages/geotoolz-products
-      - name: Typecheck geotoolz-cloud
-        run: uv run --group typecheck ty check src/geocloud
-        working-directory: packages/geotoolz-cloud
-      - name: Typecheck geotoolz-array
-        run: uv run --group typecheck ty check src/geoarray
-        working-directory: packages/geotoolz-array
+      # ty runs from each package's directory, on its import package. The two
+      # umbrellas (geotoolz, xrtoolz) hold no code and are skipped.
+      - name: Typecheck the selected packages
+        env:
+          PACKAGES: ${{ needs.changes.outputs.typecheck }}
+        run: |
+          status=0
+          for package in $(jq -r '.[]' <<< "$PACKAGES"); do
+            [[ "$package" == "geotoolz" || "$package" == "xrtoolz" ]] && continue
+            module=$(basename "$(find "packages/$package/src" -mindepth 1 -maxdepth 1 -type d ! -name '*.egg-info' | head -1)")
+            echo "::group::$package ($module)"
+            (cd "packages/$package" && uv run --group typecheck ty check "src/$module") || status=1
+            echo "::endgroup::"
+          done
+          exit $status

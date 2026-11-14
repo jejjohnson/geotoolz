@@ -3,6 +3,17 @@ name: Deploy Docs
 on:
   push:
     branches: [main]
+    # The site's inputs (the same rule as ci_select.py's docs build): a merge
+    # that touches none of them would redeploy the same site.
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - packages/*/src/**
+      - packages/*/README.md
+      - packages/*/CHANGELOG.md
+      - pyproject.toml
+      - uv.lock
+      - .github/workflows/pages.yml
   workflow_dispatch:
 
 permissions:
