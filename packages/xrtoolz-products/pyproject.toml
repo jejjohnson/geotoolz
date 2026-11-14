@@ -95,10 +95,10 @@ dev = [
     "pytest-cov>=7.1.0",
 ]
 lint = [
-    "ruff>=0.15.10,<0.16",
+    "ruff>=0.15.11",
 ]
 typecheck = [
-    "ty>=0.0.30,<0.0.32",
+    "ty>=0.0.35",
 ]
 
 [build-system]

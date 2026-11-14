@@ -1,10 +1,10 @@
-# CLAUDE.md
+# The xarray lane (`xrtoolz`, `xrtoolz-ops`, `xrtoolz-products`) — agent rules
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+These rules cover the three xarray packages, which moved into geotoolz from jejjohnson/xrtoolz; the root `AGENTS.md` holds the rules for the whole repository.
 
 ## Project Overview
 
-`xrtoolz` is a uv workspace of three packages that together provide a composable operator library for geoprocessing Earth System Data Cubes — preprocess, infer, and evaluate xarray datasets with a uniform pipeline abstraction. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework.
+`xrtoolz` is a family of three packages in the geotoolz workspace that together provide a composable operator library for geoprocessing Earth System Data Cubes — preprocess, infer, and evaluate xarray datasets with a uniform pipeline abstraction. The Operator / Sequential / Graph composition core lives in the carrier-agnostic [`pipekit`](https://github.com/jejjohnson/pipekit) framework.
 
 The packages (distribution name → import name):
 
@@ -66,8 +66,8 @@ Design rules:
 | `packages/xrtoolz/src/xrtoolz/` | Main package source code (domain submodules, combinators, shims) |
 | `packages/xrtoolz-products/src/xrproducts/` | Authenticated archive readers + request types |
 | `packages/*/tests/` | Per-package test suites |
-| `docs/` | Documentation (MkDocs root site), including `docs/design/` with the full design doc |
-| `notebooks/` | Jupyter notebooks |
+| `docs/xarray/` | Documentation, including `docs/xarray/design/` with the full design doc |
+| `notebooks/xarray/` | Jupyter notebooks |
 
 ### Key dependencies
 
@@ -115,7 +115,7 @@ one parallel job per package, each from its own directory so its pytest and
 coverage config applies. On a pull request it runs only the packages the change
 can affect, on Python 3.13: `xrtoolz-products` also runs `xrtoolz-ops` and
 `xrtoolz`, `xrtoolz-ops` also runs `xrtoolz`, any package change or a change to
-`scripts/` or `docs/api/families.md` also runs `xrtoolz-ops` (its
+`scripts/` or `docs/xarray/api/families.md` also runs `xrtoolz-ops` (its
 dependency-rule and family-parity tests scan every package), shared config
 (`pyproject.toml`, `uv.lock`, `.python-version`, `ci.yml`) runs everything, and
 docs or notebooks alone run nothing. On `main` every package runs on 3.12 and
@@ -146,7 +146,7 @@ make typecheck                                # ty per package
 
 ## Documentation Examples
 
-Example notebooks live in `docs/notebooks/` as jupytext percent-format `.py` files. The workflow:
+Example notebooks live in `docs/xarray/notebooks/` as jupytext percent-format `.py` files. The workflow:
 
 1. Write the `.py` source (jupytext percent format)
 2. Convert and execute: `jupytext --to notebook foo.py` then `jupyter nbconvert --execute --inplace foo.ipynb`
@@ -159,7 +159,7 @@ See `.github/instructions/docs-examples.instructions.md` for full standards.
 
 ## Plans
 
-Plans and design documents go in `.plans/` (gitignored, never committed). The authoritative design doc is committed in `docs/design/`. Track ongoing work via GitHub issues.
+Plans and design documents go in `.plans/` (gitignored, never committed). The authoritative design doc is committed in `docs/xarray/design/`. Track ongoing work via GitHub issues.
 
 ## PR Review Comments
 

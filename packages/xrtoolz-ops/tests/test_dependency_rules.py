@@ -291,7 +291,12 @@ def test_packages_are_current() -> None:
     found = {}
     for pyproject in pyprojects or [ROOT / "pyproject.toml"]:
         meta = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-        found[_norm(_project(meta)["name"])] = (
+        name = _norm(_project(meta)["name"])
+        # The geotoolz packages share this workspace and are checked by
+        # their own lane's guard.
+        if name.startswith("geotoolz"):
+            continue
+        found[name] = (
             str(pyproject.relative_to(ROOT)),
             _roots(meta, pyproject.parent),
         )
