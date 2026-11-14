@@ -22,6 +22,11 @@ geotoolz-catalog = { workspace = true }
 geotoolz-products = { workspace = true }
 geotoolz-cloud = { workspace = true }
 geotoolz-array = { workspace = true }
+# The xarray lane (xrops and xrproducts), moved in from jejjohnson/xrtoolz;
+# xrops takes geotoolz-ops and geotoolz-array from the workspace.
+xrtoolz = { workspace = true }
+xrtoolz-ops = { workspace = true }
+xrtoolz-products = { workspace = true }
 # The Operator / Sequential / Graph composition core lives in the pipekit
 # monorepo as `pipekit-ops` (import `pipekit_ops`, since pipekit 0.2.0),
 # which is not on PyPI (the PyPI name `pipekit` belongs to another project),
@@ -81,6 +86,32 @@ dev = [
     # Test-only oracle for geoops.geom.difference (#539): the stencils must
     # equal finitediffx's. Never a runtime dependency (it is JAX-only).
     "finitediffx>=0.1",
+    # The xarray lane. The tests exercise xrops.learn, the decomposition
+    # presets and knn/KDE gridding ([sklearn] extra of xrtoolz-ops), the JAX
+    # ModelOp adapter, and the functax gap fills and IDW ([functax] extra);
+    # the published bases stay without them.
+    "scikit-learn>=1.4",
+    "jax>=0.4",
+    "functax[jax,scipy]>=0.0.6",
+    # xrtoolz test fixtures (HTTP mocks, vector IO, Zarr round-trips).
+    "httpx>=0.28.1",
+    "geopandas>=1.1.3",
+    # Reference oracle for the xrops.geom vector↔raster bridge tests
+    # (vectorize / rasterize / footprint are cross-checked against georeader).
+    "georeader-spaceml>=2.3",
+    "pyarrow>=24.0.0",
+    "zarr>=3.1.6",
+    "loguru>=0.7.3",
+    # scripts/family_parity.py (the geoops/xrops family-name check, gate D1).
+    "cyclopts>=3",
+    # NetCDF backend for xrtoolz-products's CDS cache round-trip tests.
+    "netcdf4>=1.6",
+    # zoneinfo data so xrtoolz-products's tz-aware TimeRange tests resolve
+    # named zones in minimal containers.
+    "tzdata>=2024.1",
+    "xrtoolz",
+    "xrtoolz-ops",
+    "xrtoolz-products",
 ]
 lint = [
     "import-linter>=2.1",
@@ -118,6 +149,9 @@ docs = [
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+# The xarray lane's executed notebooks are committed as output artefacts;
+# re-editing cell source would invalidate the inline outputs.
+extend-exclude = ["docs/xarray/notebooks/*.ipynb"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
@@ -135,7 +169,10 @@ combine-as-imports = true
 lines-after-imports = 2
 # The workspace sources live under packages/*/src, so root-level files
 # (docs notebooks) need the first-party classification made explicit.
-known-first-party = ["geotoolz", "geoops", "geopatcher", "geocatalog", "geoarray"]
+known-first-party = [
+    "geotoolz", "geoops", "geopatcher", "geocatalog", "geoarray",
+    "xrtoolz", "xrops", "xrproducts",
+]
 
 [tool.ty.environment]
 python-version = "3.12"

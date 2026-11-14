@@ -98,10 +98,12 @@ plugins:
         catalog/recipes/staging-and-bundles.md: catalog/how-to/staging.md
         catalog/design/vocabulary.md: catalog/vocabulary.md
 
-# Contributor tooling, not site pages.
+# Contributor tooling, not site pages. docs/xarray/ (moved in from xrtoolz)
+# is not part of the site yet.
 exclude_docs: |
   templates/
   *.py
+  xarray/
 
 nav:
   - Home: index.md

@@ -1,0 +1,20 @@
+"""Local-file adapter for satellite L2 products already on disk."""
+
+from xrproducts._src.local.catalog import LOCAL_DATASETS
+from xrproducts._src.local.openers import (
+    open_ch4_inventory,
+    open_emit_ch4_l2b,
+    open_ghgsat_ch4_l2,
+    open_tropomi_ch4_l2,
+)
+from xrproducts._src.local.source import LocalL2Source
+
+
+__all__ = [
+    "LOCAL_DATASETS",
+    "LocalL2Source",
+    "open_ch4_inventory",
+    "open_emit_ch4_l2b",
+    "open_ghgsat_ch4_l2",
+    "open_tropomi_ch4_l2",
+]
