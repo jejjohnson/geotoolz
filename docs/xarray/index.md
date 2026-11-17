@@ -42,7 +42,7 @@ which is pre-PyPI and resolved via `[tool.uv.sources]`. A plain
 `pip install` will fail until `pipekit-ops` reaches PyPI — use `uv`:
 
 ```bash
-uv pip install "git+https://github.com/jejjohnson/xrtoolz@main"
+uv pip install "git+https://github.com/jejjohnson/geotoolz@main#subdirectory=packages/xrtoolz"
 ```
 
 Optional extras pull in heavier backends only where they are used:

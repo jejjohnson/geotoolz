@@ -4,7 +4,7 @@
 # Pre-PyPI, install from the workspace via git. The core is light, so
 # this resolves on its own; add an extra for the service you need. Once
 # published this becomes a plain `pip install 'xrtoolz-products[cmems]'`.
-uv pip install "xrtoolz-products @ git+https://github.com/jejjohnson/xrtoolz@main#subdirectory=packages/xrtoolz-products"
+uv pip install "xrtoolz-products @ git+https://github.com/jejjohnson/geotoolz@main#subdirectory=packages/xrtoolz-products"
 ```
 
 `xrproducts` is the **data-acquisition** layer of the stack. It turns a typed
