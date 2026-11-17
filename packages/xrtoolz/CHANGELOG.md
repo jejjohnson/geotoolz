@@ -1,0 +1,272 @@
+# Changelog
+
+## Unreleased
+
+### Added
+
+* `xrtoolz.metrics.array` — Tier A array kernels (D11) for the canonical pixel metrics: `mse`, `rmse`, `mae`, `bias`, `nrmse`, `correlation`, `r2_score`. Tier B (`xrtoolz.metrics._src.pixel`) now delegates via `xr.apply_ufunc` rather than reimplementing the math.
+* `xrtoolz.transforms.array` — Tier A array kernels (D11) for the canonical Fourier entry points: `fft`, `ifft`, `power_spectrum`. Numpy-only computational core; Tier B (`xrft`-backed) is unchanged.
+* `xrtoolz.calc.array` — Tier A array kernels (D11) for the canonical finite-difference primitives: `partial`, `gradient` (2nd-order central, uniform spacing). Numpy-only core complementing the `finitediffx`-backed Tier B.
+* `xrtoolz.interpolate.refine_2d` — scikit-image-backed 2-D resize for bicubic/biquintic refinement; `Refine(order=...)` opts into this path.
+* `tests/test_tier_contract.py` — three-tier contract harness (Tier A reachable, Tier B numerically agrees with Tier A, Tier C numerically agrees with Tier B) for the metrics/transforms/calc pilots.
+* `xrtoolz.transforms.operators` — Tier C wrappers for the encoder primitives: `CyclicalEncode`, `FourierFeatures`, `RandomFourierFeatures`, `PositionalEncoding`, `EncodeTimeCyclical`, `EncodeTimeOrdinal`, `TimeRescale`, `TimeUnrescale` (#95).
+* `xrtoolz.interpolate` temporal helpers — `resample_time(..., method="interpolate")` for time upsampling and `fillnan_climatology` / `FillNaNClimatology` for climatological gap fill.
+
+### Removed
+
+* Value-resampling primitives moved out of `xrtoolz.geo` into the new `xrtoolz.interpolate` package (D8/D12, Epic F3). No deprecation shim — the package is pre-1.0 and has no external users.
+  * `xrtoolz.geo.{fillnan_spatial, fillnan_temporal, fillnan_rbf, resample_time, coarsen, refine, bin_2d, histogram_2d, points_to_grid, Grid, Period, SpaceTimeGrid}` → `xrtoolz.interpolate.<same-name>`
+  * `xrtoolz.geo.operators.{FillNaNSpatial, FillNaNTemporal, ResampleTime}` → `xrtoolz.interpolate.operators.<same-name>`
+
+### Added
+
+* `xrtoolz.interpolate` — value-resampling package, sub-organized by source/target structure (`gap_fill`, `grid_to_grid`, `resample`, `binning`, `points_to_grid`) with placeholder submodules (`coord_remap`, `smooth`, `downscale`, `grid_to_points`) for upcoming work.
+* `xrtoolz.interpolate.operators` — `Bin2D`, `Coarsen`, `FillNaNRBF`, `FillNaNSpatial`, `FillNaNTemporal`, `Histogram2D`, `PointsToGrid`, `Refine`, `ResampleTime`.
+* `xrtoolz.inference` — Layer-1 wrappers for trained ML models (D4, Epic F4): `ModelOp` (framework-agnostic, duck-typed dispatch on a configurable method, xarray↔array marshalling, leading non-feature dims supported by flattening into a single ``(N, F)`` model call), plus `SklearnModelOp` and `JaxModelOp` thin subclasses. `sklearn`, `jax`, `equinox`, and `torch` are never imported at top level — backend imports are lazy. Not auto-exported from `xrtoolz`; opt-in via `from xrtoolz.inference import ModelOp`.
+
+### Deprecated
+
+* `xrtoolz.geo.{cyclical_encode, fourier_features, positional_encoding, random_fourier_features, lat_90_to_180, lat_180_to_90, lon_180_to_360, lon_360_to_180, encode_time_cyclical, encode_time_ordinal, time_rescale, time_unrescale}` — moved to `xrtoolz.transforms.encoders` (D8). The legacy paths still resolve via PEP-562 with a `DeprecationWarning` for one release; removal scheduled for the next minor.
+
+## [0.4.1](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.4.0...xrtoolz-v0.4.1) (2026-11-12)
+
+
+### Features
+
+* **interpolate:** run the gap fills and IDW on functax plans ([#401](https://github.com/jejjohnson/xrtoolz/issues/401)) ([d81a2e8](https://github.com/jejjohnson/xrtoolz/commit/d81a2e8ae91fdf9cf34024604e4120b5a1c21125))
+
+## [0.4.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.3.0...xrtoolz-v0.4.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* the xrtoolz-grad (xrgrad) distribution is gone, with no shim (PL-Q5): use from xrops import grad.
+* **xrops:** the xrtoolz-core distribution and the xrcore import are gone, with no shim (PL-Q5): use from xrops import Operator and from pipekit import Signature.
+
+### Code Refactoring
+
+* delete xrtoolz-grad; xrops.grad is the calculus ([#382](https://github.com/jejjohnson/xrtoolz/issues/382)) ([82f6fa7](https://github.com/jejjohnson/xrtoolz/commit/82f6fa78faf510fde4cd8a389dd97b529645a4fe))
+* **xrops:** fold xrcore into xrops._src and delete xrtoolz-core ([#380](https://github.com/jejjohnson/xrtoolz/issues/380)) ([756fc30](https://github.com/jejjohnson/xrtoolz/commit/756fc3074317737e8546ffa08890d7565aee3aa0))
+
+## [0.3.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.2.0...xrtoolz-v0.3.0) (2026-10-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **xrops:** knn regridding, kde_to_grid, xrops.learn and the decomposition presets need pip install 'xrtoolz-ops[sklearn]'.
+* the xrtoolz-einx (xreinx) and xrtoolz-sklearn (xrsklearn) distributions are gone, with no shim (PL-Q5).
+
+### Code Refactoring
+
+* delete xrtoolz-einx and xrtoolz-sklearn ([#376](https://github.com/jejjohnson/xrtoolz/issues/376)) ([6b51221](https://github.com/jejjohnson/xrtoolz/commit/6b51221771b2975cdeb019e5637e5f5ef4922539))
+* **xrops:** a light base install without einx or scikit-learn ([#377](https://github.com/jejjohnson/xrtoolz/issues/377)) ([2b9bd37](https://github.com/jejjohnson/xrtoolz/commit/2b9bd37f7d7e2edb4b9d451b9e20ae6e4aa271a2))
+
+## [0.2.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.1.0...xrtoolz-v0.2.0) (2026-10-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **products:** install xrtoolz-products and import xrproducts; xrreader no longer exists, and the cache env var is XRPRODUCTS_CACHE.
+
+### Code Refactoring
+
+* **products:** rename xrtoolz-reader to xrtoolz-products (import xrproducts) ([#372](https://github.com/jejjohnson/xrtoolz/issues/372)) ([b1e642d](https://github.com/jejjohnson/xrtoolz/commit/b1e642d27ea6a42d0dc661634f993814f38a613b))
+
+## [0.1.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.6...xrtoolz-v0.1.0) (2026-10-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **xrops:** import the operators from xrops (pip install xrtoolz-ops); xrtoolz.* paths, xrtoolz.Operator/Signature/Sequential and the calc, einx, signature and geo metric/encoder shims are gone.
+
+### Code Refactoring
+
+* **xrops:** create xrtoolz-ops (import xrops) and a code-free xrtoolz umbrella ([#368](https://github.com/jejjohnson/xrtoolz/issues/368)) ([d654087](https://github.com/jejjohnson/xrtoolz/commit/d654087aa6aeec67683930b8c98c492ed1e67083))
+
+## [0.0.6](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.5...xrtoolz-v0.0.6) (2026-10-27)
+
+
+### Bug Fixes
+
+* **metrics:** score a single-member ensemble CRPS as absolute error ([#352](https://github.com/jejjohnson/xrtoolz/issues/352)) ([2f6318d](https://github.com/jejjohnson/xrtoolz/commit/2f6318d614061dcff472c4d8546ece4813471c41))
+
+## [0.0.5](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.4...xrtoolz-v0.0.5) (2026-10-05)
+
+
+### Features
+
+* **metrics:** Cartesian + explicit-Coriolis physical-balance metrics ([#339](https://github.com/jejjohnson/xrtoolz/issues/339)) ([c14280b](https://github.com/jejjohnson/xrtoolz/commit/c14280b622f60378fb52157a9417feed94910300)), closes [#323](https://github.com/jejjohnson/xrtoolz/issues/323)
+* **ocn:** thread dims / geometry / explicit Coriolis through kinematics ([#338](https://github.com/jejjohnson/xrtoolz/issues/338)) ([c8429bd](https://github.com/jejjohnson/xrtoolz/commit/c8429bd1e4ffb625b2f8f9ad6f0477f135dba1a0)), closes [#322](https://github.com/jejjohnson/xrtoolz/issues/322)
+* **viz:** HovmollerPanel — time × spatial-axis section ([#344](https://github.com/jejjohnson/xrtoolz/issues/344)) ([802f59e](https://github.com/jejjohnson/xrtoolz/commit/802f59e6d6ae9deea7657ab281374405f59eb22d)), closes [#120](https://github.com/jejjohnson/xrtoolz/issues/120)
+* **viz:** projection-free CartesianMapPanel + EnergyTimeSeriesPanel ([#341](https://github.com/jejjohnson/xrtoolz/issues/341)) ([57dc910](https://github.com/jejjohnson/xrtoolz/commit/57dc9103727d62fb2fdb045b3ac26b1f049d2277)), closes [#325](https://github.com/jejjohnson/xrtoolz/issues/325)
+* **viz:** SpatialDiffPanel — (pred, ref, pred - ref) snapshot triptych ([#342](https://github.com/jejjohnson/xrtoolz/issues/342)) ([b19e725](https://github.com/jejjohnson/xrtoolz/commit/b19e725c7dfbd894fa02d8b33ef16c1cb8c616c2)), closes [#117](https://github.com/jejjohnson/xrtoolz/issues/117)
+* **viz:** TimeSeriesErrorPanel — multi-method skill scores over time ([#343](https://github.com/jejjohnson/xrtoolz/issues/343)) ([5eb4bb4](https://github.com/jejjohnson/xrtoolz/commit/5eb4bb44a9014a2c557bc9d31066668f46a3979e)), closes [#118](https://github.com/jejjohnson/xrtoolz/issues/118)
+
+## [0.0.4](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.3...xrtoolz-v0.0.4) (2026-09-24)
+
+
+### Features
+
+* **geo:** add vector ↔ raster bridge (vectorize, rasterize, footprint) ([#311](https://github.com/jejjohnson/xrtoolz/issues/311)) ([b095ee3](https://github.com/jejjohnson/xrtoolz/commit/b095ee3ba6576f9ba41576ac0202f1eec7c59f90))
+
+## [0.0.3](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.2...xrtoolz-v0.0.3) (2026-09-18)
+
+
+### Features
+
+* **atm:** met diagnostics and atm.gas.ch4 column primitives ([#306](https://github.com/jejjohnson/xrtoolz/issues/306)) ([f3f35d4](https://github.com/jejjohnson/xrtoolz/commit/f3f35d4c763d213e1144f9fc5c040518ffb6a4d3))
+* **atm:** open_wrfout — WRF-ARW NetCDF to CF Dataset ([#307](https://github.com/jejjohnson/xrtoolz/issues/307)) ([7a37aa8](https://github.com/jejjohnson/xrtoolz/commit/7a37aa8e62fae46640bb5d67eac6b8f51fb93599))
+* **geo:** utm_crs_for + local_frame — UTM zone from an origin and a metric local frame ([#302](https://github.com/jejjohnson/xrtoolz/issues/302)) ([1588dd3](https://github.com/jejjohnson/xrtoolz/commit/1588dd3dbc638a7dda87dbd008e4bd2ed8b41708))
+* **interpolate:** regrid_conservative — area-weighted regrid onto an arbitrary rectilinear target ([#305](https://github.com/jejjohnson/xrtoolz/issues/305)) ([201230b](https://github.com/jejjohnson/xrtoolz/commit/201230bc191599100a40ae7b063ef334c2c5c397))
+* **interpolate:** remap_axis with per-column source coordinates and extrapolation policy ([#304](https://github.com/jejjohnson/xrtoolz/issues/304)) ([4a47b6f](https://github.com/jejjohnson/xrtoolz/commit/4a47b6f7990eb1b043623df78a367bf4506afcdb))
+* **reader:** add LocalL2Source with TROPOMI / EMIT / GHGSat methane L2 openers ([#303](https://github.com/jejjohnson/xrtoolz/issues/303)) ([d04768e](https://github.com/jejjohnson/xrtoolz/commit/d04768e3c489f09b8cf383db6ddf8ee8890980b0))
+
+## [0.0.2](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-v0.0.1...xrtoolz-v0.0.2) (2026-08-17)
+
+
+### Features
+
+* fold xrreader into the workspace as xrtoolz-reader ([#259](https://github.com/jejjohnson/xrtoolz/issues/259)) ([aa0859b](https://github.com/jejjohnson/xrtoolz/commit/aa0859b1aafb123d6d4e21967ed46dcd9386b3ef))
+* **geo,interpolate:** add spatial_mosaic, reproject_match and Delaunay swath gridding ([#260](https://github.com/jejjohnson/xrtoolz/issues/260)) ([e80663c](https://github.com/jejjohnson/xrtoolz/commit/e80663ce35c5fc5cbe91b6423da6178c0218432d))
+* **grad,ocn:** mixed geometry, time derivatives, periodic boundaries, 3-D advection ([#282](https://github.com/jejjohnson/xrtoolz/issues/282)) ([afef8a3](https://github.com/jejjohnson/xrtoolz/commit/afef8a3cfd7f1367b74c8505b8d92a1cf3bc3a66))
+
+## 0.0.1 (2026-08-13)
+
+
+### Features
+
+* split xrtoolz into a uv workspace (core, grad, einx, sklearn) ([#252](https://github.com/jejjohnson/xrtoolz/issues/252)) ([f37a532](https://github.com/jejjohnson/xrtoolz/commit/f37a53286aa622c8bb4abe7a3f83df1ddc324bb4))
+
+## [0.1.0](https://github.com/jejjohnson/xrtoolz/compare/v0.0.8...v0.1.0) (2026-06-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* xrtoolz.data and xrtoolz.types are removed; import the readers and the typed request/Variable API from xrreader / xrreader.types.
+* flip basis encoders + dm_test to DataArray-native (PR δ) ([#217](https://github.com/jejjohnson/xrtoolz/issues/217))
+* remove public array tier, collapse to two-tier contract ([#215](https://github.com/jejjohnson/xrtoolz/issues/215))
+* flip transforms + geo single-field primitives to DataArray-positional (PR γ) ([#209](https://github.com/jejjohnson/xrtoolz/issues/209))
+* flip metrics + interpolate primitives to DataArray-positional (PR β) ([#208](https://github.com/jejjohnson/xrtoolz/issues/208))
+
+### Features
+
+* **cds:** pin insitu land profile to dataset version 3_0_0 ([370bb1d](https://github.com/jejjohnson/xrtoolz/commit/370bb1da7da004ebf9467d94e38baae6101a3c4f))
+* **core:** xarray-aware Operator with DataTree dispatch (PR α) ([#206](https://github.com/jejjohnson/xrtoolz/issues/206)) ([f16ddaa](https://github.com/jejjohnson/xrtoolz/commit/f16ddaa58759330a0ba8bf40bd733adf2c39466f))
+* **einx:** implement xrtoolz.einx labeled named-tensor bridge (PR 1/3) ([#218](https://github.com/jejjohnson/xrtoolz/issues/218)) ([c2340a7](https://github.com/jejjohnson/xrtoolz/commit/c2340a7d2ddf6a130f90f374d6ad09cff9a78722))
+* flip basis encoders + dm_test to DataArray-native (PR δ) ([#217](https://github.com/jejjohnson/xrtoolz/issues/217)) ([7bcbbdd](https://github.com/jejjohnson/xrtoolz/commit/7bcbbdd45147d331d74445460d772b21c3874fd8))
+* flip metrics + interpolate primitives to DataArray-positional (PR β) ([#208](https://github.com/jejjohnson/xrtoolz/issues/208)) ([90d4173](https://github.com/jejjohnson/xrtoolz/commit/90d41733fdd7f76efbb8e05b0f9310e796550d1f))
+* flip transforms + geo single-field primitives to DataArray-positional (PR γ) ([#209](https://github.com/jejjohnson/xrtoolz/issues/209)) ([9fab49f](https://github.com/jejjohnson/xrtoolz/commit/9fab49fa7f4671ebfa8f2aa13ba6839575c6e32e))
+* **metrics,geo:** nrmse_score + get_dataset_resolution (OB-1.5, closes [#136](https://github.com/jejjohnson/xrtoolz/issues/136)) ([#210](https://github.com/jejjohnson/xrtoolz/issues/210)) ([16b322d](https://github.com/jejjohnson/xrtoolz/commit/16b322d495c27fe70da72e032977a62ee22f8a0a))
+* **metrics:** instance-segmentation matching + AP / F1 ([#216](https://github.com/jejjohnson/xrtoolz/issues/216)) ([bad16a3](https://github.com/jejjohnson/xrtoolz/commit/bad16a321bbb748301afd2d83da8183f96c31390))
+
+
+### Code Refactoring
+
+* move data + types to xrreader (P0 xrtoolz side) ([#225](https://github.com/jejjohnson/xrtoolz/issues/225)) ([8384e25](https://github.com/jejjohnson/xrtoolz/commit/8384e254423056107e4733e08ce81142fccda04e))
+* remove public array tier, collapse to two-tier contract ([#215](https://github.com/jejjohnson/xrtoolz/issues/215)) ([0c39b88](https://github.com/jejjohnson/xrtoolz/commit/0c39b884578b4423d82842fd6f936186371b430c))
+
+## [0.0.8](https://github.com/jejjohnson/xrtoolz/compare/v0.0.7...v0.0.8) (2026-05-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename xr_toolz → xrtoolz, depend on pipekit for composition core ([#203](https://github.com/jejjohnson/xrtoolz/issues/203))
+
+### Features
+
+* **geo:** add 1-D wavelet analysis (Torrence-Compo + Liu rectified power) ([#197](https://github.com/jejjohnson/xrtoolz/issues/197)) ([4aeabfe](https://github.com/jejjohnson/xrtoolz/commit/4aeabfebe8003492a3fa56b406c75c9f1bb340a8))
+* rename xr_toolz → xrtoolz, depend on pipekit for composition core ([#203](https://github.com/jejjohnson/xrtoolz/issues/203)) ([3e3d8a4](https://github.com/jejjohnson/xrtoolz/commit/3e3d8a437c7739f6ff07ea718420f481db25add4))
+
+
+### Bug Fixes
+
+* **docs:** repair api/core.md autodoc + migrate notebook imports ([#205](https://github.com/jejjohnson/xrtoolz/issues/205)) ([14792ab](https://github.com/jejjohnson/xrtoolz/commit/14792ab8aef8f3b5c7e394987665861c2e9cf6d0))
+
+## [0.0.7](https://github.com/jejjohnson/xrtoolz/compare/v0.0.6...v0.0.7) (2026-05-09)
+
+
+### Features
+
+* **geo:** add 2-D Morlet wavelet wavenumber spectra ([#176](https://github.com/jejjohnson/xrtoolz/issues/176)) ([834ecfc](https://github.com/jejjohnson/xrtoolz/commit/834ecfc06ffc58f692bb27326c68be7217972497))
+* **geo:** add RegionSpec registry and regionmask-backed regional subsetting ([#173](https://github.com/jejjohnson/xrtoolz/issues/173)) ([8aab417](https://github.com/jejjohnson/xrtoolz/commit/8aab417afa6e4fb1b1aba80be89de28531aa27b4))
+* **geo:** add rename_to_cf_standard_names / rename_from_cf_standard_names + operators ([#172](https://github.com/jejjohnson/xrtoolz/issues/172)) ([49f03e9](https://github.com/jejjohnson/xrtoolz/commit/49f03e978ad2f1cbe092b071555d90011e7b6603))
+* **interpolate:** add biharmonic NaN inpainting ([#189](https://github.com/jejjohnson/xrtoolz/issues/189)) ([4f10dbb](https://github.com/jejjohnson/xrtoolz/commit/4f10dbbd27c332577064f644e1a7592730c76e68))
+* **interpolate:** add cosine-latitude conservative coarsen ([#186](https://github.com/jejjohnson/xrtoolz/issues/186)) ([cf01cfc](https://github.com/jejjohnson/xrtoolz/commit/cf01cfcffcb3e2ea487f11fe183c0d4cf19311b6))
+* **interpolate:** add grid-to-points sampling ([#191](https://github.com/jejjohnson/xrtoolz/issues/191)) ([cafeea5](https://github.com/jejjohnson/xrtoolz/commit/cafeea5fbe005e4062cbb7a75cd44c372ab7e83d))
+* **interpolate:** add kNN IDW interpolation ([#183](https://github.com/jejjohnson/xrtoolz/issues/183)) ([6752c97](https://github.com/jejjohnson/xrtoolz/commit/6752c97ce4e52b06594927ed7151aafaa5eb5a7c))
+* **interpolate:** add mask morphology cleanup operations ([#188](https://github.com/jejjohnson/xrtoolz/issues/188)) ([b6e4674](https://github.com/jejjohnson/xrtoolz/commit/b6e46746b5b6d3388caec725e3486684f318632c))
+* **interpolate:** add NaN-aware Gaussian smoothing ([#190](https://github.com/jejjohnson/xrtoolz/issues/190)) ([0d0c596](https://github.com/jejjohnson/xrtoolz/commit/0d0c59640e7e1f1f610cc2c92b7c6317b32bdf05))
+* **interpolate:** add skimage-backed 2D refine ([#187](https://github.com/jejjohnson/xrtoolz/issues/187)) ([09b00cb](https://github.com/jejjohnson/xrtoolz/commit/09b00cb7a0f5c748f02581f34266ad3edc8226c2))
+* **interpolate:** add sklearn-backed KDE points-to-grid ([#184](https://github.com/jejjohnson/xrtoolz/issues/184)) ([62961b6](https://github.com/jejjohnson/xrtoolz/commit/62961b6072ea29fb31ac59ce13f07a264323b8c0))
+* **interpolate:** add temporal interpolation and climatology gap fill ([#185](https://github.com/jejjohnson/xrtoolz/issues/185)) ([8c6fcdf](https://github.com/jejjohnson/xrtoolz/commit/8c6fcdf2b8453d225a42eb9498da36f4f37d4074))
+* **metrics:** add composite RMSE/PSD helpers and 2-D resolved-scale summary ([#175](https://github.com/jejjohnson/xrtoolz/issues/175)) ([95ddab0](https://github.com/jejjohnson/xrtoolz/commit/95ddab0bd4f48b45d821249ec81d441850fa6881))
+* **transforms, viz:** add rotary spectrum + RegionScoreBarPanel + RotaryPolarizationPanel ([#174](https://github.com/jejjohnson/xrtoolz/issues/174)) ([aa3bd75](https://github.com/jejjohnson/xrtoolz/commit/aa3bd75d7f40a63fca7a164b52bf15fc6c27da21))
+* **transforms:** add KE/enstrophy spectral flux + integral scale, slope fit, compensated spectrum ([#171](https://github.com/jejjohnson/xrtoolz/issues/171)) ([e8135f8](https://github.com/jejjohnson/xrtoolz/commit/e8135f817477fcbddc10aef654ea747c70353ff6))
+
+## [0.0.6](https://github.com/jejjohnson/xrtoolz/compare/v0.0.5...v0.0.6) (2026-05-08)
+
+
+### Features
+
+* **core:** signature protocol + sequential.summary / graph.summary ([#140](https://github.com/jejjohnson/xrtoolz/issues/140)) ([b6d1996](https://github.com/jejjohnson/xrtoolz/commit/b6d19967ffd880cdb4afaee89aab4309e60d604c))
+* **geo:** add decode_cf_time, validate_time, check_dataset_coords + operators ([#169](https://github.com/jejjohnson/xrtoolz/issues/169)) ([8307ee8](https://github.com/jejjohnson/xrtoolz/commit/8307ee821380a531a7d6803c9b408d045609a28b))
+* **interpolate:** add FIR filters and along-track wavelength bandpass ([#166](https://github.com/jejjohnson/xrtoolz/issues/166)) ([507355e](https://github.com/jejjohnson/xrtoolz/commit/507355e8476c2fe160b1f53f23b109aadb0c6611))
+* **interpolate:** add Laplacian NaN gap fill primitive ([#170](https://github.com/jejjohnson/xrtoolz/issues/170)) ([7e298ae](https://github.com/jejjohnson/xrtoolz/commit/7e298ae0f50bd9fbc3550117c8906bbd50606518))
+* **metrics:** add gap-tolerant segmented along-track PSD score ([#165](https://github.com/jejjohnson/xrtoolz/issues/165)) ([e6e82ba](https://github.com/jejjohnson/xrtoolz/commit/e6e82bad56321c4bffdada68d5a1d7bdfd50fe83))
+* **metrics:** add ODC-1.4 residual binning, regional scoring, and DM test ([#168](https://github.com/jejjohnson/xrtoolz/issues/168)) ([db8e6c0](https://github.com/jejjohnson/xrtoolz/commit/db8e6c02c73b6a47f7142ef972caf8cd5b2d6427))
+* **ocn:** make `lwe` optional in `calculate_ssh_alongtrack` + document MDT-regrid pattern ([#167](https://github.com/jejjohnson/xrtoolz/issues/167)) ([852e1b7](https://github.com/jejjohnson/xrtoolz/commit/852e1b7f4a89889efe10910ea5c0df0ca99dbcee))
+* **transforms:** sklearn integration (SklearnOp, accessor, nan-mask) ([#139](https://github.com/jejjohnson/xrtoolz/issues/139)) ([690363f](https://github.com/jejjohnson/xrtoolz/commit/690363ff774955dd77ed4dbde161e0c0430ddd4c))
+
+## [0.0.5](https://github.com/jejjohnson/xrtoolz/compare/v0.0.4...v0.0.5) (2026-05-05)
+
+
+### Features
+
+* foundations bundle — operators, viz utilities, metric helpers ([#131](https://github.com/jejjohnson/xrtoolz/issues/131)) ([79c24fc](https://github.com/jejjohnson/xrtoolz/commit/79c24fcb85ce463fec417f3f042fbde0dbf81bba))
+* **viz:** v1.5 PSD plot panels + savefig/show on all panels ([#129](https://github.com/jejjohnson/xrtoolz/issues/129)) ([1b34e1d](https://github.com/jejjohnson/xrtoolz/commit/1b34e1d65bb099ab1bafde7a0397c2af84049cf1))
+
+## [0.0.4](https://github.com/jejjohnson/xrtoolz/compare/v0.0.3...v0.0.4) (2026-05-05)
+
+
+### Features
+
+* **core:** operator combinators + ocean tutorial notebooks ([#115](https://github.com/jejjohnson/xrtoolz/issues/115)) ([b1e4cb3](https://github.com/jejjohnson/xrtoolz/commit/b1e4cb3eb9945f089a3a5635977a7c86a33a9656))
+* **metrics:** add V1.3 FrequencyBandSkill + V1.4 demo + pipeline ops ([#112](https://github.com/jejjohnson/xrtoolz/issues/112)) ([0d6f3f3](https://github.com/jejjohnson/xrtoolz/commit/0d6f3f32f4721bd6875b0fa3843301b5b0db2ff8))
+
+## [0.0.3](https://github.com/jejjohnson/xrtoolz/compare/v0.0.2...v0.0.3) (2026-05-04)
+
+
+### Features
+
+* **interpolate:** coord_remap submodule (F3.2) ([#110](https://github.com/jejjohnson/xrtoolz/issues/110)) ([9a5ab15](https://github.com/jejjohnson/xrtoolz/commit/9a5ab1572797145df326f0383df2ddbebb6b4aae))
+* **interpolate:** smooth submodule (F3.3) ([#109](https://github.com/jejjohnson/xrtoolz/issues/109)) ([d331b4c](https://github.com/jejjohnson/xrtoolz/commit/d331b4c812d98f53f3739f279499fc0f6f419146))
+* **metrics:** add v1.1 SkillByLeadTime + v1.2 EvaluateByRegion ([#103](https://github.com/jejjohnson/xrtoolz/issues/103)) ([19741d2](https://github.com/jejjohnson/xrtoolz/commit/19741d2d5b311a47b1cebf13905aba8f0321a02c))
+* **metrics:** add v4 process-evaluation (physical metrics + budgets) ([#106](https://github.com/jejjohnson/xrtoolz/issues/106)) ([b46582a](https://github.com/jejjohnson/xrtoolz/commit/b46582ab85ed7a1f715d0f2bb2ba4a4ce4b3a76e))
+* **metrics:** land V2 data-representation metrics (structural / probabilistic / distributional / masked) ([#104](https://github.com/jejjohnson/xrtoolz/issues/104)) ([b64ac6f](https://github.com/jejjohnson/xrtoolz/commit/b64ac6f024c8401de6a2a7e099b7ebc009d1e4da))
+* **viz:** add v6 validation panels (viz.validation) ([#107](https://github.com/jejjohnson/xrtoolz/issues/107)) ([263fbdf](https://github.com/jejjohnson/xrtoolz/commit/263fbdf9bab4ba7cb6f2571aa67c02475d631a89))
+
+## [0.0.2](https://github.com/jejjohnson/xrtoolz/compare/v0.0.1...v0.0.2) (2026-04-30)
+
+
+### Features
+
+* **inference:** modelop + Sklearn/Jax wrappers (Epic F4) ([#100](https://github.com/jejjohnson/xrtoolz/issues/100)) ([e00db49](https://github.com/jejjohnson/xrtoolz/commit/e00db49f9074918279fe92a1de167a15ddec8370))
+* **transforms:** tier c encoder operators ([#95](https://github.com/jejjohnson/xrtoolz/issues/95)) ([#99](https://github.com/jejjohnson/xrtoolz/issues/99)) ([a28f15f](https://github.com/jejjohnson/xrtoolz/commit/a28f15f889da00400da9f0e113089f211b29375d))
+
+## 0.0.1 (2026-04-30)
+
+
+### Features
+
+* add xrtoolz.types primitives and xrtoolz.data downloaders ([#8](https://github.com/jejjohnson/xrtoolz/issues/8)) ([06d2e7b](https://github.com/jejjohnson/xrtoolz/commit/06d2e7b7dfb64e901d14ca7b16332cd6d1ac58d0))
+* **data:** aemet OpenData adapter + Station type + GeoParquet archive ([#11](https://github.com/jejjohnson/xrtoolz/issues/11)) ([b3db90f](https://github.com/jejjohnson/xrtoolz/commit/b3db90f409523d0a81fcbad992ee121d137e2c86))
+* **data:** cds in-situ surface-land / surface-marine adapter + archive ([#12](https://github.com/jejjohnson/xrtoolz/issues/12)) ([fc80abb](https://github.com/jejjohnson/xrtoolz/commit/fc80abb73096b3255fb4b7fb0d36431d33e2b2ed))
+* seed xrtoolz with core, geo primitives, ocn physics, and L1 operators ([#7](https://github.com/jejjohnson/xrtoolz/issues/7)) ([424ec89](https://github.com/jejjohnson/xrtoolz/commit/424ec891119f3a4cb1211d1e7284e3b5cb7577bd))
+* **transforms:** xrtoolz.transforms + utils.XarrayEstimator ([#15](https://github.com/jejjohnson/xrtoolz/issues/15)) ([fd92ccd](https://github.com/jejjohnson/xrtoolz/commit/fd92ccd8fdb9fa013fec170268f06537980db0dc))
+* xrtoolz.calc finite-diff primitives + ocn.kinematics refactor ([#14](https://github.com/jejjohnson/xrtoolz/issues/14)) ([a828788](https://github.com/jejjohnson/xrtoolz/commit/a82878816138195fd269b0be748b62ef9ff9fa24))
+
+## Changelog
+
+All notable changes to this project will be documented in this file.
+
+See [Conventional Commits](https://www.conventionalcommits.org/) for commit guidelines.
