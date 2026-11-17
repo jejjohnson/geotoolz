@@ -99,6 +99,42 @@
         "src/geoarray/__init__.py",
         {"type": "toml", "path": "/uv.lock", "jsonpath": "$.package[?(@.name.value==='geotoolz-array')].version"}
       ]
+    },
+    "packages/xrtoolz": {
+      "release-type": "python",
+      "package-name": "xrtoolz",
+      "component": "xrtoolz",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/xrtoolz/__init__.py",
+        {"type": "toml", "path": "/uv.lock", "jsonpath": "$.package[?(@.name.value==='xrtoolz')].version"}
+      ]
+    },
+    "packages/xrtoolz-ops": {
+      "release-type": "python",
+      "package-name": "xrtoolz-ops",
+      "component": "xrtoolz-ops",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/xrops/__init__.py",
+        {"type": "toml", "path": "/uv.lock", "jsonpath": "$.package[?(@.name.value==='xrtoolz-ops')].version"}
+      ]
+    },
+    "packages/xrtoolz-products": {
+      "release-type": "python",
+      "package-name": "xrtoolz-products",
+      "component": "xrtoolz-products",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/xrproducts/__init__.py",
+        {"type": "toml", "path": "/uv.lock", "jsonpath": "$.package[?(@.name.value==='xrtoolz-products')].version"}
+      ]
     }
   }
 }
