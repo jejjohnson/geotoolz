@@ -441,9 +441,10 @@ def test_source_describe_and_catalog():
     assert {d.dataset_id for d in src.list_datasets()} == {
         "tropomi.ch4",
         "emit.ch4",
+        "av3.ch4",
         "ghgsat.ch4",
     }
-    for name in ("tropomi.ch4", "emit.ch4", "ghgsat.ch4"):
+    for name in ("tropomi.ch4", "emit.ch4", "av3.ch4", "ghgsat.ch4"):
         assert CATALOG[name].source == "local"
         assert describe(name) is src.describe(name)
     with pytest.raises(KeyError):

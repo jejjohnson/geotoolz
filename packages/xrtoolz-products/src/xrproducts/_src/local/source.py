@@ -13,6 +13,7 @@ import xarray as xr
 from xrproducts._src.base import DatasetInfo, DataSource
 from xrproducts._src.local.catalog import LOCAL_DATASETS
 from xrproducts._src.local.openers import (
+    open_av3_ch4_l2b,
     open_emit_ch4_l2b,
     open_ghgsat_ch4_l2,
     open_tropomi_ch4_l2,
@@ -30,17 +31,22 @@ from xrproducts.types import (
 _OPENERS: dict[str, Callable[..., xr.Dataset]] = {
     "tropomi.ch4": open_tropomi_ch4_l2,
     "emit.ch4": open_emit_ch4_l2b,
+    "av3.ch4": open_av3_ch4_l2b,
     "ghgsat.ch4": open_ghgsat_ch4_l2,
 }
+
+
+# Companion files that belong to one scene and so cannot be shared.
+_PER_SCENE = ("sensitivity_path", "uncertainty_path")
 
 
 class LocalL2Source(DataSource):
     """Open satellite L2 product files from the local filesystem.
 
     ``dataset_id`` selects a product opener from :data:`LOCAL_DATASETS`
-    (``"tropomi.ch4"``, ``"emit.ch4"``, ``"ghgsat.ch4"``); the file path
-    comes through ``path=`` (or ``paths=`` for multi-granule concatenation
-    along ``time``). ``bbox`` is applied with
+    (``"tropomi.ch4"``, ``"emit.ch4"``, ``"av3.ch4"``, ``"ghgsat.ch4"``);
+    the file path comes through ``path=`` (or ``paths=`` for multi-granule
+    concatenation along ``time``). ``bbox`` is applied with
     :func:`xrproducts.subset_bbox` on the 2-D ``lon``/``lat`` coordinates
     (after matching the box to the dataset's longitude convention) and
     ``time`` as a mask on the ``time`` coordinate (or on the per-scanline
@@ -103,8 +109,8 @@ class LocalL2Source(DataSource):
         """Open one or more product files as a single flat Dataset.
 
         Args:
-            dataset_id: Catalog short name (``"tropomi.ch4"``, ``"emit.ch4"``
-                or ``"ghgsat.ch4"``).
+            dataset_id: Catalog short name (``"tropomi.ch4"``, ``"emit.ch4"``,
+                ``"av3.ch4"`` or ``"ghgsat.ch4"``).
             path: The product file. Exactly one of ``path`` / ``paths``.
             paths: Several granules / scenes, concatenated along ``time``
                 in the order given (they must share the swath or raster
@@ -131,7 +137,8 @@ class LocalL2Source(DataSource):
                 opener's own default in force (``0.5`` for TROPOMI); pass
                 ``0.0`` to keep every pixel.
             **extras: Forwarded to the opener (``keep_groups=``,
-                ``glt_path=`` for a single EMIT scene ...).
+                ``glt_path=``, ``sensitivity_path=`` or
+                ``uncertainty_path=`` for a single EMIT / AVIRIS-3 scene ...).
 
         Returns:
             The screened Dataset.
@@ -141,7 +148,8 @@ class LocalL2Source(DataSource):
                 requested variable is absent from the opened file.
             ValueError: If neither or both of ``path`` / ``paths`` are
                 given; if ``glt_paths`` does not line up with ``paths`` or
-                a single ``glt_path`` is given for several scenes; or if
+                a single ``glt_path``, ``sensitivity_path`` or
+                ``uncertainty_path`` is given for several scenes; or if
                 ``bbox`` crosses the antimeridian once expressed in the
                 dataset's longitude convention.
         """
@@ -187,6 +195,13 @@ def _per_file_extras(
     extras: dict[str, Any],
 ) -> list[dict[str, Path]]:
     """Per-file opener kwargs: one ``glt_path`` per scene from ``glt_paths``."""
+    if len(files) > 1:
+        shared = [k for k in _PER_SCENE if k in extras]
+        if shared:
+            raise ValueError(
+                f"{shared[0]}= names one scene's file and cannot serve "
+                f"{len(files)} scenes; open the scenes one at a time"
+            )
     if glt_paths is None:
         if len(files) > 1 and "glt_path" in extras:
             raise ValueError(

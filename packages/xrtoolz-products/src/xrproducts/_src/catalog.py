@@ -139,6 +139,7 @@ CATALOG: dict[str, CatalogEntry] = {
     # ---- Local files — methane L2 products ----------------------------
     "tropomi.ch4": CatalogEntry(source="local", dataset_id="tropomi.ch4"),
     "emit.ch4": CatalogEntry(source="local", dataset_id="emit.ch4"),
+    "av3.ch4": CatalogEntry(source="local", dataset_id="av3.ch4"),
     "ghgsat.ch4": CatalogEntry(source="local", dataset_id="ghgsat.ch4"),
 }
 

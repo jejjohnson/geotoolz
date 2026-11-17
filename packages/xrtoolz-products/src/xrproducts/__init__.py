@@ -11,10 +11,13 @@ Reader API:
 
 - :class:`DataSource`, :class:`DatasetInfo`, :class:`DatasetKind`
 - Adapters: :class:`CMEMSSource`, :class:`CDSSource`, :class:`AemetSource`,
-  :class:`LocalL2Source` (files already on disk; TROPOMI / EMIT / GHGSat
-  methane L2 openers :func:`open_tropomi_ch4_l2`, :func:`open_emit_ch4_l2b`,
-  :func:`open_ghgsat_ch4_l2`; gridded emission inventories through
-  :func:`open_ch4_inventory`).
+  :class:`LocalL2Source` (files already on disk; TROPOMI / EMIT / AVIRIS-3 /
+  GHGSat methane L2 openers :func:`open_tropomi_ch4_l2`,
+  :func:`open_emit_ch4_l2b`, :func:`open_av3_ch4_l2b`,
+  :func:`open_ghgsat_ch4_l2`; plume-complex outlines through
+  :func:`open_ch4_plume_complexes` and :func:`plume_outline`; gridded
+  emission inventories through :func:`open_ch4_inventory`; errors
+  :class:`ProductGridError`, :class:`MissingPropertyError`).
 - Credentials: :class:`CMEMSCredentials`, :class:`CDSCredentials`,
   :class:`AEMETCredentials`, :func:`load_cmems`, :func:`load_cds`,
   :func:`load_aemet`.
@@ -68,10 +71,15 @@ from xrproducts._src.credentials import (
 )
 from xrproducts._src.local import (
     LocalL2Source,
+    MissingPropertyError,
+    ProductGridError,
+    open_av3_ch4_l2b,
     open_ch4_inventory,
+    open_ch4_plume_complexes,
     open_emit_ch4_l2b,
     open_ghgsat_ch4_l2,
     open_tropomi_ch4_l2,
+    plume_outline,
 )
 from xrproducts.types import (
     REGISTRY,
@@ -125,7 +133,9 @@ __all__ = [
     "DepthRange",
     "Issue",
     "LocalL2Source",
+    "MissingPropertyError",
     "PressureLevels",
+    "ProductGridError",
     "Request",
     "Severity",
     "Station",
@@ -140,10 +150,13 @@ __all__ = [
     "load_aemet",
     "load_cds",
     "load_cmems",
+    "open_av3_ch4_l2b",
     "open_ch4_inventory",
+    "open_ch4_plume_complexes",
     "open_emit_ch4_l2b",
     "open_ghgsat_ch4_l2",
     "open_tropomi_ch4_l2",
+    "plume_outline",
     "register",
     "resolve",
     "subset_bbox",

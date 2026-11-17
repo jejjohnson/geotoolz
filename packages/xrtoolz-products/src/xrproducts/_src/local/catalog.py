@@ -12,6 +12,7 @@ from xrproducts._src.base import DatasetInfo, DatasetKind
 from xrproducts.types import (
     CH4_ENHANCEMENT,
     CH4_PRIOR_PROFILE,
+    CH4_SENSITIVITY,
     COLUMN_AK,
     DRY_AIR_SUBCOLUMNS,
     QA_VALUE,
@@ -52,16 +53,32 @@ LOCAL_DATASETS: dict[str, DatasetInfo] = {
     "emit.ch4": DatasetInfo(
         dataset_id="emit.ch4",
         source="local",
-        title="EMIT L2B methane enhancement (CH4ENH / CH4UNCERT)",
+        title="EMIT L2B methane enhancement (CH4ENH / CH4SENS / CH4UNCERT)",
         kind=DatasetKind.SCENE,
-        variables=(CH4_ENHANCEMENT,),
+        variables=(CH4_ENHANCEMENT, CH4_SENSITIVITY),
         temporal_coverage=("2022-08-01", "present"),
         doi="10.5067/EMIT/EMITL2BCH4ENH.001",
         license="NASA Earthdata — open",
         notes=(
-            "Per-scene plume enhancement raster (ppm m) on (y, x); "
+            "Per-scene plume enhancement raster (ppm m) on (y, x), with "
+            "the sensitivity (unitless) and uncertainty (ppm m) from their "
+            "own files when sensitivity_path / uncertainty_path are given; "
             "orthorectified through the geometric lookup table when "
             "glt_path is given. NetCDF container assumed."
+        ),
+    ),
+    "av3.ch4": DatasetInfo(
+        dataset_id="av3.ch4",
+        source="local",
+        title="AVIRIS-3 L2B methane enhancement (CH4_ORT / CH4_SNS_ORT / CH4_UNC_ORT)",
+        kind=DatasetKind.SCENE,
+        variables=(CH4_ENHANCEMENT, CH4_SENSITIVITY),
+        doi="10.3334/ORNLDAAC/2358",
+        notes=(
+            "Per-scene orthocorrected enhancement raster (ppm m, UTM) on "
+            "(y, x), with the sensitivity (unitless) and uncertainty "
+            "(ppm m) from their own files when sensitivity_path / "
+            "uncertainty_path are given. NetCDF container assumed."
         ),
     ),
     "ghgsat.ch4": DatasetInfo(

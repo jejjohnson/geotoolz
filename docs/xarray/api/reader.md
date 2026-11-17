@@ -28,16 +28,17 @@ resolve through `xrproducts.resolve` and stamp CF attributes through
 
 `LocalL2Source` is the `DataSource` for satellite L2 product files that are
 already on disk — nothing is fetched (`download()` raises
-`NotImplementedError`). The catalog short names `tropomi.ch4`, `emit.ch4` and
-`ghgsat.ch4` (`source="local"`) each map to a product *opener* that turns one
-file into a flat CF Dataset. The openers read NetCDF, and the core install
+`NotImplementedError`). The catalog short names `tropomi.ch4`, `emit.ch4`,
+`av3.ch4` and `ghgsat.ch4` (`source="local"`) each map to a product *opener*
+that turns one file into a flat CF Dataset. The openers read NetCDF, and the core install
 ships no backend for it — install the `local` extra
 (`pip install 'xrtoolz-products[local]'`, which adds `netcdf4`):
 
 | Short name | Opener | Kind | Layout |
 |---|---|---|---|
 | `tropomi.ch4` | `open_tropomi_ch4_l2(path, qa_min=0.5, keep_groups=False)` | `DatasetKind.SWATH` | `(time, scanline, ground_pixel[, layer, level, corner])` |
-| `emit.ch4` | `open_emit_ch4_l2b(path, glt_path=None)` | `DatasetKind.SCENE` | `(time, y, x)` |
+| `emit.ch4` | `open_emit_ch4_l2b(path, sensitivity_path=None, uncertainty_path=None, glt_path=None)` | `DatasetKind.SCENE` | `(time, y, x)` |
+| `av3.ch4` | `open_av3_ch4_l2b(path, sensitivity_path=None, uncertainty_path=None)` | `DatasetKind.SCENE` | `(time, y, x)` |
 | `ghgsat.ch4` | `open_ghgsat_ch4_l2(path)` | `DatasetKind.SCENE` | `(time, y, x)` |
 
 **TROPOMI.** The four product groups (`PRODUCT` and
@@ -67,6 +68,12 @@ geometric lookup table (`glt_x` / `glt_y`, 1-based, `0` = no data) and the
 scalar `time` variable on the raster is carried through as the scene
 timestamp. Several scenes take one lookup table each via
 `glt_paths=[...]`, zipped with `paths=[...]`.
+
+`sensitivity_path` and `uncertainty_path` add `ch4_sensitivity` (unitless) and `ch4_uncertainty` (ppm m) from the product's separate `EMIT_L2B_CH4SENS` and `EMIT_L2B_CH4UNCERT` files. Each companion holds the registry name or a single `(y, x)` variable, and must have the enhancement's `(y, x)` shape and the same `lon` / `lat` / `x` / `y` to 1e-6 wherever both files carry them; otherwise `ProductGridError` names the file, and nothing is resampled. With a lookup table, the companions go through the same table as the enhancement. The enhancement is returned as stored (the matched-filter score, never divided by the sensitivity), and all three rasters are floats with the products' -9999 no-data value as `NaN` (recorded as `source_fill_value`). The uncertainty carries `uncertainty_of = "truth"`, meaning the standard deviation of the enhancement divided by the sensitivity, which is how JPL's SPIIRE uses it; the user guides do not say, so treat it as unverified.
+
+**AVIRIS-3.** `open_av3_ch4_l2b` reads the AVIRIS-3 L2B greenhouse-gas scenes (ORNL DAAC, doi:10.3334/ORNLDAAC/2358: `*_CH4_ORT`, `*_CH4_SNS_ORT` and `*_CH4_UNC_ORT`, orthocorrected in UTM) converted to NetCDF, and returns the EMIT opener's variables, dims and units. It has no lookup table, squeezes a length-1 `band` axis, sets the companions' flare marker -1 to `NaN` (`flare_value`), and takes the scene time from the file or else from the `AV3YYYYMMDDthhmmss` flight prefix of the file name.
+
+**Plume complexes.** `open_ch4_plume_complexes(path)` reads a plume-complex GeoJSON (the EMIT DAAC `EMIT_L2B_CH4PLMMETA_*.json`, or JPL's multi-plume lists) into a Dataset on `plume`, indexed by `"Plume ID"`, with `time` (`"UTC Time Observed"`), `scene_ids` (`"Scene FIDs"` or `"fids"`, comma-joined), the pseudo-origin `origin_lon` / `origin_lat` (`"Psuedo-Origin"`, `NaN` when absent, as in the DAAC files) and the exterior rings as a CF contiguous ragged array (`vertex_count` on `plume`, `outline_lon` / `outline_lat` on `vertex`). `plume_outline(plumes, plume_id)` returns one ring as `(lon, lat)` rows. `Point` features are skipped, a multi-polygon keeps its largest polygon (`attrs["dropped_polygons"]`), and a feature without an identifier or a geometry raises `MissingPropertyError`. See the [methane plume products recipe](../recipes/methane_plume_products.md).
 
 **GHGSat.** A per-plume NetCDF with `xch4` (ppb) and/or `ch4_enhancement` on
 `(y, x)` and 2-D `latitude` / `longitude`, promoted to `lon` / `lat` coords.
