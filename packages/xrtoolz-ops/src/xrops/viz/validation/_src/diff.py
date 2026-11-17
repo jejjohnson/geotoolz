@@ -81,7 +81,7 @@ class SpatialDiffPanel(_ValidationPanel):
     Raises:
         ValueError: The two inputs are not on the same grid.
 
-    Example:
+    Examples:
         >>> import matplotlib
         >>> matplotlib.use("Agg")
         >>> import numpy as np, xarray as xr

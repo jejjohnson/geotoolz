@@ -38,15 +38,11 @@ live in `xrops.combinators`.
 
 ## Sequential pipelines
 
-::: pipekit_ops.Sequential
+[`Sequential`](../../operators/api/core.md#pipekit_ops.Sequential) is pipekit's, documented with the geotoolz operators.
 
 ## Functional Graph API
 
-::: pipekit_ops.Input
-
-::: pipekit_ops.Node
-
-::: pipekit_ops.Graph
+[`Input`](../../operators/api/core.md#pipekit_ops.Input), [`Node`](../../operators/api/core.md#pipekit_ops.Node) and [`Graph`](../../operators/api/core.md#pipekit_ops.Graph) are pipekit's, documented with the geotoolz operators.
 
 ## Observation taps
 
@@ -54,7 +50,7 @@ live in `xrops.combinators`.
 side-effecting callback (logging, plotting, assertions) without altering
 the data flowing through.
 
-::: pipekit_ops.Tap
+It is documented with the geotoolz operators: [`Tap`](../../operators/api/core.md#pipekit_ops.Tap).
 
 ## xarray-Dataset combinators
 
