@@ -23,6 +23,7 @@ from xrproducts._src.local.openers._common import (
     attach_companions,
     attach_scene_time,
     finish_rasters,
+    lonlat_from_projection,
     open_raster,
     pick_raster,
 )
@@ -51,9 +52,11 @@ def open_av3_ch4_l2b(
     ``(time, y, x)`` grid. Each file holds the registry name or a single
     ``(y, x)`` variable (a converted GeoTIFF band); a length-1 ``band``
     axis is squeezed out. The companions must have the enhancement's
-    ``(y, x)`` shape and the same ``lon`` / ``lat`` / ``x`` / ``y`` to
-    1e-6 where both carry them; nothing is resampled. The scenes are
-    orthocorrected already, so there is no lookup table.
+    ``(y, x)`` shape, the same CRS and the same ``lon`` / ``lat`` / ``x`` /
+    ``y`` to 1e-6 where both carry them; nothing is resampled. The scenes
+    are orthocorrected already, so there is no lookup table. A UTM scene
+    with a grid mapping gets 2-D ``lon`` / ``lat`` from its ``x`` / ``y``
+    (``pyproj``), so ``LocalL2Source.open(..., bbox=...)`` can subset it.
 
     All three rasters are floats with -9999 as ``NaN``
     (``source_fill_value``); the companions' flare marker -1 is ``NaN``
@@ -73,7 +76,8 @@ def open_av3_ch4_l2b(
     Raises:
         KeyError: If a file has neither the registry name nor a single
             ``(y, x)`` variable.
-        ProductGridError: If a companion is not on the enhancement's grid.
+        ProductGridError: If a companion is not on the enhancement's grid
+            or in its CRS.
 
     Example:
         >>> prefix = "AV320231006t190153_020_L2B_GHG_6395d427"
@@ -91,6 +95,7 @@ def open_av3_ch4_l2b(
         ds, sensitivity_path=sensitivity_path, uncertainty_path=uncertainty_path
     )
     ds = finish_rasters(ds, flare_value=FLARE_VALUE)
+    ds = lonlat_from_projection(ds)
     ds = attach_scene_time(ds)
     if "time" in ds.dims:
         return ds

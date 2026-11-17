@@ -175,6 +175,12 @@ class LocalL2Source(DataSource):
                 raise KeyError(f"{missing} not in dataset; have {sorted(ds.data_vars)}")
             ds = ds.drop_vars([n for n in ds.data_vars if n not in keep])
         if bbox is not None:
+            if "lon" not in ds.variables or "lat" not in ds.variables:
+                raise ValueError(
+                    "bbox needs 2-D lon / lat coordinates, and this dataset has "
+                    "none: a projected raster without a grid mapping cannot be "
+                    "geolocated; open it without bbox and select on x / y"
+                )
             bbox = _match_lon_convention(bbox, ds["lon"])
             if bbox.crosses_antimeridian:
                 raise ValueError(

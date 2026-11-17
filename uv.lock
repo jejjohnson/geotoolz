@@ -7108,6 +7108,7 @@ grib = [
 ]
 local = [
     { name = "netcdf4" },
+    { name = "pyproj" },
 ]
 
 [package.dev-dependencies]
@@ -7141,6 +7142,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.1" },
     { name = "pyarrow", marker = "extra == 'aemet'", specifier = ">=24.0.0" },
     { name = "pyarrow", marker = "extra == 'cds-insitu'", specifier = ">=24.0.0" },
+    { name = "pyproj", marker = "extra == 'local'", specifier = ">=3.6" },
     { name = "xarray", specifier = ">=2024.10" },
 ]
 provides-extras = ["cmems", "cds", "grib", "cds-insitu", "aemet", "local"]

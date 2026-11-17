@@ -23,6 +23,10 @@ PRODUCT_FILL = -9999.0
 #: Largest coordinate difference two rasters on one grid may show.
 GRID_ATOL = 1e-6
 _GRID_COORDS = ("lon", "lat", "x", "y")
+# Where a converted GeoTIFF keeps its CRS: the grid-mapping variable rioxarray
+# writes, and the CF / GDAL attributes that hold the WKT.
+_GRID_MAPPINGS = ("spatial_ref", "crs")
+_CRS_ATTRS = ("crs_wkt", "spatial_ref")
 _UNCERTAINTY_ATTRS = {
     "long_name": "Methane enhancement uncertainty (1-sigma)",
     "units": "ppm m",
@@ -129,12 +133,80 @@ def pick_raster(ds: xr.Dataset, names: Sequence[str], path: str | Path) -> str:
     )
 
 
+def grid_crs(ds: xr.Dataset) -> str | None:
+    """The CRS of a raster's grid mapping, as whitespace-normalised WKT.
+
+    The grid-mapping variable is the one a data variable names in its
+    ``grid_mapping`` attribute or encoding, else ``spatial_ref`` or ``crs``
+    (what ``rioxarray`` writes for a GeoTIFF); its WKT is the ``crs_wkt``
+    or ``spatial_ref`` attribute.
+
+    Args:
+        ds: Raster Dataset.
+
+    Returns:
+        The WKT, or ``None`` when the raster carries no grid mapping.
+    """
+    named = [
+        da.attrs.get("grid_mapping") or da.encoding.get("grid_mapping")
+        for da in ds.data_vars.values()
+    ]
+    for name in (*named, *_GRID_MAPPINGS):
+        if not name or name not in ds.variables:
+            continue
+        attrs = ds[name].attrs
+        for key in _CRS_ATTRS:
+            if key in attrs:
+                return " ".join(str(attrs[key]).split())
+    return None
+
+
+def lonlat_from_projection(ds: xr.Dataset) -> xr.Dataset:
+    """Add 2-D ``lon`` / ``lat`` to a projected raster that lacks them.
+
+    The projected ``x`` / ``y`` centres are transformed from the raster's
+    grid mapping (:func:`grid_crs`) to WGS 84 longitude and latitude with
+    ``pyproj``, so a projected scene (AVIRIS-3, in UTM) can be subset by a
+    geographic box like a swath. A raster that already has ``lon`` and
+    ``lat``, or has no grid mapping or no ``x`` / ``y``, is returned as is.
+
+    Args:
+        ds: Raster Dataset on ``(y, x)``.
+
+    Returns:
+        The Dataset with ``lon`` / ``lat`` coordinates on ``(y, x)``.
+
+    Raises:
+        ImportError: Without ``pyproj``, with the extra to install.
+    """
+    if "lon" in ds.variables and "lat" in ds.variables:
+        return ds
+    crs = grid_crs(ds)
+    if crs is None or "x" not in ds.coords or "y" not in ds.coords:
+        return ds
+    try:
+        from pyproj import Transformer
+    except ImportError as exc:  # pragma: no cover - pyproj ships with [local]
+        raise ImportError(
+            "Geolocating a projected raster requires the 'pyproj' package. "
+            "Install with: pip install 'xrtoolz-products[local]'"
+        ) from exc
+    transformer = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+    x, y = np.meshgrid(ds["x"].values, ds["y"].values)
+    lon, lat = transformer.transform(x, y)
+    return ds.assign_coords(
+        lon=(("y", "x"), lon, {"standard_name": "longitude", "units": "degrees_east"}),
+        lat=(("y", "x"), lat, {"standard_name": "latitude", "units": "degrees_north"}),
+    )
+
+
 def require_same_grid(scene: xr.Dataset, other: xr.Dataset, path: str | Path) -> None:
     """Check that ``other`` is on the grid of ``scene``.
 
-    The ``(y, x)`` shapes must match, and every coordinate among ``lon``,
-    ``lat``, ``x`` and ``y`` that both carry must agree to within
-    :data:`GRID_ATOL`.
+    The ``(y, x)`` shapes must match, the grid mappings must name the same
+    CRS when both carry one (equal projected coordinates in two UTM zones
+    are two places), and every coordinate among ``lon``, ``lat``, ``x`` and
+    ``y`` that both carry must agree to within :data:`GRID_ATOL`.
 
     Args:
         scene: The enhancement raster.
@@ -142,7 +214,7 @@ def require_same_grid(scene: xr.Dataset, other: xr.Dataset, path: str | Path) ->
         path: The companion's file, named in the error.
 
     Raises:
-        ProductGridError: If the shapes or the coordinates differ.
+        ProductGridError: If the shapes, the CRS or the coordinates differ.
     """
     shape = (scene.sizes.get("y"), scene.sizes.get("x"))
     other_shape = (other.sizes.get("y"), other.sizes.get("x"))
@@ -150,6 +222,12 @@ def require_same_grid(scene: xr.Dataset, other: xr.Dataset, path: str | Path) ->
         raise ProductGridError(
             f"{path!s} is on a {other_shape[0]} by {other_shape[1]} (y, x) grid; "
             f"the enhancement is on {shape[0]} by {shape[1]}"
+        )
+    crs = grid_crs(scene)
+    other_crs = grid_crs(other)
+    if crs is not None and other_crs is not None and crs != other_crs:
+        raise ProductGridError(
+            f"{path!s} is in another coordinate reference system than the enhancement"
         )
     for name in _GRID_COORDS:
         if name not in scene.variables or name not in other.variables:

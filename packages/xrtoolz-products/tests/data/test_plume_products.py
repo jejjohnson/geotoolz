@@ -16,6 +16,7 @@ import xarray as xr
 import xrproducts
 import xrproducts.types
 from xrproducts import (
+    BBox,
     LocalL2Source,
     MissingPropertyError,
     ProductGridError,
@@ -85,29 +86,52 @@ def emit_scene(tmp_path: Path) -> dict[str, Path]:
     return files
 
 
+# Projected centres of the AVIRIS-3 scene [m]: x = 500 km is the central
+# meridian of its UTM zone.
+AV3_X = 500_000.0 + 5.0 * np.arange(N)
+AV3_Y = 3_600_000.0 - 5.0 * np.arange(N)
+
+
+def _utm_wkt(zone: int) -> str:
+    pyproj = pytest.importorskip("pyproj")
+    # WGS 84 / UTM zone <zone>N
+    return pyproj.CRS.from_epsg(32600 + zone).to_wkt()
+
+
+def _av3_band(values: np.ndarray, path: Path, *, wkt: str | None) -> Path:
+    """A converted AVIRIS-3 GeoTIFF: one band on (band, y, x), as rioxarray writes."""
+    data = xr.Dataset(
+        {"band_data": (("band", "y", "x"), values[None])},
+        coords={"band": [1], "y": AV3_Y, "x": AV3_X},
+    )
+    if wkt is not None:
+        data = data.assign_coords(
+            spatial_ref=((), 0, {"crs_wkt": wkt, "spatial_ref": wkt})
+        )
+        data["band_data"].attrs["grid_mapping"] = "spatial_ref"
+    data.to_netcdf(path)
+    return path
+
+
 @pytest.fixture
 def av3_scene(tmp_path: Path) -> dict[str, Path]:
-    """AVIRIS-3 scene as converted GeoTIFFs: one generic band on (band, y, x)."""
+    """AVIRIS-3 scene in UTM zone 13N, as converted GeoTIFFs."""
     prefix = tmp_path / "AV320231006t190153_020_L2B_GHG_6395d427"
     files = {
         "enh": Path(f"{prefix}_CH4_ORT.nc"),
         "sens": Path(f"{prefix}_CH4_SNS_ORT.nc"),
         "unc": Path(f"{prefix}_CH4_UNC_ORT.nc"),
     }
-    x = 500_000.0 + 5.0 * np.arange(N)
-    y = 3_600_000.0 - 5.0 * np.arange(N)
+    wkt = _utm_wkt(13)
     for key, values in (
         ("enh", _enhancement()),
         ("sens", _sensitivity()),
         ("unc", _uncertainty()),
     ):
-        band = values[None].copy()
+        band = values.copy()
         if key != "enh":
-            band[0, 3, 3] = -1.0  # flare marker
-        xr.Dataset(
-            {"band_data": (("band", "y", "x"), band)},
-            coords={"band": [1], "y": y, "x": x},
-        ).to_netcdf(files[key])
+            band[3, 3] = -1.0  # flare marker
+        _av3_band(band, files[key], wkt=wkt)
     return files
 
 
@@ -331,6 +355,52 @@ def test_av3_companion_on_another_grid_raises(tmp_path, av3_scene):
     ).to_netcdf(other)
     with pytest.raises(ProductGridError, match=r"other\.nc"):
         open_av3_ch4_l2b(av3_scene["enh"], uncertainty_path=other)
+
+
+def test_av3_companion_in_another_utm_zone_raises(tmp_path, av3_scene):
+    # the same eastings and northings in zone 14 are another place
+    other = _av3_band(_uncertainty(), tmp_path / "zone14.nc", wkt=_utm_wkt(14))
+    with pytest.raises(ProductGridError, match="coordinate reference system"):
+        open_av3_ch4_l2b(av3_scene["enh"], uncertainty_path=other)
+
+
+def test_av3_gets_lonlat_from_its_utm_grid(av3_scene):
+    pyproj = pytest.importorskip("pyproj")
+    ds = open_av3_ch4_l2b(av3_scene["enh"])
+    assert ds["lon"].dims == ("y", "x")
+    assert ds["lat"].dims == ("y", "x")
+    # x = 500 km lies on the zone's central meridian, 105° W for zone 13
+    np.testing.assert_allclose(ds["lon"].values[:, 0], -105.0, atol=1e-9)
+    # lon / lat project back onto the scene's own x / y
+    to_utm = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:32613", always_xy=True)
+    x, y = to_utm.transform(ds["lon"].values, ds["lat"].values)
+    np.testing.assert_allclose(x, np.broadcast_to(AV3_X, (N, N)), atol=1e-6)
+    np.testing.assert_allclose(y, np.broadcast_to(AV3_Y[:, None], (N, N)), atol=1e-6)
+
+
+def test_source_subsets_av3_by_a_geographic_box(av3_scene):
+    ds = open_av3_ch4_l2b(av3_scene["enh"])
+    lon = ds["lon"].values
+    lat = ds["lat"].values
+    # the western half of the scene's columns
+    box = BBox(
+        lon_min=float(lon.min()) - 1e-6,
+        lon_max=float(lon[:, N // 2 - 1].max()) + 1e-9,
+        lat_min=float(lat.min()) - 1e-6,
+        lat_max=float(lat.max()) + 1e-6,
+    )
+    subset = LocalL2Source().open("av3.ch4", path=av3_scene["enh"], bbox=box)
+    assert subset.sizes["x"] < N
+    kept = subset["lon"].values[np.isfinite(subset["lon"].values)]
+    assert kept.max() <= box.lon_max
+
+
+def test_bbox_on_a_raster_without_geolocation_raises(tmp_path):
+    path = tmp_path / "AV320231006t190153_020_L2B_GHG_6395d427_CH4_ORT.nc"
+    _av3_band(_enhancement(), path, wkt=None)
+    box = BBox(lon_min=-106.0, lon_max=-104.0, lat_min=32.0, lat_max=33.0)
+    with pytest.raises(ValueError, match="lon / lat"):
+        LocalL2Source().open("av3.ch4", path=path, bbox=box)
 
 
 def test_source_opens_av3_and_refuses_shared_companions(av3_scene):
