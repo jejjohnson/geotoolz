@@ -2,11 +2,13 @@
 
 geotoolz sits in GeoStack, tier 1 (operators on arrays and geoarray carriers).
 Its packages must not import or depend on filterax, finitevolX, gauss_flows,
-gaussx, geonnax, kernellib, optax_bayes, plumax, pyrox, radtrax, somax,
-spectraldiffx, vardax, xrtoolz, xtremax: they sit above it, or beside it in the
-same tier. Every import of a stack library is declared, as a dependency or an
-extra, and what importing a package runs needs a dependency. Its packages form
-no cycle. Dev, docs and tutorial dependency groups are not checked.
+geonnax, kernellib, manipy, optax_bayes, plumax, pyrox, radtrax, sesmax,
+spectraldiffx, vardax, xtremax: they sit above it, or beside it in the same
+tier. Every import of a stack library is declared, as a dependency or an extra,
+and what importing a package runs needs a dependency. Its packages form no
+cycle. Dev, docs and tutorial dependency groups are not checked. Inside
+geotoolz, xrtoolz, xrtoolz-ops, xrtoolz-products sit in tier 2, so no geotoolz
+package of a lower tier may import or depend on them.
 
 The rules: https://github.com/jejjohnson/geostack/blob/main/docs/api/dependency_graph.md
 
@@ -58,6 +60,18 @@ PACKAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         "packages/geotoolz-products/pyproject.toml",
         ("packages/geotoolz-products/src/geoproducts",),
     ),
+    "xrtoolz": (
+        "packages/xrtoolz/pyproject.toml",
+        ("packages/xrtoolz/src/xrtoolz",),
+    ),
+    "xrtoolz-ops": (
+        "packages/xrtoolz-ops/pyproject.toml",
+        ("packages/xrtoolz-ops/src/xrops",),
+    ),
+    "xrtoolz-products": (
+        "packages/xrtoolz-products/pyproject.toml",
+        ("packages/xrtoolz-products/src/xrproducts",),
+    ),
 }
 
 #: stack libraries geotoolz may not use: import name -> distribution
@@ -65,9 +79,9 @@ FORBIDDEN: dict[str, str] = {
     "filterax": "filterax",
     "finitevolx": "finitevolx",
     "gauss_flows": "gauss-flows",
-    "gaussx": "gaussx",
     "geonnax": "geonnax",
     "kernellib": "kernellib",
+    "manipy": "manipy-jax",
     "optax_bayes": "optax-bayes",
     "plumax": "plumax",
     "pyrox": "pyrox",
@@ -75,17 +89,18 @@ FORBIDDEN: dict[str, str] = {
     "pyrox_lgm": "pyrox-lgm",
     "pyrox_nn": "pyrox-nn",
     "radtrax": "radtrax",
-    "somax": "somax",
+    "sesmax": "sesmax",
+    "sesmax_core": "sesmax-core",
     "spectraldiffx": "spectraldiffx",
     "vardax": "vardax",
-    "xrops": "xrtoolz-ops",
-    "xrproducts": "xrtoolz-products",
-    "xrtoolz": "xrtoolz",
     "xtremax": "xtremax",
 }
 
 #: stack libraries geotoolz may use: import name -> distribution
 ALLOWED: dict[str, str] = {
+    "argminax": "argminax",
+    "functax": "functax",
+    "gaussx": "gaussx",
     "geoarray": "geotoolz-array",
     "geocatalog": "geotoolz-catalog",
     "geocloud": "geotoolz-cloud",
@@ -94,13 +109,58 @@ ALLOWED: dict[str, str] = {
     "geoproducts": "geotoolz-products",
     "georeader": "georeader-spaceml",
     "geotoolz": "geotoolz",
-    "pipekit_ops": "pipekit-ops",
+    "integrix": "integrix",
+    "pipekit": "pipekit",
     "pipekit_array": "pipekit-array",
     "pipekit_cycle": "pipekit-cycle",
     "pipekit_evaluate": "pipekit-evaluate",
     "pipekit_experiment": "pipekit-experiment",
     "pipekit_jax": "pipekit-jax",
+    "pipekit_ops": "pipekit-ops",
     "pipekit_train": "pipekit-train",
+    "xrops": "xrtoolz-ops",
+    "xrproducts": "xrtoolz-products",
+    "xrtoolz": "xrtoolz",
+}
+
+#: packages of geotoolz that one of its packages may not use, because they sit in
+#: a higher package tier: distribution -> {import name: distribution}
+FORBIDDEN_INSIDE: dict[str, dict[str, str]] = {
+    "geotoolz": {
+        "xrops": "xrtoolz-ops",
+        "xrproducts": "xrtoolz-products",
+        "xrtoolz": "xrtoolz",
+    },
+    "geotoolz-array": {
+        "xrops": "xrtoolz-ops",
+        "xrproducts": "xrtoolz-products",
+        "xrtoolz": "xrtoolz",
+    },
+    "geotoolz-catalog": {
+        "xrops": "xrtoolz-ops",
+        "xrproducts": "xrtoolz-products",
+        "xrtoolz": "xrtoolz",
+    },
+    "geotoolz-cloud": {
+        "xrops": "xrtoolz-ops",
+        "xrproducts": "xrtoolz-products",
+        "xrtoolz": "xrtoolz",
+    },
+    "geotoolz-ops": {
+        "xrops": "xrtoolz-ops",
+        "xrproducts": "xrtoolz-products",
+        "xrtoolz": "xrtoolz",
+    },
+    "geotoolz-patcher": {
+        "xrops": "xrtoolz-ops",
+        "xrproducts": "xrtoolz-products",
+        "xrtoolz": "xrtoolz",
+    },
+    "geotoolz-products": {
+        "xrops": "xrtoolz-ops",
+        "xrproducts": "xrtoolz-products",
+        "xrtoolz": "xrtoolz",
+    },
 }
 
 #: imports left undeclared on purpose, kept in step with geostack:
@@ -306,12 +366,7 @@ def test_packages_are_current() -> None:
     found = {}
     for pyproject in pyprojects or [ROOT / "pyproject.toml"]:
         meta = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-        name = _norm(_project(meta)["name"])
-        # The xrtoolz packages share this workspace and are checked by
-        # their own lane's guard.
-        if name.startswith("xrtoolz"):
-            continue
-        found[name] = (
+        found[_norm(_project(meta)["name"])] = (
             str(pyproject.relative_to(ROOT)),
             _roots(meta, pyproject.parent),
         )
@@ -322,12 +377,13 @@ def test_packages_are_current() -> None:
 
 @pytest.mark.parametrize("dist", sorted(PACKAGES))
 def test_no_import_points_up(dist: str) -> None:
+    forbidden = FORBIDDEN | FORBIDDEN_INSIDE.get(dist, {})
     found = sorted(
         {
-            f"{f.relative_to(ROOT)}:{line} imports {top} ({FORBIDDEN[top]})"
+            f"{f.relative_to(ROOT)}:{line} imports {top} ({forbidden[top]})"
             for f, imports in _modules(PACKAGES[dist][1]).values()
             for name, _, line in imports
-            if (top := name.split(".")[0]) in FORBIDDEN
+            if (top := name.split(".")[0]) in forbidden
         }
     )
     assert not found, "\n".join(found)
@@ -336,7 +392,8 @@ def test_no_import_points_up(dist: str) -> None:
 @pytest.mark.parametrize("dist", sorted(PACKAGES))
 def test_no_dependency_points_up(dist: str) -> None:
     base, extras = _declared(PACKAGES[dist][0])
-    found = sorted((base | extras) & set(FORBIDDEN.values()))
+    forbidden = FORBIDDEN | FORBIDDEN_INSIDE.get(dist, {})
+    found = sorted((base | extras) & set(forbidden.values()))
     assert not found, f"{dist} declares {found}"
 
 
