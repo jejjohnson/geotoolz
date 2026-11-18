@@ -28,10 +28,10 @@ declare.
 |---|---|
 | pointwise | 99 |
 | spatial | 96 |
-| spectral | 35 |
+| spectral | 36 |
 | spectro-temporal | 14 |
 | spatio-temporal | 11 |
-| spatio-spectral | 9 |
+| spatio-spectral | 10 |
 | spatio-spectro-temporal | 5 |
 | temporal | 4 |
 | volumetric | 4 |
@@ -234,6 +234,8 @@ declare.
 | `plume` | `WindAdvectionCone` | pointwise |  |  |  | grid only |
 | `qa` | `CloudSEN12` | spatio-spectral | band reduce | global |  |  |
 | `qa` | `DecodeBitmask` | pointwise | band expand |  |  |  |
+| `qa` | `EMITBandMask` | spatio-spectral | band reduce | global |  |  |
+| `qa` | `EMITL2AMask` | spectral | band reduce |  |  |  |
 | `qa` | `LandsatQA_PIXEL` | pointwise | band select |  |  |  |
 | `qa` | `MODISStateQA` | pointwise | band select |  |  |  |
 | `qa` | `MaskCirrus` | pointwise | band select |  |  |  |

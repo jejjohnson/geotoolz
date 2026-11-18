@@ -10,6 +10,10 @@ The canonical home for QA-band decoding:
    test membership against a set of integer field-values. Different from
    ``mask_from_qa_bits`` because that helper OR-s individual bits, which
    is wrong when the bits form a single contiguous categorical field.
+4. **`flagged_band_count`** and **`mask_from_band_count`** — EMIT's
+   packed per-band mask: the number of flagged bands per pixel, and the
+   dilated saturation mask above each detector column's baseline. These
+   two are NumPy-only (a lookup table and a SciPy distance transform).
 
 Each decoder is element-wise and written against the array namespace of
 its input, so the QA operators run it through pipekit-array's ``KernelOp``
@@ -27,6 +31,8 @@ References:
     MODIS Surface Reflectance User's Guide (MOD09 / MYD09),
     Vermote, 2015 — Table 12 (``state_1km``).
     ESA, Sentinel-2 MSI L1C Product Specification — QA60 bit table.
+    JPL, "EMIT L2A Data Product User Guide", V1.0, JPL D-107863, 2022 —
+    Table 3-3 (``band_mask``).
 """
 
 from __future__ import annotations
@@ -34,9 +40,22 @@ from __future__ import annotations
 from collections.abc import Sequence
 from itertools import pairwise
 
+import einx
 import numpy as np
-from jaxtyping import Bool, Int
+from jaxtyping import Bool, Int, UInt8
 from pipekit_array import array_namespace
+from scipy import ndimage
+
+
+#: Bits set in each byte value 0 to 255.
+_POPCOUNT: Int[np.ndarray, " value"] = einx.sum(
+    "value [bit]",
+    einx.rearrange(
+        "(value bit) -> value bit",
+        np.unpackbits(np.arange(256, dtype=np.uint8)),
+        bit=8,
+    ).astype(np.int64),
+)
 
 
 def mask_from_qa_bits(
@@ -180,6 +199,125 @@ def mask_from_bit_field(
     field = (_as_int64(qa) >> shift) & ((1 << width) - 1)
     out = _isin(field, values_tuple)
     return ~out if invert else out
+
+
+def flagged_band_count(
+    bandmask: UInt8[np.ndarray, "row col byte"],
+) -> Int[np.ndarray, "row col"]:
+    """Number of bands flagged in each pixel's packed band mask.
+
+    nᵢⱼ = ∑_k b_ijk, the bits set across the pixel's bytes.
+
+    EMIT's ``band_mask`` packs one bit per spectral band into 36 bytes for
+    its 285 bands (EMIT L2A User Guide, Table 3-3); a set bit marks a band
+    interpolated over a bad detector element or saturation. The count does
+    not depend on the bit order within a byte.
+
+    Algorithm:
+        1. Look up the bits set in every byte value in a 256-entry table.
+        2. Gather it for each byte and sum over the bytes.
+
+    The table avoids ``np.unpackbits``, which would allocate eight times
+    the input.
+
+    Args:
+        bandmask: Packed band mask, the bytes on the last axis.
+
+    Returns:
+        The count nᵢⱼ, ``int64``.
+
+    Examples:
+        >>> bandmask = np.array([[[0b1010_0000, 0b0000_0001]]], dtype=np.uint8)
+        >>> flagged_band_count(bandmask).tolist()
+        [[3]]
+    """
+    packed = np.asarray(bandmask)
+    if packed.dtype != np.uint8:
+        raise TypeError(
+            f"flagged_band_count: bandmask must be uint8, got {packed.dtype}"
+        )
+    # bits set in each byte of each pixel
+    flagged = _POPCOUNT[packed]
+    # nᵢⱼ = ∑_k b_ijk
+    return einx.sum("row col [byte]", flagged)
+
+
+def mask_from_band_count(
+    count: Int[np.ndarray, "row col"],
+    *,
+    valid: Bool[np.ndarray, "row col"] | None = None,
+    dilation: int = 10,
+) -> Bool[np.ndarray, "row col"]:
+    """Pixels with more flagged bands than their column's baseline, dilated.
+
+    satᵢⱼ = [nᵢⱼ - m_j > 0] with m_j = minᵢ nᵢⱼ over valid rows, grown by
+    ``dilation`` pixels in city-block distance.
+
+    Algorithm:
+        1. Take each column's minimum count over its valid rows.
+        2. Flag valid pixels above their column's minimum.
+        3. Threshold the city-block distance to the flagged pixels.
+
+    EMIT is a push-broom instrument, so column j is one cross-track detector
+    element in every row. A dead or hot element flags the same bands down
+    its whole column, so the column minimum is the static part and what a
+    pixel has above it is transient, in practice saturation. Compute the
+    mask in swath geometry, before any orthorectification: on a map grid
+    the columns no longer follow the detector. ``dilation=10`` is SPIIRE's
+    default, 600 m on EMIT's 60 m pixels.
+
+    Invalid pixels never set a baseline and are never flagged, and a column
+    with no valid row is all ``False``; the dilation may still reach into
+    valid pixels next to them.
+
+    Args:
+        count: Flagged-band count nᵢⱼ, from :func:`flagged_band_count`.
+        valid: Pixels to use; ``None`` uses all.
+        dilation: Growth radius r in pixels.
+
+    Returns:
+        The mask; True means mask out.
+
+    Raises:
+        ValueError: If ``dilation`` is negative, or ``valid`` does not match
+            the shape of ``count``.
+
+    Examples:
+        A column with three bands flagged in every row, and one pixel with
+        two more:
+
+        >>> count = np.full((5, 5), 3)
+        >>> count[2, 2] = 5
+        >>> mask = mask_from_band_count(count, dilation=1)
+        >>> mask.astype(int).tolist()[1:4]
+        [[0, 0, 1, 0, 0], [0, 1, 1, 1, 0], [0, 0, 1, 0, 0]]
+    """
+    if dilation < 0:
+        raise ValueError(f"mask_from_band_count: dilation must be >= 0, got {dilation}")
+    counts = np.asarray(count)
+    if valid is None:
+        valid_mask = np.ones(counts.shape, dtype=bool)
+    else:
+        valid_mask = np.asarray(valid, dtype=bool)
+        if valid_mask.shape != counts.shape:
+            raise ValueError(
+                "mask_from_band_count: valid has shape "
+                f"{valid_mask.shape}, count has {counts.shape}"
+            )
+    # invalid pixels never set a baseline
+    largest = np.iinfo(np.int64).max
+    masked = np.where(valid_mask, counts.astype(np.int64), largest)
+    # m_j = minᵢ nᵢⱼ over valid rows
+    baseline = einx.min("[row] col", masked)
+    # satᵢⱼ = [nᵢⱼ - m_j > 0], valid pixels only
+    excess = einx.subtract("row col, col -> row col", masked, baseline)
+    saturated = valid_mask & (excess > 0)
+    if not bool(saturated.any()):
+        return saturated
+    # city-block distance to the nearest saturated pixel
+    distance = ndimage.distance_transform_cdt(~saturated, metric="taxicab")
+    # maskᵢⱼ = [d₁((i, j), sat) ≤ r]
+    return distance <= dilation
 
 
 def _as_int64(qa: Int[np.ndarray, "*dims"]) -> Int[np.ndarray, "*dims"]:

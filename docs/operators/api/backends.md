@@ -11,7 +11,7 @@ NumPy result on a JAX carrier and trace once under `jax.jit` for
 same-shape inputs on different grids (the contract test checks
 both).
 
-57 of 277 operators run on JAX today.
+57 of 279 operators run on JAX today.
 
 | Family | Operator | Backends |
 |---|---|---|
@@ -211,6 +211,8 @@ both).
 | `plume` | `WindAdvectionCone` | numpy |
 | `qa` | `CloudSEN12` | numpy |
 | `qa` | `DecodeBitmask` | numpy |
+| `qa` | `EMITBandMask` | numpy |
+| `qa` | `EMITL2AMask` | numpy |
 | `qa` | `LandsatQA_PIXEL` | numpy, jax, dask |
 | `qa` | `MODISStateQA` | numpy, jax, dask |
 | `qa` | `MaskCirrus` | numpy, jax, dask |

@@ -1139,6 +1139,10 @@ def _toy_inputs() -> list[Any]:
         toy_geoarray(labels, fill_value=0),
         toy_geoarray(labels.astype(np.uint8), fill_value=0),
         np.full(3, 0.5),  # a single 1-D spectrum (per-pixel MF ops)
+        # packed per-band bit masks, bytes on the band dim (EMITBandMask)
+        toy_geoarray(
+            rng.integers(0, 256, (4, 16, 16)).astype(np.uint8), fill_value=None
+        ),
     ]
 
 
