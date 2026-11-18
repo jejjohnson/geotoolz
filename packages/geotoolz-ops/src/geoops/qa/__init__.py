@@ -10,13 +10,16 @@ Two operator families:
   `MaskSnow`, `MaskWater`, `MaskNoData`, `MaskInvalid`, `MaskSaturated`,
   `DecodeBitmask`) — pass explicit ``bits`` / ``values`` with an optional
   ``qa_band`` (``None`` = the carrier is the QA band).
-- Sensor presets (`S2QA60`, `S2SCL`, `LandsatQA_PIXEL`, `MODISStateQA`)
-  — published bit/class layouts baked in; pick ``targets`` by name.
+- Sensor presets (`S2QA60`, `S2SCL`, `LandsatQA_PIXEL`, `MODISStateQA`,
+  `EMITL2AMask`, and `EMITBandMask` for EMIT's packed band mask) —
+  published bit/class layouts baked in; pick ``targets`` by name.
 """
 
 from __future__ import annotations
 
 from geoops.qa._src.array import (
+    flagged_band_count,
+    mask_from_band_count,
     mask_from_bit_field,
     mask_from_qa_bits,
     mask_from_scl,
@@ -27,6 +30,8 @@ from geoops.qa._src.operators import (
     SENSOR_QA_REGISTRY,
     CloudSEN12,
     DecodeBitmask,
+    EMITBandMask,
+    EMITL2AMask,
     LandsatQA_PIXEL,
     MaskCirrus,
     MaskClouds,
@@ -62,6 +67,8 @@ __all__ = [
     "SENSOR_QA_REGISTRY",
     "CloudSEN12",
     "DecodeBitmask",
+    "EMITBandMask",
+    "EMITL2AMask",
     "LandsatQA_PIXEL",
     "MODISStateQA",
     "MaskCirrus",
@@ -74,6 +81,8 @@ __all__ = [
     "MaskWater",
     "OmniCloudMask",
     "S2Cloudless",
+    "flagged_band_count",
+    "mask_from_band_count",
     "mask_from_bit_field",
     "mask_from_qa_bits",
     "mask_from_scl",

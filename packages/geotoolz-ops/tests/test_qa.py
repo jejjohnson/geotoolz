@@ -753,3 +753,174 @@ def test_4d_time_stack() -> None:
     layers = qa.DecodeBitmask(bits={"cloud": [3], "none": [5]}, qa_band=1)(stack)
     assert layers.shape == (2, 2, 4, 4)
     assert layers.attrs["band_names"] == ("cloud", "none")
+
+
+# ── EMIT presets (#743) ─────────────────────────────────────────────────────
+
+
+def test_flagged_band_count_equals_unpacked_bit_sum() -> None:
+    rng = np.random.default_rng(0)
+    bandmask = rng.integers(0, 256, size=(7, 9, 36), dtype=np.uint8)
+    count = qa.flagged_band_count(bandmask)
+    np.testing.assert_array_equal(count, np.unpackbits(bandmask, axis=-1).sum(-1))
+    with pytest.raises(TypeError, match="uint8"):
+        qa.flagged_band_count(bandmask.astype(np.int16))
+
+
+def test_static_column_flags_are_not_saturation() -> None:
+    # three bands flagged in every row of every column: the baseline
+    count = np.full((12, 8), 3)
+    assert not qa.mask_from_band_count(count, dilation=0).any()
+    # two more at one pixel flag that pixel alone
+    count[5, 3] += 2
+    expected = np.zeros((12, 8), dtype=bool)
+    expected[5, 3] = True
+    np.testing.assert_array_equal(qa.mask_from_band_count(count, dilation=0), expected)
+    # a hot column flags no pixel of its own
+    count = np.full((12, 8), 3)
+    count[:, 6] = 40
+    assert not qa.mask_from_band_count(count, dilation=0).any()
+
+
+@pytest.mark.parametrize("radius", [0, 1, 10])
+def test_one_saturated_pixel_grows_into_a_diamond(radius: int) -> None:
+    count = np.zeros((41, 41), dtype=np.int64)
+    count[20, 20] = 1
+    mask = qa.mask_from_band_count(count, dilation=radius)
+    # |{(i, j) : |i - 20| + |j - 20| ≤ r}| = 2r² + 2r + 1
+    assert int(mask.sum()) == 2 * radius**2 + 2 * radius + 1
+    rows, cols = np.nonzero(mask)
+    assert int(np.max(np.abs(rows - 20) + np.abs(cols - 20))) == radius
+
+
+@pytest.mark.parametrize("radius", [1, 3, 7])
+def test_distance_threshold_equals_iterated_dilation(radius: int) -> None:
+    from scipy import ndimage
+
+    rng = np.random.default_rng(radius)
+    saturated = rng.random((30, 25)) < 0.02
+    count = saturated.astype(np.int64)
+    # the 4-connected cross, r times
+    cross = ndimage.generate_binary_structure(2, 1)
+    expected = ndimage.binary_dilation(saturated, structure=cross, iterations=radius)
+    np.testing.assert_array_equal(
+        qa.mask_from_band_count(count, dilation=radius), expected
+    )
+
+
+def test_invalid_rows_neither_set_the_baseline_nor_are_flagged() -> None:
+    count = np.full((10, 4), 3)
+    # a missing row flags every band, and a dropped row flags none
+    count[2] = 285
+    count[7] = 0
+    valid = np.ones((10, 4), dtype=bool)
+    valid[[2, 7]] = False
+    assert not qa.mask_from_band_count(count, valid=valid, dilation=0).any()
+    # without `valid`, row 7 sets a baseline of 0 and every other row is flagged
+    assert qa.mask_from_band_count(count, dilation=0).sum() == 9 * 4
+    # a column with no valid row is all False
+    valid[:, 1] = False
+    count[4, 1] = 100
+    mask = qa.mask_from_band_count(count, valid=valid, dilation=0)
+    assert not mask[:, 1].any()
+    # the dilation does not reach an invalid neighbour
+    centre = np.zeros((3, 3), dtype=np.int64)
+    centre[1, 1] = 1
+    neighbour = np.ones((3, 3), dtype=bool)
+    neighbour[1, 2] = False
+    grown = qa.mask_from_band_count(centre, valid=neighbour, dilation=1)
+    assert not grown[1, 2]
+    assert int(grown.sum()) == 4
+    with pytest.raises(ValueError, match="dilation"):
+        qa.mask_from_band_count(count, dilation=-1)
+    with pytest.raises(ValueError, match="shape"):
+        qa.mask_from_band_count(count, valid=valid[:, :2])
+
+
+def test_emit_l2a_mask_single_targets_and_default() -> None:
+    rng = np.random.default_rng(3)
+    flags = (rng.random((8, 6, 7)) < 0.3).astype(np.float32)
+    # the data bands hold positive values, never flags
+    flags[5] = rng.random((6, 7))
+    flags[6] = 2.0 + rng.random((6, 7))
+    bands = {
+        "cloud": 0,
+        "cirrus": 1,
+        "water": 2,
+        "spacecraft": 3,
+        "dilated_cloud": 4,
+        "aggregate": 7,
+    }
+    for name, band in bands.items():
+        out = qa.EMITL2AMask(targets=[name])(flags)
+        np.testing.assert_array_equal(out, flags[band] > 0)
+    np.testing.assert_array_equal(
+        qa.EMITL2AMask()(flags), np.any(flags[:3] > 0, axis=0)
+    )
+    assert qa.SENSOR_QA_REGISTRY["emit_l2a_mask"] == {
+        name: {"band": (band,)} for name, band in bands.items()
+    }
+    with pytest.raises(ValueError, match="unknown emit_l2a_mask QA target"):
+        qa.EMITL2AMask(targets=["aod"])
+    with pytest.raises(ValueError, match="needs at least 8 bands"):
+        qa.EMITL2AMask(targets=["aggregate"])(flags[:3])
+
+
+def _packed_scene() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A 20 x 16 swath: band mask bytes, L2A flags and the expected mask."""
+    shape = (20, 16)
+    bandmask = np.zeros((36, *shape), dtype=np.uint8)
+    # static defects: column 3 has 5 bad bands, every column has 1
+    bandmask[0] = 0b0000_0001
+    bandmask[1, :, 3] = 0b1111_0000
+    # a flare at (6, 10): 40 more bands
+    bandmask[10:15, 6, 10] = 0xFF
+    flags = np.zeros((8, *shape), dtype=np.float32)
+    flags[0, 15:, :4] = 1.0  # cloud
+    flags[2, :2, 12:] = 1.0  # water
+    flags[3, 10, 10] = 1.0  # spacecraft, not a default target
+    flags[5] = 0.1  # AOD
+    flags[6] = 1.5  # water vapour
+    expected = np.zeros(shape, dtype=bool)
+    rows, cols = np.indices(shape)
+    expected |= np.abs(rows - 6) + np.abs(cols - 10) <= 3
+    expected[15:, :4] = True
+    expected[:2, 12:] = True
+    return bandmask, flags, expected
+
+
+def test_combined_emit_mask_on_the_fixture() -> None:
+    bandmask, flags, expected = _packed_scene()
+    saturated = qa.EMITBandMask(dilation=3)(bandmask)
+    obscured = qa.EMITL2AMask()(flags)
+    np.testing.assert_array_equal(saturated | obscured, expected)
+
+
+def test_emit_presets_keep_the_carrier_and_declare_a_false_fill() -> None:
+    bandmask, flags, _ = _packed_scene()
+    gt = _toy_geoarray(bandmask, fill_value=None)
+    out = qa.EMITBandMask(dilation=3)(gt)
+    assert out.fill_value is False
+    assert np.asarray(out).dtype == bool
+    np.testing.assert_array_equal(
+        np.asarray(out), qa.EMITBandMask(dilation=3)(bandmask)
+    )
+    assert isinstance(qa.EMITBandMask()(bandmask), np.ndarray)
+    out = qa.EMITL2AMask()(_toy_geoarray(flags, fill_value=-9999.0))
+    assert out.fill_value is False
+    assert isinstance(qa.EMITL2AMask()(flags), np.ndarray)
+
+
+def test_emit_band_mask_leaves_out_fill_pixels() -> None:
+    bandmask, _, _ = _packed_scene()
+    # any byte equal to the fill makes a pixel nodata, so the flare's bytes
+    # stay below it
+    bandmask[10:15, 6, 10] = 0xFE
+    # a missing row flags every band; as the fill it is left out
+    bandmask[:, 18] = 0xFF
+    gt = _toy_geoarray(bandmask, fill_value=255)
+    out = np.asarray(qa.EMITBandMask(dilation=0)(gt))
+    assert not out[18].any()
+    # the flare is still found, and column 3's baseline is its static 5
+    assert out[6, 10]
+    assert int(out.sum()) == 1

@@ -14,8 +14,8 @@ Two operator families live here:
   `geoops.mask.ApplyMask` to apply the result.
 - *Sensor presets* whose defaults encode the published bit / class
   layouts (Landsat C2 ``QA_PIXEL``, Sentinel-2 ``QA60`` / ``SCL``,
-  MODIS ``state_1km``). Pick these for "give me the standard cloud mask
-  for sensor X" workflows.
+  MODIS ``state_1km``, the EMIT band mask and L2A mask bands). Pick
+  these for "give me the standard cloud mask for sensor X" workflows.
 
 Both layers return a boolean mask following the project convention:
 **True = mask this pixel out**. Bit decoding is metadata-independent, so
@@ -35,8 +35,8 @@ The generic ``Mask*`` decoders and the sensor presets run their
 element-wise decoder through `geoops._src.kernels.mask_kernel` (pipekit-array's
 ``KernelOp``), so they take a NumPy or JAX ``GeoArray`` (under
 ``jax.jit`` too), an ``xr.DataArray`` (lazily on dask) or a plain array.
-`DecodeBitmask`, `MaskInvalid`, `MaskSaturated`, `MaskNoData` and the
-model-backed masks stay NumPy-only.
+`DecodeBitmask`, `MaskInvalid`, `MaskSaturated`, `MaskNoData`, the EMIT
+presets and the model-backed masks stay NumPy-only.
 
 The band is picked along ``dim="band"``. A ``(T, C, H, W)`` time stack
 gives a ``(T, 1, H, W)`` mask (``(T, n_layers, H, W)`` for
@@ -50,6 +50,8 @@ References:
     MODIS Surface Reflectance User's Guide (MOD09 / MYD09),
     Vermote, 2015 — Table 12 (``state_1km``).
     ESA, Sentinel-2 MSI Level-1C / Level-2A product specifications.
+    JPL, "EMIT L2A Data Product User Guide", V1.0, JPL D-107863, 2022 —
+    Tables 3-3 (``band_mask``) and 3-4 (mask bands).
 """
 
 from __future__ import annotations
@@ -71,6 +73,8 @@ from geoops._src.valid import invalid_values, valid_pixels, wrap_filled
 from geoops._src.wrap import wrap_like
 from geoops.qa._src.array import (
     _as_int64,
+    flagged_band_count,
+    mask_from_band_count,
     mask_from_bit_field,
     mask_from_qa_bits,
     mask_from_scl,
@@ -94,6 +98,9 @@ BandSelector = int | str | None
 #    "values": (v, ...)}``        ``mask_from_bit_field``.
 # - ``{"values": (v, ...)}``    — categorical class IDs decoded via
 #                                 ``mask_from_scl``.
+# - ``{"band": (i,)}``          — a binary flag held as band ``i`` of a
+#                                 multi-band mask; set where non-zero
+#                                 (`EMITL2AMask`).
 #
 # Bit citations:
 # - Landsat 8/9 C2 ``QA_PIXEL`` — USGS LSDS-1619 Table 6-3 (bits
@@ -107,6 +114,10 @@ BandSelector = int | str | None
 #   2-bit cloud-state field (0=clear, 1=cloudy, 2=mixed, 3=not-set);
 #   bit 2 is cloud shadow; bits [8,9] are a 2-bit cirrus field
 #   (0=none, 1=small, 2=average, 3=high).
+# - EMIT L2A mask — EMIT L2A User Guide V1.0 (JPL D-107863) Table 3-4,
+#   one-based there: 1 cloud, 2 cirrus, 3 water, 4 spacecraft, 5 dilated
+#   cloud, 6 AOD at 550 nm and 7 water vapour (data, not flags), 8 the
+#   aggregate of flags 1-5. Masks are ones.
 SENSOR_QA_REGISTRY: dict[str, dict[str, dict[str, tuple[int, ...]]]] = {
     "s2_qa60": {
         "cloud": {"bits": (10,)},
@@ -149,6 +160,16 @@ SENSOR_QA_REGISTRY: dict[str, dict[str, dict[str, tuple[int, ...]]]] = {
         # cirrus field: bits[8,9] — 0=none, 1=small, 2=average, 3=high.
         # Default "cirrus" flags small/average/high.
         "cirrus": {"field": (8, 9), "values": (1, 2, 3)},
+    },
+    # EMIT L2A mask bands (L2A User Guide Table 3-4), zero-based; bands 5
+    # and 6 hold AOD and water vapour, which are not flags.
+    "emit_l2a_mask": {
+        "cloud": {"band": (0,)},
+        "cirrus": {"band": (1,)},
+        "water": {"band": (2,)},
+        "spacecraft": {"band": (3,)},
+        "dilated_cloud": {"band": (4,)},
+        "aggregate": {"band": (7,)},
     },
 }
 
@@ -249,6 +270,11 @@ def _decode_registry_entry(
         return mask_from_qa_bits(qa, entry["bits"])
     if "values" in entry:
         return mask_from_scl(qa, entry["values"])
+    if "band" in entry:
+        raise ValueError(
+            "a band entry selects a band of a multi-band mask; decode it with "
+            "EMITL2AMask, not from a single QA band"
+        )
     raise ValueError(f"unrecognised registry entry: {dict(entry)!r}")
 
 
@@ -1039,6 +1065,135 @@ class MODISStateQA(Operator):
             "targets": list(self.targets),
             "dim": self.dim,
         }
+
+
+class EMITBandMask(Operator):
+    """Saturation mask from EMIT's packed band mask; True = mask out.
+
+    satᵢⱼ = [nᵢⱼ - minᵢ nᵢⱼ > 0], grown by ``dilation`` pixels in city-block
+    distance, with nᵢⱼ the bands flagged at pixel (i, j).
+
+    The carrier is EMIT's ``band_mask`` in swath geometry: ``uint8``, one
+    bit per spectral band packed into 36 bytes along ``dim`` (EMIT L2A User
+    Guide V1.0, Table 3-3; the L1B band mask has the same layout). A set
+    bit marks a band interpolated over a bad detector element or
+    saturation. See `geoops.qa.flagged_band_count` and
+    `geoops.qa.mask_from_band_count` for the maths: the column minimum
+    removes the static detector defects, and what is left is saturation.
+
+    Compute it before orthorectifying, since the columns must be detector
+    elements. Nodata pixels of the carrier (its fill value) neither set a
+    column's baseline nor are flagged, and the output declares
+    ``fill_value=False``. Every byte value can be data, and a pixel with any
+    byte equal to the fill is nodata, so declare a fill only for a value
+    the product reserves for missing pixels. A ``(Y, H, W)`` carrier gives
+    an ``(H, W)`` mask.
+
+    Args:
+        dilation: Growth of the mask in pixels (city-block distance).
+            Default 10, SPIIRE's.
+        dim: Name of the packed-byte dim (default ``"band"``).
+
+    Examples:
+        >>> import numpy as np
+        >>> from geoops.qa import EMITBandMask
+        >>> bandmask = np.zeros((36, 5, 5), dtype=np.uint8)
+        >>> bandmask[0] = 0b0000_0111   # three bad bands in every pixel
+        >>> bandmask[4, 2, 2] = 0b1100_0000   # two more at one pixel
+        >>> EMITBandMask(dilation=0)(bandmask).astype(int).sum()
+        np.int64(1)
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # the bytes of a pixel, and the whole column for its baseline
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band", "space"}, effects={"band": "reduce"}, reach=None
+    )
+
+    def __init__(self, *, dilation: int = 10, dim: str = "band") -> None:
+        if dilation < 0:
+            raise ValueError(f"EMITBandMask: dilation must be >= 0, got {dilation}")
+        self.dilation = dilation
+        self.dim = dim
+
+    @over_frames
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        reject_geotensor(gt, "EMITBandMask")
+        axis = dim_axis(gt, self.dim, name="EMITBandMask")
+        packed = np.moveaxis(np.asarray(gt), axis, -1)
+        valid = valid_pixels(gt) if isinstance(gt, GeoArray) else None
+        # nᵢⱼ = ∑_k b_ijk
+        count = flagged_band_count(packed)
+        mask = mask_from_band_count(count, valid=valid, dilation=self.dilation)
+        return wrap_filled(gt, mask, fill_value=False, valid=valid)
+
+
+class EMITL2AMask(Operator):
+    """Named flags of the EMIT L2A mask product, OR-combined; True = mask out.
+
+    maskᵢⱼ = OR over t in targets of [flag_{ij, band(t)} > 0].
+
+    The carrier is the ``mask`` variable of an EMIT L2A MASK file, one band
+    per flag, in the order of the EMIT L2A User Guide V1.0, Table 3-4
+    (``SENSOR_QA_REGISTRY["emit_l2a_mask"]``): ``cloud``, ``cirrus``,
+    ``water``, ``spacecraft`` and ``dilated_cloud`` are bands 0 to 4 and
+    ``aggregate`` (the OR of the first five) is band 7. Bands 5 and 6 hold
+    the aerosol optical depth and the water vapour, which are not flags.
+    The default, cloud, cirrus and water, is SPIIRE's mask of clouds and
+    surface water.
+
+    Nodata pixels of the carrier are never flagged, and the output declares
+    ``fill_value=False``. A ``(B, H, W)`` carrier gives an ``(H, W)`` mask.
+
+    Args:
+        targets: Flag names from ``SENSOR_QA_REGISTRY["emit_l2a_mask"]``.
+            Default ``("cloud", "cirrus", "water")``.
+        dim: Name of the band dim (default ``"band"``).
+
+    Examples:
+        >>> import numpy as np
+        >>> from geoops.qa import EMITL2AMask
+        >>> flags = np.zeros((8, 2, 2), dtype=np.float32)
+        >>> flags[2, 0, 1] = 1.0   # water
+        >>> flags[3, 1, 1] = 1.0   # spacecraft, not a default target
+        >>> EMITL2AMask()(flags).tolist()
+        [[False, True], [False, False]]
+    """
+
+    backends: ClassVar[tuple[str, ...]] = ("numpy",)
+    # OR across the selected flag bands
+    coupling: ClassVar[Coupling] = Coupling(
+        couples={"band"}, effects={"band": "reduce"}
+    )
+
+    def __init__(
+        self,
+        *,
+        targets: Sequence[str] = ("cloud", "cirrus", "water"),
+        dim: str = "band",
+    ) -> None:
+        self.targets = tuple(str(target) for target in targets)
+        _registry_bit_groups("emit_l2a_mask", self.targets)
+        self.dim = dim
+
+    @over_frames
+    def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
+        reject_geotensor(gt, "EMITL2AMask")
+        axis = dim_axis(gt, self.dim, name="EMITL2AMask")
+        flags = np.asarray(gt)
+        entries = _registry_bit_groups("emit_l2a_mask", self.targets)
+        indices = [entry["band"][0] for entry in entries.values()]
+        if max(indices) >= flags.shape[axis]:
+            raise ValueError(
+                f"EMITL2AMask: target band {max(indices)} needs at least "
+                f"{max(indices) + 1} bands, the carrier has {flags.shape[axis]}"
+            )
+        # flag_{ij, band(t)} > 0 for each target
+        selected = np.take(flags, indices, axis=axis) > 0
+        # OR over the targets
+        mask = np.any(selected, axis=axis)
+        valid = valid_pixels(gt) if isinstance(gt, GeoArray) else None
+        return wrap_filled(gt, mask, fill_value=False, valid=valid)
 
 
 # ---------------------------------------------------------------------------
