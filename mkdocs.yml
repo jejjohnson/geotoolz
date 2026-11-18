@@ -280,6 +280,7 @@ nav:
               - Ocean Colour — Binning: xarray/notebooks/cmems_oc_products.ipynb
           - Data Acquisition:
               - Open a TROPOMI CH₄ granule and screen it: xarray/recipes/tropomi_ch4_screen.md
+              - Open a methane plume scene and select one plume: xarray/recipes/methane_plume_products.md
           - Validation:
               - V1 — Scales of Evaluation: xarray/notebooks/validation_v1_scales.ipynb
               - V1.5 — PSD Plots & Resolved Scale: xarray/notebooks/validation_v1_psd_plots.ipynb

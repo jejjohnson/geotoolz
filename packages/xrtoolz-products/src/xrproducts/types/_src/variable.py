@@ -368,6 +368,15 @@ CH4_ENHANCEMENT = Variable(
     cmap="magma",
 )
 
+# Matched-filter sensitivity of the EMIT / AVIRIS-3 L2B rasters: unitless
+# per the EMIT L2B GHG and AVIRIS-3 L2B GHG user guides.
+CH4_SENSITIVITY = Variable(
+    name="ch4_sensitivity",
+    long_name="Methane matched-filter sensitivity",
+    units="1",
+    cmap="viridis",
+)
+
 COLUMN_AK = Variable(
     name="column_averaging_kernel",
     long_name="Column averaging kernel",
@@ -1299,6 +1308,7 @@ REGISTRY: dict[str, Variable] = {
         XCH4_BC,
         XCH4_PRECISION,
         CH4_ENHANCEMENT,
+        CH4_SENSITIVITY,
         COLUMN_AK,
         CH4_PRIOR_PROFILE,
         DRY_AIR_SUBCOLUMNS,
