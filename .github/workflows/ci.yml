@@ -151,13 +151,12 @@ jobs:
           for package in geotoolz-ops geotoolz-catalog geotoolz-patcher; do
             (cd "packages/$package" && uv run pytest -q --no-cov tests/test_docs_paths.py)
           done
-      # Both lanes' dependency-rule guards read every package, so a change to
-      # any one package runs them here rather than the two full suites.
+      # The dependency-rule guard reads every package, the xrtoolz ones
+      # included (#746), so a change to any one package runs it here rather
+      # than the full geotoolz-ops suite.
       - name: Dependency rules
         run: |
-          for package in geotoolz-ops xrtoolz-ops; do
-            (cd "packages/$package" && uv run pytest -q --no-cov tests/test_dependency_rules.py)
-          done
+          cd packages/geotoolz-ops && uv run pytest -q --no-cov tests/test_dependency_rules.py
       - name: Family name parity between geoops and xrops
         run: uv run python scripts/family_parity.py --check
       - name: CI selection rules
