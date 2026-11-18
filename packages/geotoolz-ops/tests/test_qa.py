@@ -823,6 +823,14 @@ def test_invalid_rows_neither_set_the_baseline_nor_are_flagged() -> None:
     count[4, 1] = 100
     mask = qa.mask_from_band_count(count, valid=valid, dilation=0)
     assert not mask[:, 1].any()
+    # the dilation does not reach an invalid neighbour
+    centre = np.zeros((3, 3), dtype=np.int64)
+    centre[1, 1] = 1
+    neighbour = np.ones((3, 3), dtype=bool)
+    neighbour[1, 2] = False
+    grown = qa.mask_from_band_count(centre, valid=neighbour, dilation=1)
+    assert not grown[1, 2]
+    assert int(grown.sum()) == 4
     with pytest.raises(ValueError, match="dilation"):
         qa.mask_from_band_count(count, dilation=-1)
     with pytest.raises(ValueError, match="shape"):

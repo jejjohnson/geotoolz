@@ -266,9 +266,8 @@ def mask_from_band_count(
     the columns no longer follow the detector. ``dilation=10`` is SPIIRE's
     default, 600 m on EMIT's 60 m pixels.
 
-    Invalid pixels never set a baseline and are never flagged, and a column
-    with no valid row is all ``False``; the dilation may still reach into
-    valid pixels next to them.
+    Invalid pixels never set a baseline and are never flagged, not even by
+    the dilation, and a column with no valid row is all ``False``.
 
     Args:
         count: Flagged-band count nᵢⱼ, from :func:`flagged_band_count`.
@@ -316,8 +315,8 @@ def mask_from_band_count(
         return saturated
     # city-block distance to the nearest saturated pixel
     distance = ndimage.distance_transform_cdt(~saturated, metric="taxicab")
-    # maskᵢⱼ = [d₁((i, j), sat) ≤ r]
-    return distance <= dilation
+    # maskᵢⱼ = [d₁((i, j), sat) ≤ r], on valid pixels only
+    return (distance <= dilation) & valid_mask
 
 
 def _as_int64(qa: Int[np.ndarray, "*dims"]) -> Int[np.ndarray, "*dims"]:
