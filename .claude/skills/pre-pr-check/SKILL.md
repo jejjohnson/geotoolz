@@ -35,11 +35,10 @@ rename rather than allowlist, unless the user decides otherwise.
 ## When docs changed
 
 ```bash
-uv run --group docs mkdocs build --strict
+make docs        # needs mystmd: npm install -g mystmd
 ```
 
-The notebook plugin can stall locally; if it does, build with a copy of
-`mkdocs.yml` that drops `mkdocs-jupyter` and say so.
+It builds the prose and notebooks with mystmd and the API reference with Zensical, both strict, and fails on any broken link.
 
 ## When packaging, extras or imports changed
 

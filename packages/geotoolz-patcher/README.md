@@ -99,7 +99,7 @@ georeader reader crosses with
 For independent local jobs, swap the loop for
 `geopatcher.run.parallel_map`; for global-context operators, use the codified
 `reduce` / `two_pass` helpers. See the
-[concepts page](https://jejjohnson.github.io/geotoolz/patcher/concepts/) for the
+[concepts page](https://jejjohnson.github.io/geotoolz/concepts-1/) for the
 full mental model.
 
 ## Where things live
@@ -168,12 +168,12 @@ CRS.
 
 ## Next steps
 
-- **Concepts:** [concepts](https://jejjohnson.github.io/geotoolz/patcher/concepts/) — the four-axis abstraction with diagrams.
-- **15-min walkthrough:** [quickstart](https://jejjohnson.github.io/geotoolz/patcher/quickstart/) — Lake Tahoe Sentinel-2 NDVI inference.
-- **Recipes:** [streaming OverlapAdd](https://jejjohnson.github.io/geotoolz/patcher/recipes/streaming-overlap-add/), [on-error policies](https://jejjohnson.github.io/geotoolz/patcher/recipes/on-error-policies/), [PatchJournal resume](https://jejjohnson.github.io/geotoolz/patcher/recipes/journal-and-resume/).
-- **Demo notebook:** [patcher_lake_tahoe](https://jejjohnson.github.io/geotoolz/patcher/notebooks/patcher_lake_tahoe/) — patcher slice of the Lake Tahoe scenario.
+- **Concepts:** [concepts](https://jejjohnson.github.io/geotoolz/concepts-1/) — the four-axis abstraction with diagrams.
+- **15-min walkthrough:** [quickstart](https://jejjohnson.github.io/geotoolz/quickstart/) — Lake Tahoe Sentinel-2 NDVI inference.
+- **Recipes:** [streaming OverlapAdd](https://jejjohnson.github.io/geotoolz/streaming-overlap-add/), [on-error policies](https://jejjohnson.github.io/geotoolz/on-error-policies/), [PatchJournal resume](https://jejjohnson.github.io/geotoolz/journal-and-resume/).
+- **Demo notebook:** [patcher_lake_tahoe](https://jejjohnson.github.io/geotoolz/patcher-lake-tahoe/) — patcher slice of the Lake Tahoe scenario.
 - **See the full end-to-end story:** [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb) — catalog → operators → patcher.
-- **API reference:** [docs site](https://jejjohnson.github.io/geotoolz/patcher/api/reference/).
+- **API reference:** [docs site](https://jejjohnson.github.io/geotoolz/reference/patcher/api/reference/).
 
 ## License
 

@@ -3,31 +3,33 @@ status: draft
 version: 0.1.0
 ---
 
-!!! note "These design docs cover the planned operator surface for `xrtoolz`"
-    Code snippets use class names directly. In the implementation, the
-    submodule layout is:
+:::{note} These design docs cover the planned operator surface for `xrtoolz`
+Code snippets use class names directly. In the implementation, the
+submodule layout is:
 
-    - **`xrtoolz.geo`** — domain-agnostic geoprocessing (CRS, validation,
-      subset, masks, detrend)
-    - **`xrtoolz.interpolate`** — value resampling: regrid, gap-fill,
-      bin, coord-axis remap, time resample, smooth, learned downscale
-      (D12)
-    - **`xrtoolz.transforms`** — signal transforms / decompositions /
-      encoders (D8)
-    - **`xrtoolz.metrics`** — skill scores (D7)
-    - **`xrtoolz.kinematics`** — domain-specific physical quantities,
-      sub-organized by domain (D9)
-    - **`xrtoolz.viz`** — plotting operators (D10)
+- **`xrtoolz.geo`** — domain-agnostic geoprocessing (CRS, validation,
+  subset, masks, detrend)
+- **`xrtoolz.interpolate`** — value resampling: regrid, gap-fill,
+  bin, coord-axis remap, time resample, smooth, learned downscale
+  (D12)
+- **`xrtoolz.transforms`** — signal transforms / decompositions /
+  encoders (D8)
+- **`xrtoolz.metrics`** — skill scores (D7)
+- **`xrtoolz.kinematics`** — domain-specific physical quantities,
+  sub-organized by domain (D9)
+- **`xrtoolz.viz`** — plotting operators (D10)
 
-    See `xrtoolz/__init__.py` for the current export surface.
+See `xrtoolz/__init__.py` for the current export surface.
+:::
 
-!!! note "Type contract — two tiers (D11)"
-    Every public-facing module exposes two tiers:
+:::{note} Type contract — two tiers (D11)
+Every public-facing module exposes two tiers:
 
-    - **Layer 0 — xarray** — DataArray-positional primitives. Single-variable functions take an `xr.DataArray` (and return one); multi-variable physics primitives take multiple DataArrays positionally. Inherently Dataset-shaped ops (`validation`, `crs`, `subset`, `masks`) take `xr.Dataset` directly. All use `dim=`.
-    - **Layer 1 — Operator** — input is `xr.Dataset` (or two for multi-input). Output is usually `xr.Dataset`, may narrow to `xr.DataArray` or scalar for reductions (e.g., metrics), or `matplotlib.Figure / Axes` for terminal viz (D10). The only tier `Sequential` and `Graph` see.
+- **Layer 0 — xarray** — DataArray-positional primitives. Single-variable functions take an `xr.DataArray` (and return one); multi-variable physics primitives take multiple DataArrays positionally. Inherently Dataset-shaped ops (`validation`, `crs`, `subset`, `masks`) take `xr.Dataset` directly. All use `dim=`.
+- **Layer 1 — Operator** — input is `xr.Dataset` (or two for multi-input). Output is usually `xr.Dataset`, may narrow to `xr.DataArray` or scalar for reductions (e.g., metrics), or `matplotlib.Figure / Axes` for terminal viz (D10). The only tier `Sequential` and `Graph` see.
 
-    Private implementation detail: numpy / scipy kernels live as `_*_kernels.py` siblings inside each module's `_src/` (e.g., `metrics/_src/_pixel_kernels.py`). They carry no stability guarantees and are not re-exported anywhere — Layer 0 dispatches to them via `xr.apply_ufunc`. Value-resampling functionality lives under `xrtoolz.interpolate` (D12), not separate `regrid` / `interpolation` / `discretize` modules. See [architecture.md §Type Contract](../architecture.md) and [decisions.md §D11](../decisions.md).
+Private implementation detail: numpy / scipy kernels live as `_*_kernels.py` siblings inside each module's `_src/` (e.g., `metrics/_src/_pixel_kernels.py`). They carry no stability guarantees and are not re-exported anywhere — Layer 0 dispatches to them via `xr.apply_ufunc`. Value-resampling functionality lives under `xrtoolz.interpolate` (D12), not separate `regrid` / `interpolation` / `discretize` modules. See [architecture.md §Type Contract](../architecture.md) and [decisions.md §D11](../decisions.md).
+:::
 
 # Components — Layer 1 Operators
 
@@ -837,4 +839,4 @@ class SklearnOp(Operator):
 | `xarray_sklearn` | Delegates to `XarrayEstimator` — full NaN policies (`"propagate"`, `"raise"`, `"mask"`), Dataset column-concat, Pipeline/GridSearchCV compat. |
 | `xarray_sklearn` + `xrpatcher` | Same as above, plus users can wrap `SklearnOp` in a patch loop via `XRDAPatcher` for per-region fitting and memory-bounded inference. |
 
-See [../examples/](../examples/) for usage patterns covering all three modes.
+See [../examples/](../examples/README.md) for usage patterns covering all three modes.

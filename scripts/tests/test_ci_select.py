@@ -107,6 +107,7 @@ CASES = {
     "notebooks only": (["notebooks/xarray/example.ipynb"], (), False, False, False),
     "a script": (["scripts/capabilities.py"], (), False, True, False),
     "mkdocs.yml": (["mkdocs.yml"], (), True, False, False),
+    "docs build script": (["scripts/build_docs.py"], (), True, True, False),
     "a LICENSE": (
         ["packages/geotoolz-ops/LICENSE"],
         ("geotoolz-ops",),

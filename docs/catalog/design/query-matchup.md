@@ -1,7 +1,7 @@
 # Query → Matchup → Patch: A Cross-Package Design
 
 **Status:** Implemented — this document describes the shipped surface; §8 lists what is not built
-**Author:** @jejjohnson + Claude
+**Author:** \@jejjohnson + Claude
 **Date:** 2026-05-23 (updated to the shipped API)
 **Affects:** `geocatalog`, `geotoolz`, `geopatcher`
 
@@ -159,7 +159,7 @@ src/geocatalog/_src/
 Public namespaces (`geocatalog.sources`, `geocatalog.storage`,
 `geocatalog.matchup`, `geocatalog.staging`, `geocatalog.patch`)
 re-export these, each name from exactly one of them (see the
-[API reference](../api/reference.md)).
+[API reference](https://jejjohnson.github.io/geotoolz/reference/catalog/api/reference/)).
 
 ### 4.2 `Source` Protocol
 

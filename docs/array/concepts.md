@@ -2,7 +2,7 @@
 
 geoarray has three carriers, one rule for what compiles, and one set of
 dim-level functions shared with every named array of the stack. This page
-is the mental model; the [reference](api.md) has every signature.
+is the mental model; the [reference](https://jejjohnson.github.io/geotoolz/reference/array/api/) has every signature.
 
 ## A new carrier only when the georeference changes
 

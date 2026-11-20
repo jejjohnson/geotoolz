@@ -120,7 +120,7 @@ already in the bundle raises; pass `on_duplicate="skip"` to ignore it, or
 - **Client reuse.** A `STACSource` caches its `pystac_client.Client`;
   reuse one instance across ingests.
 - **Other archives.** `EarthAccessSource` and `CMRSource` plug into
-  `ingest` the same way; see the [Sources API](../api/sources.md).
+  `ingest` the same way; see the [Sources API](https://jejjohnson.github.io/geotoolz/reference/catalog/api/sources/).
 
 Next, [stage](staging.md) the assets for repeated reads, or
 [match](matchup.md) the two collections.

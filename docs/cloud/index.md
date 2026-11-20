@@ -102,6 +102,6 @@ field.domain.shape                                        # (1, 10980, 10980)
 - How-to: [move files](how-to/move-files.md) · [credentials](how-to/credentials.md) ·
   [read COGs](how-to/read-cogs.md) · [write COGs](how-to/write-cogs.md).
 - Tutorial: [a tour of geocloud](notebooks/geocloud_tour.ipynb) — register buckets, read COG windows, write and validate a COG, test offline.
-- [API reference](api.md).
-- To patch a COG, [`geopatcher.fields.CogField`](../patcher/api/fields.md) is
+- [API reference](https://jejjohnson.github.io/geotoolz/reference/cloud/api/).
+- To patch a COG, [`geopatcher.fields.CogField`](https://jejjohnson.github.io/geotoolz/reference/patcher/api/fields/) is
   `CogSource` with the `Field` interface.

@@ -3,13 +3,14 @@ status: draft
 version: 0.2.0
 ---
 
-!!! note "Module paths shown are proposed design targets"
-    Throughout this page, paths such as `xrtoolz.metrics.*`, `xrtoolz.budgets`,
-    and `xrtoolz.phenomena` refer to **proposed** subpackages and **are not part
-    of the current export surface**. Most domain-agnostic functionality today
-    still lives under `xrtoolz.geo` (for example `xrtoolz.geo.operators`,
-    `xrtoolz.geo.metrics`). Treat the snippets below as architectural direction;
-    once the proposed modules ship, the imports become copy/paste-ready.
+:::{note} Module paths shown are proposed design targets
+Throughout this page, paths such as `xrtoolz.metrics.*`, `xrtoolz.budgets`,
+and `xrtoolz.phenomena` refer to **proposed** subpackages and **are not part
+of the current export surface**. Most domain-agnostic functionality today
+still lives under `xrtoolz.geo` (for example `xrtoolz.geo.operators`,
+`xrtoolz.geo.metrics`). Treat the snippets below as architectural direction;
+once the proposed modules ship, the imports become copy/paste-ready.
+:::
 
 # Validation Framework
 

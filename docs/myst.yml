@@ -1,0 +1,445 @@
+# ---------------------------------------------------------------------------
+# mystmd builds the prose half of the documentation: the home page, each
+# package's overview, concepts, how-tos, tutorials and design pages, and the
+# executed notebooks. The API reference is built separately by Zensical +
+# mkdocstrings from mkdocs.yml and mounted at /reference/; the API pages it
+# builds are excluded here. See docs/README.md.
+#
+# references.api points at a LOCAL server because mystmd only loads
+# intersphinx inventories over http(s): a filesystem path is rejected and a
+# file:// URL is silently ignored. scripts/build_docs.py serves the freshly
+# built API site/ on this exact port, then rewrites the resulting localhost
+# URLs to the deployed /reference/ path. Keep the port in sync with API_PORT
+# in that script.
+#
+# mystmd builds flat URLs from file names and has no way to set a slug, so a
+# second page with the same file name (each package's index.md and
+# concepts.md, the design pages) is served at <name>-1/, <name>-2/, … in toc
+# order; the nav shows each page's own title. Never link to such a URL by
+# hand: link to the file, and the build resolves it.
+# ---------------------------------------------------------------------------
+version: 1
+
+project:
+  id: geotoolz-docs
+  title: geotoolz
+  description: >-
+    The geostack: find, read, cut and compute on Earth-observation data, one
+    composable stack of five packages.
+  github: https://github.com/jejjohnson/geotoolz
+  authors:
+    - name: J. Emmanuel Johnson
+  references:
+    api: http://127.0.0.1:8910/
+  exclude:
+    - README.md
+    - api/**
+    - templates/**
+    - hooks/**
+    - wave-backlog.md
+    - xarray/contributing.md
+    - operators/api/**
+    - patcher/api/**
+    - catalog/api/**
+    - xarray/api/**
+    - array/api/**
+    - array/api.md
+    - cloud/api.md
+    - products/api.md
+  toc:
+    - file: index.md
+      title: "Home"
+    - file: geostack.md
+      title: "How the packages interlock"
+    - file: capabilities.md
+      title: "Capability index"
+    - file: agents.md
+      title: "Building with agents"
+    - title: "Operators — geotoolz"
+      children:
+        - file: operators/index.md
+          title: "Overview"
+        - file: operators/concepts.md
+          title: "Concepts"
+        - title: "How-to"
+          children:
+            - file: operators/how-to/define-an-operator.md
+              title: "Define an operator"
+            - file: operators/how-to/branching-pipelines.md
+              title: "Branching pipelines"
+            - file: operators/patch_ops.md
+              title: "Tile → operate → stitch"
+            - file: operators/normalization.md
+              title: "Normalise for training and inference"
+            - file: operators/io.md
+              title: "Read HDF and NetCDF files"
+        - title: "Tutorials"
+          children:
+            - file: operators/notebooks/operators_lake_tahoe.ipynb
+              title: "Operators on Sentinel-2 (Lake Tahoe)"
+    - title: "Patcher — geopatcher"
+      children:
+        - file: patcher/index.md
+          title: "Overview"
+        - file: patcher/concepts.md
+          title: "Concepts"
+        - file: patcher/quickstart.md
+          title: "Quickstart"
+        - title: "How-to"
+          children:
+            - file: patcher/recipes/streaming-overlap-add.md
+              title: "Stream to disk"
+            - file: patcher/recipes/on-error-policies.md
+              title: "Handle read failures"
+            - file: patcher/recipes/journal-and-resume.md
+              title: "Journal and resume"
+            - file: patcher/recipes/patch-cache.md
+              title: "Cache patch reads"
+            - file: patcher/recipes/mixed-crs.md
+              title: "Patch across CRSs"
+            - file: patcher/recipes/global-statistics.md
+              title: "Global statistics"
+            - file: patcher/patching/async-prefetch.md
+              title: "Async and prefetch"
+            - file: patcher/observability.md
+              title: "Observability hooks"
+            - file: patcher/recipes/temporal-patching.md
+              title: "Temporal patching"
+            - file: patcher/recipes/temporal-stencils.md
+              title: "Temporal stencils"
+            - file: patcher/recipes/xarray-nd-patching.md
+              title: "xarray N-D patching"
+        - title: "Tutorials"
+          children:
+            - file: patcher/notebooks/patcher_lake_tahoe.ipynb
+              title: "Patching Sentinel-2 (Lake Tahoe)"
+        - title: "Reference"
+          children:
+            - file: patcher/patching.md
+              title: "Behaviour"
+        - title: "Design"
+          children:
+            - file: patcher/decisions.md
+              title: "Design decisions"
+    - title: "Catalog — geocatalog"
+      children:
+        - file: catalog/index.md
+          title: "Overview"
+        - file: catalog/concepts.md
+          title: "Concepts"
+        - file: catalog/quickstart.md
+          title: "Quickstart"
+        - title: "How-to"
+          children:
+            - file: catalog/how-to/stac-ingestion.md
+              title: "Ingest from STAC"
+            - file: catalog/how-to/staging.md
+              title: "Stage remote files"
+            - file: catalog/how-to/large-archives.md
+              title: "Index large archives"
+            - file: catalog/how-to/matchup.md
+              title: "Match across sources"
+            - file: catalog/how-to/catalog-to-patcher.md
+              title: "Catalog → patcher"
+            - file: catalog/how-to/grid-alignment.md
+              title: "Grid alignment"
+            - file: catalog/how-to/model-states.md
+              title: "Model states"
+        - title: "Tutorials"
+          children:
+            - file: catalog/notebooks/end_to_end_lake_tahoe.ipynb
+              title: "End-to-end (Lake Tahoe)"
+        - title: "Reference"
+          children:
+            - file: catalog/cli.md
+              title: "CLI"
+            - file: catalog/vocabulary.md
+              title: "Parameter vocabulary"
+            - file: catalog/schema-versions.md
+              title: "Schema versions"
+            - file: catalog/logging.md
+              title: "Logging"
+            - file: catalog/changelog.md
+              title: "Changelog"
+        - title: "Design"
+          children:
+            - file: catalog/design/query-matchup.md
+              title: "Query → matchup → patch"
+            - file: catalog/design/exact-grid-alignment.md
+              title: "Exact grid alignment"
+    - title: "Cloud — geocloud"
+      children:
+        - file: cloud/index.md
+          title: "Overview"
+        - file: cloud/concepts.md
+          title: "Concepts"
+        - title: "How-to"
+          children:
+            - file: cloud/how-to/move-files.md
+              title: "Move files"
+            - file: cloud/how-to/credentials.md
+              title: "Register credentials"
+            - file: cloud/how-to/read-cogs.md
+              title: "Read COGs"
+            - file: cloud/how-to/write-cogs.md
+              title: "Write COGs"
+            - file: cloud/how-to/fsspec.md
+              title: "Use fsspec libraries"
+            - file: cloud/how-to/cache.md
+              title: "Cache remote files"
+            - file: cloud/how-to/hdf.md
+              title: "Read HDF and NetCDF"
+        - title: "Tutorials"
+          children:
+            - file: cloud/notebooks/geocloud_tour.ipynb
+              title: "A tour of geocloud"
+    - title: "Products — geoproducts"
+      children:
+        - file: products/index.md
+          title: "Overview"
+        - file: products/concepts.md
+          title: "Concepts"
+        - title: "Sensors"
+          children:
+            - file: products/goes.md
+              title: "GOES-R ABI"
+            - file: products/himawari.md
+              title: "Himawari AHI"
+            - file: products/carbonmapper.md
+              title: "Carbon Mapper"
+        - title: "How-to"
+          children:
+            - file: products/product-readers.md
+              title: "Add a product reader"
+        - title: "Tutorials"
+          children:
+            - file: products/notebooks/goes_mesoscale.ipynb
+              title: "GOES-19 mesoscale"
+            - file: products/notebooks/himawari_japan.ipynb
+              title: "Himawari over Japan"
+    - title: "Array — geoarray"
+      children:
+        - file: array/index.md
+          title: "Overview"
+        - file: array/concepts.md
+          title: "Concepts"
+        - title: "How-to"
+          children:
+            - file: array/how-to/when-to-jit.md
+              title: "When to jit"
+            - file: array/how-to/xarray.md
+              title: "Cross to xarray"
+        - title: "Tutorials"
+          children:
+            - file: array/notebooks/swath_averaging_kernels.ipynb
+              title: "Swaths and averaging kernels"
+    - title: "xarray lane — xrtoolz"
+      children:
+        - file: xarray/index.md
+          title: "Overview"
+        - title: "Packages"
+          children:
+            - file: xarray/packages/index.md
+              title: "Overview"
+            - file: xarray/packages/grad.md
+              title: "Calculus (xrops.grad)"
+            - file: xarray/packages/reader.md
+              title: "xrtoolz-products (xrproducts)"
+        - title: "Tutorials"
+          children:
+            - title: "Core"
+              children:
+                - file: xarray/notebooks/operators_pipeline_demo.ipynb
+                  title: "Operators & Pipelines"
+                - file: xarray/notebooks/xrgrad_quickstart.ipynb
+                  title: "xrgrad Quickstart"
+                - file: xarray/notebooks/sequential_summary_demo.ipynb
+                  title: "Structural Summaries"
+                - file: xarray/notebooks/sklearn_patchwise_recipe.ipynb
+                  title: "Sklearn patch-wise Recipe"
+                - file: xarray/notebooks/nan_aware_smoothing.ipynb
+                  title: "NaN-aware Smoothing"
+                - file: xarray/notebooks/inference_modelop_demo.ipynb
+                  title: "Inference with ModelOp"
+            - title: "Ocean"
+              children:
+                - file: xarray/notebooks/ocean_kinematics_glorys_duacs.ipynb
+                  title: "Kinematics — GLORYS vs DUACS"
+                - file: xarray/notebooks/ocean_alongtrack_ssh.ipynb
+                  title: "Along-track SSH"
+                - file: xarray/notebooks/ocean_stratification_glorys.ipynb
+                  title: "Stratification — GLORYS 3D"
+            - title: "Gridding & Binning"
+              children:
+                - file: xarray/notebooks/cmems_sst_products.ipynb
+                  title: "SST — Binning L3 onto a Grid"
+                - file: xarray/notebooks/cmems_sss_products.ipynb
+                  title: "SSS — Binning L3 onto a Grid"
+                - file: xarray/notebooks/cmems_ssh_products.ipynb
+                  title: "SSH — Binning Along-track"
+                - file: xarray/notebooks/cmems_oc_products.ipynb
+                  title: "Ocean Colour — Binning"
+            - title: "Data Acquisition"
+              children:
+                - file: xarray/recipes/tropomi_ch4_screen.md
+                  title: "Open a TROPOMI CH₄ granule and screen it"
+                - file: xarray/recipes/methane_plume_products.md
+                  title: "Open a methane plume scene and select one plume"
+            - title: "Validation"
+              children:
+                - file: xarray/notebooks/validation_v1_scales.ipynb
+                  title: "V1 — Scales of Evaluation"
+                - file: xarray/notebooks/validation_v1_psd_plots.ipynb
+                  title: "V1.5 — PSD Plots & Resolved Scale"
+                - file: xarray/notebooks/validation_v2_data_representation.ipynb
+                  title: "V2 — Data Representation"
+                - file: xarray/notebooks/validation_v4_process.ipynb
+                  title: "V4 — Process Evaluation"
+                - file: xarray/notebooks/validation_v6_capstone.ipynb
+                  title: "V6 — Capstone"
+        - title: "Reference"
+          children:
+            - file: xarray/changelog.md
+              title: "Changelog"
+        - file: xarray/dask.md
+          title: "Dask"
+        - title: "Design"
+          children:
+            - file: xarray/design/README.md
+              title: "Overview"
+            - file: xarray/design/vision.md
+              title: "Vision"
+            - file: xarray/design/architecture.md
+              title: "Architecture"
+            - file: xarray/design/boundaries.md
+              title: "Boundaries"
+            - file: xarray/design/decisions.md
+              title: "Decisions"
+            - title: "API"
+              children:
+                - file: xarray/design/api/README.md
+                  title: "Overview"
+                - file: xarray/design/api/primitives.md
+                  title: "Primitives (L0)"
+                - file: xarray/design/api/components.md
+                  title: "Components (L1)"
+                - file: xarray/design/api/models.md
+                  title: "Models (L2)"
+            - title: "Examples"
+              children:
+                - file: xarray/design/examples/README.md
+                  title: "Overview"
+                - file: xarray/design/examples/primitives.md
+                  title: "Primitives"
+                - file: xarray/design/examples/components.md
+                  title: "Components"
+                - file: xarray/design/examples/models.md
+                  title: "Models"
+                - file: xarray/design/examples/integration.md
+                  title: "Integration"
+                - file: xarray/design/examples/validation.md
+                  title: "Validation"
+                - file: xarray/design/examples/budgets.md
+                  title: "Budgets"
+                - file: xarray/design/examples/lagrangian.md
+                  title: "Lagrangian"
+                - file: xarray/design/examples/phenomena.md
+                  title: "Phenomena"
+            - title: "Reader (xrproducts)"
+              children:
+                - file: xarray/design/reader/architecture.md
+                  title: "Architecture"
+            - title: "Bridge Modules"
+              children:
+                - file: xarray/design/bridges/README.md
+                  title: "Overview"
+                - file: xarray/design/bridges/overview.md
+                  title: "Cross-cutting"
+                - title: "linalg (structured linear algebra)"
+                  children:
+                    - file: xarray/design/bridges/linalg/vision.md
+                      title: "Vision"
+                    - file: xarray/design/bridges/linalg/architecture.md
+                      title: "Architecture"
+                    - file: xarray/design/bridges/linalg/api.md
+                      title: "API"
+                    - file: xarray/design/bridges/linalg/decisions.md
+                      title: "Decisions"
+                - title: "prob (probabilistic distributions)"
+                  children:
+                    - file: xarray/design/bridges/prob/vision.md
+                      title: "Vision"
+                    - file: xarray/design/bridges/prob/architecture.md
+                      title: "Architecture"
+                    - file: xarray/design/bridges/prob/api.md
+                      title: "API"
+                    - file: xarray/design/bridges/prob/decisions.md
+                      title: "Decisions"
+            - title: "Validation"
+              children:
+                - file: xarray/design/validation.md
+                  title: "Validation framework"
+                - file: xarray/design/validation-decisions.md
+                  title: "Validation decisions"
+                - file: xarray/design/api/validation.md
+                  title: "Validation API map"
+            - title: "Surveys"
+              children:
+                - file: xarray/design/oceanbench-survey.md
+                  title: "OceanBench survey"
+                - file: xarray/design/ob-1.1-xrpatcher-integration.md
+                  title: "OB-1.1 xrpatcher integration"
+                - file: xarray/design/ob-1.2-cf-standard-name-rename.md
+                  title: "OB-1.2 CF standard-name rename"
+                - file: xarray/design/ob-1.3-regions-and-subset.md
+                  title: "OB-1.3 Regions and subset"
+                - file: xarray/design/ob-1.4-class4-profile-validation.md
+                  title: "OB-1.4 Class-IV profile validation"
+                - file: xarray/design/ocean-data-challenges-survey.md
+                  title: "Ocean Data Challenges survey"
+                - file: xarray/design/odc-1.1-fir-filters.md
+                  title: "ODC-1.1 FIR filters"
+                - file: xarray/design/odc-1.2-grid-to-points.md
+                  title: "ODC-1.2 Grid to points"
+                - file: xarray/design/odc-1.3-segmented-psd.md
+                  title: "ODC-1.3 Segmented PSD"
+                - file: xarray/design/odc-1.4-binned-stats-regions.md
+                  title: "ODC-1.4 Binned statistics"
+                - file: xarray/design/odc-1.5-regime-bars-rotary.md
+                  title: "ODC-1.5 Regime bars and rotary spectra"
+                - file: xarray/design/odc-2.1-rmse-and-psd-spacetime.md
+                  title: "ODC-2.1 RMSE and space-time PSD"
+                - file: xarray/design/odc-2.2-laplacian-gap-fill.md
+                  title: "ODC-2.2 Laplacian gap-fill"
+                - file: xarray/design/odc-2.3-facet-panel.md
+                  title: "ODC-2.3 Facet panel"
+                - file: xarray/design/odc-3.1-spectral-flux-and-scales.md
+                  title: "ODC-3.1 Spectral flux and scales"
+                - file: xarray/design/odc-3.3-lagrangian-reconciliation.md
+                  title: "ODC-3.3 Lagrangian reconciliation"
+                - file: xarray/design/odc-3.4-pairwise-compare-panel.md
+                  title: "ODC-3.4 Pairwise compare panel"
+                - file: xarray/design/odc-3.6-animate-panel.md
+                  title: "ODC-3.6 Animate panel"
+            - title: "Notes"
+              children:
+                - file: xarray/design/conventions/array-typing.md
+                  title: "Array typing conventions"
+                - file: xarray/design/xarray-native-primitives.md
+                  title: "xarray-native primitives"
+                - file: xarray/design/xrgrad-nan-masks.md
+                  title: "xrgrad NaN masks"
+    - file: contributing.md
+      title: "Contributing"
+
+site:
+  template: book-theme
+  options:
+    logo: assets/logo-light.svg
+    logo_dark: assets/logo-dark.svg
+    favicon: assets/icon.svg
+  nav:
+    - title: API reference
+      url: https://jejjohnson.github.io/geotoolz/reference/api/
+    - title: Extended examples
+      url: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack

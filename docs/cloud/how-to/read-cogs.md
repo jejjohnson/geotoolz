@@ -105,7 +105,7 @@ the grid of any `GeoArray` or raster source) and `read_to_crs`.
 
 ## Patch a COG
 
-[`geopatcher.fields.CogField`](../../patcher/api/fields.md) is `CogSource`
+[`geopatcher.fields.CogField`](https://jejjohnson.github.io/geotoolz/reference/patcher/api/fields/) is `CogSource`
 with the patcher's `Field` interface; install `geotoolz-patcher[cog]`.
 
 ## Pitfalls

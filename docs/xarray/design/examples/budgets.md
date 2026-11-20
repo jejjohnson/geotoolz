@@ -3,13 +3,14 @@ status: draft
 version: 0.2.0
 ---
 
-!!! note "Module paths shown are proposed design targets"
-    The snippets below import from `xrtoolz.budgets`, `xrtoolz.metrics.*`, and other
-    submodules that **do not exist in the current export surface** — the current
-    domain-agnostic functionality still lives under `xrtoolz.geo.*`. Treat these
-    imports as design-target aliases; once the modules ship the snippets become
-    copy/paste-ready, but until then map each `xrtoolz.<topic>` path to its
-    equivalent under today's `xrtoolz.geo.<topic>`.
+:::{note} Module paths shown are proposed design targets
+The snippets below import from `xrtoolz.budgets`, `xrtoolz.metrics.*`, and other
+submodules that **do not exist in the current export surface** — the current
+domain-agnostic functionality still lives under `xrtoolz.geo.*`. Treat these
+imports as design-target aliases; once the modules ship the snippets become
+copy/paste-ready, but until then map each `xrtoolz.<topic>` path to its
+equivalent under today's `xrtoolz.geo.<topic>`.
+:::
 
 # Budget Validation Examples
 

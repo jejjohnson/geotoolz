@@ -7,19 +7,20 @@ only runs on `.compute()`. Where the algorithm needs the whole array (a
 global neighbour search, a global fit), the operator still accepts dask
 input but **materialises internally**, with an identical result.
 
-!!! tip "The one rule: keep *core* dims in a single chunk"
-    An operator transforms along its *core* dimensions — the spatial
-    `(lat, lon)` for a 2-D gap-filler, the transform dim for an FFT or
-    wavelet, the smoothing dim for a filter. **Chunk the batch dims** (e.g.
-    `time`) and **keep each core dim whole**:
+:::{tip} The one rule: keep *core* dims in a single chunk
+An operator transforms along its *core* dimensions — the spatial
+`(lat, lon)` for a 2-D gap-filler, the transform dim for an FFT or
+wavelet, the smoothing dim for a filter. **Chunk the batch dims** (e.g.
+`time`) and **keep each core dim whole**:
 
-    ```python
-    ds = ds.chunk({"time": 1, "lat": -1, "lon": -1})   # -1 = one chunk
-    ```
+```python
+ds = ds.chunk({"time": 1, "lat": -1, "lon": -1})   # -1 = one chunk
+```
 
-    Operators that need a whole core slice are built with
-    `allow_rechunk=False`, so a *split* core dim raises a clear error rather
-    than silently rechunking (which would corrupt a windowed transform).
+Operators that need a whole core slice are built with
+`allow_rechunk=False`, so a *split* core dim raises a clear error rather
+than silently rechunking (which would corrupt a windowed transform).
+:::
 
 ## A lazy pipeline
 
@@ -46,7 +47,7 @@ result = lazy.compute()    # run it (optionally under a dask scheduler/cluster)
 
 ## Declared backends
 
-Every xrops operator declares `backends` from pipekit's vocabulary (OP-O6); today all declare `("numpy", "dask")`. A DataArray counts by the backend of its data and a Dataset by its variables', so a JAX-backed input raises a `BackendError` naming the conversion, while a NumPy operand beside a dask one (a static mask, an in-memory reference) joins the lazy computation. geoops geometry operators, which need a `GeoArray` per item, run over a cube through [`xrops.lift`](api/lift.md).
+Every xrops operator declares `backends` from pipekit's vocabulary (OP-O6); today all declare `("numpy", "dask")`. A DataArray counts by the backend of its data and a Dataset by its variables', so a JAX-backed input raises a `BackendError` naming the conversion, while a NumPy operand beside a dask one (a static mask, an in-memory reference) joins the lazy computation. geoops geometry operators, which need a `GeoArray` per item, run over a cube through [`xrops.lift`](https://jejjohnson.github.io/geotoolz/reference/xarray/api/lift/).
 
 ## Per-operator tiers
 
@@ -61,14 +62,15 @@ sweep asserts numpy/dask **result parity** for all of them, and asserts
 | **Eager (dask-safe)** | accepts dask, computes internally, identical result | binning (`Bin2D`, `Histogram2D`); the sklearn bridge (`XarrayEstimator`, decompositions, `SklearnModelOp`) |
 | **N/A** | numpy-array primitives — no xarray, so no dask | `points_to_grid`, `idw_to_grid`, `kde_to_grid` (use the `*ToGrid` operators for the xarray surface) |
 
-!!! note "Why some operators can't be fully lazy"
-    `Bin2D`, the IDW/KNN regridders, RBF infilling, and the scikit-learn
-    estimators rest on a **global** computation — a KD-tree over every point,
-    or a single fit across the whole sample. Those have no correct per-chunk
-    decomposition, so the operator gathers what it needs and computes it.
-    They remain perfectly usable on dask-backed data; they just aren't a
-    deferred graph. Making them distributed would mean reimplementing the
-    underlying KD-tree / least-squares solvers, which is out of scope.
+:::{note} Why some operators can't be fully lazy
+`Bin2D`, the IDW/KNN regridders, RBF infilling, and the scikit-learn
+estimators rest on a **global** computation — a KD-tree over every point,
+or a single fit across the whole sample. Those have no correct per-chunk
+decomposition, so the operator gathers what it needs and computes it.
+They remain perfectly usable on dask-backed data; they just aren't a
+deferred graph. Making them distributed would mean reimplementing the
+underlying KD-tree / least-squares solvers, which is out of scope.
+:::
 
 ## Testing your own pipelines
 

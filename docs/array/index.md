@@ -139,23 +139,23 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 |---|---|---|
 | `GeoArray` | carry data with its stored dims, coordinates, transform, CRS, fill value and attrs; `sel` / `isel` by name, `grid`, `with_data`, `to_jax`, `to_numpy`, `from_coords` | [Concepts](concepts.md) |
 | `GeoSwath`, `GeoPoints`, `pad_points` | carry swaths in sensor geometry (lat/lon leaves) and point sets (xy, z, time, valid) | [Tutorial](notebooks/swath_averaging_kernels.ipynb) |
-| `geoarray.coords` | say what a dim means: `SpectralAxis`, `VariableAxis`, `VerticalAxis`, `TimeAxis`, `PixelGrid`, … | [Reference](api/coords.md) |
-| `geoarray.types` | name common shapes (`GeoImage`, `GeoMapSeries`, `GeoTracks`, …) and check them with `check_dims` | [Reference](api/types.md) |
+| `geoarray.coords` | say what a dim means: `SpectralAxis`, `VariableAxis`, `VerticalAxis`, `TimeAxis`, `PixelGrid`, … | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/coords/) |
+| `geoarray.types` | name common shapes (`GeoImage`, `GeoMapSeries`, `GeoTracks`, …) and check them with `check_dims` | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/types/) |
 | `isel`, `sel`, `reduce`, `map_over`, `concat`, `combine`, … | pipekit-array's dim-level functions, on every named carrier; a pipekit-array `KernelOp` runs on carriers too | [Concepts](concepts.md#one-set-of-dim-level-functions) |
 | `to_pixel` | map coordinates to fractional pixels (functax's kernel, re-exported); H(x) itself is `geoops.geom.interp_at` | [When to jit](how-to/when-to-jit.md) |
 | `to_xarray`, `from_xarray`, `to_dataset`, `to_datatree` | cross to xarray losslessly (`[xarray]`) | [Cross to xarray](how-to/xarray.md) |
-| `Grid` | describe a pixel grid without data: `bounds`, `res`, `shift`, `crop`, `from_bounds`, `isclose`, `get_config` | [Reference](api.md#grid) |
-| `PixelWindow` | name a rectangle of pixels, rasterio's `Window` without rasterio; `Grid.window` / `Grid.bounds_of` convert to and from map bounds | [Reference](api.md#pixelwindow) |
-| `g[...]`, `isel` | slice with the transform following; select bands with their per-band attrs | [Reference](api.md#geoarray) |
-| `map`, `shift_origin`, `squeeze`, `expand_dims` | change the data on the same grid, move the georeferencing, add or drop leading axes | [Reference](api.md#geoarray) |
-| `crop`, `read_window`, `write_window`, `pad` | cut, read past the edges, write and pad pixels; `crop` inside `jit` / `vmap` | [Reference](api.md#geometry) |
-| `valid_mask`, `pixel_coords`, `footprint` | find the pixels that hold data, their map coordinates, the outline (`[vector]`) | [Reference](api.md#geometry) |
-| `stack`, `concatenate` | join carriers that share a grid (`stack(gs, "time")`; `concatenate` is `concat` by position) | [Reference](api.md#joining-carriers) |
-| `FrozenAttrs` | keep metadata hashable, so it can key a compiled function | [Reference](api.md#frozenattrs) |
-| `RasterSource`, `AsyncRasterSource` | describe a lazy reader: its grid, and reads that return a `GeoArray` (`read_window`, `load`); a `GeoArray` is one | [Reference](api.md#lazy-readers) |
-| `set_options`, `get_options`, `HostTransferWarning` | find the NumPy steps that copy JAX data to the host | [Reference](api.md#backends-and-interop) |
-| `from_georeader`, `to_georeader` | bridge to georeader's `GeoTensor`, zero-copy, and (`source_from_georeader` / `source_to_georeader`) its lazy readers (`[georeader]`) | [Reference](api.md#backends-and-interop) |
-| `as_transform`, `as_crs` | coerce an `affine.Affine`, six numbers, an EPSG code or WKT | [Reference](api.md#coercions) |
+| `Grid` | describe a pixel grid without data: `bounds`, `res`, `shift`, `crop`, `from_bounds`, `isclose`, `get_config` | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#grid) |
+| `PixelWindow` | name a rectangle of pixels, rasterio's `Window` without rasterio; `Grid.window` / `Grid.bounds_of` convert to and from map bounds | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#pixelwindow) |
+| `g[...]`, `isel` | slice with the transform following; select bands with their per-band attrs | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#geoarray) |
+| `map`, `shift_origin`, `squeeze`, `expand_dims` | change the data on the same grid, move the georeferencing, add or drop leading axes | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#geoarray) |
+| `crop`, `read_window`, `write_window`, `pad` | cut, read past the edges, write and pad pixels; `crop` inside `jit` / `vmap` | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#geometry) |
+| `valid_mask`, `pixel_coords`, `footprint` | find the pixels that hold data, their map coordinates, the outline (`[vector]`) | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#geometry) |
+| `stack`, `concatenate` | join carriers that share a grid (`stack(gs, "time")`; `concatenate` is `concat` by position) | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#joining-carriers) |
+| `FrozenAttrs` | keep metadata hashable, so it can key a compiled function | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#frozenattrs) |
+| `RasterSource`, `AsyncRasterSource` | describe a lazy reader: its grid, and reads that return a `GeoArray` (`read_window`, `load`); a `GeoArray` is one | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#lazy-readers) |
+| `set_options`, `get_options`, `HostTransferWarning` | find the NumPy steps that copy JAX data to the host | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#backends-and-interop) |
+| `from_georeader`, `to_georeader` | bridge to georeader's `GeoTensor`, zero-copy, and (`source_from_georeader` / `source_to_georeader`) its lazy readers (`[georeader]`) | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#backends-and-interop) |
+| `as_transform`, `as_crs` | coerce an `affine.Affine`, six numbers, an EPSG code or WKT | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#coercions) |
 
 ## Next steps
 
@@ -164,7 +164,7 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 - How-to: [When to jit](how-to/when-to-jit.md),
   [Cross to xarray](how-to/xarray.md).
 - Tutorial: [Swaths and averaging kernels](notebooks/swath_averaging_kernels.ipynb).
-- [API reference](api.md), [`geoarray.coords`](api/coords.md),
-  [`geoarray.types`](api/types.md).
+- [API reference](https://jejjohnson.github.io/geotoolz/reference/array/api/), [`geoarray.coords`](https://jejjohnson.github.io/geotoolz/reference/array/api/coords/),
+  [`geoarray.types`](https://jejjohnson.github.io/geotoolz/reference/array/api/types/).
 - The design, its decisions and its roadmap: [geoarray: one NumPy/JAX
   carrier for geotoolz](https://github.com/jejjohnson/geostack/blob/main/docs/design/01_geoarray.md).

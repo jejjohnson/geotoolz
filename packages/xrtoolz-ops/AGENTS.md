@@ -151,7 +151,7 @@ Example notebooks live in `docs/xarray/notebooks/` as jupytext percent-format `.
 1. Write the `.py` source (jupytext percent format)
 2. Convert and execute: `jupytext --to notebook foo.py` then `jupyter nbconvert --execute --inplace foo.ipynb`
 3. Delete the `.py` — the executed `.ipynb` is the committed source of truth
-4. `mkdocs-jupyter` renders the pre-executed `.ipynb` with `execute: false`
+4. mystmd renders the pre-executed `.ipynb` without executing it; list it in the `toc` of `docs/myst.yml`
 
 Figures render inline via `plt.show()` — do **not** use `savefig` or commit separate PNG files. The `.ipynb` cell outputs are the single source of rendered figures.
 

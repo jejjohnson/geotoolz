@@ -142,6 +142,6 @@ cannot tell which is right.
 - [ ] Leads with the point; sentences < 25 words, paragraphs ≤ 3 sentences
 - [ ] `uv run python scripts/check_docs.py` passes
 - [ ] Diagrams are rendered PNGs with alt text
-- [ ] `uv run --group docs mkdocs build --strict` passes
-- [ ] In `mkdocs.yml` nav, under the section's Landing / Concepts / How-to /
+- [ ] `make docs` passes (mystmd + Zensical, strict, every link checked)
+- [ ] A prose page is in the `toc` of `docs/myst.yml` and an API page in the `nav` of `mkdocs.yml`, under the section's Landing / Concepts / How-to /
       Tutorials / Reference grouping

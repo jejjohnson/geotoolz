@@ -1,1 +1,2 @@
---8<-- "packages/xrtoolz/CHANGELOG.md"
+```{include} ../../packages/xrtoolz/CHANGELOG.md
+```

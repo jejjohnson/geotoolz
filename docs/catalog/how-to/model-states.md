@@ -151,4 +151,4 @@ leaf per producer, each a cube on its own grid.
   `geocatalog migrate <path>` first ([schema versions](../schema-versions.md)).
 
 The reserved columns and their types are on the
-[States API](../api/states.md) page.
+[States API](https://jejjohnson.github.io/geotoolz/reference/catalog/api/states/) page.

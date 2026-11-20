@@ -225,5 +225,5 @@ Fitted attributes are not constructor arguments, so they stay out of
 
 - [Branching pipelines](branching-pipelines.md): combine your operator
   with others in a `Graph`, `Branch` or `Switch`.
-- [Carrier helpers](../api/carrier.md): every helper in
+- [Carrier helpers](https://jejjohnson.github.io/geotoolz/reference/operators/api/carrier/): every helper in
   `geoops.carrier` and `geoops.testing`.

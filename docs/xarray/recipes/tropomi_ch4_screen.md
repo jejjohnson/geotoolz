@@ -96,4 +96,4 @@ plume = src.open("ghgsat.ch4", path="GHGSat_plume.nc")
 
 Both come back on `(time, y, x)` with 2-D `lon` / `lat`, so `subset_bbox`
 and the `xrops.geom` operators run on them unchanged. See
-[Local L2 products](../api/reader.md#local-l2-products) for the full API.
+[Local L2 products](https://jejjohnson.github.io/geotoolz/reference/xarray/api/reader/#local-l2-products) for the full API.

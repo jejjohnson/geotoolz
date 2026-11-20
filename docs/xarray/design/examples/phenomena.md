@@ -3,12 +3,13 @@ status: draft
 version: 0.2.0
 ---
 
-!!! note "Module paths shown are proposed design targets"
-    The snippets below import from `xrtoolz.phenomena`, `xrtoolz.metrics.object`,
-    and other submodules that **do not exist in the current export surface** — the
-    current domain-agnostic functionality still lives under `xrtoolz.geo.*`.
-    Treat these imports as design-target aliases; until the modules ship, map each
-    `xrtoolz.<topic>` path to its equivalent under today's `xrtoolz.geo.<topic>`.
+:::{note} Module paths shown are proposed design targets
+The snippets below import from `xrtoolz.phenomena`, `xrtoolz.metrics.object`,
+and other submodules that **do not exist in the current export surface** — the
+current domain-agnostic functionality still lives under `xrtoolz.geo.*`.
+Treat these imports as design-target aliases; until the modules ship, map each
+`xrtoolz.<topic>` path to its equivalent under today's `xrtoolz.geo.<topic>`.
+:::
 
 # Phenomena-Based Validation Examples
 

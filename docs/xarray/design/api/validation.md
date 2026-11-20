@@ -3,27 +3,28 @@ status: draft
 version: 0.2.0
 ---
 
-!!! note "Module paths shown — partially shipped"
-    Only the following names are real and importable today:
+:::{note} Module paths shown — partially shipped
+Only the following names are real and importable today:
 
-    - **`xrtoolz.metrics.pixel`** — `mse`, `rmse`, `nrmse`, `mae`, `bias`,
-      `correlation`, `r2_score`, plus `MSE`, `RMSE`, `NRMSE`, `MAE`,
-      `Bias`, `Correlation`, `R2Score`.
-    - **`xrtoolz.metrics.spectral`** — `psd_error`, `psd_score`,
-      `resolved_scale`, `find_intercept_1D`, plus `PSDScore`.
+- **`xrtoolz.metrics.pixel`** — `mse`, `rmse`, `nrmse`, `mae`, `bias`,
+  `correlation`, `r2_score`, plus `MSE`, `RMSE`, `NRMSE`, `MAE`,
+  `Bias`, `Correlation`, `R2Score`.
+- **`xrtoolz.metrics.spectral`** — `psd_error`, `psd_score`,
+  `resolved_scale`, `find_intercept_1D`, plus `PSDScore`.
 
-    Every other class referenced on this page (`NashSutcliffe`,
-    `ResolvedScale`, `SkillByLeadTime`, `RMSEByLead`, `EvaluateByRegion`,
-    `FrequencyBandSkill`, `CRPS`, `SSIM`, `GeostrophicBalanceError`,
-    detectors, panels, …) is a **design target** that lands with its
-    respective view epic. The taxonomy submodules (`forecast`,
-    `multiscale`, `structural`, `probabilistic`, `distributional`,
-    `masked`, `lagrangian`, `physical`, `object`) are importable today
-    but empty — `from xrtoolz.metrics.forecast import RMSEByLead` will
-    succeed at the module import but fail on the symbol. Sibling
-    packages `xrtoolz.budgets`, `xrtoolz.phenomena`,
-    `xrtoolz.lagrangian`, and `xrtoolz.viz.validation` are still
-    proposed layouts and not yet on the export surface.
+Every other class referenced on this page (`NashSutcliffe`,
+`ResolvedScale`, `SkillByLeadTime`, `RMSEByLead`, `EvaluateByRegion`,
+`FrequencyBandSkill`, `CRPS`, `SSIM`, `GeostrophicBalanceError`,
+detectors, panels, …) is a **design target** that lands with its
+respective view epic. The taxonomy submodules (`forecast`,
+`multiscale`, `structural`, `probabilistic`, `distributional`,
+`masked`, `lagrangian`, `physical`, `object`) are importable today
+but empty — `from xrtoolz.metrics.forecast import RMSEByLead` will
+succeed at the module import but fail on the symbol. Sibling
+packages `xrtoolz.budgets`, `xrtoolz.phenomena`,
+`xrtoolz.lagrangian`, and `xrtoolz.viz.validation` are still
+proposed layouts and not yet on the export surface.
+:::
 
 # Validation API Map
 

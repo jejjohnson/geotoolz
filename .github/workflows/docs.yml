@@ -27,7 +27,7 @@ jobs:
       pull-requests: read
 
   build:
-    name: mkdocs build --strict
+    name: docs build
     needs: changes
     if: needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
@@ -36,10 +36,16 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Install mystmd
+        run: npm install -g mystmd
       - name: Install docs dependencies
         run: uv sync --group docs
-      # --strict turns every warning (broken cross-reference, missing
-      # nav target, unresolvable mkdocstrings identifier) into a failure,
-      # so docs drift breaks the PR instead of the deployed site.
-      - name: Build docs
-        run: uv run --group docs mkdocs build --strict
+      # Builds both halves (mystmd prose, Zensical API reference) in strict
+      # mode, assembles them into public/, repairs the cross-generator links,
+      # and fails on any broken link, in either half or crossing between
+      # them, so docs drift breaks the PR instead of the deployed site.
+      - name: Build and verify the documentation site
+        run: uv run --group docs python scripts/build_docs.py

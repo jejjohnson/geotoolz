@@ -1,1 +1,2 @@
---8<-- "packages/geotoolz-catalog/CHANGELOG.md"
+```{include} ../../packages/geotoolz-catalog/CHANGELOG.md
+```

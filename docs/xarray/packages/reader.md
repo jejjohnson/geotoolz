@@ -79,5 +79,5 @@ under `docs/` still picks up the project-root `.env`.
 
 ## API reference
 
-- [Readers](../api/reader.md)
+- [Readers](https://jejjohnson.github.io/geotoolz/reference/xarray/api/reader/)
 - [Reader architecture](../design/reader/architecture.md)

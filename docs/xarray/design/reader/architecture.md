@@ -24,16 +24,17 @@ This page is the design record for the reader layer and its public API. The
 [migration mechanics](#migration-mechanics) section is retained as the
 historical record of the `xrtoolz.data` → `xrreader` split.
 
-!!! note "Why this is a separate package and not part of geocatalog"
-    A reasonable question: there is already a `geocatalog` package that talks to
-    remote data — why not put the readers there? Because they solve a *different*
-    problem. `geocatalog` **indexes files**: point it at a pile of GeoTIFFs / a
-    STAC API and it answers "what overlaps this box and time?" without opening
-    anything. `xrreader` **fetches arrays**: CMEMS / CDS / AEMET are API services
-    with their own auth and server-side subsetting — you ask for a subset and get
-    a NetCDF back. One discovers *where data is*; the other *materializes the data
-    itself*. Keeping them apart keeps both contracts honest. The two meet at a
-    shared query vocabulary (see [geocatalog integration](#geocatalog-integration)).
+:::{note} Why this is a separate package and not part of geocatalog
+A reasonable question: there is already a `geocatalog` package that talks to
+remote data — why not put the readers there? Because they solve a *different*
+problem. `geocatalog` **indexes files**: point it at a pile of GeoTIFFs / a
+STAC API and it answers "what overlaps this box and time?" without opening
+anything. `xrreader` **fetches arrays**: CMEMS / CDS / AEMET are API services
+with their own auth and server-side subsetting — you ask for a subset and get
+a NetCDF back. One discovers *where data is*; the other *materializes the data
+itself*. Keeping them apart keeps both contracts honest. The two meet at a
+shared query vocabulary (see [geocatalog integration](#geocatalog-integration)).
+:::
 
 ## The mental model
 
@@ -161,14 +162,15 @@ and any future UI build *one* shape; the adapter picks the fields it needs.
 Every adapter exposes the same four-method surface. `list_datasets` and
 `describe` are discovery (cheap, no download); `download` and `open` materialize:
 
-!!! note "API status — P0 vs P1"
-    The snippets below pass a single `Request` to `open`/`download` to
-    illustrate the **P1 target** API (locked decision #1). The **P0** code this
-    package ships today takes the request fields as keyword-only arguments
-    (`open(dataset_id, *, variables=, bbox=, time=, ...)`) and does not resolve
-    short names — callers resolve them via `CATALOG[name].dataset_id`. See the
-    [README quickstart](https://github.com/jejjohnson/xrtoolz/tree/main/packages/xrtoolz-reader#usage) for a
-    runnable P0 example. P1 introduces the canonical `Request` argument.
+:::{note} API status — P0 vs P1
+The snippets below pass a single `Request` to `open`/`download` to
+illustrate the **P1 target** API (locked decision #1). The **P0** code this
+package ships today takes the request fields as keyword-only arguments
+(`open(dataset_id, *, variables=, bbox=, time=, ...)`) and does not resolve
+short names — callers resolve them via `CATALOG[name].dataset_id`. See the
+[README quickstart](https://github.com/jejjohnson/xrtoolz/tree/main/packages/xrtoolz-reader#usage) for a
+runnable P0 example. P1 introduces the canonical `Request` argument.
+:::
 
 ```python
 import xrreader
@@ -206,44 +208,47 @@ it. Lazy imports mean installing `xrreader` core does **not** drag in
 `copernicusmarine`, `cdsapi`, or `httpx` — each adapter pulls its client only
 when first used, and points you at the right extra if it is missing.
 
-=== "CMEMS (ocean)"
+::::{tab-set}
+:::{tab-item} CMEMS (ocean)
 
-    ```python
-    src = xrreader.CMEMSSource()             # pip install 'xrtoolz-reader[cmems]'
-    ds  = src.open("duacs.sla", xrreader.Request(
-        variables=("sla", "ugos", "vgos"),
-        bbox=xrreader.BBox(-65, -45, 30, 45),
-        time=xrreader.TimeRange.parse("2017-01-01", "2017-12-31"),
-    ))
-    # → copernicusmarine.open_dataset(dataset_id=..., **bbox.as_cmems(),
-    #                                 **time.as_cmems(), variables=[...])
-    ```
+```python
+src = xrreader.CMEMSSource()             # pip install 'xrtoolz-reader[cmems]'
+ds  = src.open("duacs.sla", xrreader.Request(
+    variables=("sla", "ugos", "vgos"),
+    bbox=xrreader.BBox(-65, -45, 30, 45),
+    time=xrreader.TimeRange.parse("2017-01-01", "2017-12-31"),
+))
+# → copernicusmarine.open_dataset(dataset_id=..., **bbox.as_cmems(),
+#                                 **time.as_cmems(), variables=[...])
+```
+:::
+:::{tab-item} CDS (atmosphere / ERA5)
 
-=== "CDS (atmosphere / ERA5)"
+```python
+src = xrreader.CDSSource()               # pip install 'xrtoolz-reader[cds]'
+path = src.download("era5.single_levels", "era5.nc", xrreader.Request(
+    variables=("t2m", "msl", "u10", "v10"),
+    bbox=xrreader.BBox(-10, 5, 35, 45),
+    time=xrreader.TimeRange.parse("2021-06-01", "2021-06-30", freq="6h"),
+))
+# → cdsapi.retrieve(name, {**time.as_cds_form(), 'area': bbox.as_cds_area(),
+#                          'variable': [...]}, path)
+```
+:::
+:::{tab-item} AEMET (stations)
 
-    ```python
-    src = xrreader.CDSSource()               # pip install 'xrtoolz-reader[cds]'
-    path = src.download("era5.single_levels", "era5.nc", xrreader.Request(
-        variables=("t2m", "msl", "u10", "v10"),
-        bbox=xrreader.BBox(-10, 5, 35, 45),
-        time=xrreader.TimeRange.parse("2021-06-01", "2021-06-30", freq="6h"),
-    ))
-    # → cdsapi.retrieve(name, {**time.as_cds_form(), 'area': bbox.as_cds_area(),
-    #                          'variable': [...]}, path)
-    ```
-
-=== "AEMET (stations)"
-
-    ```python
-    src = xrreader.AemetSource()             # pip install 'xrtoolz-reader[aemet]'
-    ds  = src.open("aemet.daily", xrreader.Request(
-        variables=("tmed", "prec"),
-        time=xrreader.TimeRange.parse("2022-01-01", "2022-03-31"),
-    ))
-    # AEMET's OpenData API is a two-hop fetch (signed-URL envelope → payload)
-    # behind a conservative rate limit; the adapter watches the
-    # Remaining-request-count header and backs off before HTTP 429.
-    ```
+```python
+src = xrreader.AemetSource()             # pip install 'xrtoolz-reader[aemet]'
+ds  = src.open("aemet.daily", xrreader.Request(
+    variables=("tmed", "prec"),
+    time=xrreader.TimeRange.parse("2022-01-01", "2022-03-31"),
+))
+# AEMET's OpenData API is a two-hop fetch (signed-URL envelope → payload)
+# behind a conservative rate limit; the adapter watches the
+# Remaining-request-count header and backs off before HTTP 429.
+```
+:::
+::::
 
 Station data is *unstructured* — one record per `(station, time)` — so AEMET (and
 CDS in-situ) also ship a local **Archive** that mirrors observations to
@@ -331,6 +336,7 @@ The invariants that keep this graph **acyclic**:
 | `xrreader[pipekit]` | `pipekit` | `xrreader.ops` Operator bridge |
 | `xrreader[geocatalog]` | `geocatalog` | `xrreader.integrations.geocatalog` |
 
+(the-types-decision-why-xrreader-owns-them)=
 ## The types decision (why xrreader owns them)
 
 `xrtoolz.types` today holds two separable things. The **request vocabulary**
@@ -453,6 +459,7 @@ Two design points carry over from `pipekit` conventions:
   `_apply`. That keeps them pickleable / `check_pickleable`-clean, so they do not
   need `forbid_in_yaml`.
 
+(geocatalog-integration)=
 ## geocatalog integration
 
 `xrreader.integrations.geocatalog` (gated behind `[geocatalog]`, mirroring
@@ -482,6 +489,7 @@ from xrreader.integrations.geocatalog import request_to_geoslice
 hits = catalog.query(request_to_geoslice(req))   # same req that drives open()
 ```
 
+(local-archives)=
 ### Local archives
 
 `AemetArchive` and `CDSInsituArchive` are **value stores** — they hold the actual
@@ -512,6 +520,7 @@ outgrows single-file GeoParquet — at which point geocatalog's DuckDB backend
 (millions of rows, remote/S3, predicate pushdown) becomes the right home and the
 trade flips.
 
+(migration-mechanics)=
 ## Migration mechanics
 
 ### Coupling — why this is a clean lift

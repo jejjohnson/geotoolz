@@ -1,19 +1,82 @@
-site_name: geotoolz
-site_description: The geostack — find, read, cut and compute on Earth-observation data, one composable stack of five packages.
+# ---------------------------------------------------------------------------
+# Zensical builds ONLY the API reference from this file (it reads mkdocs.yml
+# as is), and it is deployed as the `/reference/` subtree of the MyST site.
+# The home page, concepts, how-tos, tutorials, design pages and notebooks are
+# built by mystmd from `docs/myst.yml`. See `docs/README.md` for the split.
+#
+# The API pages stay where each package's docs keep them (`docs/<pkg>/api/`,
+# and `api.md` for the single-page packages), which the scripts that check and
+# generate them read. Zensical reads `docs/` and `exclude_docs` leaves out
+# everything else, so the reference mirrors the source tree and every relative
+# link in an API page means what it says; links into prose pages are rewritten
+# to the MyST pages by `scripts/build_docs.py`. `docs/api/index.md` is the
+# overview, served at `/reference/api/`.
+#
+# mkdocstrings publishes a Sphinx-compatible `objects.inv` into `site/`, and
+# that inventory is what lets the MyST prose cross-reference into these pages.
+# ---------------------------------------------------------------------------
+site_name: geotoolz API reference
+site_description: API reference for the geostack packages (geoops, geopatcher, geocatalog, geocloud, geoproducts, geoarray and the xrtoolz xarray lane), generated from Google-style docstrings.
 site_author: J. Emmanuel Johnson
 repo_url: https://github.com/jejjohnson/geotoolz
 repo_name: jejjohnson/geotoolz
 
+docs_dir: docs
+site_dir: site
+
+# gitignore syntax: drop everything, then re-include only the API pages.
+exclude_docs: |
+  /*
+  !/api/
+  !/javascripts/
+  !/assets/
+  /assets/*
+  !/assets/icon.svg
+  !/operators/
+  /operators/*
+  !/operators/api/
+  !/patcher/
+  /patcher/*
+  !/patcher/api/
+  !/catalog/
+  /catalog/*
+  !/catalog/api/
+  !/xarray/
+  /xarray/*
+  !/xarray/api/
+  !/array/
+  /array/*
+  !/array/api/
+  !/array/api.md
+  !/cloud/
+  /cloud/*
+  !/cloud/api.md
+  !/products/
+  /products/*
+  !/products/api.md
+
+# The guide pages live in the MyST half of the site, so links to them point
+# outside `docs_dir` by design. `scripts/build_docs.py` rewrites them to the
+# pages mystmd built and then validates every link in the assembled site,
+# across both halves, which neither tool can do on its own.
+validation:
+  links:
+    unrecognized_links: ignore
+    absolute_links: ignore
+    not_found: ignore
+
 theme:
   name: material
+  # Zensical's Material-compatible look; `modern` is its newer default.
+  variant: classic
   logo: assets/icon.svg
   favicon: assets/icon.svg
   features:
-    - navigation.tabs
     - navigation.sections
     - navigation.top
     - content.code.copy
     - content.code.annotate
+    - toc.follow
   palette:
     - scheme: default
       primary: indigo
@@ -27,9 +90,6 @@ theme:
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
-
-hooks:
-  - docs/hooks/xarray_options.py
 
 plugins:
   - search
@@ -55,313 +115,110 @@ plugins:
             show_root_heading: true
             # geoarray re-exports functax's affine kernels (`to_pixel`);
             # griffe must load functax to resolve those aliases.
+            # xrops re-exports xrproducts names (subset_bbox, …); preload it
+            # so griffe can resolve those aliases.
             preload_modules:
               - functax
-  - mkdocs-jupyter:
-      execute: false
-      ignore_h1_titles: true
-  # The operator pages moved under operators/ (one folder per package);
-  # the old URLs keep working.
-  - redirects:
-      redirect_maps:
-        concepts.md: operators/concepts.md
-        notebooks/operators_lake_tahoe.md: operators/notebooks/operators_lake_tahoe.ipynb
-        quickstart.md: operators/index.md
-        operators/quickstart.md: operators/index.md
-        normalization.md: operators/normalization.md
-        patch_ops.md: operators/patch_ops.md
-        io.md: operators/io.md
-        recipes/define-an-operator.md: operators/how-to/define-an-operator.md
-        recipes/branching-pipelines.md: operators/how-to/branching-pipelines.md
-        recipes/integration-with-geocatalog-and-geopatcher.md: operators/patch_ops.md
-        operators/how-to/integration-with-geocatalog-and-geopatcher.md: operators/patch_ops.md
-        api/augment.md: operators/api/augment.md
-        api/carrier.md: operators/api/carrier.md
-        api/compositing.md: operators/api/compositing.md
-        api/core.md: operators/api/core.md
-        api/einx.md: operators/api/einx.md
-        api/feature.md: operators/api/feature.md
-        api/geom.md: operators/api/geom.md
-        api/indices.md: operators/api/indices.md
-        api/io.md: operators/api/io.md
-        api/learn.md: operators/api/learn.md
-        api/mask.md: operators/api/mask.md
-        api/matched_filter.md: operators/api/matched_filter.md
-        api/measure.md: operators/api/measure.md
-        api/normalize.md: operators/api/normalize.md
-        api/plume.md: operators/api/plume.md
-        api/qa.md: operators/api/qa.md
-        api/radiometry.md: operators/api/radiometry.md
-        api/restore.md: operators/api/restore.md
-        api/segment.md: operators/api/segment.md
-        api/spectral.md: operators/api/spectral.md
-        api/viz.md: operators/api/viz.md
-        design/query-matchup.md: catalog/design/query-matchup.md
-        patcher/design/query-matchup.md: catalog/design/query-matchup.md
-        catalog/recipes/large-archives.md: catalog/how-to/large-archives.md
-        catalog/recipes/from-stac.md: catalog/how-to/stac-ingestion.md
-        catalog/recipes/staging-and-bundles.md: catalog/how-to/staging.md
-        catalog/design/vocabulary.md: catalog/vocabulary.md
-
-# Contributor tooling, not site pages.
-exclude_docs: |
-  templates/
-  *.py
+              - xrproducts
 
 nav:
-  - Home: index.md
-  - How the packages interlock: geostack.md
-  - Capability index: capabilities.md
-  - Building with agents: agents.md
-  - Operators — geotoolz:
-      - Overview: operators/index.md
-      - Concepts: operators/concepts.md
-      - How-to:
-          - Define an operator: operators/how-to/define-an-operator.md
-          - Branching pipelines: operators/how-to/branching-pipelines.md
-          - Tile → operate → stitch: operators/patch_ops.md
-          - Normalise for training and inference: operators/normalization.md
-          - Read HDF and NetCDF files: operators/io.md
-      - Tutorials:
-          - Operators on Sentinel-2 (Lake Tahoe): operators/notebooks/operators_lake_tahoe.ipynb
-      - Reference:
-          - Core: operators/api/core.md
-          - Carrier & contract checks: operators/api/carrier.md
-          - Backends: operators/api/backends.md
-          - Coupling: operators/api/coupling.md
-          - Augment: operators/api/augment.md
-          - Compositing: operators/api/compositing.md
-          - Einx: operators/api/einx.md
-          - Feature: operators/api/feature.md
-          - Geometry: operators/api/geom.md
-          - Indices: operators/api/indices.md
-          - IO: operators/api/io.md
-          - Learn (scikit-learn): operators/api/learn.md
-          - Mask: operators/api/mask.md
-          - Matched filter: operators/api/matched_filter.md
-          - Measure: operators/api/measure.md
-          - Normalize: operators/api/normalize.md
-          - Plume: operators/api/plume.md
-          - QA: operators/api/qa.md
-          - Radiometry: operators/api/radiometry.md
-          - Restore: operators/api/restore.md
-          - Segment: operators/api/segment.md
-          - Spectral: operators/api/spectral.md
-          - Viz: operators/api/viz.md
-  - Patcher — geopatcher:
-      - Overview: patcher/index.md
-      - Concepts: patcher/concepts.md
-      - Quickstart: patcher/quickstart.md
-      - How-to:
-          - Stream to disk: patcher/recipes/streaming-overlap-add.md
-          - Handle read failures: patcher/recipes/on-error-policies.md
-          - Journal and resume: patcher/recipes/journal-and-resume.md
-          - Cache patch reads: patcher/recipes/patch-cache.md
-          - Patch across CRSs: patcher/recipes/mixed-crs.md
-          - Global statistics: patcher/recipes/global-statistics.md
-          - Async and prefetch: patcher/patching/async-prefetch.md
-          - Observability hooks: patcher/observability.md
-          - Temporal patching: patcher/recipes/temporal-patching.md
-          - Temporal stencils: patcher/recipes/temporal-stencils.md
-          - xarray N-D patching: patcher/recipes/xarray-nd-patching.md
-      - Tutorials:
-          - Patching Sentinel-2 (Lake Tahoe): patcher/notebooks/patcher_lake_tahoe.ipynb
-      - Reference:
-          - Behaviour: patcher/patching.md
-          - Overview: patcher/api/reference.md
-          - Core: patcher/api/core.md
-          - Spatial axes: patcher/api/spatial.md
-          - Temporal axes: patcher/api/temporal.md
-          - Fields: patcher/api/fields.md
-          - Matched multi-source: patcher/api/matched.md
-          - Running at scale: patcher/api/run.md
-          - Observing: patcher/api/observe.md
-          - Config: patcher/api/config.md
-          - Integrations: patcher/api/integrations.md
-      - Design:
-          - Design decisions: patcher/decisions.md
-  - Catalog — geocatalog:
-      - Overview: catalog/index.md
-      - Concepts: catalog/concepts.md
-      - Quickstart: catalog/quickstart.md
-      - How-to:
-          - Ingest from STAC: catalog/how-to/stac-ingestion.md
-          - Stage remote files: catalog/how-to/staging.md
-          - Index large archives: catalog/how-to/large-archives.md
-          - Match across sources: catalog/how-to/matchup.md
-          - Catalog → patcher: catalog/how-to/catalog-to-patcher.md
-          - Grid alignment: catalog/how-to/grid-alignment.md
-          - Model states: catalog/how-to/model-states.md
-      - Tutorials:
-          - End-to-end (Lake Tahoe): catalog/notebooks/end_to_end_lake_tahoe.ipynb
-      - Reference:
-          - Overview: catalog/api/reference.md
-          - Core: catalog/api/core.md
-          - Sources: catalog/api/sources.md
-          - Build: catalog/api/build.md
-          - Backends: catalog/api/backends.md
-          - Matchup: catalog/api/matchup.md
-          - Load: catalog/api/load.md
-          - States: catalog/api/states.md
-          - Storage: catalog/api/storage.md
-          - Staging: catalog/api/staging.md
-          - Patch: catalog/api/patch.md
-          - Grid: catalog/api/grid.md
-          - Utils: catalog/api/utils.md
-          - CLI: catalog/cli.md
-          - Parameter vocabulary: catalog/vocabulary.md
-          - Schema versions: catalog/schema-versions.md
-          - Logging: catalog/logging.md
-          - Changelog: catalog/changelog.md
-      - Design:
-          - Query → matchup → patch: catalog/design/query-matchup.md
-          - Exact grid alignment: catalog/design/exact-grid-alignment.md
-  - Cloud — geocloud:
-      - Overview: cloud/index.md
-      - Concepts: cloud/concepts.md
-      - How-to:
-          - Move files: cloud/how-to/move-files.md
-          - Register credentials: cloud/how-to/credentials.md
-          - Read COGs: cloud/how-to/read-cogs.md
-          - Write COGs: cloud/how-to/write-cogs.md
-          - Use fsspec libraries: cloud/how-to/fsspec.md
-          - Cache remote files: cloud/how-to/cache.md
-          - Read HDF and NetCDF: cloud/how-to/hdf.md
-      - Tutorials:
-          - A tour of geocloud: cloud/notebooks/geocloud_tour.ipynb
-      - Reference: cloud/api.md
-  - Products — geoproducts:
-      - Overview: products/index.md
-      - Concepts: products/concepts.md
-      - Sensors:
-          - GOES-R ABI: products/goes.md
-          - Himawari AHI: products/himawari.md
-          - Carbon Mapper: products/carbonmapper.md
-      - How-to:
-          - Add a product reader: products/product-readers.md
-      - Tutorials:
-          - GOES-19 mesoscale: products/notebooks/goes_mesoscale.ipynb
-          - Himawari over Japan: products/notebooks/himawari_japan.ipynb
-      - Reference: products/api.md
-  - Array — geoarray:
-      - Overview: array/index.md
-      - Concepts: array/concepts.md
-      - How-to:
-          - When to jit: array/how-to/when-to-jit.md
-          - Cross to xarray: array/how-to/xarray.md
-      - Tutorials:
-          - Swaths and averaging kernels: array/notebooks/swath_averaging_kernels.ipynb
-      - Reference:
-          - geoarray: array/api.md
-          - geoarray.coords: array/api/coords.md
-          - geoarray.types: array/api/types.md
-  - xarray lane — xrtoolz:
-      - Overview: xarray/index.md
-      - Packages:
-          - Overview: xarray/packages/index.md
-          - Calculus (xrops.grad): xarray/packages/grad.md
-          - xrtoolz-products (xrproducts): xarray/packages/reader.md
-      - Tutorials:
-          - Core:
-              - Operators & Pipelines: xarray/notebooks/operators_pipeline_demo.ipynb
-              - xrgrad Quickstart: xarray/notebooks/xrgrad_quickstart.ipynb
-              - Structural Summaries: xarray/notebooks/sequential_summary_demo.ipynb
-              - Sklearn patch-wise Recipe: xarray/notebooks/sklearn_patchwise_recipe.ipynb
-              - NaN-aware Smoothing: xarray/notebooks/nan_aware_smoothing.ipynb
-              - Inference with ModelOp: xarray/notebooks/inference_modelop_demo.ipynb
-          - Ocean:
-              - Kinematics — GLORYS vs DUACS: xarray/notebooks/ocean_kinematics_glorys_duacs.ipynb
-              - Along-track SSH: xarray/notebooks/ocean_alongtrack_ssh.ipynb
-              - Stratification — GLORYS 3D: xarray/notebooks/ocean_stratification_glorys.ipynb
-          - Gridding & Binning:
-              - SST — Binning L3 onto a Grid: xarray/notebooks/cmems_sst_products.ipynb
-              - SSS — Binning L3 onto a Grid: xarray/notebooks/cmems_sss_products.ipynb
-              - SSH — Binning Along-track: xarray/notebooks/cmems_ssh_products.ipynb
-              - Ocean Colour — Binning: xarray/notebooks/cmems_oc_products.ipynb
-          - Data Acquisition:
-              - Open a TROPOMI CH₄ granule and screen it: xarray/recipes/tropomi_ch4_screen.md
-              - Open a methane plume scene and select one plume: xarray/recipes/methane_plume_products.md
-          - Validation:
-              - V1 — Scales of Evaluation: xarray/notebooks/validation_v1_scales.ipynb
-              - V1.5 — PSD Plots & Resolved Scale: xarray/notebooks/validation_v1_psd_plots.ipynb
-              - V2 — Data Representation: xarray/notebooks/validation_v2_data_representation.ipynb
-              - V4 — Process Evaluation: xarray/notebooks/validation_v4_process.ipynb
-              - V6 — Capstone: xarray/notebooks/validation_v6_capstone.ipynb
-      - Reference:
-          - Overview: xarray/api/index.md
-          - Composition: xarray/api/composition.md
-          - Geoprocessing:
-              - Validation & Coordinates: xarray/api/geo/coords.md
-              - Subsetting, Regions & Masks: xarray/api/geo/subset.md
-              - CRS & Reprojection: xarray/api/geo/crs.md
-              - Climatology & Anomalies: xarray/api/geo/climatology.md
-              - Wavelet Analysis: xarray/api/geo/wavelet.md
-              - Extremes: xarray/api/geo/extremes.md
-          - Numerics:
-              - Calculus (xrops.grad): xarray/api/calc.md
-              - Transforms: xarray/api/transforms.md
-              - Encoders: xarray/api/encoders.md
-              - Interpolation: xarray/api/interpolate.md
-          - Domain Physics:
-              - Oceanography: xarray/api/ocn.md
-              - Atmosphere: xarray/api/atm.md
-          - Diagnostics:
-              - Metrics: xarray/api/metrics.md
-              - Budgets: xarray/api/budgets.md
-          - Data Acquisition:
-              - Archive Readers (xrproducts): xarray/api/reader.md
-          - Bridges & Integration:
-              - scikit-learn on xarray (xrops.learn): xarray/api/learn.md
-              - Inference: xarray/api/inference.md
-              - Visualization: xarray/api/viz.md
-              - Utilities: xarray/api/utils.md
-              - Families of geoops and xrops: xarray/api/families.md
-              - Lifting geoops operators (xrops.lift): xarray/api/lift.md
-          - Changelog: xarray/changelog.md
-      - Dask: xarray/dask.md
-      - Design:
-          - Overview: xarray/design/README.md
-          - Vision: xarray/design/vision.md
-          - Architecture: xarray/design/architecture.md
-          - Boundaries: xarray/design/boundaries.md
-          - Decisions: xarray/design/decisions.md
-          - API:
-              - Overview: xarray/design/api/README.md
-              - Primitives (L0): xarray/design/api/primitives.md
-              - Components (L1): xarray/design/api/components.md
-              - Models (L2): xarray/design/api/models.md
-          - Examples:
-              - Overview: xarray/design/examples/README.md
-              - Primitives: xarray/design/examples/primitives.md
-              - Components: xarray/design/examples/components.md
-              - Models: xarray/design/examples/models.md
-              - Integration: xarray/design/examples/integration.md
-          - Reader (xrproducts):
-              - Architecture: xarray/design/reader/architecture.md
-          - Bridge Modules:
-              - Overview: xarray/design/bridges/README.md
-              - Cross-cutting: xarray/design/bridges/overview.md
-              - linalg (structured linear algebra):
-                  - Vision: xarray/design/bridges/linalg/vision.md
-                  - Architecture: xarray/design/bridges/linalg/architecture.md
-                  - API: xarray/design/bridges/linalg/api.md
-                  - Decisions: xarray/design/bridges/linalg/decisions.md
-              - prob (probabilistic distributions):
-                  - Vision: xarray/design/bridges/prob/vision.md
-                  - Architecture: xarray/design/bridges/prob/architecture.md
-                  - API: xarray/design/bridges/prob/api.md
-                  - Decisions: xarray/design/bridges/prob/decisions.md
-  - Extended examples ↗: https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack
-  - Contributing: contributing.md
+  - Overview: api/index.md
+  - geoops (geotoolz-ops):
+      - Core: operators/api/core.md
+      - Carrier & contract checks: operators/api/carrier.md
+      - Backends: operators/api/backends.md
+      - Coupling: operators/api/coupling.md
+      - Augment: operators/api/augment.md
+      - Compositing: operators/api/compositing.md
+      - Einx: operators/api/einx.md
+      - Feature: operators/api/feature.md
+      - Geometry: operators/api/geom.md
+      - Indices: operators/api/indices.md
+      - IO: operators/api/io.md
+      - Learn (scikit-learn): operators/api/learn.md
+      - Mask: operators/api/mask.md
+      - Matched filter: operators/api/matched_filter.md
+      - Measure: operators/api/measure.md
+      - Normalize: operators/api/normalize.md
+      - Plume: operators/api/plume.md
+      - QA: operators/api/qa.md
+      - Radiometry: operators/api/radiometry.md
+      - Restore: operators/api/restore.md
+      - Segment: operators/api/segment.md
+      - Spectral: operators/api/spectral.md
+      - Viz: operators/api/viz.md
+  - geopatcher:
+      - Overview: patcher/api/reference.md
+      - Core: patcher/api/core.md
+      - Spatial axes: patcher/api/spatial.md
+      - Temporal axes: patcher/api/temporal.md
+      - Fields: patcher/api/fields.md
+      - Matched multi-source: patcher/api/matched.md
+      - Running at scale: patcher/api/run.md
+      - Observing: patcher/api/observe.md
+      - Config: patcher/api/config.md
+      - Integrations: patcher/api/integrations.md
+  - geocatalog:
+      - Overview: catalog/api/reference.md
+      - Core: catalog/api/core.md
+      - Sources: catalog/api/sources.md
+      - Build: catalog/api/build.md
+      - Backends: catalog/api/backends.md
+      - Matchup: catalog/api/matchup.md
+      - Load: catalog/api/load.md
+      - States: catalog/api/states.md
+      - Storage: catalog/api/storage.md
+      - Staging: catalog/api/staging.md
+      - Patch: catalog/api/patch.md
+      - Grid: catalog/api/grid.md
+      - Utils: catalog/api/utils.md
+  - geocloud: cloud/api.md
+  - geoproducts: products/api.md
+  - geoarray:
+      - geoarray: array/api.md
+      - geoarray.coords: array/api/coords.md
+      - geoarray.types: array/api/types.md
+  - xarray lane (xrops, xrproducts):
+      - Overview: xarray/api/index.md
+      - Composition: xarray/api/composition.md
+      - Geoprocessing:
+          - Validation & Coordinates: xarray/api/geo/coords.md
+          - Subsetting, Regions & Masks: xarray/api/geo/subset.md
+          - CRS & Reprojection: xarray/api/geo/crs.md
+          - Climatology & Anomalies: xarray/api/geo/climatology.md
+          - Wavelet Analysis: xarray/api/geo/wavelet.md
+          - Extremes: xarray/api/geo/extremes.md
+      - Numerics:
+          - Calculus (xrops.grad): xarray/api/calc.md
+          - Transforms: xarray/api/transforms.md
+          - Encoders: xarray/api/encoders.md
+          - Interpolation: xarray/api/interpolate.md
+      - Domain Physics:
+          - Oceanography: xarray/api/ocn.md
+          - Atmosphere: xarray/api/atm.md
+      - Diagnostics:
+          - Metrics: xarray/api/metrics.md
+          - Budgets: xarray/api/budgets.md
+      - Data Acquisition:
+          - Archive Readers (xrproducts): xarray/api/reader.md
+      - Bridges & Integration:
+          - scikit-learn on xarray (xrops.learn): xarray/api/learn.md
+          - Inference: xarray/api/inference.md
+          - Visualization: xarray/api/viz.md
+          - Utilities: xarray/api/utils.md
+          - Families of geoops and xrops: xarray/api/families.md
+          - Lifting geoops operators (xrops.lift): xarray/api/lift.md
 
 markdown_extensions:
+  # docs/hooks/xarray_options.py: xrtoolz's mkdocstrings options on the
+  # xrops / xrproducts directives (scripts/build_docs.py puts docs/hooks on
+  # PYTHONPATH).
+  - xarray_options
   - admonition
   - pymdownx.arithmatex:
       generic: true
   - pymdownx.highlight:
       anchor_linenums: true
-  - pymdownx.snippets:
-      check_paths: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid

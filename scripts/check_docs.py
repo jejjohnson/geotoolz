@@ -70,10 +70,14 @@ def _sources() -> list[Path]:
     # The xarray lane's design pages (moved in from xrtoolz) sketch code in
     # pseudocode, and they are not site pages yet.
     xr_design = ROOT / "docs" / "xarray" / "design"
+    # mystmd's build output (`make docs`) holds copies of every page.
+    build = ROOT / "docs" / "_build"
     return [
         f
         for f in files
-        if "capabilities.md" not in f.name and not f.is_relative_to(xr_design)
+        if "capabilities.md" not in f.name
+        and not f.is_relative_to(xr_design)
+        and not f.is_relative_to(build)
     ]
 
 

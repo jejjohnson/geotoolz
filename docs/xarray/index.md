@@ -18,16 +18,16 @@ domain.
 - **One abstraction, three layers.** Pure functions (Layer 0) → `Operator`
   wrappers (Layer 1) → `Graph` DAGs (Layer 2). Drop down a layer whenever
   you need the raw function; stay up high to compose.
-- **Domain-organised.** Generic geoprocessing in [`geo`](api/geo/coords.md);
-  true physics in [`ocn`](api/ocn.md) / `atm` / `rs`; numerics in
-  [`calc`](api/calc.md) / [`transforms`](api/transforms.md) /
-  [`interpolate`](api/interpolate.md); evaluation in
-  [`metrics`](api/metrics.md) / [`budgets`](api/budgets.md).
+- **Domain-organised.** Generic geoprocessing in [`geo`](https://jejjohnson.github.io/geotoolz/reference/xarray/api/geo/coords/);
+  true physics in [`ocn`](https://jejjohnson.github.io/geotoolz/reference/xarray/api/ocn/) / `atm` / `rs`; numerics in
+  [`calc`](https://jejjohnson.github.io/geotoolz/reference/xarray/api/calc/) / [`transforms`](https://jejjohnson.github.io/geotoolz/reference/xarray/api/transforms/) /
+  [`interpolate`](https://jejjohnson.github.io/geotoolz/reference/xarray/api/interpolate/); evaluation in
+  [`metrics`](https://jejjohnson.github.io/geotoolz/reference/xarray/api/metrics/) / [`budgets`](https://jejjohnson.github.io/geotoolz/reference/xarray/api/budgets/).
 - **Typed to the core.** Operators speak `xr.Dataset` / `xr.DataArray`; the
   private numpy kernels behind them are
   [jaxtyped](design/conventions/array-typing.md) so array shapes are part of
   the signature.
-- **Bring your own model.** [`ModelOp`](api/inference.md) wraps a trained
+- **Bring your own model.** [`ModelOp`](https://jejjohnson.github.io/geotoolz/reference/xarray/api/inference/) wraps a trained
   sklearn / JAX / framework-agnostic model as an operator — the ML backend
   is imported lazily, so you only install what you use.
 
@@ -82,20 +82,11 @@ fig = SpatialMapPanel(variable="u")(currents)
 
 The same three operators can be wired as a DAG with `Graph` when you need
 branching or shared intermediates — see
-[Composition](api/composition.md).
+[Composition](https://jejjohnson.github.io/geotoolz/reference/xarray/api/composition/).
 
 ## Where to go next
 
-<div class="grid cards" markdown>
-
-- :material-cube-outline: **[Core Concepts](api/composition.md)** —
-  `Operator`, `Sequential`, `Graph`, and the combinators.
-- :material-book-open-variant: **[Tutorials](notebooks/operators_pipeline_demo.ipynb)** —
-  executable notebooks for pipelines, ocean kinematics, gridding, and
-  validation.
-- :material-api: **[API Reference](api/index.md)** — every public symbol,
-  grouped by subject.
-- :material-drawing: **[Design](design/README.md)** — architecture,
-  boundaries, conventions, and roadmap.
-
-</div>
+- **[Core Concepts](https://jejjohnson.github.io/geotoolz/reference/xarray/api/composition/)**: `Operator`, `Sequential`, `Graph`, and the combinators.
+- **[Tutorials](notebooks/operators_pipeline_demo.ipynb)**: executable notebooks for pipelines, ocean kinematics, gridding, and validation.
+- **[API Reference](https://jejjohnson.github.io/geotoolz/reference/xarray/api/)**: every public symbol, grouped by subject.
+- **[Design](design/README.md)**: architecture, boundaries, conventions, and roadmap.

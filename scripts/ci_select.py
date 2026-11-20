@@ -14,8 +14,8 @@ so a change runs the jobs it can affect and nothing else.
   what its tests import. The graph is read from the packages themselves.
 - A workflow file runs that workflow in full.
 - The docs site builds when its inputs change: ``docs/``, ``mkdocs.yml``,
-  any package's ``src/`` (mkdocstrings renders the docstrings), changelog or
-  README.
+  ``scripts/build_docs.py``, any package's ``src/`` (mkdocstrings renders the
+  docstrings), changelog or README.
 - The repository checks (capability index, docs examples, docs paths,
   dependency rules, import contracts, family parity) run on any package's
   ``src/`` or ``pyproject.toml``, and on ``docs/``, the READMEs and
@@ -232,6 +232,7 @@ def select(
             checks = checks or f.startswith("docs/")
         elif f == "README.md" or f.startswith("scripts/"):
             checks = True
+            docs = docs or f == "scripts/build_docs.py"
         elif f == "LICENSE":
             build = True
 
