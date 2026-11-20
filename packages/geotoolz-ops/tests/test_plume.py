@@ -512,12 +512,43 @@ def test_column_to_mass_round_trip_from_ppm_m() -> None:
     assert np.allclose(recovered, values)
 
 
+def test_ppm_m_default_is_near_surface_air() -> None:
+    # 1 atm and 298.15 K give V_m = R T / p = 0.0244655 m³/mol, within 3e-5 of
+    # the 0.024465 the function used before it took its maths from geophysix.
+    mol = convert_column_units(
+        np.array([1000.0]), gas="CH4", units_in="ppm_m", units_out="mol_m2"
+    )
+    assert mol == pytest.approx(1000.0e-6 / 0.024465, rel=3e-5)
+    explicit = convert_column_units(
+        np.array([1000.0]),
+        gas="CH4",
+        units_in="ppm_m",
+        units_out="mol_m2",
+        pressure_pa=101_325.0,
+        temperature_k=298.15,
+    )
+    np.testing.assert_array_equal(mol, explicit)
+
+
+def test_ppm_m_follows_pressure_and_temperature() -> None:
+    # V_m = R T / p: halving the pressure doubles V_m and halves the moles.
+    values = np.array([1000.0])
+    one = convert_column_units(values, units_in="ppm_m", units_out="mol_m2")
+    half = convert_column_units(
+        values, units_in="ppm_m", units_out="mol_m2", pressure_pa=101_325.0 / 2
+    )
+    np.testing.assert_allclose(half, one / 2, rtol=1e-12)
+
+
 def test_column_to_mass_operator_preserves_metadata() -> None:
     gt = _gt(np.array([[1.0, 2.0]]))
 
     out = gz.plume.ColumnToMass(gas="CO2", units_in="mol_m2")(gt)
 
-    assert np.allclose(np.asarray(out), np.array([[0.04401, 0.08802]]))
+    # geophysix's CO2 molar mass is 0.0440095 kg/mol (the local table had 0.04401).
+    assert np.allclose(
+        np.asarray(out), np.array([[0.0440095, 0.088019]]), rtol=1e-12, atol=0
+    )
     assert out.grid == gt.grid
     assert str(out.crs) == "EPSG:32629"
 

@@ -803,3 +803,15 @@ def test_advection_rejects_scalar_missing_the_vertical_dim(ds_uvw_3d):
         advection(
             ds, scalar="c", components=("u", "v", "w"), dims=("lon", "lat", "depth")
         )
+
+
+def test_coriolis_parameter_is_lazy_on_dask_and_keeps_coords():
+    lat = xr.DataArray(
+        np.linspace(-60.0, 60.0, 7), dims="lat", name="lat"
+    ).assign_coords(lat=np.linspace(-60.0, 60.0, 7))
+    f = coriolis_parameter(lat.chunk({"lat": 3}))
+    assert f.chunks is not None
+    np.testing.assert_allclose(
+        f.values, 2.0 * 7.292115e-5 * np.sin(np.deg2rad(lat.values)), rtol=1e-12
+    )
+    assert f["lat"].equals(lat["lat"])
