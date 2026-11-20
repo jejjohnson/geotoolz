@@ -2,7 +2,7 @@
 
 One page per public namespace, generated from the docstrings. Which step
 each namespace serves is in the
-[What's inside](../index.md#whats-inside) table.
+[What's inside](../catalog.md#whats-inside) table.
 
 - [Core](core.md): `geocatalog` — `GeoCatalog`, `GeoSlice`,
   `open_catalog`, `query` / `intersect` / `union`

@@ -8,7 +8,7 @@ naming ``geoarray.interop.georeader.from_georeader``. These are the
 helpers the built-in operators use to keep them; an operator you write on
 top of the stack uses the same ones, so it composes with everything else.
 The rules themselves are in the repository's ``AGENTS.md`` ("The two
-contracts") and ``docs/operators/concepts.md``.
+contracts") and ``docs/operators/operators-concepts.md``.
 
 Rewrap:
     `wrap_like` puts a result back on the input's carrier (``transform=``

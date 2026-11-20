@@ -150,7 +150,7 @@ codes: dict[int, str] = acm.flags("ACM")   # {0: 'clear', 1: 'probably_clear', 2
 
 ## One grid
 
-[`geoproducts.stack`](concepts.md#one-grid-stack) puts L1b channels at
+[`geoproducts.stack`](products-concepts.md#one-grid-stack) puts L1b channels at
 different resolutions — or L1b and L2 — on one grid:
 
 ```python
@@ -183,7 +183,7 @@ rgb_in: GeoArray = geoproducts.stack(
 
 `goes.recipes` holds the operational RGBs as data; with `[operators]`
 each preset is a [`gz.viz.RGBRecipe`](https://jejjohnson.github.io/geotoolz/reference/operators/api/viz/) (see
-[Recipes and presets](concepts.md#recipes-and-presets)).
+[Recipes and presets](products-concepts.md#recipes-and-presets)).
 
 ```python
 from datetime import datetime

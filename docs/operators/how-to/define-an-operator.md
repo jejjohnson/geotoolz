@@ -2,7 +2,7 @@
 
 Write your own step and it composes with every built-in: in a
 `Sequential`, in a `Graph`, and in `get_config()`. This page is the one
-walkthrough; the model behind it is in [Concepts](../concepts.md#the-operator).
+walkthrough; the model behind it is in [Concepts](../operators-concepts.md#the-operator).
 
 ## Write the operator
 
@@ -211,7 +211,7 @@ flowing, use `gz.Sink(write_fn)`, which returns its input.
 
 An operator that learns from data never overwrites its constructor
 attributes in `_apply`. It follows the
-[fitted-operator contract](../concepts.md#fitted-operators):
+[fitted-operator contract](../operators-concepts.md#fitted-operators):
 
 - `fit(x) -> self` writes trailing-underscore attributes (`mean_`);
 - `transform(x)` only reads them;

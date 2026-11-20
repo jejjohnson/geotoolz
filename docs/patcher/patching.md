@@ -2,7 +2,7 @@
 
 The exact rules the patchers follow at edges, on fills, under failures
 and across runs. Each rule lives here once; the how-tos link back. For the
-mental model, read [Concepts](concepts.md) first.
+mental model, read [Concepts](patcher-concepts.md) first.
 
 ## Fields and domains
 

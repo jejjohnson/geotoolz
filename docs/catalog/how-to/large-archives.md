@@ -2,7 +2,7 @@
 
 Past ~10⁵ files, build into GeoParquet instead of RAM, and query it with
 `DuckDBGeoCatalog`. All three patterns below need the `[duckdb]` extra;
-[Backends](../concepts.md#backends) explains the trade-off.
+[Backends](../catalog-concepts.md#backends) explains the trade-off.
 
 ## Stream a build into GeoParquet
 

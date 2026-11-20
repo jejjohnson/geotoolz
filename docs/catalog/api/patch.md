@@ -1,6 +1,6 @@
 # Patch — `geocatalog.patch`
 
-The bridge to [geopatcher](../../patcher/index.md): turn catalog rows
+The bridge to [geopatcher](../../patcher/patcher.md): turn catalog rows
 into a `RasterField` to split, or iterate a catalog's footprint as a
 patcher `Domain`. `field_for` needs the `[patch]` extra.
 

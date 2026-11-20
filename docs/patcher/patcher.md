@@ -87,7 +87,7 @@ back as data; see [Window convention](patching.md#window-convention).
 
 | Namespace | What's there | Read |
 |---|---|---|
-| `geopatcher` | `SpatialPatcher`, `AsyncSpatialPatcher`, `TemporalPatcher`, `SpatioTemporalPatcher`; the `Patch` carriers; `Field` / `Domain`; `RasterField` | [Concepts](concepts.md) · [Core API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/core/) |
+| `geopatcher` | `SpatialPatcher`, `AsyncSpatialPatcher`, `TemporalPatcher`, `SpatioTemporalPatcher`; the `Patch` carriers; `Field` / `Domain`; `RasterField` | [Concepts](patcher-concepts.md) · [Core API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/core/) |
 | `geopatcher.spatial` | the four axes — `geometry`, `sampler`, `window`, `aggregation` | [Behaviour](patching.md) · [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/spatial/) |
 | `geopatcher.temporal` | the same four axes along time, plus `stencils` | [Temporal patching](recipes/temporal-patching.md) · [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/temporal/) |
 | `geopatcher.fields` | `XarrayField`, `RioXarrayField`, `DaskField`, `GeoPandasField`, `XvecField`, `CogField`, `ReprojectingRasterField`, the domain types | [Fields](patching.md#fields-and-domains) · [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/fields/) |
@@ -97,7 +97,7 @@ back as data; see [Window convention](patching.md#window-convention).
 | `geopatcher.config` | `axis_envelope` / `from_config` round-trips | [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/config/) |
 | `geopatcher.integrations.pipekit` | `GridSampler`, `ApplyToChips`, `MergePatches` (re-exported as `geoops.patch_ops`) | [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/integrations/) |
 
-Cloud-Optimized GeoTIFF reads come from [geotoolz-cloud](../cloud/index.md);
+Cloud-Optimized GeoTIFF reads come from [geotoolz-cloud](../cloud/cloud.md);
 `geopatcher.fields.CogField` is their `Field`.
 
 ## Is this the right tool?
@@ -156,8 +156,8 @@ runs the same pipeline on real Sentinel-2 data.
 
 ## Next steps
 
-- **[Concepts](concepts.md)** — the four axes, the patch lifecycle, fields and streaming.
-- **[Quickstart](quickstart.md)** — the same patcher on a real Sentinel-2 scene.
+- **[Concepts](patcher-concepts.md)** — the four axes, the patch lifecycle, fields and streaming.
+- **[Quickstart](patcher-quickstart.md)** — the same patcher on a real Sentinel-2 scene.
 - **How-tos** — [stream to disk](recipes/streaming-overlap-add.md),
   [handle read failures](recipes/on-error-policies.md),
   [resume a job](recipes/journal-and-resume.md),

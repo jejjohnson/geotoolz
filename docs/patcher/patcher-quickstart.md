@@ -1,7 +1,7 @@
 # Quickstart — patch a Sentinel-2 scene
 
 Run a per-patch operator over a real Sentinel-2 band and stitch it back
-with feathered seams. The [landing-page quickstart](index.md#quickstart)
+with feathered seams. The [landing-page quickstart](patcher.md#quickstart)
 does the same on a synthetic array; the
 [tutorial notebook](notebooks/patcher_lake_tahoe.ipynb) adds plots.
 

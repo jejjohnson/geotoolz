@@ -2,12 +2,12 @@
 
 Run any operator or model tile by tile and get one result on the scene's
 grid. The chips of one scene are held in memory together; for scenes
-larger than memory, use [geopatcher's runners](../patcher/index.md) to
+larger than memory, use [geopatcher's runners](../patcher/patcher.md) to
 stream them. `geoops.patch_ops` turns the
-[geopatcher](../patcher/index.md) steps into operators, so the whole flow
+[geopatcher](../patcher/patcher.md) steps into operators, so the whole flow
 is one `Sequential`.
 
-Install the `[patch]` extra (see [Install](index.md#install)):
+Install the `[patch]` extra (see [Install](operators.md#install)):
 
 ```bash
 pip install 'geotoolz-ops[patch]'
@@ -106,7 +106,7 @@ water: GeoArray = infer(field)                                     # (2, 384, 38
 
 Fit any learned preprocessing (`StandardScaler().fit(...)`) before the
 pipeline, so every tile uses the same statistics; see
-[Fitted operators](concepts.md#fitted-operators).
+[Fitted operators](operators-concepts.md#fitted-operators).
 
 ## Start from a catalog
 
@@ -173,7 +173,7 @@ classes are importable from `geopatcher.integrations.pipekit`.
 - **Two different stitchers.** `MergePatches` merges patches into a
   field; `gz.Stitch` mosaics georeferenced GeoArray tiles.
 - **Other sampling axes** (along-track, points, temporal) live in
-  geopatcher; see [Patcher concepts](../patcher/concepts.md).
+  geopatcher; see [Patcher concepts](../patcher/patcher-concepts.md).
 - **Overlap and reach.** A tile reproduces the whole-scene result only
   where every pixel it reads is inside the tile. `ApplyToChips` reads the
   operator's [coupling](https://jejjohnson.github.io/geotoolz/reference/operators/api/coupling/) and warns with

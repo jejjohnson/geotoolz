@@ -2,7 +2,7 @@
 
 Fit per-band statistics once on training data, save them as plain
 configuration, and apply the same scaling at inference. The contract
-behind `fit` / `transform` is in [Fitted operators](concepts.md#fitted-operators).
+behind `fit` / `transform` is in [Fitted operators](operators-concepts.md#fitted-operators).
 
 ## Fit on training data, apply at inference
 

@@ -72,7 +72,7 @@ onto the slice grid and mosaicked. Its options:
 
 For remote rows, [stage](staging.md) the catalog first so the patcher
 reads local files. Choosing the patcher's four axes is covered in the
-[patcher concepts](../../patcher/concepts.md).
+[patcher concepts](../../patcher/patcher-concepts.md).
 
 ## Walk a catalog file by file
 

@@ -1,7 +1,7 @@
 # `geopatcher` — API reference
 
 One page per namespace; each public name has exactly one home. For the
-mental model see [Concepts](../concepts.md); for edge, fill and failure
+mental model see [Concepts](../patcher-concepts.md); for edge, fill and failure
 rules, the [Behaviour reference](../patching.md).
 
 | Namespace | Holds | Page |
@@ -17,5 +17,5 @@ rules, the [Behaviour reference](../patching.md).
 | `geopatcher.integrations.pipekit` | pipekit operator wrappers | [Integrations](integrations.md) |
 
 Cloud-Optimized GeoTIFF reads and the shared object-store pool live in
-[geotoolz-cloud](../../cloud/index.md) (`geocloud`); `geopatcher.fields.CogField`
+[geotoolz-cloud](../../cloud/cloud.md) (`geocloud`); `geopatcher.fields.CogField`
 is their `Field`.

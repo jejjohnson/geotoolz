@@ -583,7 +583,8 @@ def apply_mask(
     """Apply a boolean mask to a multi-band array, filling masked pixels.
 
     The mask follows the package polarity: True where pixels should be
-    *masked out* (dropped) — see "Mask polarity" in ``docs/operators/concepts.md``.
+    *masked out* (dropped) — see "Mask polarity" in
+    ``docs/operators/operators-concepts.md``.
     The result is ``arr`` with ``fill_value`` substituted wherever
     ``mask`` is True. Flip a keep-polarity mask with :func:`invert_mask`
     first.

@@ -218,7 +218,7 @@ set of credentials. Local paths work too. It needs the `[fsspec]` extra.
 
 ## Next steps
 
-- **Docs:** [geotoolz-cloud](https://jejjohnson.github.io/geotoolz/index-4/).
+- **Docs:** [geotoolz-cloud](https://jejjohnson.github.io/geotoolz/cloud/).
 - **Patching a COG:** `geopatcher.fields.CogField` is `CogSource` as a
   geopatcher `Field` (`pip install 'geotoolz-patcher[cog]'`).
 

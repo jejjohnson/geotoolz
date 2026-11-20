@@ -107,7 +107,7 @@ about an hour, so re-run the search for a fresh catalog.
 
 ## Next steps
 
-- [Concepts](concepts.md): why queries open no file, and when to pick
+- [Concepts](catalog-concepts.md): why queries open no file, and when to pick
   DuckDB.
 - [STAC ingestion](how-to/stac-ingestion.md): every band per item,
   provenance bundles, signing.

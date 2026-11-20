@@ -3,7 +3,7 @@
 A new sensor or provider gets its own subpackage, `geoproducts.<sensor>`,
 with the same small surface as the others. This page is the one home of
 that layout and of the shared toolkit every reader builds on. What a
-reader must return is the [ProductReader contract](concepts.md#the-productreader-contract).
+reader must return is the [ProductReader contract](products-concepts.md#the-productreader-contract).
 
 ## The subpackage layout
 
@@ -145,4 +145,4 @@ credential fields and renewal flow.
 - Add a sensor page `docs/products/<sensor>.md` following the template of
   [GOES-R ABI](goes.md): what a file is → find and download → read and
   calibrate → L2 → one grid → recipes and presets → module layout. Add it
-  to the sensor table on the [landing page](index.md) and to the nav.
+  to the sensor table on the [landing page](products.md) and to the nav.

@@ -150,7 +150,7 @@ prob: himawari.L2Reader = himawari.L2Reader(path, variables="CloudProbability") 
 
 ## One grid
 
-[`geoproducts.stack`](concepts.md#one-grid-stack) puts the 0.5 km, 1 km
+[`geoproducts.stack`](products-concepts.md#one-grid-stack) puts the 0.5 km, 1 km
 and 2 km bands of the Japan area — and a full-disk L2 mask — on one grid.
 This is the figure above:
 
@@ -185,7 +185,7 @@ scene: GeoArray = geoproducts.stack([
 `himawari.recipes` holds the RGBs as data: the GOES quick-guide
 stretches on the matching AHI bands. With `[operators]` each preset is a
 [`gz.viz.RGBRecipe`](https://jejjohnson.github.io/geotoolz/reference/operators/api/viz/) (see
-[Recipes and presets](concepts.md#recipes-and-presets)).
+[Recipes and presets](products-concepts.md#recipes-and-presets)).
 
 ```python
 from datetime import datetime

@@ -137,11 +137,11 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 
 | Name | Use it to… | Guide |
 |---|---|---|
-| `GeoArray` | carry data with its stored dims, coordinates, transform, CRS, fill value and attrs; `sel` / `isel` by name, `grid`, `with_data`, `to_jax`, `to_numpy`, `from_coords` | [Concepts](concepts.md) |
+| `GeoArray` | carry data with its stored dims, coordinates, transform, CRS, fill value and attrs; `sel` / `isel` by name, `grid`, `with_data`, `to_jax`, `to_numpy`, `from_coords` | [Concepts](array-concepts.md) |
 | `GeoSwath`, `GeoPoints`, `pad_points` | carry swaths in sensor geometry (lat/lon leaves) and point sets (xy, z, time, valid) | [Tutorial](notebooks/swath_averaging_kernels.ipynb) |
 | `geoarray.coords` | say what a dim means: `SpectralAxis`, `VariableAxis`, `VerticalAxis`, `TimeAxis`, `PixelGrid`, … | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/coords/) |
 | `geoarray.types` | name common shapes (`GeoImage`, `GeoMapSeries`, `GeoTracks`, …) and check them with `check_dims` | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/types/) |
-| `isel`, `sel`, `reduce`, `map_over`, `concat`, `combine`, … | pipekit-array's dim-level functions, on every named carrier; a pipekit-array `KernelOp` runs on carriers too | [Concepts](concepts.md#one-set-of-dim-level-functions) |
+| `isel`, `sel`, `reduce`, `map_over`, `concat`, `combine`, … | pipekit-array's dim-level functions, on every named carrier; a pipekit-array `KernelOp` runs on carriers too | [Concepts](array-concepts.md#one-set-of-dim-level-functions) |
 | `to_pixel` | map coordinates to fractional pixels (functax's kernel, re-exported); H(x) itself is `geoops.geom.interp_at` | [When to jit](how-to/when-to-jit.md) |
 | `to_xarray`, `from_xarray`, `to_dataset`, `to_datatree` | cross to xarray losslessly (`[xarray]`) | [Cross to xarray](how-to/xarray.md) |
 | `Grid` | describe a pixel grid without data: `bounds`, `res`, `shift`, `crop`, `from_bounds`, `isclose`, `get_config` | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#grid) |
@@ -159,7 +159,7 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 
 ## Next steps
 
-- [Concepts](concepts.md): carriers, static or leaf, the shared functions,
+- [Concepts](array-concepts.md): carriers, static or leaf, the shared functions,
   readable types, moving from 0.2.
 - How-to: [When to jit](how-to/when-to-jit.md),
   [Cross to xarray](how-to/xarray.md).

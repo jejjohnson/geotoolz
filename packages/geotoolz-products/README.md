@@ -179,7 +179,7 @@ it.
 
 ## Next steps
 
-- **Products docs:** [home](https://jejjohnson.github.io/geotoolz/index-5/) ·
+- **Products docs:** [home](https://jejjohnson.github.io/geotoolz/products/) ·
   [adding a product reader](https://jejjohnson.github.io/geotoolz/product-readers/) ·
   [GOES-R ABI](https://jejjohnson.github.io/geotoolz/goes/) ·
   [Himawari AHI](https://jejjohnson.github.io/geotoolz/himawari/) ·

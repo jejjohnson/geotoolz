@@ -3,7 +3,7 @@
 Register credentials once per store root, then pass only URIs. Every
 call on the pool picks them up, and `gdal_access` hands GDAL the same
 grant. Which entry wins when several apply is in
-[Concepts](../concepts.md#credential-precedence).
+[Concepts](../cloud-concepts.md#credential-precedence).
 
 ## Register a root
 

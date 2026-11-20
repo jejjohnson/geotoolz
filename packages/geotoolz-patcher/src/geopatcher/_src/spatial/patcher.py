@@ -7,7 +7,7 @@ spatial.window.Window.weights → Field.select`` and hands the result to
 `Iterator[Patch]` so streaming is the default; ``list(patcher.split(field))``
 materialises eagerly when that's what's wanted.
 
-See ``docs/patcher/concepts.md`` ("The four-axis abstraction") for the
+See ``docs/patcher/patcher-concepts.md`` ("The four-axis abstraction") for the
 four-axis framework.
 """
 
