@@ -492,9 +492,10 @@ def rewrite_prose_links(
 ) -> tuple[int, list[str]]:
     """Point the API pages' links into prose pages at the pages mystmd built.
 
-    The API pages link to the prose beside them by file (``../concepts.md``).
-    Zensical excludes those files, so it renders each link as the directory URL
-    the page would have had (``../concepts/``), under ``/reference/``. This
+    The API pages link to the prose beside them by file
+    (``../operators-concepts.md``). Zensical excludes those files, so it
+    renders each link as the directory URL the page would have had
+    (``../operators-concepts/``), under ``/reference/``. This
     resolves every such URL back to its source file and replaces it with the
     URL mystmd gave that file, so a link always lands on the page its author
     meant, whatever slug suffix mystmd chose.

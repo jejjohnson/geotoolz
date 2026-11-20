@@ -25,7 +25,7 @@ Pick the generic decoders (`MaskClouds`, `MaskCloudShadow`, `MaskCirrus`, `MaskS
 | `EMITL2AMask` | EMIT L2A `mask`, one flag per band (0 cloud, 1 cirrus, 2 water, 3 spacecraft, 4 dilated cloud, 7 aggregate; 5 and 6 are AOD and water vapour) | cloud + cirrus + water | EMIT L2A User Guide V1.0 (JPL D-107863), Table 3-4 |
 | `EMITBandMask` | EMIT `band_mask`, one bit per spectral band in 36 bytes | flagged bands above the column baseline, dilated by 10 pixels | EMIT L2A User Guide V1.0, Table 3-3 |
 
-All QA mask operators return boolean masks matching the input carrier: GeoArray in (CRS/transform preserved, `fill_value=False`), plain `np.ndarray` in, plain boolean array out. The convention is **`True` means "mask this pixel out"** (see [Mask polarity](../concepts.md#mask-polarity)).
+All QA mask operators return boolean masks matching the input carrier: GeoArray in (CRS/transform preserved, `fill_value=False`), plain `np.ndarray` in, plain boolean array out. The convention is **`True` means "mask this pixel out"** (see [Mask polarity](../operators-concepts.md#mask-polarity)).
 
 ### MODIS bit-field semantics
 

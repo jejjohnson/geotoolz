@@ -64,7 +64,7 @@ in `geoproducts/__init__.py`.
 - [ ] A page `docs/products/<sensor>.md` on the sensor template (see the
       docs page's "Tests and docs"), typed and shape-annotated, in the
       products part of the `toc` in `docs/myst.yml`.
-- [ ] The sensor in the sensor table of `docs/products/index.md`; its
+- [ ] The sensor in the sensor table of `docs/products/products.md`; its
       extra in that page's extras table and in
       `packages/geotoolz-products/README.md`.
 - [ ] `docs/products/api.md` has a section for the new namespace.

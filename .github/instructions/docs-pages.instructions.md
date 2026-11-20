@@ -16,11 +16,13 @@ be two is split.
 
 | Kind | Answers | Lives at | Shape |
 |---|---|---|---|
-| **Landing** | What is this, should I use it, how do I start? | `docs/<pkg>/index.md` (the stack's: `docs/index.md`) | the package README, adapted (below) |
-| **Concepts** | How does it think? | `docs/<pkg>/concepts.md` | the mental model, the contract, the vocabulary — one diagram, small examples |
+| **Landing** | What is this, should I use it, how do I start? | `docs/<pkg>/<pkg>.md` (the stack's: `docs/index.md`) | the package README, adapted (below) |
+| **Concepts** | How does it think? | `docs/<pkg>/<pkg>-concepts.md` | the mental model, the contract, the vocabulary — one diagram, small examples |
 | **How-to** | How do I do *X*? | `docs/<pkg>/how-to/<task>.md` (`recipes/` in older sections) | goal → minimal runnable example → variations → pitfalls |
 | **Tutorial** | Show me end to end on real data | `docs/<pkg>/notebooks/*.ipynb` | executed notebook (see the notebook standard) |
 | **Reference** | What exactly does `f` take? | `docs/<pkg>/api/*.md` | mkdocstrings `:::` directives, one heading per public namespace, a one-line intro each |
+
+mystmd serves every prose page at a URL made from its file name alone, so a prose file name must be unique across `docs/`: that is why the landing and concepts pages carry the package name.
 
 Design records (`decisions.md`, `design/*.md`) are kept for history and
 linked from Concepts; they are not entry points and are not rewritten to

@@ -1,7 +1,7 @@
 # `geoarray.types`
 
 Readable names for the common carrier shapes: a dims pattern and a geometry
-kind any carrier can match (see [Concepts](../concepts.md#readable-types)).
+kind any carrier can match (see [Concepts](../array-concepts.md#readable-types)).
 
 ::: geoarray.types
     options:

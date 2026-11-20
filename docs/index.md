@@ -27,7 +27,7 @@ record of it to a product catalog, where the next search can find it
 Most codebases rebuild that loop per project, so every step is hard-wired
 to the next. The geostack gives each step its own package and one small,
 typed seam between neighbours: a `GeoSlice` is the request every catalog
-answers, a [`geoarray.GeoArray`](array/index.md) is the array every reader returns
+answers, a [`geoarray.GeoArray`](array/array.md) is the array every reader returns
 and every operator takes, and a `Patch` is what the patcher hands an operator.
 Because operators are plain `pipekit` objects, the patcher itself becomes
 an operator — *tile → predict → stitch* is one more `Sequential`.
@@ -36,12 +36,12 @@ an operator — *tile → predict → stitch* is one more `Sequential`.
 
 | Package | Import | Use it to… | Docs |
 |---|---|---|---|
-| `geotoolz-ops` | `geoops` | compute on rasters with carrier-preserving operators (radiometry, indices, masks, geometry, ML, …) | [Operators](operators/index.md) |
-| `geotoolz-patcher` | `geopatcher` | split a field into patches, run an operator per patch, stitch back (Geometry × Sampler × Window × Aggregation) | [Patcher](patcher/index.md) |
-| `geotoolz-catalog` | `geocatalog` | find, index, join, load and stage files (`GeoSlice` queries over GeoParquet) | [Catalog](catalog/index.md) |
-| `geotoolz-cloud` | `geocloud` | reach object storage: one client pool, file verbs, credentials, COG reads and writes | [Cloud](cloud/index.md) |
-| `geotoolz-products` | `geoproducts` | read Earth-observation products (GOES-R ABI, Himawari AHI, Carbon Mapper, …) as `geoarray.RasterSource`s that read `GeoArray`s | [Products](products/index.md) |
-| `geotoolz-array` | `geoarray` | carry rasters: `GeoArray` (NumPy or JAX data with transform, CRS, fill and attrs; a JAX pytree), `Grid` / `PixelWindow`, the `RasterSource` protocol, the georeader bridge | [Array](array/index.md) |
+| `geotoolz-ops` | `geoops` | compute on rasters with carrier-preserving operators (radiometry, indices, masks, geometry, ML, …) | [Operators](operators/operators.md) |
+| `geotoolz-patcher` | `geopatcher` | split a field into patches, run an operator per patch, stitch back (Geometry × Sampler × Window × Aggregation) | [Patcher](patcher/patcher.md) |
+| `geotoolz-catalog` | `geocatalog` | find, index, join, load and stage files (`GeoSlice` queries over GeoParquet) | [Catalog](catalog/catalog.md) |
+| `geotoolz-cloud` | `geocloud` | reach object storage: one client pool, file verbs, credentials, COG reads and writes | [Cloud](cloud/cloud.md) |
+| `geotoolz-products` | `geoproducts` | read Earth-observation products (GOES-R ABI, Himawari AHI, Carbon Mapper, …) as `geoarray.RasterSource`s that read `GeoArray`s | [Products](products/products.md) |
+| `geotoolz-array` | `geoarray` | carry rasters: `GeoArray` (NumPy or JAX data with transform, CRS, fill and attrs; a JAX pytree), `Grid` / `PixelWindow`, the `RasterSource` protocol, the georeader bridge | [Array](array/array.md) |
 
 ![Dependency layers: every package stands on geotoolz-array (the GeoArray carrier); object storage in geotoolz-cloud; geotoolz-ops on pipekit; georeader is an internal engine; cross-package links are opt-in extras](assets/diagrams/stack-layers.png)
 

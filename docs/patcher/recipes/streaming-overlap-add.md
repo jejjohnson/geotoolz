@@ -3,7 +3,7 @@
 Stitch an output bigger than RAM: `spatial.aggregation.OverlapAdd(streaming=True)`
 keeps its two accumulators in a zarr store on disk, so peak memory is one
 patch plus one store block. It needs the `[streaming]` extra (zarr ≥ 3);
-see [Install](../index.md#install).
+see [Install](../patcher.md#install).
 
 ## Stream patches into a zarr store
 

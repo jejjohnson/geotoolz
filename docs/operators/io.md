@@ -8,7 +8,7 @@ call them with no input. They wrap [`geocloud.hdf`](../cloud/how-to/hdf.md):
 HDF5 is read with ranged requests, NetCDF and HDF4 from a cached local copy.
 
 Install the backend you need; the extras are listed on the
-[landing page](index.md#install):
+[landing page](operators.md#install):
 
 ```bash
 pip install 'geotoolz-ops[hdf5,netcdf]'     # h5py, netCDF4
@@ -98,4 +98,4 @@ Pass `decode_cf=False` to get the raw packed integers, and
 - [IO reference](https://jejjohnson.github.io/geotoolz/reference/operators/api/io/): window readers, STAC and Earth Engine
   sources, and the GeoTIFF / COG / Zarr writers.
 - Sensor-specific readers (GOES, Himawari, Carbon Mapper) live in
-  [geoproducts](../products/index.md).
+  [geoproducts](../products/products.md).

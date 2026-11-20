@@ -18,7 +18,7 @@ time a bucket is touched, then hands every later caller the same one. Credential
 root in `geocloud.credentials`, so code downstream handles nothing but
 URIs. `geocloud.files` (whole-object verbs) and `geocloud.cog` (COG reads
 and writes) sit on that pool, and the other packages build on them. Every
-raster it reads or writes is a [`geoarray.GeoArray`](../array/index.md),
+raster it reads or writes is a [`geoarray.GeoArray`](../array/array.md),
 and its COG readers are `geoarray.RasterSource`s.
 
 ![geocloud's layers: geopatcher's CogField, geoproducts' readers and bucket helpers, geocatalog's stage and your code call geocloud.files and geocloud.cog; both take their client from the geocloud.store pool, which merges the grants in geocloud.credentials (also handed to GDAL by gdal_access) and keeps one client per s3, gs, Azure, https or hf root](../assets/diagrams/cloud-pool.png)
@@ -69,7 +69,7 @@ chips: list[GeoArray] = src.read_windows([
 
 | Namespace | Use it to… | Guide |
 |---|---|---|
-| `geocloud.store` | get the pooled client for a URI or local path (`get_obstore`, `object_key`), tell local from remote (`local_path`), mount a test store | [Concepts](concepts.md) |
+| `geocloud.store` | get the pooled client for a URI or local path (`get_obstore`, `object_key`), tell local from remote (`local_path`), mount a test store | [Concepts](cloud-concepts.md) |
 | `geocloud.files` | list, read, download, upload, copy, sync, delete and pre-sign objects | [Move files](how-to/move-files.md) |
 | `geocloud.credentials` | register credentials per bucket / container / host, load a TOML file, hand them to GDAL, redact logs | [Credentials](how-to/credentials.md) |
 | `geocloud.hdf` | read HDF5, NetCDF and HDF4 from any location; decode CF packing | [Read HDF and NetCDF](how-to/hdf.md) |
@@ -98,7 +98,7 @@ field.domain.shape                                        # (1, 10980, 10980)
 
 ## Next steps
 
-- [Concepts](concepts.md) — the pool, store roots, `mount` and credential precedence.
+- [Concepts](cloud-concepts.md) — the pool, store roots, `mount` and credential precedence.
 - How-to: [move files](how-to/move-files.md) · [credentials](how-to/credentials.md) ·
   [read COGs](how-to/read-cogs.md) · [write COGs](how-to/write-cogs.md).
 - Tutorial: [a tour of geocloud](notebooks/geocloud_tour.ipynb) — register buckets, read COG windows, write and validate a COG, test offline.

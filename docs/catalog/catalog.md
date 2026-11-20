@@ -85,7 +85,7 @@ scene: GeoArray = gc.load.load_raster(hits, aoi, band_indexes=[1, 2, 3])  # (3, 
 loader opens files, and only the ones that overlap; it returns a
 `geoarray.GeoArray` on the slice grid (`scene.grid == aoi.grid`) with its
 nodata in `fill_value`. The
-[Quickstart](quickstart.md) adds STAC discovery and saving the catalog.
+[Quickstart](catalog-quickstart.md) adds STAC discovery and saving the catalog.
 
 ## What's inside
 
@@ -97,7 +97,7 @@ the step it serves:
 |---|---|---|---|
 | discover | `geocatalog.sources` | `STACSource`, `CMRSource`, `EarthAccessSource`, `GEESource`, `from_stac_search` | [STAC ingestion](how-to/stac-ingestion.md) |
 | index | `geocatalog.build` | `build_raster_catalog`, `build_xarray_catalog`, `build_vector_catalog`, `build_state_catalog`, `append_files` | [Large archives](how-to/large-archives.md) |
-| hold | `geocatalog.backends` | `InMemoryGeoCatalog`, `DuckDBGeoCatalog`, `CatalogRow`, the errors | [Backends](concepts.md#backends) |
+| hold | `geocatalog.backends` | `InMemoryGeoCatalog`, `DuckDBGeoCatalog`, `CatalogRow`, the errors | [Backends](catalog-concepts.md#backends) |
 | join | `geocatalog.matchup` | `matchup`, `MatchupRow`, the spatial and temporal strategies | [Match sources](how-to/matchup.md) |
 | read | `geocatalog.load` | `load_raster`, `aload_raster`, `load_raster_timeseries`, `load_xarray`, `load_vector` | [Load API](https://jejjohnson.github.io/geotoolz/reference/catalog/api/load/) |
 | model states | `geocatalog.states` | `load_states`, `forecasts`, `ensemble_at`, `forecast_chain`, `lead_window`, `at_time`, `latest_analysis`, `CF_NAMES` | [Model states](how-to/model-states.md) |
@@ -109,9 +109,9 @@ the step it serves:
 
 ## Next steps
 
-- [Concepts](concepts.md): `GeoSlice`, the row schema, the two backends,
+- [Concepts](catalog-concepts.md): `GeoSlice`, the row schema, the two backends,
   set algebra and provenance.
-- [Quickstart](quickstart.md): local files, then Sentinel-2 from STAC.
+- [Quickstart](catalog-quickstart.md): local files, then Sentinel-2 from STAC.
 - How-tos: [STAC ingestion](how-to/stac-ingestion.md),
   [staging](how-to/staging.md), [large archives](how-to/large-archives.md),
   [matching sources](how-to/matchup.md),

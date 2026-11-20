@@ -2,7 +2,7 @@
 
 Branch a pipeline when one chain is not enough: two scenes in, several
 products out, a fork on the input's type, or one recipe per sensor. Which
-shape to pick is in [Concepts](../concepts.md#choose-a-composition-shape);
+shape to pick is in [Concepts](../operators-concepts.md#choose-a-composition-shape);
 this page builds each one.
 
 ![Branch forks on a predicate, Switch dispatches on a key, Fanout returns one named output per branch](../../assets/diagrams/control-flow.png)

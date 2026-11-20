@@ -11,7 +11,7 @@ indexing, nodata handling, rescaling and georeferencing. Nothing in them
 can be reused or tested alone.
 
 `geotoolz` cuts each step into an **Operator**: a typed callable with a
-keyword-only constructor. It takes a [`geoarray.GeoArray`](../array/index.md) (or a plain
+keyword-only constructor. It takes a [`geoarray.GeoArray`](../array/array.md) (or a plain
 `ndarray`) and returns the same kind of carrier on the same CRS and
 transform, with band names and a fill value that match the output.
 
@@ -118,7 +118,7 @@ its fill because it is a new float quantity; the mask uses `False`.
 | chain two to six steps | `Sequential` (`a \| b \| c`) |
 | branch, fan in, or return several named outputs | `Graph` ([branching pipelines](how-to/branching-pipelines.md)) |
 | run a model tile by tile over a large raster | `geoops.patch_ops` ([tile → operate → stitch](patch_ops.md)) |
-| find and load scenes from STAC or local files | [geocatalog](../catalog/index.md), then pass the `GeoArray` in |
+| find and load scenes from STAC or local files | [geocatalog](../catalog/catalog.md), then pass the `GeoArray` in |
 
 ## What's inside
 
@@ -153,7 +153,7 @@ numpy primitives (`gz.indices.ndvi`).
 
 ## Next steps
 
-- **[Concepts](concepts.md)**: the Operator contract, `Sequential` and
+- **[Concepts](operators-concepts.md)**: the Operator contract, `Sequential` and
   `Graph`, control flow, observers, fitted operators, band names, mask
   polarity.
 - **How-to guides**: [define an operator](how-to/define-an-operator.md) ·

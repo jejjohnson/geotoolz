@@ -2,7 +2,7 @@
 
 `geocloud.files` lists, reads, downloads, uploads, copies, syncs, deletes
 and pre-signs objects with one set of verbs. Either end can be any URI
-the [pool](../concepts.md#store-roots) understands or a local path.
+the [pool](../cloud-concepts.md#store-roots) understands or a local path.
 
 ## List a public bucket
 
@@ -23,7 +23,7 @@ entries. Prefixes match whole segments: `2026` does not match `2026-old`.
 ## Download, upload, copy
 
 The example runs offline: it mounts a `MemoryStore` at a bucket root (see
-[Mounts](../concepts.md#mounts)) and works in a temporary directory.
+[Mounts](../cloud-concepts.md#mounts)) and works in a temporary directory.
 
 ```python
 import tempfile

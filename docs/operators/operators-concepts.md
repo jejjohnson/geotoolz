@@ -47,7 +47,7 @@ Writing your own, with the full set of rules and a contract test, is
   runs, and each node runs once.
 
 Both are operators, so a `Graph` can sit inside a `Sequential` and the
-other way round. The [landing-page quickstart](index.md#quickstart) builds
+other way round. The [landing-page quickstart](operators.md#quickstart) builds
 the pipeline in the picture.
 
 Execution is **eager**: calling an operator on a value runs it. The only

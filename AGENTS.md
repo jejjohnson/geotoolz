@@ -116,7 +116,7 @@ Everything in the stack composes because it keeps two contracts: pipekit's
 `Operator` and geoarray's `GeoArray`. Code that breaks either runs fine
 alone and fails the moment someone puts it in a pipeline, so treat both as
 hard rules. The long form, with examples, is
-[`docs/operators/concepts.md`](docs/operators/concepts.md) and
+[`docs/operators/operators-concepts.md`](docs/operators/operators-concepts.md) and
 [`docs/operators/how-to/define-an-operator.md`](docs/operators/how-to/define-an-operator.md).
 
 ### pipekit `Operator`: how pieces compose

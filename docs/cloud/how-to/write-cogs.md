@@ -8,7 +8,7 @@ pipeline, use the operator `gz.WriteCOG`.
 ## Write a float, a class map and a mask
 
 The example writes small synthetic rasters to an in-memory bucket (see
-[Mounts](../concepts.md#mounts)) and a temporary directory. It runs
+[Mounts](../cloud-concepts.md#mounts)) and a temporary directory. It runs
 offline.
 
 ```python

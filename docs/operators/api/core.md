@@ -6,7 +6,7 @@ framework and is re-exported at `geotoolz.*` (and `pipekit.*`) for
 convenience. The only geotoolz-specific addition on this page is
 `ModelOp`, which lives at `geoops.learn`.
 
-For the model behind these primitives, read the [Concepts](../concepts.md)
+For the model behind these primitives, read the [Concepts](../operators-concepts.md)
 page first.
 
 ## Base

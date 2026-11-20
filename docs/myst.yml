@@ -12,10 +12,12 @@
 # URLs to the deployed /reference/ path. Keep the port in sync with API_PORT
 # in that script.
 #
-# mystmd builds flat URLs from file names and has no way to set a slug, so a
-# second page with the same file name (each package's index.md and
-# concepts.md, the design pages) is served at <name>-1/, <name>-2/, … in toc
-# order; the nav shows each page's own title. Never link to such a URL by
+# mystmd builds flat URLs from file names and has no way to set a slug, so
+# each package's pages carry the package in their file name
+# (catalog/catalog.md, catalog/catalog-concepts.md) and are served at
+# /catalog/, /catalog-concepts/. A second page with the same file name (the
+# xarray design pages) is served at <name>-1/, <name>-2/, … in toc order;
+# the nav shows each page's own title. Never link to such a URL by
 # hand: link to the file, and the build resolves it.
 # ---------------------------------------------------------------------------
 version: 1
@@ -57,9 +59,9 @@ project:
       title: "Building with agents"
     - title: "Operators — geotoolz"
       children:
-        - file: operators/index.md
+        - file: operators/operators.md
           title: "Overview"
-        - file: operators/concepts.md
+        - file: operators/operators-concepts.md
           title: "Concepts"
         - title: "How-to"
           children:
@@ -79,11 +81,11 @@ project:
               title: "Operators on Sentinel-2 (Lake Tahoe)"
     - title: "Patcher — geopatcher"
       children:
-        - file: patcher/index.md
+        - file: patcher/patcher.md
           title: "Overview"
-        - file: patcher/concepts.md
+        - file: patcher/patcher-concepts.md
           title: "Concepts"
-        - file: patcher/quickstart.md
+        - file: patcher/patcher-quickstart.md
           title: "Quickstart"
         - title: "How-to"
           children:
@@ -123,11 +125,11 @@ project:
               title: "Design decisions"
     - title: "Catalog — geocatalog"
       children:
-        - file: catalog/index.md
+        - file: catalog/catalog.md
           title: "Overview"
-        - file: catalog/concepts.md
+        - file: catalog/catalog-concepts.md
           title: "Concepts"
-        - file: catalog/quickstart.md
+        - file: catalog/catalog-quickstart.md
           title: "Quickstart"
         - title: "How-to"
           children:
@@ -159,7 +161,7 @@ project:
               title: "Schema versions"
             - file: catalog/logging.md
               title: "Logging"
-            - file: catalog/changelog.md
+            - file: catalog/catalog-changelog.md
               title: "Changelog"
         - title: "Design"
           children:
@@ -169,9 +171,9 @@ project:
               title: "Exact grid alignment"
     - title: "Cloud — geocloud"
       children:
-        - file: cloud/index.md
+        - file: cloud/cloud.md
           title: "Overview"
-        - file: cloud/concepts.md
+        - file: cloud/cloud-concepts.md
           title: "Concepts"
         - title: "How-to"
           children:
@@ -195,9 +197,9 @@ project:
               title: "A tour of geocloud"
     - title: "Products — geoproducts"
       children:
-        - file: products/index.md
+        - file: products/products.md
           title: "Overview"
-        - file: products/concepts.md
+        - file: products/products-concepts.md
           title: "Concepts"
         - title: "Sensors"
           children:
@@ -219,9 +221,9 @@ project:
               title: "Himawari over Japan"
     - title: "Array — geoarray"
       children:
-        - file: array/index.md
+        - file: array/array.md
           title: "Overview"
-        - file: array/concepts.md
+        - file: array/array-concepts.md
           title: "Concepts"
         - title: "How-to"
           children:
@@ -235,11 +237,11 @@ project:
               title: "Swaths and averaging kernels"
     - title: "xarray lane — xrtoolz"
       children:
-        - file: xarray/index.md
+        - file: xarray/xarray-lane.md
           title: "Overview"
         - title: "Packages"
           children:
-            - file: xarray/packages/index.md
+            - file: xarray/packages/packages.md
               title: "Overview"
             - file: xarray/packages/grad.md
               title: "Calculus (xrops.grad)"
@@ -299,7 +301,7 @@ project:
                   title: "V6 — Capstone"
         - title: "Reference"
           children:
-            - file: xarray/changelog.md
+            - file: xarray/xarray-changelog.md
               title: "Changelog"
         - file: xarray/dask.md
           title: "Dask"

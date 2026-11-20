@@ -3,7 +3,7 @@
 ## `geoproducts`
 
 The reader base class and `stack`. The contract is in
-[Concepts](concepts.md).
+[Concepts](products-concepts.md).
 
 ::: geoproducts.ProductReader
 ::: geoproducts.stack

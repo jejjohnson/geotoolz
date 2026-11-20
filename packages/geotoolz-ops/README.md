@@ -272,8 +272,8 @@ make docs
 
 ## Next steps
 
-- **Docs site:** [concepts](https://jejjohnson.github.io/geotoolz/concepts/),
-  [quickstart](https://jejjohnson.github.io/geotoolz/index-1/),
+- **Docs site:** [concepts](https://jejjohnson.github.io/geotoolz/operators-concepts/),
+  [quickstart](https://jejjohnson.github.io/geotoolz/operators/),
   [API reference](https://jejjohnson.github.io/geotoolz/reference/operators/api/core/).
 - **End-to-end Lake Tahoe notebook (catalog → patch → operate):**
   [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).

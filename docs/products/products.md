@@ -79,8 +79,8 @@ window without loading the scene.
 
 | Namespace | Use it to… | Guide |
 |---|---|---|
-| `geoproducts.ProductReader` | build a reader: a `geoarray.RasterSource` | [Concepts](concepts.md#the-productreader-contract) |
-| `geoproducts.stack` | put several readers' bands on one grid | [Concepts](concepts.md#one-grid-stack) |
+| `geoproducts.ProductReader` | build a reader: a `geoarray.RasterSource` | [Concepts](products-concepts.md#the-productreader-contract) |
+| `geoproducts.stack` | put several readers' bands on one grid | [Concepts](products-concepts.md#one-grid-stack) |
 | `geoproducts.goes` | read GOES-R ABI L1b and L2, find files on NOAA's buckets | [GOES-R ABI](goes.md) |
 | `geoproducts.himawari` | read Himawari AHI HSD segments and L2 cloud products | [Himawari AHI](himawari.md) |
 | `geoproducts.carbonmapper` | query Carbon Mapper plumes and sources, read their rasters | [Carbon Mapper](carbonmapper.md) |
@@ -88,7 +88,7 @@ window without loading the scene.
 
 ## Next steps
 
-- [Concepts](concepts.md) — the `ProductReader` contract, `stack`, recipes and presets.
+- [Concepts](products-concepts.md) — the `ProductReader` contract, `stack`, recipes and presets.
 - Sensors: [GOES-R ABI](goes.md) · [Himawari AHI](himawari.md) · [Carbon Mapper](carbonmapper.md).
 - [Add a product reader](product-readers.md) — the subpackage layout and the shared toolkit.
 - Tutorials: [GOES-19 mesoscale](notebooks/goes_mesoscale.ipynb) · [Himawari over Japan](notebooks/himawari_japan.ipynb).

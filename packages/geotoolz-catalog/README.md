@@ -139,9 +139,9 @@ uv add geotoolz-catalog
 
 ## Next steps
 
-- **[Docs site](https://jejjohnson.github.io/geotoolz/index-3/)** — concepts, quickstart, API
-- **[Concepts](https://jejjohnson.github.io/geotoolz/concepts-2/)** — mental model, backend comparison, set algebra
-- **[Quickstart](https://jejjohnson.github.io/geotoolz/quickstart-1/)** — 15-minute Lake Tahoe Sentinel-2 walkthrough
+- **[Docs site](https://jejjohnson.github.io/geotoolz/catalog/)** — concepts, quickstart, API
+- **[Concepts](https://jejjohnson.github.io/geotoolz/catalog-concepts/)** — mental model, backend comparison, set algebra
+- **[Quickstart](https://jejjohnson.github.io/geotoolz/catalog-quickstart/)** — 15-minute Lake Tahoe Sentinel-2 walkthrough
 - **[Recipes](https://jejjohnson.github.io/geotoolz/large-archives/)** — large archives, STAC ingestion, staging & bundles
 - **[End-to-end notebook](https://jejjohnson.github.io/geotoolz/end-to-end-lake-tahoe/)** — discover Sentinel-2 over Lake Tahoe, query it and load it onto one grid (with [geotoolz](https://github.com/jejjohnson/geotoolz) and [geopatcher](https://github.com/jejjohnson/geotoolz/tree/main/packages/geotoolz-patcher))
 - **[API reference](https://jejjohnson.github.io/geotoolz/reference/catalog/api/reference/)** — full mkdocstrings-generated reference

@@ -162,7 +162,7 @@ the [design record](design/query-matchup.md) explains the choices.
 
 ## See also
 
-- [Quickstart](quickstart.md): the model on local files and STAC.
+- [Quickstart](catalog-quickstart.md): the model on local files and STAC.
 - [Catalog → patcher](how-to/catalog-to-patcher.md): `field_for` and
   `CatalogDomain`.
 - [Logging](logging.md): `logger.enable("geocatalog")` shows what the

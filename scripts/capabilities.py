@@ -369,7 +369,7 @@ def render_coupling() -> str:
         "(`geoops.carrier.Coupling`). An operator couples a dim when some output",
         "depends on two or more input values that differ along it; re-indexing",
         "alone (a selection, a crop, a flip) is an effect, not a coupling. See",
-        "[Concepts](../concepts.md#coupling-which-dims-an-operator-mixes).",
+        "[Concepts](../operators-concepts.md#coupling-which-dims-an-operator-mixes).",
         "",
         "- **Reach** is the spatial reach in pixels at the default settings:",
         "  a tile reproduces the whole-scene result in its interior when it",
