@@ -31,6 +31,7 @@ import geoarray
 import numpy as np
 from affine import Affine
 from geoarray import DIMS, FrozenAttrs, GeoArray, GeoPoints, GridMismatchError
+from geophysix.earth import SPHERE, WGS84
 from pipekit_array import array_namespace
 from pipekit_ops import Operator, backend_of, get_adapter
 from pyproj import CRS
@@ -1496,8 +1497,8 @@ class Stitch(Operator):
 
 
 #: Mean Earth radius R₁ (km), IUGG / Moritz (2000), "Geodetic Reference
-#: System 1980", J. Geodesy 74:128-133.
-_EARTH_MEAN_RADIUS_KM: float = 6371.0088
+#: System 1980", J. Geodesy 74:128-133 (geophysix's ``SPHERE``).
+_EARTH_MEAN_RADIUS_KM: float = SPHERE.semi_major / 1000.0
 
 # MODIS: 10 / 20 / 40 detectors per scan at 1 km / 500 m / 250 m; 1354 /
 # 2708 / 5416 frames over ±55°; Terra/Aqua nominal altitude 705 km.
@@ -1895,7 +1896,7 @@ class GeostationaryParallaxCorrect(Operator):
         satellite_lon_deg: float,
         satellite_height_m: float = 35_786_023.0,
         target_height_m: float | np.ndarray | GeoArray = 0.0,
-        earth_radius_m: float = 6_378_137.0,
+        earth_radius_m: float = WGS84.semi_major,
         method: str = "bilinear",
     ) -> None:
         self.satellite_lon_deg = satellite_lon_deg

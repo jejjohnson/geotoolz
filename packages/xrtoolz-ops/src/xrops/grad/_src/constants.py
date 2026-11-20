@@ -1,17 +1,21 @@
 """Physical constants used by xrops.grad operators.
 
-These replace the equivalent ``metpy.constants`` lookups so the package
-can drop the metpy dependency.
+They are geophysix's: the radius of the IUGG mean sphere, WGS84's rotation
+rate and standard gravity. The names stay here because ``xrops.grad``
+re-exports them.
 """
 
 from __future__ import annotations
 
+from geophysix.constants import STANDARD
+from geophysix.earth import SPHERE, WGS84
 
-EARTH_RADIUS: float = 6_371_000.0
-"""Mean Earth radius in metres."""
 
-OMEGA: float = 7.2921159e-5
-"""Earth's rotation rate in rad/s."""
+EARTH_RADIUS: float = SPHERE.semi_major
+"""Mean Earth radius in metres (IUGG R₁ = 6,371,008.77 m)."""
 
-GRAVITY: float = 9.80665
-"""Standard gravitational acceleration in m/s²."""
+OMEGA: float = WGS84.rotation_rate
+"""Earth's rotation rate in rad/s (WGS84, 7.292115e-5)."""
+
+GRAVITY: float = STANDARD.standard_gravity
+"""Standard gravitational acceleration in m/s² (9.80665)."""

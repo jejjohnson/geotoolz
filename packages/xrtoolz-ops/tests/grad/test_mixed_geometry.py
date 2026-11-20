@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from xrops.grad import divergence, partial
+from xrops.grad import EARTH_RADIUS, divergence, partial
 
 
 def _ocean_box(nlon: int = 12, nlat: int = 10) -> xr.Dataset:
@@ -57,7 +57,7 @@ def test_mixed_geometry_includes_curvature_term():
         geometry=("spherical", "spherical", "rectilinear"),
     )
     phi = np.deg2rad(ds["lat"].values)
-    expected = np.broadcast_to((-np.tan(phi) / 6_371_000.0)[None, :, None], got.shape)
+    expected = np.broadcast_to((-np.tan(phi) / EARTH_RADIUS)[None, :, None], got.shape)
     np.testing.assert_allclose(got.values, expected, atol=1e-18)
 
 

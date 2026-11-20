@@ -19,19 +19,20 @@ from pathlib import Path
 
 import numpy as np
 import xarray as xr
+from geophysix.constants import STANDARD
 from xrproducts.types import Variable, apply_cf_attrs
 
-from xrops.atm._src.constants import C_P, R_D
 
-
-#: Gravitational acceleration WRF uses for the geopotential [m s⁻²].
+#: Gravitational acceleration WRF itself uses for the geopotential [m s⁻²]; the
+#: file's ``PH`` is ``9.81 z``, so this is the model's constant, not geophysix's
+#: standard gravity.
 GRAVITY: float = 9.81
 #: Reference pressure for potential temperature [Pa].
 P_REFERENCE: float = 1.0e5
 #: Base-state potential temperature added to the perturbation ``T`` [K].
 THETA_BASE: float = 300.0
-#: Poisson constant ``R_d / c_p = 287.04 / 1004.5``.
-KAPPA: float = R_D / C_P
+#: Poisson constant ``R_d / c_p`` (geophysix's).
+KAPPA: float = STANDARD.kappa
 
 #: WRF dimension → CF-style dimension.
 _DIMS: dict[str, str] = {

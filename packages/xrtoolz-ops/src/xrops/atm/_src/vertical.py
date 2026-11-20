@@ -12,10 +12,15 @@ from typing import Literal
 
 import numpy as np
 import xarray as xr
+from geophysix.constants import STANDARD
+from geophysix.thermo import virtual_temperature
 from xrproducts.types import Variable, apply_cf_attrs
 
-from xrops.atm._src.constants import EPSILON_TV, R_D, G
+from xrops._src.elementwise import elementwise
 
+
+#: ``R_d / g₀`` [m K⁻¹], the hypsometric scale per kelvin.
+_R_D_OVER_G = STANDARD.dry_air_gas_constant / STANDARD.standard_gravity
 
 _GEOPOTENTIAL_HEIGHT = Variable(
     name="geopotential_height",
@@ -135,7 +140,8 @@ def hypsometric_height(
     """Geopotential height of pressure levels from the hypsometric equation.
 
     Integrates layer by layer upward from the surface with the virtual
-    temperature ``T_v = T (1 + 0.61 q)``:
+    temperature ``T_v = T (1 + (1/ε − 1) q)``, ``1/ε − 1 ≈ 0.608``
+    (`geophysix.thermo.virtual_temperature`):
 
     ``z_{k+1} = z_k + (R_d T̄_{v,k} / g) ln(p_k / p_{k+1})``
 
@@ -175,7 +181,11 @@ def hypsometric_height(
     for label, da in ((pressure, p), (temperature, t)):
         if level not in da.dims:
             raise ValueError(f"{label!r} does not carry the level dim {level!r}")
-    tv = t * (1.0 + EPSILON_TV * ds[specific_humidity]) if specific_humidity else t
+    tv = (
+        elementwise(virtual_temperature, t, ds[specific_humidity])
+        if specific_humidity
+        else t
+    )
     ps = ds[surface_pressure]
     # 1-D pressure axes may run top-down (CDS/ERA5 style); integrate
     # surface-first and flip the result back into the dataset's order.
@@ -188,9 +198,9 @@ def hypsometric_height(
     tv_pos = _positional(tv, level)
     p_lo, p_hi = _lo_hi(p_pos, level)
     tv_lo, tv_hi = _lo_hi(tv_pos, level)
-    dz_layers = (R_D / G) * 0.5 * (tv_lo + tv_hi) * np.log(p_lo / p_hi)
+    dz_layers = _R_D_OVER_G * 0.5 * (tv_lo + tv_hi) * np.log(p_lo / p_hi)
     first = {level: slice(0, 1)}
-    dz_first = (R_D / G) * tv_pos.isel(first) * np.log(ps / p_pos.isel(first))
+    dz_first = _R_D_OVER_G * tv_pos.isel(first) * np.log(ps / p_pos.isel(first))
     z = xr.concat([dz_first, dz_layers], dim=level).cumsum(level, skipna=False)
     if surface_height is not None:
         z = z + ds[surface_height]
@@ -301,7 +311,7 @@ def pbl_height_bulk_richardson(
     thv_s = thv.isel(surface)
     z_s = z.isel(surface)
     shear2 = (ds[u] - ds[u].isel(surface)) ** 2 + (ds[v] - ds[v].isel(surface)) ** 2
-    numerator = G * (thv - thv_s) * (z - z_s)
+    numerator = STANDARD.standard_gravity * (thv - thv_s) * (z - z_s)
     # Calm levels (zero shear relative to the surface) have infinite Ri_b
     # with the sign of the numerator (0 where the numerator is zero too):
     # mask the denominator so the division never warns, then restore the

@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Literal
 
 import numpy as np
+from geophysix.earth import great_circle_distance
 
 from geopatcher._src._serialize import config_from_fields
 from geopatcher._src.carrier import raster_grid
@@ -177,12 +178,10 @@ class SphericalCap(Geometry):
 
     Args:
         radius_km: Cap radius in kilometres, used as great-circle distance
-            from the anchor. Earth radius is fixed at 6371 km.
+            from the anchor, on the IUGG mean sphere (R = 6371.0088 km).
     """
 
     radius_km: float
-
-    _EARTH_RADIUS_KM: ClassVar[float] = 6371.0
 
     def neighborhood(self, domain: Any, anchor: Any) -> Any:
         if isinstance(domain, GridDomain):
@@ -270,12 +269,8 @@ def _haversine_km(
     lat2: float | np.ndarray,
     lon2: float | np.ndarray,
 ) -> np.ndarray:
-    """Great-circle distance in km on a spherical Earth (R = 6371 km)."""
-    lat1r, lat2r = np.radians(lat1), np.radians(lat2)
-    dlat = lat2r - lat1r
-    dlon = np.radians(lon2) - np.radians(lon1)
-    a = np.sin(dlat / 2) ** 2 + np.cos(lat1r) * np.cos(lat2r) * np.sin(dlon / 2) ** 2
-    return 2.0 * SphericalCap._EARTH_RADIUS_KM * np.arcsin(np.sqrt(a))
+    """Great-circle distance in km on the IUGG mean sphere (geophysix)."""
+    return great_circle_distance(lon1, lat1, lon2, lat2) / 1000.0
 
 
 @dataclass(eq=False)

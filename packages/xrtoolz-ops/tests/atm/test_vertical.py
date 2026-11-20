@@ -5,13 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import xarray as xr
+from geophysix.constants import H2O, STANDARD
 
 from xrops.atm import (
     column_integral,
     hypsometric_height,
     pbl_height_bulk_richardson,
 )
-from xrops.atm._src.constants import R_D, G
 
 
 # ---------- column_integral ----------------------------------------------
@@ -105,9 +105,9 @@ def ds_isothermal() -> xr.Dataset:
 def test_isothermal_closed_form(ds_isothermal):
     out = hypsometric_height(ds_isothermal, pressure="level")
     expected = (
-        R_D
+        STANDARD.dry_air_gas_constant
         * 250.0
-        / G
+        / STANDARD.standard_gravity
         * np.log(
             ds_isothermal["sp"].values[None, :] / ds_isothermal["level"].values[:, None]
         )
@@ -133,10 +133,12 @@ def test_surface_height_offset_and_humidity(ds_isothermal):
     dry = hypsometric_height(ds, pressure="level")["height"]
     lifted = hypsometric_height(ds, pressure="level", surface_height="zs")["height"]
     np.testing.assert_allclose(lifted - dry, ds["zs"].broadcast_like(dry), rtol=1e-12)
-    # Moist air is lighter: T_v = T (1 + 0.61 q) thickens every layer.
+    # Moist air is lighter: T_v = T (1 + (1/ε − 1) q), 1/ε − 1 = M_dry / M_H2O − 1
+    # = 0.6078 (geophysix; the local copy used 0.61), thickens every layer.
+    excess = STANDARD.dry_air_molar_mass / H2O.molar_mass - 1.0
     moist = ds.assign(q=(("level", "x"), np.full((6, 2), 0.01)))
     wet = hypsometric_height(moist, pressure="level", specific_humidity="q")["height"]
-    np.testing.assert_allclose(wet, dry * (1.0 + 0.61 * 0.01), rtol=1e-12)
+    np.testing.assert_allclose(wet, dry * (1.0 + excess * 0.01), rtol=1e-12)
 
 
 def test_hypsometric_nan_temperature_invalidates_levels_above(ds_isothermal):
@@ -174,7 +176,9 @@ def ds_pbl() -> xr.Dataset:
         },
         coords={"z_agl": ("level", z)},
     )
-    ds.attrs["h_closed_form"] = lambda ri: ri * theta0 * u0**2 / (G * gamma * z_ref)
+    ds.attrs["h_closed_form"] = lambda ri: (
+        ri * theta0 * u0**2 / (STANDARD.standard_gravity * gamma * z_ref)
+    )
     return ds
 
 

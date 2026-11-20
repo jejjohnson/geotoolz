@@ -17,18 +17,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
-from math import asin, cos, radians, sin, sqrt
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
+
+from geophysix.earth import great_circle_distance
 
 from xrproducts.types._src.geometry import BBox
 
 
 if TYPE_CHECKING:
     import pandas as pd
-
-
-_EARTH_RADIUS_KM = 6371.0088
 
 
 @dataclass(frozen=True)
@@ -68,7 +66,7 @@ class Station:
 
     def distance_to(self, lon: float, lat: float) -> float:
         """Great-circle distance to ``(lon, lat)`` in kilometres."""
-        return _haversine_km(self.lon, self.lat, lon, lat)
+        return float(great_circle_distance(self.lon, self.lat, lon, lat)) / 1000.0
 
     def in_bbox(self, bbox: BBox) -> bool:
         """Whether the station falls inside ``bbox`` (inclusive).
@@ -256,14 +254,6 @@ class StationCollection:
 
 
 # ---- internals ----------------------------------------------------------
-
-
-def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
-    phi1, phi2 = radians(lat1), radians(lat2)
-    dphi = radians(lat2 - lat1)
-    dlmb = radians(lon2 - lon1)
-    a = sin(dphi / 2.0) ** 2 + cos(phi1) * cos(phi2) * sin(dlmb / 2.0) ** 2
-    return 2.0 * _EARTH_RADIUS_KM * asin(sqrt(a))
 
 
 def _norm(value: str | None) -> str | None:
