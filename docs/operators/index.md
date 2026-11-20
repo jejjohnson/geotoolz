@@ -128,27 +128,27 @@ numpy primitives (`gz.indices.ndvi`).
 
 | Namespace | What it does | Reference |
 |---|---|---|
-| core | `Operator`, `Sequential`, `Graph`, `Input`, `Branch`, `Switch`, `Fanout`, `Tap`, `Snapshot`, … (from pipekit) and `ModelOp` | [Core](api/core.md) |
-| `geoops.carrier`, `geoops.testing` | helpers that keep the `GeoArray` contract, and `check_operator` | [Carrier](api/carrier.md) |
-| `radiometry` | DN ↔ radiance ↔ reflectance, sun geometry, brightness temperature, DOS1, stretches | [Radiometry](api/radiometry.md) |
-| `indices` | spectral indices: NDVI, EVI, NDWI, NBR, NDSI, … | [Indices](api/indices.md) |
-| `qa` | cloud and quality masks from QA bits, SCL classes and sensor presets | [QA](api/qa.md) |
-| `mask` | geometry and DEM masks, mask morphology and algebra, `ApplyMask` | [Mask](api/mask.md) |
-| `spectral` | band selection, stacking, band math, spectral resampling | [Spectral](api/spectral.md) |
-| `geom` (+ `geom.coregister`) | reproject, resample, crop, tile, rasterise, swath geometry, registration | [Geometry](api/geom.md) |
-| `compositing` | temporal composites and multi-source fusion | [Compositing](api/compositing.md) |
-| `restore` | denoising, despeckling, destriping, gap filling, MNF | [Restore](api/restore.md) |
-| `segment` | thresholds, superpixels, watershed and other skimage segmentations | [Segment](api/segment.md) |
-| `measure` | connected components, region properties, contours | [Measure](api/measure.md) |
-| `feature` | edges, blobs, corners, Hough transforms, local features | [Feature](api/feature.md) |
-| `plume` | methane and CO₂ plume retrieval, masks, footprints, mass and flux | [Plume](api/plume.md) |
-| `matched_filter` | hyperspectral matched filters and background statistics | [Matched filter](api/matched_filter.md) |
-| `augment` | augmentations that respect georeferencing and physical bands | [Augment](api/augment.md) |
-| `normalize` | per-band scalers, non-linear scaling, histogram stretch and matching | [Normalize](api/normalize.md) · [how-to](normalization.md) |
-| `learn` | scikit-learn estimators as pixel-wise operators | [Learn](api/learn.md) |
-| `einx` | einstein-notation tensor operations that keep georeferencing | [Einx](api/einx.md) |
-| `viz` | composites, display stretches, colormaps, hillshade, overlays | [Viz](api/viz.md) |
-| `io` | window readers, HDF and NetCDF readers, GeoTIFF / COG / Zarr writers | [IO](api/io.md) · [how-to](io.md) |
+| core | `Operator`, `Sequential`, `Graph`, `Input`, `Branch`, `Switch`, `Fanout`, `Tap`, `Snapshot`, … (from pipekit) and `ModelOp` | [Core](https://jejjohnson.github.io/geotoolz/reference/operators/api/core/) |
+| `geoops.carrier`, `geoops.testing` | helpers that keep the `GeoArray` contract, and `check_operator` | [Carrier](https://jejjohnson.github.io/geotoolz/reference/operators/api/carrier/) |
+| `radiometry` | DN ↔ radiance ↔ reflectance, sun geometry, brightness temperature, DOS1, stretches | [Radiometry](https://jejjohnson.github.io/geotoolz/reference/operators/api/radiometry/) |
+| `indices` | spectral indices: NDVI, EVI, NDWI, NBR, NDSI, … | [Indices](https://jejjohnson.github.io/geotoolz/reference/operators/api/indices/) |
+| `qa` | cloud and quality masks from QA bits, SCL classes and sensor presets | [QA](https://jejjohnson.github.io/geotoolz/reference/operators/api/qa/) |
+| `mask` | geometry and DEM masks, mask morphology and algebra, `ApplyMask` | [Mask](https://jejjohnson.github.io/geotoolz/reference/operators/api/mask/) |
+| `spectral` | band selection, stacking, band math, spectral resampling | [Spectral](https://jejjohnson.github.io/geotoolz/reference/operators/api/spectral/) |
+| `geom` (+ `geom.coregister`) | reproject, resample, crop, tile, rasterise, swath geometry, registration | [Geometry](https://jejjohnson.github.io/geotoolz/reference/operators/api/geom/) |
+| `compositing` | temporal composites and multi-source fusion | [Compositing](https://jejjohnson.github.io/geotoolz/reference/operators/api/compositing/) |
+| `restore` | denoising, despeckling, destriping, gap filling, MNF | [Restore](https://jejjohnson.github.io/geotoolz/reference/operators/api/restore/) |
+| `segment` | thresholds, superpixels, watershed and other skimage segmentations | [Segment](https://jejjohnson.github.io/geotoolz/reference/operators/api/segment/) |
+| `measure` | connected components, region properties, contours | [Measure](https://jejjohnson.github.io/geotoolz/reference/operators/api/measure/) |
+| `feature` | edges, blobs, corners, Hough transforms, local features | [Feature](https://jejjohnson.github.io/geotoolz/reference/operators/api/feature/) |
+| `plume` | methane and CO₂ plume retrieval, masks, footprints, mass and flux | [Plume](https://jejjohnson.github.io/geotoolz/reference/operators/api/plume/) |
+| `matched_filter` | hyperspectral matched filters and background statistics | [Matched filter](https://jejjohnson.github.io/geotoolz/reference/operators/api/matched_filter/) |
+| `augment` | augmentations that respect georeferencing and physical bands | [Augment](https://jejjohnson.github.io/geotoolz/reference/operators/api/augment/) |
+| `normalize` | per-band scalers, non-linear scaling, histogram stretch and matching | [Normalize](https://jejjohnson.github.io/geotoolz/reference/operators/api/normalize/) · [how-to](normalization.md) |
+| `learn` | scikit-learn estimators as pixel-wise operators | [Learn](https://jejjohnson.github.io/geotoolz/reference/operators/api/learn/) |
+| `einx` | einstein-notation tensor operations that keep georeferencing | [Einx](https://jejjohnson.github.io/geotoolz/reference/operators/api/einx/) |
+| `viz` | composites, display stretches, colormaps, hillshade, overlays | [Viz](https://jejjohnson.github.io/geotoolz/reference/operators/api/viz/) |
+| `io` | window readers, HDF and NetCDF readers, GeoTIFF / COG / Zarr writers | [IO](https://jejjohnson.github.io/geotoolz/reference/operators/api/io/) · [how-to](io.md) |
 | `patch_ops` | geopatcher as operators: `GridSampler`, `ApplyToChips`, `MergePatches`, label-aware samplers | [Tile → operate → stitch](patch_ops.md) |
 
 ## Next steps
@@ -162,6 +162,6 @@ numpy primitives (`gz.indices.ndvi`).
   [normalise for training and inference](normalization.md) ·
   [read HDF and NetCDF](io.md).
 - **Tutorial**: [operators on Sentinel-2 over Lake Tahoe](notebooks/operators_lake_tahoe.ipynb).
-- **Reference**: start at [Core](api/core.md); the
+- **Reference**: start at [Core](https://jejjohnson.github.io/geotoolz/reference/operators/api/core/); the
   [capability index](../capabilities.md) lists every public name once.
 - **Changelog**: [`packages/geotoolz-ops/CHANGELOG.md`](https://github.com/jejjohnson/geotoolz/blob/main/packages/geotoolz-ops/CHANGELOG.md).

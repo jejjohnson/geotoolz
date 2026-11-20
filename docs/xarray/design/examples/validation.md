@@ -3,15 +3,16 @@ status: draft
 version: 0.2.0
 ---
 
-!!! note "Module paths shown are proposed design targets"
-    The snippets below import from `xrtoolz.metrics.*`, `xrtoolz.budgets`,
-    `xrtoolz.phenomena`, and `xrtoolz.lagrangian` — submodules that **do not
-    exist in the current export surface**. Today, validators such as
-    `ValidateCoords` live under `xrtoolz.geo.operators` (not
-    `xrtoolz.geo.validation`), and metric primitives live under
-    `xrtoolz.geo.metrics`. Treat the imports below as design-target aliases;
-    once the modules ship, the snippets will be copy/paste-ready against the
-    proposed layout.
+:::{note} Module paths shown are proposed design targets
+The snippets below import from `xrtoolz.metrics.*`, `xrtoolz.budgets`,
+`xrtoolz.phenomena`, and `xrtoolz.lagrangian` — submodules that **do not
+exist in the current export surface**. Today, validators such as
+`ValidateCoords` live under `xrtoolz.geo.operators` (not
+`xrtoolz.geo.validation`), and metric primitives live under
+`xrtoolz.geo.metrics`. Treat the imports below as design-target aliases;
+once the modules ship, the snippets will be copy/paste-ready against the
+proposed layout.
+:::
 
 # Validation Examples
 

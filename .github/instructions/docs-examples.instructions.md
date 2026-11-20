@@ -6,7 +6,7 @@ applyTo: "docs/**/*.ipynb,docs/**/*.py,docs/**/*.md,notebooks/**/*.ipynb"
 
 ## Overview
 
-Example notebooks live in `docs/notebooks/` as **executed `.ipynb` files**. The committed `.ipynb` carries both source cells and rendered cell outputs (including matplotlib figures as embedded PNGs). `mkdocs-jupyter` renders them with `execute: false`, so the committed outputs are what users see in the docs.
+Example notebooks live in `docs/notebooks/` as **executed `.ipynb` files**. The committed `.ipynb` carries both source cells and rendered cell outputs (including matplotlib figures as embedded PNGs). mystmd renders them without executing them, so the committed outputs are what users see in the docs.
 
 Every notebook is **Google Colab compatible** — the first cell detects Colab and `pip install`s the right dependencies so users can click "Open in Colab" and run end-to-end without touching the host environment.
 
@@ -46,7 +46,7 @@ No separate `images/` directory — figures live inside the `.ipynb` cell output
    ```
 
 5. Delete the `.py` — the `.ipynb` is the committed source of truth.
-6. Commit the `.ipynb`. `mkdocs-jupyter` picks it up automatically.
+6. Commit the `.ipynb` and add it to the `toc` in `docs/myst.yml`, or mystmd does not build it.
 
 ## Jupytext Header (dev only)
 
@@ -195,7 +195,7 @@ The `[docs]` dependency group pulls in `watermark`, so under the documented auth
 
 ## Markdown Paragraph Wrapping
 
-**Each paragraph in a `# %% [markdown]` block must be a single long line.** Do not soft-wrap paragraph text across multiple `#` lines. jupytext preserves source newlines as soft breaks, which mkdocs-jupyter renders as awkward visual breaks.
+**Each paragraph in a `# %% [markdown]` block must be a single long line.** Do not soft-wrap paragraph text across multiple `#` lines. jupytext preserves source newlines as soft breaks, which the docs render as awkward visual breaks.
 
 Right:
 
@@ -231,7 +231,7 @@ Display:
 $$f(x) = \sum_{i=1}^{N} w_i \phi_i(x)$$
 ```
 
-MathJax is configured in `mkdocs.yml` — both inline and display math render in the docs.
+mystmd renders both inline and display maths with KaTeX. KaTeX rejects a bare `_` inside `\text{}` and `\texttt{}` (write `\_`), and `make docs` fails on any maths it cannot render.
 
 ## Checklist for New Notebooks
 
@@ -244,4 +244,4 @@ MathJax is configured in `mkdocs.yml` — both inline and display math render in
 - [ ] Matplotlib defaults only (no `style.use`, no `rcParams`)
 - [ ] Converted to `.ipynb` and executed in place
 - [ ] `.py` deleted; `.ipynb` with embedded outputs committed
-- [ ] Listed in `mkdocs.yml` nav
+- [ ] Listed in the `toc` of `docs/myst.yml`

@@ -184,7 +184,7 @@ scene: GeoArray = geoproducts.stack([
 
 `himawari.recipes` holds the RGBs as data: the GOES quick-guide
 stretches on the matching AHI bands. With `[operators]` each preset is a
-[`gz.viz.RGBRecipe`](../operators/api/viz.md) (see
+[`gz.viz.RGBRecipe`](https://jejjohnson.github.io/geotoolz/reference/operators/api/viz/) (see
 [Recipes and presets](concepts.md#recipes-and-presets)).
 
 ```python

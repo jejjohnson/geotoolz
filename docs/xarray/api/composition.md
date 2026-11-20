@@ -67,3 +67,16 @@ variable independently.
 `Signature` is pipekit's shape descriptor (ordered `(name, size)` dims and a dtype), used by `compute_output_signature` for static shape inference across a pipeline.
 
 ::: pipekit_ops.Signature
+    options:
+      docstring_section_style: "table"
+      docstring_options: {"warn_unknown_params": false, "warn_missing_types": false}
+      merge_init_into_class: true
+      show_root_full_path: false
+      show_symbol_type_heading: true
+      show_symbol_type_toc: true
+      separate_signature: true
+      show_signature_annotations: true
+      signature_crossrefs: true
+      members_order: "source"
+      filters: ["!^_"]
+      heading_level: 3

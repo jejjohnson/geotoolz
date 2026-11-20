@@ -322,7 +322,8 @@ make test-all             # everything incl. slow / integration tiers
 make format               # ruff format . && ruff check --fix .
 make lint                 # ruff check . (entire repo) + import contracts (lint-imports)
 make typecheck            # ty check, per package
-make docs-serve           # local MkDocs preview
+make docs                 # build the docs site into public/ and check every link
+make docs-serve           # build, then serve the docs at http://127.0.0.1:8000
 ```
 
 Run a single test from the owning package directory so its pytest config
@@ -398,8 +399,7 @@ sure every new file is tracked: `git status` must not show it as ignored.
 
 ## Documentation
 
-MkDocs + Material + mkdocstrings; the root `mkdocs.yml` builds one site with a
-section per package. The READMEs set the bar and the docs follow it:
+Two tools build one site with a section per package (`docs/README.md` has the details): mystmd builds the prose and the notebooks from `docs/myst.yml`, and Zensical + mkdocstrings builds the API pages (`docs/<pkg>/api/`, and `api.md` for the single-page packages) from `mkdocs.yml` into `/reference/`. `scripts/build_docs.py` (`make docs`) builds both, points the API pages' links into prose at the MyST pages, and fails on any broken link. Link from prose to an API object with `[name](xref:api#geoops.Name)` and to an API page by its deployed URL (`https://jejjohnson.github.io/geotoolz/reference/operators/api/core/`); a relative link into an API page publishes its Markdown source as a download, and the build fails on it. The READMEs set the bar and the docs follow it:
 
 - **Pages** follow `.github/instructions/docs-pages.instructions.md`: one
   kind per page (landing / concepts / how-to / tutorial / reference), a

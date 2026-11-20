@@ -255,4 +255,4 @@ and `OMEGA` are exported at the top level and replace the equivalent
 
 ## API reference
 
-- [Calculus](../api/calc.md)
+- [Calculus](https://jejjohnson.github.io/geotoolz/reference/xarray/api/calc/)

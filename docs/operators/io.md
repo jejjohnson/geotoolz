@@ -95,7 +95,7 @@ Pass `decode_cf=False` to get the raw packed integers, and
 
 ## Further reading
 
-- [IO reference](api/io.md): window readers, STAC and Earth Engine
+- [IO reference](https://jejjohnson.github.io/geotoolz/reference/operators/api/io/): window readers, STAC and Earth Engine
   sources, and the GeoTIFF / COG / Zarr writers.
 - Sensor-specific readers (GOES, Himawari, Carbon Mapper) live in
   [geoproducts](../products/index.md).

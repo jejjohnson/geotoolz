@@ -92,5 +92,5 @@ window without loading the scene.
 - Sensors: [GOES-R ABI](goes.md) · [Himawari AHI](himawari.md) · [Carbon Mapper](carbonmapper.md).
 - [Add a product reader](product-readers.md) — the subpackage layout and the shared toolkit.
 - Tutorials: [GOES-19 mesoscale](notebooks/goes_mesoscale.ipynb) · [Himawari over Japan](notebooks/himawari_japan.ipynb).
-- [API reference](api.md).
+- [API reference](https://jejjohnson.github.io/geotoolz/reference/products/api/).
 - The whole stack: [How the packages interlock](../geostack.md).

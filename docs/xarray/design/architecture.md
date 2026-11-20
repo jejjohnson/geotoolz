@@ -3,23 +3,24 @@ status: draft
 version: 0.1.0
 ---
 
-!!! note "These design docs cover the planned operator surface for `xrtoolz`"
-    Code snippets use class names directly. In the implementation, the
-    submodule layout is:
+:::{note} These design docs cover the planned operator surface for `xrtoolz`
+Code snippets use class names directly. In the implementation, the
+submodule layout is:
 
-    - **`xrtoolz.geo`** — domain-agnostic geoprocessing (CRS, validation,
-      subset, masks, detrend)
-    - **`xrtoolz.interpolate`** — value resampling: regrid, gap-fill,
-      bin, coord-axis remap, time resample, smooth, learned downscale
-      (D12)
-    - **`xrtoolz.transforms`** — signal transforms / decompositions /
-      encoders (D8)
-    - **`xrtoolz.metrics`** — skill scores (D7)
-    - **`xrtoolz.kinematics`** — domain-specific physical quantities,
-      sub-organized by domain (D9)
-    - **`xrtoolz.viz`** — plotting operators (D10)
+- **`xrtoolz.geo`** — domain-agnostic geoprocessing (CRS, validation,
+  subset, masks, detrend)
+- **`xrtoolz.interpolate`** — value resampling: regrid, gap-fill,
+  bin, coord-axis remap, time resample, smooth, learned downscale
+  (D12)
+- **`xrtoolz.transforms`** — signal transforms / decompositions /
+  encoders (D8)
+- **`xrtoolz.metrics`** — skill scores (D7)
+- **`xrtoolz.kinematics`** — domain-specific physical quantities,
+  sub-organized by domain (D9)
+- **`xrtoolz.viz`** — plotting operators (D10)
 
-    See `xrtoolz/__init__.py` for the current export surface.
+See `xrtoolz/__init__.py` for the current export surface.
+:::
 
 # Architecture
 
@@ -640,7 +641,7 @@ The built-in `sklearn` submodule (`SklearnOp`, `to_2d` / `from_2d`) provides min
 
 ### xarray_sklearn — full sklearn bridge
 
-[`XarrayEstimator`](../api/utils.md) is a standalone sklearn wrapper that preserves dims, coords, and attrs through any sklearn estimator. It handles NaN policies (`"propagate"`, `"raise"`, `"mask"`), shape-changing transforms (e.g., PCA), Dataset column-concatenation, and full compatibility with `Pipeline` and `GridSearchCV`.
+[`XarrayEstimator`](https://jejjohnson.github.io/geotoolz/reference/xarray/api/utils/) is a standalone sklearn wrapper that preserves dims, coords, and attrs through any sklearn estimator. It handles NaN policies (`"propagate"`, `"raise"`, `"mask"`), shape-changing transforms (e.g., PCA), Dataset column-concatenation, and full compatibility with `Pipeline` and `GridSearchCV`.
 
 `SklearnOp` can delegate to `XarrayEstimator` when the package is installed, gaining NaN handling and richer metadata preservation for free:
 

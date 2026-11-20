@@ -62,7 +62,7 @@ check-env-%:
 # Phony declarations
 # ---------------------------------------------------------------------------
 .PHONY: help install lint imports format typecheck test test-all test-slow test-doctest test-cov \
-        precommit build clean version docs docs-check docs-serve docs-deploy \
+        precommit build clean version docs docs-check docs-api docs-serve \
         gh-labels gh-sub gh-block gh-show
 
 .DEFAULT_GOAL := help
@@ -220,8 +220,8 @@ clean: ## 🗑️  Remove build artefacts and cache directories
 ##@ Docs
 # ===========================================================================
 
-docs: ## 📖 Build documentation with mkdocs
-	uv run --group docs mkdocs build
+docs: ## 📖 Build the site (MyST prose + Zensical API) into public/ and check its links
+	uv run --group docs python scripts/build_docs.py
 
 capabilities: ## 🗂️  Regenerate docs/capabilities.md (every public name in the stack)
 	uv run python scripts/capabilities.py
@@ -229,11 +229,11 @@ capabilities: ## 🗂️  Regenerate docs/capabilities.md (every public name in 
 docs-check: ## 🔎 Check every docs / README example parses and its stack names exist
 	uv run python scripts/check_docs.py
 
-docs-serve: ## 🌐 Serve documentation locally
-	uv run --group docs mkdocs serve
+docs-api: ## 📚 Build only the Zensical API reference into site/
+	PYTHONPATH=docs/hooks uv run --group docs zensical build --strict
 
-docs-deploy: ## 🚀 Deploy documentation to GitHub Pages
-	uv run --group docs mkdocs gh-deploy --force
+docs-serve: docs ## 🌐 Build, then serve the assembled site at http://127.0.0.1:8000
+	uv run python -m http.server 8000 --directory public
 
 gh-labels: ## 🏷️  Bootstrap the GitHub label taxonomy (type / area / layer / wave / priority)
 	bash .github/scripts/create-labels.sh

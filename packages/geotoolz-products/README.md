@@ -179,12 +179,12 @@ it.
 
 ## Next steps
 
-- **Products docs:** [home](https://jejjohnson.github.io/geotoolz/products/) ·
-  [adding a product reader](https://jejjohnson.github.io/geotoolz/products/product-readers/) ·
-  [GOES-R ABI](https://jejjohnson.github.io/geotoolz/products/goes/) ·
-  [Himawari AHI](https://jejjohnson.github.io/geotoolz/products/himawari/) ·
-  [Carbon Mapper](https://jejjohnson.github.io/geotoolz/products/carbonmapper/) ·
-  [API reference](https://jejjohnson.github.io/geotoolz/products/api/).
+- **Products docs:** [home](https://jejjohnson.github.io/geotoolz/index-5/) ·
+  [adding a product reader](https://jejjohnson.github.io/geotoolz/product-readers/) ·
+  [GOES-R ABI](https://jejjohnson.github.io/geotoolz/goes/) ·
+  [Himawari AHI](https://jejjohnson.github.io/geotoolz/himawari/) ·
+  [Carbon Mapper](https://jejjohnson.github.io/geotoolz/carbonmapper/) ·
+  [API reference](https://jejjohnson.github.io/geotoolz/reference/products/api/).
 - **The whole stack:** the root [README](https://github.com/jejjohnson/geotoolz#readme)
   walks a Carbon Mapper + Sentinel-2 methane example through all four packages.
 

@@ -2,9 +2,16 @@
 
 The xrops and xrproducts docstrings document constructor arguments on the
 class and leave many return types to the prose, so the geotoolz defaults
-would misrender them and fail ``mkdocs build --strict``. This hook gives
-every ``:::`` directive under ``docs/xarray/`` xrtoolz's options, keeping any
-option the page sets itself; the geotoolz pages are unchanged.
+would misrender them and fail ``zensical build --strict``. This Markdown
+extension gives every ``::: xrops.…`` and ``::: xrproducts.…`` directive
+xrtoolz's options, keeping any option the page sets itself; the geotoolz
+pages are unchanged.
+
+Zensical, which builds the API reference, does not run MkDocs hooks, but it
+renders with Python-Markdown, so this is a preprocessor rather than an
+``on_page_markdown`` hook. ``mkdocs.yml`` loads it by module name;
+``scripts/build_docs.py`` and ``make docs-api`` put ``docs/hooks`` on
+``PYTHONPATH`` so it imports.
 """
 
 from __future__ import annotations
@@ -12,6 +19,9 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+
+from markdown import Extension, Markdown
+from markdown.preprocessors import Preprocessor
 
 
 OPTIONS: dict[str, Any] = {
@@ -28,7 +38,7 @@ OPTIONS: dict[str, Any] = {
     "filters": ["!^_"],
     "heading_level": 3,
 }
-DIRECTIVE = re.compile(r"^(?P<indent>\s*):::\s+\S+\s*$")
+DIRECTIVE = re.compile(r"^(?P<indent>\s*):::\s+(?:xrops|xrproducts)(?:\.\S+)?\s*$")
 KEY = re.compile(r"^\s*(?P<key>\w+)\s*:")
 
 
@@ -36,10 +46,8 @@ def _indent(line: str) -> int:
     return len(line) - len(line.lstrip())
 
 
-def on_page_markdown(markdown: str, page: Any, **_: Any) -> str:
-    if not page.file.src_uri.startswith("xarray/"):
-        return markdown
-    lines = markdown.split("\n")
+def add_options(lines: list[str]) -> list[str]:
+    """Add xrtoolz's options to every xrops / xrproducts directive in ``lines``."""
     out: list[str] = []
     i = 0
     while i < len(lines):
@@ -83,4 +91,20 @@ def on_page_markdown(markdown: str, page: Any, **_: Any) -> str:
         else:
             out.append(f"{base}options:")
             out.extend(f"{base}  {k}: {json.dumps(v)}" for k, v in OPTIONS.items())
-    return "\n".join(out)
+    return out
+
+
+class _XarrayOptions(Preprocessor):
+    def run(self, lines: list[str]) -> list[str]:
+        return add_options(lines)
+
+
+class XarrayOptionsExtension(Extension):
+    """Register the preprocessor ahead of mkdocstrings' block parsing."""
+
+    def extendMarkdown(self, md: Markdown) -> None:
+        md.preprocessors.register(_XarrayOptions(md), "xarray_options", 25)
+
+
+def makeExtension(**kwargs: Any) -> XarrayOptionsExtension:
+    return XarrayOptionsExtension(**kwargs)

@@ -152,7 +152,7 @@ pipeline.get_config()                         # {"operators": [{"class": "Scale"
 ```
 
 The same shape with the `|` pipe operator: `Scale(scale=1e-4) | NormalizedDifference(a=7, b=3)`.
-See [Define an operator](https://jejjohnson.github.io/geotoolz/operators/how-to/define-an-operator/)
+See [Define an operator](https://jejjohnson.github.io/geotoolz/define-an-operator/)
 for the full conventions (parameter vocabulary, fill values, terminal
 operators).
 
@@ -248,7 +248,7 @@ make test-all    # + geotoolz slow / integration tiers
 make lint        # ruff check .   (entire repo)
 make format      # ruff format . && ruff check --fix .
 make typecheck   # ty check, per package
-make docs-serve  # local MkDocs server for the whole site
+make docs-serve  # build and serve the whole docs site
 ```
 
 geotoolz's own tests run from this directory, so its pytest config
@@ -267,14 +267,14 @@ make test
 uv run --group lint ruff check .
 uv run --group lint ruff format --check .
 make typecheck
-uv run --group docs mkdocs build --strict
+make docs
 ```
 
 ## Next steps
 
-- **Docs site:** [concepts](https://jejjohnson.github.io/geotoolz/operators/concepts/),
-  [quickstart](https://jejjohnson.github.io/geotoolz/operators/quickstart/),
-  [API reference](https://jejjohnson.github.io/geotoolz/operators/api/core/).
+- **Docs site:** [concepts](https://jejjohnson.github.io/geotoolz/concepts/),
+  [quickstart](https://jejjohnson.github.io/geotoolz/index-1/),
+  [API reference](https://jejjohnson.github.io/geotoolz/reference/operators/api/core/).
 - **End-to-end Lake Tahoe notebook (catalog → patch → operate):**
   [`docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb`](https://github.com/jejjohnson/geotoolz/blob/main/docs/catalog/notebooks/end_to_end_lake_tahoe.ipynb).
 - **Operator-composition slice:**

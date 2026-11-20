@@ -87,15 +87,15 @@ back as data; see [Window convention](patching.md#window-convention).
 
 | Namespace | What's there | Read |
 |---|---|---|
-| `geopatcher` | `SpatialPatcher`, `AsyncSpatialPatcher`, `TemporalPatcher`, `SpatioTemporalPatcher`; the `Patch` carriers; `Field` / `Domain`; `RasterField` | [Concepts](concepts.md) · [Core API](api/core.md) |
-| `geopatcher.spatial` | the four axes — `geometry`, `sampler`, `window`, `aggregation` | [Behaviour](patching.md) · [API](api/spatial.md) |
-| `geopatcher.temporal` | the same four axes along time, plus `stencils` | [Temporal patching](recipes/temporal-patching.md) · [API](api/temporal.md) |
-| `geopatcher.fields` | `XarrayField`, `RioXarrayField`, `DaskField`, `GeoPandasField`, `XvecField`, `CogField`, `ReprojectingRasterField`, the domain types | [Fields](patching.md#fields-and-domains) · [API](api/fields.md) |
-| `geopatcher.matched` | co-registered multi-source patching (`MatchedField`, `MatchedSpatialPatcher`, …) | [API](api/matched.md) |
-| `geopatcher.run` | `parallel_map`, `prefetch_iterable`, Dask and JAX bridges, `PatchCache`, `IndexedPatchView` | [Cache reads](recipes/patch-cache.md) · [API](api/run.md) |
+| `geopatcher` | `SpatialPatcher`, `AsyncSpatialPatcher`, `TemporalPatcher`, `SpatioTemporalPatcher`; the `Patch` carriers; `Field` / `Domain`; `RasterField` | [Concepts](concepts.md) · [Core API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/core/) |
+| `geopatcher.spatial` | the four axes — `geometry`, `sampler`, `window`, `aggregation` | [Behaviour](patching.md) · [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/spatial/) |
+| `geopatcher.temporal` | the same four axes along time, plus `stencils` | [Temporal patching](recipes/temporal-patching.md) · [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/temporal/) |
+| `geopatcher.fields` | `XarrayField`, `RioXarrayField`, `DaskField`, `GeoPandasField`, `XvecField`, `CogField`, `ReprojectingRasterField`, the domain types | [Fields](patching.md#fields-and-domains) · [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/fields/) |
+| `geopatcher.matched` | co-registered multi-source patching (`MatchedField`, `MatchedSpatialPatcher`, …) | [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/matched/) |
+| `geopatcher.run` | `parallel_map`, `prefetch_iterable`, Dask and JAX bridges, `PatchCache`, `IndexedPatchView` | [Cache reads](recipes/patch-cache.md) · [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/run/) |
 | `geopatcher.observe` | `PatcherHook`, `PatchJournal`, `PatchErrorRecord`, strict mode | [Hooks](observability.md) · [Journal](recipes/journal-and-resume.md) |
-| `geopatcher.config` | `axis_envelope` / `from_config` round-trips | [API](api/config.md) |
-| `geopatcher.integrations.pipekit` | `GridSampler`, `ApplyToChips`, `MergePatches` (re-exported as `geoops.patch_ops`) | [API](api/integrations.md) |
+| `geopatcher.config` | `axis_envelope` / `from_config` round-trips | [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/config/) |
+| `geopatcher.integrations.pipekit` | `GridSampler`, `ApplyToChips`, `MergePatches` (re-exported as `geoops.patch_ops`) | [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/integrations/) |
 
 Cloud-Optimized GeoTIFF reads come from [geotoolz-cloud](../cloud/index.md);
 `geopatcher.fields.CogField` is their `Field`.
@@ -166,4 +166,4 @@ runs the same pipeline on real Sentinel-2 data.
   [global statistics](recipes/global-statistics.md),
   [temporal patching](recipes/temporal-patching.md).
 - **[Tutorial](notebooks/patcher_lake_tahoe.ipynb)** — patching Sentinel-2 over Lake Tahoe, with plots.
-- **[Behaviour reference](patching.md)** and the **[API reference](api/reference.md)**.
+- **[Behaviour reference](patching.md)** and the **[API reference](https://jejjohnson.github.io/geotoolz/reference/patcher/api/reference/)**.

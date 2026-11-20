@@ -153,7 +153,7 @@ aggregations can stream is in
 | `AsyncSpatialPatcher` | space, over an `AsyncField` | high-latency cloud reads — [Async and prefetch](patching/async-prefetch.md) |
 | `TemporalPatcher` | a time axis | lookback / horizon windows, forecasts |
 | `SpatioTemporalPatcher` | space × time | dense cubes, event-triggered patches |
-| `geopatcher.matched.MatchedSpatialPatcher` (and temporal siblings) | several co-registered sources | multi-sensor matchups — [API](api/matched.md) |
+| `geopatcher.matched.MatchedSpatialPatcher` (and temporal siblings) | several co-registered sources | multi-sensor matchups — [API](https://jejjohnson.github.io/geotoolz/reference/patcher/api/matched/) |
 
 The temporal side mirrors the four axes and adds coordinate-aware
 `TimeStencil` windows: see [Temporal patching](recipes/temporal-patching.md)

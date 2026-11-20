@@ -77,7 +77,7 @@ For a `uint8` image ready to save, use `gz.viz.StretchToUint8`.
 
 ## Further reading
 
-- [Normalize reference](api/normalize.md): every scaler, the non-linear
+- [Normalize reference](https://jejjohnson.github.io/geotoolz/reference/operators/api/normalize/): every scaler, the non-linear
   scalings and histogram matching.
 - [Tile → operate → stitch](patch_ops.md): apply one fitted scaler to
   every tile of a large scene.

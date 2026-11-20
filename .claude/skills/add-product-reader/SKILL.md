@@ -63,7 +63,7 @@ in `geoproducts/__init__.py`.
 
 - [ ] A page `docs/products/<sensor>.md` on the sensor template (see the
       docs page's "Tests and docs"), typed and shape-annotated, in the
-      products nav of `mkdocs.yml`.
+      products part of the `toc` in `docs/myst.yml`.
 - [ ] The sensor in the sensor table of `docs/products/index.md`; its
       extra in that page's extras table and in
       `packages/geotoolz-products/README.md`.

@@ -62,12 +62,12 @@ itself becomes an operator: *tile → predict → stitch* is one more
 
 | Package (dist) | Import | One-liner | Docs |
 |---|---|---|---|
-| [`geotoolz-ops`](packages/geotoolz-ops) | `geoops` | Carrier-preserving `pipekit_ops.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/operators/) |
-| [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher (Geometry × Sampler × Window × Aggregation): split a field into patches, run an operator per patch, stitch back | [Patcher →](https://jejjohnson.github.io/geotoolz/patcher/) |
-| [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files: STAC/CMR discovery → GeoParquet catalog → `GeoSlice` → loaders | [Catalog →](https://jejjohnson.github.io/geotoolz/catalog/) |
-| [`geotoolz-cloud`](packages/geotoolz-cloud) | `geocloud` | Cloud object storage for the stack: one process-wide obstore client pool, file verbs (ls / download / upload / copy / sync / sign), per-bucket credentials, and Cloud-Optimized GeoTIFF reads and validated writes | [Cloud →](https://jejjohnson.github.io/geotoolz/cloud/) |
-| [`geotoolz-products`](packages/geotoolz-products) | `geoproducts` | Readers for Earth-observation data products — the `ProductReader` ABC, mission readers such as GOES-R ABI and Himawari AHI, and provider clients such as Carbon Mapper — each a `geoarray.RasterSource` that reads `GeoArray`s | [Products →](https://jejjohnson.github.io/geotoolz/products/) |
-| [`geotoolz-array`](packages/geotoolz-array) | `geoarray` | The carrier every package takes and returns: `GeoArray`, NumPy or JAX data with its transform, CRS, fill and attrs (a JAX pytree, so `jit` / `grad` / `vmap` work on it), plus `Grid` / `PixelWindow` geometry, the `RasterSource` protocol for lazy readers, and a zero-copy bridge to georeader | [Array →](https://jejjohnson.github.io/geotoolz/array/) |
+| [`geotoolz-ops`](packages/geotoolz-ops) | `geoops` | Carrier-preserving `pipekit_ops.Operator` families for remote-sensing rasters — Sentinel-2 to NDVI in three small operators | [Operators →](https://jejjohnson.github.io/geotoolz/index-1/) |
+| [`geotoolz-patcher`](packages/geotoolz-patcher) | `geopatcher` | Four-axis Patcher (Geometry × Sampler × Window × Aggregation): split a field into patches, run an operator per patch, stitch back | [Patcher →](https://jejjohnson.github.io/geotoolz/index-2/) |
+| [`geotoolz-catalog`](packages/geotoolz-catalog) | `geocatalog` | Queryable spatiotemporal index over geospatial files: STAC/CMR discovery → GeoParquet catalog → `GeoSlice` → loaders | [Catalog →](https://jejjohnson.github.io/geotoolz/index-3/) |
+| [`geotoolz-cloud`](packages/geotoolz-cloud) | `geocloud` | Cloud object storage for the stack: one process-wide obstore client pool, file verbs (ls / download / upload / copy / sync / sign), per-bucket credentials, and Cloud-Optimized GeoTIFF reads and validated writes | [Cloud →](https://jejjohnson.github.io/geotoolz/index-4/) |
+| [`geotoolz-products`](packages/geotoolz-products) | `geoproducts` | Readers for Earth-observation data products — the `ProductReader` ABC, mission readers such as GOES-R ABI and Himawari AHI, and provider clients such as Carbon Mapper — each a `geoarray.RasterSource` that reads `GeoArray`s | [Products →](https://jejjohnson.github.io/geotoolz/index-5/) |
+| [`geotoolz-array`](packages/geotoolz-array) | `geoarray` | The carrier every package takes and returns: `GeoArray`, NumPy or JAX data with its transform, CRS, fill and attrs (a JAX pytree, so `jit` / `grad` / `vmap` work on it), plus `Grid` / `PixelWindow` geometry, the `RasterSource` protocol for lazy readers, and a zero-copy bridge to georeader | [Array →](https://jejjohnson.github.io/geotoolz/index-6/) |
 
 Import names are unchanged from the pre-monorepo repos — only the
 distribution names carry the `geotoolz-` prefix. The dependency graph is
@@ -143,9 +143,9 @@ axes the chips carry, so NDVI's `(h, w)` chips merge into one `(H, W)`
 `GeoArray` on the scene's transform and CRS.
 
 The end-to-end Lake Tahoe tutorial runs this flow for real:
-[catalog notebook](https://jejjohnson.github.io/geotoolz/catalog/notebooks/end_to_end_lake_tahoe/) ·
-[patcher notebook](https://jejjohnson.github.io/geotoolz/patcher/notebooks/patcher_lake_tahoe/) ·
-[operators notebook](https://jejjohnson.github.io/geotoolz/operators/notebooks/operators_lake_tahoe/).
+[catalog notebook](https://jejjohnson.github.io/geotoolz/end-to-end-lake-tahoe/) ·
+[patcher notebook](https://jejjohnson.github.io/geotoolz/patcher-lake-tahoe/) ·
+[operators notebook](https://jejjohnson.github.io/geotoolz/operators-lake-tahoe/).
 
 ## Advanced — all four packages: methane screening with labels
 

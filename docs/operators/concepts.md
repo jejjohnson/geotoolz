@@ -286,7 +286,7 @@ care which catalog or reader produced them. The seams are on
 
 - [Define an operator](how-to/define-an-operator.md) and
   [branching pipelines](how-to/branching-pipelines.md).
-- [Core API](api/core.md) and [carrier helpers](api/carrier.md).
+- [Core API](https://jejjohnson.github.io/geotoolz/reference/operators/api/core/) and [carrier helpers](https://jejjohnson.github.io/geotoolz/reference/operators/api/carrier/).
 - Notebooks in the
   [research_notebook geostack project](https://github.com/jejjohnson/research_notebook/tree/main/projects/geostack):
   [composition core](https://github.com/jejjohnson/research_notebook/blob/main/projects/geostack/notebooks/01_composition_core.ipynb),

@@ -176,7 +176,7 @@ classes are importable from `geopatcher.integrations.pipekit`.
   geopatcher; see [Patcher concepts](../patcher/concepts.md).
 - **Overlap and reach.** A tile reproduces the whole-scene result only
   where every pixel it reads is inside the tile. `ApplyToChips` reads the
-  operator's [coupling](api/coupling.md) and warns with
+  operator's [coupling](https://jejjohnson.github.io/geotoolz/reference/operators/api/coupling/) and warns with
   `PatchReachWarning` when neighbouring tiles overlap by less than twice
   its spatial reach, or when the operator reads the whole scene (a
   percentile stretch, an Otsu threshold): such an operator gives a

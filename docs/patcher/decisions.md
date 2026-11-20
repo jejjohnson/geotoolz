@@ -10,13 +10,14 @@ The format is loose ADR: **Decision** → **Context** → **Consequences** →
 were locked in and listed in that order; existing decisions do not change
 without a follow-up entry that supersedes them.
 
-!!! note "A historical record"
-    These entries keep the wording of the day they were decided.
-    References to "v0.1" and "v0.2" are the design-phase milestones of
-    the standalone geopatcher, before it joined this workspace as
-    `geotoolz-patcher` (now 0.10). Where a constraint still holds, the
-    how-to that relies on it says so — for example, stride-1 stencils in
-    [Temporal stencils](recipes/temporal-stencils.md#limits).
+:::{note} A historical record
+These entries keep the wording of the day they were decided.
+References to "v0.1" and "v0.2" are the design-phase milestones of
+the standalone geopatcher, before it joined this workspace as
+`geotoolz-patcher` (now 0.10). Where a constraint still holds, the
+how-to that relies on it says so — for example, stride-1 stencils in
+[Temporal stencils](recipes/temporal-stencils.md#limits).
+:::
 
 ---
 
@@ -64,6 +65,7 @@ memory.
 
 ---
 
+(adr-002-disk-backed-aggregations-use-zarr)=
 ## ADR-002 — Disk-backed aggregations use Zarr
 
 **Decision.** Streaming aggregations that need an out-of-RAM target
