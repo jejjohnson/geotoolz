@@ -45,6 +45,9 @@ pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = 
 # install is NumPy-only (geoarray's affine kernels); `functax[jax]` brings
 # the plans (geoops' `interp` extra).
 functax = { git = "https://github.com/jejjohnson/functax", tag = "v0.0.6" }
+# geophysix (constants and closed-form Earth and air maths, NumPy-only with
+# JAX optional) is not on PyPI either, so it comes from GitHub at a release tag.
+geophysix = { git = "https://github.com/jejjohnson/geophysix.git", tag = "v0.0.2" }
 
 [build-system]
 requires = ["hatchling"]

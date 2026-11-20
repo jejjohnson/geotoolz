@@ -39,8 +39,10 @@ from typing import Any, Literal, cast
 
 import numpy as np
 import xarray as xr
+from geophysix import rotation
 
 from xrops import grad
+from xrops._src.elementwise import elementwise
 
 
 type Geometry = Literal["cartesian", "rectilinear", "spherical"]
@@ -60,7 +62,10 @@ def coriolis_parameter(
     Returns:
         Coriolis parameter with the same shape as ``lat``.
     """
-    return 2.0 * grad.OMEGA * np.sin(np.deg2rad(lat))
+    if isinstance(lat, xr.DataArray):
+        return elementwise(rotation.coriolis, lat)
+    f = rotation.coriolis(lat)
+    return float(f) if np.ndim(f) == 0 else f
 
 
 def _geom_kw(dims: tuple[str, str], geometry: Geometry) -> dict[str, Any]:

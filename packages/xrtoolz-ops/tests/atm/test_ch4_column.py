@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import xarray as xr
+from geophysix.constants import STANDARD
 
-from xrops.atm._src.constants import M_DRY, N_A, G
 from xrops.atm.gas.ch4 import (
     apply_column_averaging_kernel,
     column_mass_to_delta_vmr,
@@ -146,7 +146,12 @@ def test_dry_air_column_reference_value():
     out = dry_air_column(xr.Dataset({"sp": ((), 1.0e5)}))["dry_air_column"]
     # N_A p_s / (g M_dry) for p_s = 1e5 Pa
     assert float(out) == pytest.approx(2.12e29, rel=2e-3)
-    assert float(out) == pytest.approx(N_A * 1.0e5 / (G * M_DRY), rel=1e-12)
+    assert float(out) == pytest.approx(
+        STANDARD.avogadro
+        * 1.0e5
+        / (STANDARD.standard_gravity * STANDARD.dry_air_molar_mass),
+        rel=1e-12,
+    )
     assert out.attrs["units"] == "m-2"
 
 
@@ -154,7 +159,11 @@ def test_dry_air_column_removes_water_vapour():
     ds = xr.Dataset({"sp": ("x", [1.0e5, 9.0e4]), "tcwv": ("x", [20.0, 5.0])})
     dry = dry_air_column(ds)["dry_air_column"]
     wet = dry_air_column(ds, water_vapour_column="tcwv")["dry_air_column"]
-    np.testing.assert_allclose(dry - wet, ds["tcwv"] * N_A / M_DRY, rtol=1e-12)
+    np.testing.assert_allclose(
+        dry - wet,
+        ds["tcwv"] * STANDARD.avogadro / STANDARD.dry_air_molar_mass,
+        rtol=1e-12,
+    )
 
 
 @pytest.fixture

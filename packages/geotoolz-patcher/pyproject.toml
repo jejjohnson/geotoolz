@@ -34,6 +34,8 @@ dependencies = [
     # samplers; >=2.1 for the numpy-subclass GeoTensor the adapter targets.
     "georeader-spaceml>=2.1",
     "numpy>=1.26",
+    # Great-circle distance for the `SphericalCap` / `KNNGraph` / `RadiusGraph` geometries (NumPy-only; JAX stays optional in geophysix).
+    "geophysix>=0.0.2",
     # KDTree (PointDomain) + signal windows (Tukey/Gaussian).
     "scipy>=1.11",
     # `georeader.geotensor` imports `Self` from typing_extensions without

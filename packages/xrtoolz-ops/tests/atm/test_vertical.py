@@ -5,13 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import xarray as xr
+from geophysix.constants import STANDARD
 
 from xrops.atm import (
     column_integral,
     hypsometric_height,
     pbl_height_bulk_richardson,
 )
-from xrops.atm._src.constants import R_D, G
 
 
 # ---------- column_integral ----------------------------------------------
@@ -105,9 +105,9 @@ def ds_isothermal() -> xr.Dataset:
 def test_isothermal_closed_form(ds_isothermal):
     out = hypsometric_height(ds_isothermal, pressure="level")
     expected = (
-        R_D
+        STANDARD.dry_air_gas_constant
         * 250.0
-        / G
+        / STANDARD.standard_gravity
         * np.log(
             ds_isothermal["sp"].values[None, :] / ds_isothermal["level"].values[:, None]
         )
@@ -174,7 +174,9 @@ def ds_pbl() -> xr.Dataset:
         },
         coords={"z_agl": ("level", z)},
     )
-    ds.attrs["h_closed_form"] = lambda ri: ri * theta0 * u0**2 / (G * gamma * z_ref)
+    ds.attrs["h_closed_form"] = lambda ri: (
+        ri * theta0 * u0**2 / (STANDARD.standard_gravity * gamma * z_ref)
+    )
     return ds
 
 

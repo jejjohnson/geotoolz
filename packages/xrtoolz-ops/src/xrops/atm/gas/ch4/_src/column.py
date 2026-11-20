@@ -8,15 +8,17 @@ fraction directly.
 from __future__ import annotations
 
 import xarray as xr
+from geophysix import columns, thermo
+from geophysix.constants import CH4, STANDARD, Gas
 from xrproducts.types import Variable, apply_cf_attrs
 
-from xrops.atm._src.constants import K_B, M_CH4, M_DRY, N_A, G
+from xrops._src.elementwise import elementwise
 from xrops.atm._src.vertical import column_integral
 
 
 #: ``N_A / (g M_dry)``: molecules of dry air per m² per Pa of hydrostatic
 #: pressure.
-_MOLECULES_PER_PA = N_A / (G * M_DRY)
+_MOLECULES_PER_PA = float(columns.dry_air_column(1.0)) * STANDARD.avogadro
 
 _DRY_AIR_COLUMN = Variable(
     name="dry_air_column",
@@ -118,10 +120,9 @@ def dry_air_column(
     Returns:
         ``ds`` with ``name`` added [molecules m⁻²].
     """
-    mass = ds[surface_pressure] / G
-    if water_vapour_column is not None:
-        mass = mass - ds[water_vapour_column]
-    n_dry = mass * (N_A / M_DRY)
+    water = 0.0 if water_vapour_column is None else ds[water_vapour_column]
+    n_dry = elementwise(columns.dry_air_column, ds[surface_pressure], water)
+    n_dry = n_dry * STANDARD.avogadro
     out = ds.copy()
     out[name] = apply_cf_attrs(n_dry, _DRY_AIR_COLUMN, overwrite=True)
     return out
@@ -178,7 +179,7 @@ def column_mass_to_delta_vmr(
     pressure_pa: float | xr.DataArray,
     temperature_k: float | xr.DataArray,
     path_length_m: float | xr.DataArray,
-    molar_mass_kg_mol: float = M_CH4,
+    molar_mass_kg_mol: float = CH4.molar_mass,
 ) -> xr.DataArray:
     """Column mass enhancement → volume-mixing-ratio enhancement.
 
@@ -199,7 +200,10 @@ def column_mass_to_delta_vmr(
         Dimensionless mixing-ratio enhancement, same shape as
         ``column_mass`` broadcast against the layer parameters.
     """
-    n_air = pressure_pa / (K_B * temperature_k)
-    molecules_per_m2 = column_mass / molar_mass_kg_mol * N_A
+    gas = Gas("gas", molar_mass_kg_mol)
+    n_air = elementwise(thermo.number_density, pressure_pa, temperature_k)
+    molecules_per_m2 = elementwise(
+        columns.convert, column_mass, "kg_m2", "molecules_m2", gas=gas
+    )
     delta = molecules_per_m2 / (n_air * path_length_m)
     return delta.assign_attrs(long_name="Mixing-ratio enhancement", units="1")

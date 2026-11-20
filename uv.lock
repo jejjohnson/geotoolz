@@ -1503,6 +1503,14 @@ wheels = [
 ]
 
 [[package]]
+name = "geophysix"
+version = "0.0.2"
+source = { git = "https://github.com/jejjohnson/geophysix.git?tag=v0.0.2#b6b0ba2e73ce4533595b07f2877e6948e47c6f01" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[[package]]
 name = "georeader-spaceml"
 version = "2.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2011,6 +2019,7 @@ source = { editable = "packages/geotoolz-ops" }
 dependencies = [
     { name = "affine" },
     { name = "einx" },
+    { name = "geophysix" },
     { name = "geotoolz-array" },
     { name = "jaxtyping" },
     { name = "numpy" },
@@ -2120,6 +2129,7 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4" },
     { name = "functax", extras = ["jax", "scipy"], marker = "extra == 'interp'", git = "https://github.com/jejjohnson/functax?tag=v0.0.6" },
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=0.14" },
+    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix.git?tag=v0.0.2" },
     { name = "georeader-spaceml", marker = "extra == 'sensors'", specifier = ">=2.1" },
     { name = "geotoolz-array", editable = "packages/geotoolz-array" },
     { name = "geotoolz-array", extras = ["georeader"], marker = "extra == 'sensors'", editable = "packages/geotoolz-array" },
@@ -2174,6 +2184,7 @@ name = "geotoolz-patcher"
 version = "0.14.3"
 source = { editable = "packages/geotoolz-patcher" }
 dependencies = [
+    { name = "geophysix" },
     { name = "georeader-spaceml" },
     { name = "geotoolz-array", extra = ["georeader"] },
     { name = "numpy" },
@@ -2263,6 +2274,7 @@ requires-dist = [
     { name = "dask", extras = ["bag"], marker = "extra == 'patch-full'", specifier = ">=2024.8.3" },
     { name = "geopandas", marker = "extra == 'patch-full'", specifier = ">=0.14" },
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=0.14" },
+    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix.git?tag=v0.0.2" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz-array", extras = ["georeader"], editable = "packages/geotoolz-array" },
     { name = "geotoolz-array", extras = ["jax"], marker = "extra == 'jax'", editable = "packages/geotoolz-array" },
@@ -6960,6 +6972,7 @@ version = "0.5.1"
 source = { editable = "packages/xrtoolz-ops" }
 dependencies = [
     { name = "dask", extra = ["array"] },
+    { name = "geophysix" },
     { name = "geotoolz-array" },
     { name = "geotoolz-ops" },
     { name = "jaxtyping" },
@@ -7041,6 +7054,7 @@ requires-dist = [
     { name = "dask", extras = ["array"], specifier = ">=2024.10" },
     { name = "functax", extras = ["jax", "scipy"], marker = "extra == 'functax'", git = "https://github.com/jejjohnson/functax?tag=v0.0.6" },
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=1.1.3" },
+    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix.git?tag=v0.0.2" },
     { name = "geotoolz-array", editable = "packages/geotoolz-array" },
     { name = "geotoolz-ops", editable = "packages/geotoolz-ops" },
     { name = "jaxtyping", specifier = ">=0.2.34" },
@@ -7101,6 +7115,7 @@ name = "xrtoolz-products"
 version = "0.5.0"
 source = { editable = "packages/xrtoolz-products" }
 dependencies = [
+    { name = "geophysix" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "xarray" },
@@ -7156,6 +7171,7 @@ requires-dist = [
     { name = "copernicusmarine", marker = "extra == 'cmems'", specifier = ">=2.0" },
     { name = "geopandas", marker = "extra == 'aemet'", specifier = ">=1.1.3" },
     { name = "geopandas", marker = "extra == 'cds-insitu'", specifier = ">=1.1.3" },
+    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix.git?tag=v0.0.2" },
     { name = "httpx", marker = "extra == 'aemet'", specifier = ">=0.28.1" },
     { name = "loguru", marker = "extra == 'aemet'", specifier = ">=0.7.3" },
     { name = "loguru", marker = "extra == 'cds-insitu'", specifier = ">=0.7.3" },

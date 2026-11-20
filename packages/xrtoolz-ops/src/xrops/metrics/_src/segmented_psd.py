@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
+from geophysix.earth import great_circle_distance
 from numpy.typing import ArrayLike, NDArray
 from scipy import signal
 from scipy.stats import circmean
@@ -14,7 +15,6 @@ from xrops._src.operator import Operator
 from xrops.metrics._src._segmented_psd_kernels import _segment_bounds
 
 
-_EARTH_RADIUS_KM = 6371.0088
 _DEFAULT_MAX_GAP = np.timedelta64(2, "s")
 _DEFAULT_LAT_CENTERS = np.arange(-80, 91, 1)
 _DEFAULT_LON_CENTERS = np.arange(0, 360, 1)
@@ -39,18 +39,10 @@ def _gap_indices_from_da(
 
 
 def _median_dx_km(lon: NDArray[np.floating], lat: NDArray[np.floating]) -> float:
-    lon_rad = np.deg2rad(lon)
-    lat_rad = np.deg2rad(lat)
-    # Wrap to (-π, π] so dateline crossings (e.g. 179° → -179°) report
-    # the shortest arc rather than the raw ~358° jump. Haversine's
-    # sin²(Δλ/2) happens to be 2π-periodic so this is defensive, but
-    # being explicit avoids future formula tweaks silently breaking it.
-    dlon = (np.diff(lon_rad) + np.pi) % (2.0 * np.pi) - np.pi
-    dlat = np.diff(lat_rad)
-    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat_rad[:-1]) * np.cos(lat_rad[1:]) * (
-        np.sin(dlon / 2.0) ** 2
-    )
-    dx = 2.0 * _EARTH_RADIUS_KM * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
+    # Great-circle spacing of consecutive points on the IUGG mean sphere; the
+    # trigonometry is 2π-periodic in longitude, so a dateline crossing (179° →
+    # -179°) reports the shortest arc.
+    dx = great_circle_distance(lon[:-1], lat[:-1], lon[1:], lat[1:]) / 1000.0
     dx = dx[np.isfinite(dx) & (dx > 0.0)]
     if dx.size == 0:
         raise ValueError("could not infer positive along-track spacing.")

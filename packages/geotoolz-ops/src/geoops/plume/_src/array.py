@@ -18,6 +18,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+from geophysix.columns import convert
+from geophysix.constants import CH4, CO2, STANDARD
 from jaxtyping import Bool, Float, Num, Shaped
 
 from geoops.carrier import optional_name, pixel_xy, single_band
@@ -31,15 +33,10 @@ if TYPE_CHECKING:
 
 ColumnUnit = Literal["ppm_m", "mol_m2", "kg_m2"]
 
-# Molar masses (kg/mol) for supported trace gases.
-MOLAR_MASS_KG_PER_MOL = {
-    "CH4": 0.01604,
-    "CO2": 0.04401,
-}
-# Standard molar volume of an ideal gas at 298.15 K, 1 atm (m^3/mol).
-# Used only by ``convert_column_units`` to translate ppm m (mixing ratio
-# integrated along path) into mol/m^2 for typical near-surface conditions.
-STANDARD_MOLAR_VOLUME_M3_PER_MOL = 0.024465
+# The trace gases ``convert_column_units`` knows, by upper-case name.
+_GASES = {"CH4": CH4, "CO2": CO2}
+# Near-surface air for the ppm m conversion: 1 atm and 298.15 K.
+_NEAR_SURFACE_TEMPERATURE_K = 298.15
 
 
 def squeeze_single_band(
@@ -201,6 +198,8 @@ def convert_column_units(
     gas: str = "CH4",
     units_in: ColumnUnit = "ppm_m",
     units_out: ColumnUnit = "kg_m2",
+    pressure_pa: float = STANDARD.standard_pressure,
+    temperature_k: float = _NEAR_SURFACE_TEMPERATURE_K,
 ) -> Float[np.ndarray, "*dims"]:
     r"""Convert column enhancement among ppm m, mol/m^2, and kg/m^2.
 
@@ -213,39 +212,34 @@ def convert_column_units(
                                         \cdot \Omega_{\mathrm{mol/m^2}}
 
     where ``X`` is the column-integrated volume mixing ratio in ppm m,
-    :math:`V_m = 0.024465` m^3/mol is the standard molar volume of an
-    ideal gas at 298.15 K and 1 atm, and :math:`M_{\mathrm{gas}}` is the
-    molar mass (CH4: 0.01604 kg/mol; CO2: 0.04401 kg/mol).
+    :math:`V_m = R T / p` is the molar volume of an ideal gas at pressure
+    ``pressure_pa`` and temperature ``temperature_k`` (1 atm and 298.15 K by
+    default, :math:`V_m \approx 0.024465` m^3/mol), and
+    :math:`M_{\mathrm{gas}}` is the molar mass (CH4: 0.0160425 kg/mol; CO2:
+    0.0440095 kg/mol). The maths is `geophysix.columns.convert`.
 
-    The ppm m branch therefore assumes near-surface conditions. Pass
-    ``mol_m2`` or ``kg_m2`` inputs when retrieval-specific pressure and
-    temperature corrections have already been applied upstream (e.g. by
-    a matched-filter retrieval per Thompson 2015 / Foote 2020).
+    The ppm m branch therefore assumes near-surface conditions unless you
+    pass the air's pressure and temperature. Pass ``mol_m2`` or ``kg_m2``
+    inputs when retrieval-specific pressure and temperature corrections have
+    already been applied upstream (e.g. by a matched-filter retrieval per
+    Thompson 2015 / Foote 2020).
     """
     gas_key = gas.upper()
-    if gas_key not in MOLAR_MASS_KG_PER_MOL:
-        supported = ", ".join(sorted(MOLAR_MASS_KG_PER_MOL))
+    if gas_key not in _GASES:
+        supported = ", ".join(sorted(_GASES))
         raise ValueError(f"unsupported gas {gas!r}; expected one of {supported}")
-    molar_mass = MOLAR_MASS_KG_PER_MOL[gas_key]
-
-    arr = np.asarray(values, dtype=float)
-    if units_in == "ppm_m":
-        # 1e-6 converts ppm to a fraction; molar volume assumes standard air.
-        mol_m2 = arr * 1e-6 / STANDARD_MOLAR_VOLUME_M3_PER_MOL
-    elif units_in == "mol_m2":
-        mol_m2 = arr
-    elif units_in == "kg_m2":
-        mol_m2 = arr / molar_mass
-    else:
+    if units_in not in ("ppm_m", "mol_m2", "kg_m2"):
         raise ValueError("units_in must be 'ppm_m', 'mol_m2', or 'kg_m2'")
-
-    if units_out == "ppm_m":
-        return mol_m2 * STANDARD_MOLAR_VOLUME_M3_PER_MOL * 1e6
-    if units_out == "mol_m2":
-        return mol_m2
-    if units_out == "kg_m2":
-        return mol_m2 * molar_mass
-    raise ValueError("units_out must be 'ppm_m', 'mol_m2', or 'kg_m2'")
+    if units_out not in ("ppm_m", "mol_m2", "kg_m2"):
+        raise ValueError("units_out must be 'ppm_m', 'mol_m2', or 'kg_m2'")
+    return convert(
+        np.asarray(values, dtype=float),
+        units_in,
+        units_out,
+        gas=_GASES[gas_key],
+        pressure=pressure_pa,
+        temperature=temperature_k,
+    )
 
 
 def plume_length(
