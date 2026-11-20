@@ -26,7 +26,7 @@ dependencies = [
     "geotoolz-array>=0.3.0",
     "numpy>=1.26",
     # Earth radius, column unit conversion and the shared constants (NumPy-only; JAX stays optional in geophysix).
-    "geophysix>=0.0.2",
+    "geophysix>=0.0.3",
     # Shape/dtype annotations on the Tier-A numpy primitives (the
     # `Float[np.ndarray, "c h w"]` aliases). Annotation-only usage — no
     # runtime checking decorators — so the import cost is trivial.

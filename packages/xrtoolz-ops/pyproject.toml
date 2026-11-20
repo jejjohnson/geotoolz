@@ -24,7 +24,7 @@ classifiers = [
 dependencies = [
     "numpy>=1.26",
     # Constants, Coriolis, the dry-air column, great-circle spacing (NumPy-only; JAX stays optional in geophysix).
-    "geophysix>=0.0.2",
+    "geophysix>=0.0.3",
     # Lazy/chunked xarray backend. Operators stay lazy where their kernel is
     # naturally per-chunk; the rest accept dask input and materialise
     # internally. See the Dask page in the docs for the per-operator tiers.

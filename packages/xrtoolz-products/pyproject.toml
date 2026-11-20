@@ -28,7 +28,7 @@ classifiers = [
 dependencies = [
     "numpy>=1.26",
     # Great-circle distance for `Station.distance_to` (NumPy-only; JAX stays optional in geophysix).
-    "geophysix>=0.0.2",
+    "geophysix>=0.0.3",
     "pandas>=2.1",
     "xarray>=2024.10",
 ]
