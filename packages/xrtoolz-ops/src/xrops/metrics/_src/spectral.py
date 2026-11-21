@@ -12,10 +12,11 @@ band-decomposition slice of validation.md §1. Bands are specified as
 **physical units** of the dim's coordinate (e.g. cycles/day for time,
 cycles/km for spatial dims). Lat/lon coordinates whose ``units``
 attribute looks like ``degrees_north`` / ``degrees_east`` are converted
-to kilometres internally using a meridian-arc length of ``111.0`` km
-per degree latitude and an additional ``cos(mean_lat)`` factor for
-longitude — adequate for mid-latitude mesoscale demos but the user
-should provide ``coord_spacing=`` overrides for high-precision work.
+to kilometres internally using a meridian-arc length of 111.195 km
+per degree latitude (one degree on the IUGG mean sphere, from geophysix)
+and an additional ``cos(mean_lat)`` factor for longitude — adequate for
+mid-latitude mesoscale demos but the user should provide
+``coord_spacing=`` overrides for high-precision work.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
+from geophysix.earth import SPHERE, meridian_degree_length
 from jaxtyping import Float
 from scipy.interpolate import interp1d
 
@@ -39,7 +41,8 @@ from xrops.wavelets._src.wavelet import wvlt_power_spectrum
 from xrops.wavelets._src.wavelet_utils import scale_to_wavenumber
 
 
-_KM_PER_DEGREE = 111.0
+# one degree on the IUGG mean sphere, km
+_KM_PER_DEGREE = float(meridian_degree_length(0.0, earth=SPHERE)) / 1e3
 _LAT_UNITS = {
     "degrees_north",
     "degree_north",

@@ -79,3 +79,33 @@ def test_bad_convention_raises(ds_uv):
         wind_direction(ds_uv, convention="bogus")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="convention"):
         wind_components(wind_direction(wind_speed(ds_uv)), convention="bogus")  # type: ignore[arg-type]
+
+
+def test_wind_maths_is_the_previous_inline_formula(ds_uv):
+    # the formulas xrops wrote inline before it called geophysix.wind
+    u, v = ds_uv["u"].values, ds_uv["v"].values
+    np.testing.assert_array_equal(
+        wind_speed(ds_uv)["wind_speed"].values, (u**2 + v**2) ** 0.5
+    )
+    bearing = np.mod(270.0 - np.degrees(np.arctan2(v, u)), 360.0)
+    np.testing.assert_array_equal(
+        wind_direction(ds_uv)["wind_direction"].values, bearing
+    )
+    np.testing.assert_array_equal(
+        wind_direction(ds_uv, convention="to")["wind_direction"].values,
+        np.mod(bearing + 180.0, 360.0),
+    )
+    polar = ds_uv.assign(
+        wind_speed=(("y", "x"), np.abs(u)), wind_direction=(("y", "x"), bearing)
+    )
+    out = wind_components(polar, u="ue", v="vn")
+    theta = np.radians(bearing)
+    np.testing.assert_array_equal(out["ue"].values, -1.0 * np.abs(u) * np.sin(theta))
+    np.testing.assert_array_equal(out["vn"].values, -1.0 * np.abs(u) * np.cos(theta))
+
+
+def test_wind_stays_lazy_on_dask(ds_uv):
+    pytest.importorskip("dask")
+    lazy = ds_uv.chunk({"y": 2})
+    assert wind_speed(lazy)["wind_speed"].chunks is not None
+    assert wind_direction(lazy)["wind_direction"].chunks is not None

@@ -40,6 +40,7 @@ from typing import Any, Literal, cast
 import numpy as np
 import xarray as xr
 from geophysix import rotation
+from geophysix.seawater import LINEAR_EOS
 
 from xrops import grad
 from xrops._src.elementwise import elementwise
@@ -840,7 +841,7 @@ def brunt_vaisala_frequency(
     ds: xr.Dataset,
     density: str = "rho",
     depth: str = "depth",
-    rho0: float = 1025.0,
+    rho0: float = LINEAR_EOS.reference_density,
     g: float | None = None,
     positive: str = "down",
 ) -> xr.Dataset:

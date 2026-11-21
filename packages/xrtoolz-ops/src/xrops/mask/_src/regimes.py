@@ -7,12 +7,14 @@ from functools import lru_cache
 import numpy as np
 import regionmask
 import xarray as xr
+from geophysix.earth import SPHERE, meridian_degree_length
 from shapely.geometry import MultiPolygon, box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 
-KM_PER_DEGREE_AT_EQUATOR = 111.0
+#: One degree on the IUGG mean sphere, km (111.195).
+KM_PER_DEGREE_AT_EQUATOR = float(meridian_degree_length(0.0, earth=SPHERE)) / 1e3
 
 
 @lru_cache
