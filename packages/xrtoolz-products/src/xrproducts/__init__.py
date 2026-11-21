@@ -105,7 +105,7 @@ from xrproducts.types import (
 )
 
 
-__version__ = "0.5.0"  # x-release-please-version
+__version__ = "0.5.1"  # x-release-please-version
 
 __all__ = [
     "CATALOG",
