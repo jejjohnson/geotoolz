@@ -31,7 +31,7 @@ import geoarray
 import numpy as np
 from affine import Affine
 from geoarray import DIMS, FrozenAttrs, GeoArray, GeoPoints, GridMismatchError
-from geophysix.earth import SPHERE, WGS84
+from geophysix.earth import SPHERE, WGS84, geodetic_to_ecef, sphere
 from pipekit_array import array_namespace
 from pipekit_ops import Operator, backend_of, get_adapter
 from pyproj import CRS
@@ -2779,13 +2779,9 @@ def _spherical_xyz(
     lat_rad: np.ndarray,
     radius: float,
 ) -> np.ndarray:
-    cos_lat = np.cos(lat_rad)
+    # (x, y, z) = R (cos φ cos λ, cos φ sin λ, sin φ)
     return np.stack(
-        [
-            radius * cos_lat * np.cos(lon_rad),
-            radius * cos_lat * np.sin(lon_rad),
-            radius * np.sin(lat_rad),
-        ],
+        geodetic_to_ecef(lon_rad, lat_rad, earth=sphere(radius), degrees=False),
         axis=0,
     )
 

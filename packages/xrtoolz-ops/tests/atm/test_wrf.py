@@ -363,3 +363,21 @@ def test_open_wrfout_chunks_keep_everything_lazy(synthetic_wrf):
     assert lazy["z_agl"].chunks is not None
     eager = open_wrfout(synthetic_wrf.path)
     xr.testing.assert_allclose(lazy.compute(), eager)
+
+
+def test_wrf_temperature_is_the_previous_inline_formula():
+    from xrops.atm._src.wrf import KAPPA, P_REFERENCE, THETA_BASE, wrf_temperature
+
+    rng = np.random.default_rng(755)
+    shape = (2, 3, 4)
+    dims = ("Time", "bottom_top", "west_east")
+    ds = xr.Dataset(
+        {
+            "T": (dims, rng.normal(0.0, 5.0, shape)),
+            "P": (dims, rng.normal(0.0, 500.0, shape)),
+            "PB": (dims, rng.uniform(3e4, 1e5, shape)),
+        }
+    )
+    expected = (ds["T"] + THETA_BASE) * ((ds["P"] + ds["PB"]) / P_REFERENCE) ** KAPPA
+    np.testing.assert_array_equal(wrf_temperature(ds).values, expected.values)
+    assert wrf_temperature(ds).dims == expected.dims

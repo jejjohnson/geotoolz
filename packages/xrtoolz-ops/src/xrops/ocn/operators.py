@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from geophysix.seawater import LINEAR_EOS
+
 from xrops._src.operator import Operator
 from xrops.ocn._src import (
     kinematics as _kinematics,
@@ -815,7 +817,7 @@ class BruntVaisalaFrequency(Operator):
         self,
         density: str = "rho",
         depth: str = "depth",
-        rho0: float = 1025.0,
+        rho0: float = LINEAR_EOS.reference_density,
         g: float | None = None,
         positive: str = "down",
     ):
