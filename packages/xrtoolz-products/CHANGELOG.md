@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/jejjohnson/geotoolz/compare/xrtoolz-products-v0.5.0...xrtoolz-products-v0.5.1) (2026-11-21)
+
+
+### Features
+
+* **products:** open the methane plume complexes and the sensitivity and uncertainty rasters ([#744](https://github.com/jejjohnson/geotoolz/issues/744)) ([e5bfe04](https://github.com/jejjohnson/geotoolz/commit/e5bfe0405a61ebe0e70ce304272d0e405c833866))
+
 ## [0.5.0](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-products-v0.4.0...xrtoolz-products-v0.5.0) (2026-10-30)
 
 

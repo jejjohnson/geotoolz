@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.2](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.18.1...geotoolz-ops-v0.18.2) (2026-11-21)
+
+
+### Features
+
+* **qa:** presets for the EMIT band mask and the L2A mask bands ([#747](https://github.com/jejjohnson/geotoolz/issues/747)) ([5742376](https://github.com/jejjohnson/geotoolz/commit/5742376a6b00acffd6761a8b1a70115e8eb4d3f9))
+
 ## [0.18.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-ops-v0.18.0...geotoolz-ops-v0.18.1) (2026-11-11)
 
 
