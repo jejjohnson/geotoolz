@@ -14,6 +14,7 @@ metres, ``sweep=y``; see
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import warnings
 from collections.abc import Sequence
@@ -24,6 +25,8 @@ from typing import Any, Literal, get_args
 import numpy as np
 from affine import Affine
 from geoarray import PixelWindow
+from geophysix.constants import STANDARD
+from radiomax.thermal import PlanckQuadratic, brightness_temperature_band
 from rasterio.crs import CRS
 
 from geoproducts._src.base import ProductReader, Track
@@ -342,12 +345,11 @@ class Reader(ProductReader):
 def _brightness_temperature(radiance: np.ndarray, h: HSDHeader) -> np.ndarray:
     """Radiance (W m-2 sr-1 µm-1) → brightness temperature (K)."""
     c, planck, boltzmann = h.planck_constants
-    wavelength_m = h.wavelength_um * 1e-6
-    spectral = radiance * 1e6  # per µm → per m
-    with np.errstate(divide="ignore", invalid="ignore"):
-        positive = np.where(spectral > 0, spectral, np.nan)
-        effective = (planck * c / (boltzmann * wavelength_m)) / np.log(
-            2.0 * planck * c**2 / (wavelength_m**5 * positive) + 1.0
-        )
+    # the header's own constants, as the coefficients were fitted with them
+    constants = dataclasses.replace(
+        STANDARD, planck=planck, speed_of_light=c, boltzmann=boltzmann
+    )
     c0, c1, c2 = h.tb_coefficients
-    return c0 + c1 * effective + c2 * effective**2
+    band = PlanckQuadratic(wavelength=h.wavelength_um * 1e-6, c0=c0, c1=c1, c2=c2)
+    # per µm → per m
+    return brightness_temperature_band(radiance * 1e6, band, constants=constants)

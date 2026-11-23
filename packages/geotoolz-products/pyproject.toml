@@ -32,6 +32,9 @@ dependencies = [
     # numpy-subclass GeoTensor.
     "georeader-spaceml>=2.1",
     "numpy>=1.26",
+    # Brightness temperatures and the geostationary disk (NumPy-only; JAX stays optional in radiomax), on geophysix's records.
+    "radiomax>=0.0.6",
+    "geophysix>=0.0.4",
     # `georeader.geotensor` imports `Self` from typing_extensions without
     # declaring it (upstream packaging bug in >=2.1).
     "typing-extensions>=4.0",

@@ -51,7 +51,7 @@ geophysix = { git = "https://github.com/jejjohnson/geophysix", tag = "v0.0.4" }
 # radiomax (observation geometry and radiometry on any array library, on
 # geophysix) is not on PyPI either. It sources geophysix from this same URL:
 # uv reads `….git` as another one.
-radiomax = { git = "https://github.com/jejjohnson/radiomax", tag = "v0.0.5" }
+radiomax = { git = "https://github.com/jejjohnson/radiomax", tag = "v0.0.6" }
 
 [build-system]
 requires = ["hatchling"]

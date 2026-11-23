@@ -129,24 +129,13 @@ def test_geostationary_helpers() -> None:
     assert crs("x") != crs("y")
 
 
-def test_on_earth_is_the_limb_for_both_sweeps() -> None:
+@pytest.mark.parametrize("sweep", ["x", "y"])
+def test_on_earth_is_the_limb_for_both_sweeps(sweep: str) -> None:
     from pyproj import Transformer
 
-    from geoproducts._src.geostationary import FixedGrid, on_earth
+    from geoproducts._src.geostationary import FixedGrid
 
     height, a, b = 35_786_023.0, 6_378_137.0, 6_356_752.31414
-    # The limb along the equator sits at asin(a / (a + h)) ≈ 8.7°.
-    limb = np.arcsin(a / (a + height))
-    for sweep in ("x", "y"):
-        inside = on_earth(
-            np.array([0.0, limb - 1e-4, limb + 1e-4]),
-            np.zeros(3),
-            height_m=height,
-            semi_major_m=a,
-            semi_minor_m=b,
-            sweep=sweep,
-        )
-        assert inside.tolist() == [True, True, False]
     # Pixel by pixel, the mask agrees with PROJ's own inverse.
     grid = FixedGrid(
         height=60,
@@ -158,7 +147,7 @@ def test_on_earth_is_the_limb_for_both_sweeps() -> None:
         height_m=height,
         semi_major_m=a,
         semi_minor_m=b,
-        sweep="x",
+        sweep=sweep,
     )
     mask = grid.on_earth(slice(0, 60), slice(0, 60))
     rows, cols = np.mgrid[0:60, 0:60]

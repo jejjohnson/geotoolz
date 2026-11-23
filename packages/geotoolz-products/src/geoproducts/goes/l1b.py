@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Literal, get_args
 
 import numpy as np
+from radiomax.thermal import PlanckLinear, brightness_temperature_band
 
 from geoproducts.goes import constants
 from geoproducts.goes._src.base import ABIFile, Source
@@ -180,12 +181,13 @@ class Reader(ABIFile):
             return radiance[None]
         if self.calibration == "reflectance":
             return (radiance * np.float32(c["kappa0"]))[None]
-        with np.errstate(divide="ignore", invalid="ignore"):
-            positive = np.where(radiance > 0, radiance, np.nan)
-            bt = (
-                c["planck_fk2"] / np.log(c["planck_fk1"] / positive + 1.0)
-                - c["planck_bc1"]
-            ) / c["planck_bc2"]
+        band = PlanckLinear(
+            fk1=c["planck_fk1"],
+            fk2=c["planck_fk2"],
+            bc1=c["planck_bc1"],
+            bc2=c["planck_bc2"],
+        )
+        bt = brightness_temperature_band(radiance, band)
         return bt.astype(np.float32)[None]
 
 

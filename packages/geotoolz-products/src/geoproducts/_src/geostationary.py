@@ -20,12 +20,14 @@ from typing import Any
 
 import numpy as np
 from affine import Affine
+from geophysix.earth import Ellipsoid
+from radiomax.geometry import geostationary_on_earth
 from rasterio.crs import CRS
 
 from geoproducts._src import hdf
 
 
-__all__ = ["FixedGrid", "geos_crs", "on_earth", "scan_angle_transform"]
+__all__ = ["FixedGrid", "geos_crs", "scan_angle_transform"]
 
 
 def geos_crs(
@@ -98,55 +100,6 @@ def _as_centres(coords: np.ndarray, bounds: np.ndarray) -> np.ndarray:
     if abs((coords[0] - lead) / step) < 0.25:  # on the leading edge
         return coords + step / 2.0
     return coords
-
-
-def on_earth(
-    x_rad: np.ndarray,
-    y_rad: np.ndarray,
-    *,
-    height_m: float,
-    semi_major_m: float,
-    semi_minor_m: float,
-    sweep: str = "x",
-) -> np.ndarray:
-    """Whether the line of sight at each scan angle meets the Earth.
-
-    A geostationary imager also samples space around the disk; those
-    pixels have no geolocation. The line of sight from the satellite (at
-    ``semi_major_m + height_m`` from the Earth's centre, over the equator)
-    meets the ellipsoid exactly when its intersection quadratic has a real
-    root.
-
-    Args:
-        x_rad: Column scan angles (radians), broadcastable with ``y_rad``.
-        y_rad: Row scan angles (radians), positive north.
-        height_m: Satellite height above the equator (metres).
-        semi_major_m: Equatorial radius (metres).
-        semi_minor_m: Polar radius (metres).
-        sweep: Scan sweep axis, ``"x"`` (GOES ABI) or ``"y"`` (AHI, FCI,
-            SEVIRI).
-
-    Returns:
-        Boolean array, ``True`` where the pixel views the Earth.
-
-    Examples:
-        >>> on_earth(np.array([0.0, 0.16]), np.array([0.0, 0.0]),
-        ...          height_m=35786023.0, semi_major_m=6378137.0,
-        ...          semi_minor_m=6356752.31414).tolist()
-        [True, False]
-    """
-    x, y = np.broadcast_arrays(np.asarray(x_rad, float), np.asarray(y_rad, float))
-    # Unit line of sight (towards the Earth = +d1) in the satellite frame.
-    if sweep == "x":
-        d1, d2, d3 = np.cos(x) * np.cos(y), np.sin(x), np.cos(x) * np.sin(y)
-    else:
-        d1, d2, d3 = np.cos(x) * np.cos(y), np.sin(x) * np.cos(y), np.sin(y)
-    distance = semi_major_m + height_m
-    a2, b2 = semi_major_m**2, semi_minor_m**2
-    quad = (d1**2 + d2**2) / a2 + d3**2 / b2
-    half_lin = distance * d1 / a2
-    const = distance**2 / a2 - 1.0
-    return half_lin**2 - quad * const >= 0.0
 
 
 @dataclass(frozen=True)
@@ -243,7 +196,9 @@ class FixedGrid:
     def on_earth(self, rows: slice, cols: slice) -> np.ndarray:
         """Whether each pixel of ``[rows, cols]`` views the Earth.
 
-        See :func:`on_earth`.
+        A geostationary imager also samples space around the disk; those
+        pixels have no geolocation
+        (`radiomax.geometry.geostationary_on_earth`).
 
         Args:
             rows: Grid rows (0-based, step 1; may extend past the grid).
@@ -255,13 +210,16 @@ class FixedGrid:
         t = self.transform
         x = t.c + t.a * (np.arange(cols.start, cols.stop) + 0.5)
         y = t.f + t.e * (np.arange(rows.start, rows.stop) + 0.5)
-        return on_earth(
+        earth = Ellipsoid(
+            semi_major=self.semi_major_m,
+            flattening=1.0 - self.semi_minor_m / self.semi_major_m,
+        )
+        return geostationary_on_earth(
             x[None, :] / self.height_m,
             y[:, None] / self.height_m,
-            height_m=self.height_m,
-            semi_major_m=self.semi_major_m,
-            semi_minor_m=self.semi_minor_m,
-            sweep=self.sweep,
+            height=self.height_m,
+            sweep="x" if self.sweep == "x" else "y",
+            earth=earth,
         )
 
     @classmethod
