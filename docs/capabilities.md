@@ -1682,7 +1682,7 @@ helper is added here, not inline in one caller.
 | `geoproducts._src.credentials` | Credential storage shared by provider clients. | `auth_path`, `read_json_config`, `jwt_expiry` |
 | `geoproducts._src.extras` | Install hints for optional extras. | `install_hint`, `missing_extra`, `require` |
 | `geoproducts._src.files` | Atomic file writes shared by the product readers. | `atomic_path`, `atomic_write_text`, `write_private_json` |
-| `geoproducts._src.geostationary` | The geostationary fixed grid shared by geostationary imagers. | `geos_crs`, `scan_angle_transform`, `on_earth`, `FixedGrid` |
+| `geoproducts._src.geostationary` | The geostationary fixed grid shared by geostationary imagers. | `geos_crs`, `scan_angle_transform`, `FixedGrid` |
 | `geoproducts._src.hdf` | CF-packed NetCDF-4 / HDF5 product readers, on geotoolz-cloud's decoders. | `PackedGridReader` |
 | `geoproducts._src.net` | HTTP plumbing shared by every product reader. | `backoff_seconds`, `retry_after_seconds`, `retrying`, `stream_to_file`, `bearer_headers_for` |
 | `geoproducts._src.presets` | Shared building blocks of the per-product geotoolz presets. | `Recipe`, `geotoolz_module`, `rgb_recipe`, `parallax_correct` |
