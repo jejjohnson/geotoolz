@@ -232,6 +232,11 @@ def test_bt_from_radiance_round_trip_against_planck() -> None:
     np.testing.assert_allclose(recovered, targets, rtol=1e-12)
 
 
+def test_bt_from_radiance_is_nan_where_the_radiance_is_not_positive() -> None:
+    out = bt_from_radiance(np.array([10.0, 0.0, -0.1]), k1=774.8853, k2=1321.0789)
+    assert np.isnan(out).tolist() == [False, True, True]
+
+
 def test_earth_sun_distance_perihelion_aphelion() -> None:
     """Perihelion (~Jan 3) gives d ≈ 0.983; aphelion (~Jul 4) gives d ≈ 1.017."""
     d_perihelion = earth_sun_distance_correction_factor(datetime(2024, 1, 3))
