@@ -138,7 +138,7 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 | Name | Use it to… | Guide |
 |---|---|---|
 | `GeoArray` | carry data with its stored dims, coordinates, transform, CRS, fill value and attrs; `sel` / `isel` by name, `grid`, `with_data`, `to_jax`, `to_numpy`, `from_coords` | [Concepts](concepts.md) |
-| `GeoSwath`, `GeoPoints`, `pad_points` | carry swaths in sensor geometry (lat/lon leaves) and point sets (xy, z, time, valid) | [Tutorial](notebooks/swath_averaging_kernels.ipynb) |
+| `GeoSwath`, `GeoPoints`, `pad_points`, `to_geoswath` | carry swaths in sensor geometry (lat/lon leaves), point sets (xy, z, time, valid) and model fields on a lat-lon grid | [Tutorial](notebooks/swath_averaging_kernels.ipynb) |
 | `geoarray.coords` | say what a dim means: `SpectralAxis`, `VariableAxis`, `VerticalAxis`, `TimeAxis`, `PixelGrid`, … | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/coords/) |
 | `geoarray.types` | name common shapes (`GeoImage`, `GeoMapSeries`, `GeoTracks`, …) and check them with `check_dims` | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/types/) |
 | `isel`, `sel`, `reduce`, `map_over`, `concat`, `combine`, … | pipekit-array's dim-level functions, on every named carrier; a pipekit-array `KernelOp` runs on carriers too | [Concepts](concepts.md#one-set-of-dim-level-functions) |

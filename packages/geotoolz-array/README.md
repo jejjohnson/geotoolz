@@ -140,7 +140,7 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 | Name | Purpose |
 |---|---|
 | `GeoArray` | The grid carrier: data, stored dims, coordinates, transform, CRS, fill value, attrs; `sel` / `isel` by name, `grid`, `with_data`, `to_jax`, `to_numpy` |
-| `GeoSwath`, `GeoPoints` | Swaths in sensor geometry (lat/lon leaves) and point sets (xy, z, time, valid); `pad_points` |
+| `GeoSwath`, `GeoPoints` | Swaths in sensor geometry (lat/lon leaves) and point sets (xy, z, time, valid); `pad_points`; `to_geoswath` for a model field on a lat-lon grid |
 | `geoarray.coords` | `SpectralAxis`, `VariableAxis`, `VerticalAxis`, `TimeAxis` and the grid coordinates |
 | `geoarray.types` | Readable names (`GeoImage`, `GeoMapSeries`, `GeoTracks`, …) any carrier can match; `check_dims` |
 | Dim-level functions | `isel`, `sel`, `transpose`, `take_along`, `map_over`, `concat`, `combine`: pipekit-array's, on every named carrier (named reductions: `geoops.compositing.reduce` / `argreduce`) |

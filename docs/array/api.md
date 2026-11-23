@@ -19,6 +19,7 @@ Carriers whose georeference is not an affine grid: per-pixel lat/lon on
 ::: geoarray.GeoSwath
 ::: geoarray.GeoPoints
 ::: geoarray.pad_points
+::: geoarray.to_geoswath
 
 ## Dim-level functions
 
