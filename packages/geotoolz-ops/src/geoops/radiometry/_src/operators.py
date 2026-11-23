@@ -29,6 +29,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 import pandas as pd
 from pipekit_ops import Operator
+from radiomax.radiometry import (
+    radiance_from_reflectance,
+    reflectance,
+    response_matrix,
+)
 
 from geoops._src.bands import resolve_wavelengths, strip_band_attrs
 from geoops._src.config import as_tuple, jsonable
@@ -58,7 +63,7 @@ from geoops.radiometry._src.array import (
 from geoops.radiometry._src.solar import (
     compute_sza,
     earth_sun_distance_correction_factor,
-    observation_date_correction_factor,
+    footprint_zenith,
 )
 
 
@@ -76,6 +81,51 @@ def _rewrap_stretch(gt: Any, out: Any) -> Any:
     if out.ndim < 2:
         return wrap_like(gt, out, fill_value=np.nan)
     return wrap_filled(gt, out, fill_value=np.nan)
+
+
+#: How many of each radiance unit make 1 W m⁻² sr⁻¹ nm⁻¹.
+_PER_SI_RADIANCE: dict[str, float] = {
+    "W/m2/sr/nm": 1.0,
+    "mW/m2/sr/nm": 1000.0,
+    "uW/cm^2/SR/nm": 100.0,
+}
+
+
+def _zenith(op: Any, gt: Any, name: str) -> Any:
+    """The solar zenith an operator was given, or that of each pixel (degrees)."""
+    if op.sza_deg is not None:
+        return op.sza_deg
+    if op.center_coords is not None:
+        return compute_sza(
+            op.center_coords, op.acquisition_date, crs_coords=op.crs_coords
+        )
+    require_geoarray(
+        gt,
+        name,
+        hint="The solar geometry is derived from the footprint when "
+        "neither `sza_deg` nor `center_coords` is provided.",
+    )
+    return footprint_zenith(gt, op.acquisition_date)
+
+
+def _per_band(solar_irradiance: Any, values: np.ndarray, name: str) -> np.ndarray:
+    """The band irradiances as ``(C, 1, 1)``, checked against the bands."""
+    irradiance = np.asarray(solar_irradiance, dtype=float)
+    if values.ndim != 3 or irradiance.shape != values.shape[:1]:
+        raise ValueError(
+            f"{name} expects a (C, H, W) cube and C solar irradiances; got "
+            f"{values.shape} and {irradiance.shape}"
+        )
+    return irradiance[:, None, None]
+
+
+def _rewrap_lit(gt: Any, out: Any, zenith: Any) -> Any:
+    """Rewrap a solar conversion, with the carried fill at nodata and at night."""
+    out = np.asarray(out)
+    lit = np.broadcast_to(np.asarray(zenith) < 90.0, out.shape[-2:])
+    return wrap_filled(
+        gt, out, fill_value=carried_fill(gt, out.dtype), valid=valid_pixels(gt) & lit
+    )
 
 
 def _parse_datetime(value: datetime | str) -> datetime:
@@ -359,27 +409,27 @@ class RadianceToReflectance(Operator):
     Earth–Sun distance (AU) for the acquisition date and ``θ_z`` is the
     solar zenith angle. The factor ``π·d²/cos(θ_z)`` is the
     *observation-date correction factor* — pass ``sza_deg`` to provide
-    it from metadata, or pass ``center_coords`` and let ``pysolar``
-    derive it from the location and UTC time.
+    the angle from metadata, or ``center_coords`` to compute one angle
+    there for the whole scene.
 
     This is a carrier-aware wrapper around
-    :func:`georeader.reflectance.radiance_to_reflectance`; it does not
-    duplicate the unit-conversion or geometry logic, only the JSON-safe
-    ``get_config`` and the ``sza_deg`` shortcut.
+    `radiomax.radiometry.reflectance`, with the unit table and the
+    JSON-safe ``get_config``.
 
     Geo-dependence: when neither ``sza_deg`` nor ``center_coords`` is
-    provided, the solar geometry is derived from the footprint, so the
+    provided, the solar zenith is computed at every pixel, so the
     input must be a georeferenced GeoArray (plain arrays raise
-    ``TypeError`` in that mode).
+    ``TypeError`` in that mode). Pixels at night (a zenith of 90° or more)
+    hold the fill.
 
     Args:
         solar_irradiance: Per-band TOA solar irradiance in W/m²/nm,
             shape ``(C,)``.
         acquisition_date: UTC datetime of acquisition.
         center_coords: Optional ``(lon, lat)`` for the SZA computation.
-            Inferred from the GeoArray transform if omitted.
+            Without it, every pixel has its own.
         sza_deg: Optional pre-computed solar zenith angle in degrees.
-            If provided, ``center_coords`` and ``pysolar`` are skipped.
+            If provided, ``center_coords`` is ignored.
         crs_coords: CRS of ``center_coords``. ``None`` → EPSG:4326.
         units: Radiance units. One of ``"W/m2/sr/nm"``,
             ``"mW/m2/sr/nm"``, ``"uW/cm^2/SR/nm"``.
@@ -419,36 +469,20 @@ class RadianceToReflectance(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        radiance_to_reflectance = optional_name(
-            "georeader.reflectance",
-            "radiance_to_reflectance",
-            "sensors",
-            feature="geoops.radiometry.RadianceToReflectance",
-        )
-        obs_factor = observation_date_correction_factor(
-            self.acquisition_date,
-            sza_deg=self.sza_deg,
-            center_coords=self.center_coords,
-            crs_coords=self.crs_coords,
-        )
-        if obs_factor is None:
-            require_geoarray(
-                gt,
-                "RadianceToReflectance",
-                hint="The solar geometry is derived from the footprint when "
-                "neither `sza_deg` nor `center_coords` is provided.",
+        zenith = _zenith(self, gt, "RadianceToReflectance")
+        if self.units not in _PER_SI_RADIANCE:
+            raise ValueError(
+                f"units must be one of {sorted(_PER_SI_RADIANCE)}; got {self.units!r}"
             )
-        out = radiance_to_reflectance(
-            to_engine(gt),
-            solar_irradiance=self.solar_irradiance,
-            date_of_acquisition=self.acquisition_date,
-            center_coords=self.center_coords,
-            crs_coords=self.crs_coords,
-            observation_date_corr_factor=obs_factor,
-            units=self.units,
+        radiance = np.asarray(gt) / _PER_SI_RADIANCE[self.units]
+        out = reflectance(
+            radiance,
+            _per_band(self.solar_irradiance, radiance, "RadianceToReflectance"),
+            zenith,
+            earth_sun_distance_correction_factor(self.acquisition_date),
+            max_zenith=90.0,
         )
-        # georeader's result carries no ``attrs``; rewrap onto the input.
-        return _rewrap_carried(gt, np.asarray(out))
+        return _rewrap_lit(gt, out, zenith)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -473,11 +507,11 @@ class ReflectanceToRadiance(Operator):
         L \;=\; \frac{\rho \, E_{\text{sun}} \, \cos(\theta_z)}{\pi \, d^{2}}
 
     Same solar-geometry inputs as the forward direction: pass
-    ``sza_deg`` for a metadata-driven SZA or ``center_coords`` to let
-    ``pysolar`` derive it.
+    ``sza_deg`` for a metadata-driven SZA or ``center_coords`` for one
+    angle computed there.
 
     Geo-dependence: when neither ``sza_deg`` nor ``center_coords`` is
-    provided, the solar geometry is derived from the footprint, so the
+    provided, the solar zenith is computed at every pixel, so the
     input must be a georeferenced GeoArray (plain arrays raise
     ``TypeError`` in that mode).
 
@@ -527,35 +561,15 @@ class ReflectanceToRadiance(Operator):
 
     @over_frames
     def _apply(self, gt: GeoArray | np.ndarray) -> GeoArray | np.ndarray:
-        reflectance_to_radiance = optional_name(
-            "georeader.reflectance",
-            "reflectance_to_radiance",
-            "sensors",
-            feature="geoops.radiometry.ReflectanceToRadiance",
+        zenith = _zenith(self, gt, "ReflectanceToRadiance")
+        values = np.asarray(gt)
+        out = radiance_from_reflectance(
+            values,
+            _per_band(self.solar_irradiance, values, "ReflectanceToRadiance"),
+            zenith,
+            earth_sun_distance_correction_factor(self.acquisition_date),
         )
-        obs_factor = observation_date_correction_factor(
-            self.acquisition_date,
-            sza_deg=self.sza_deg,
-            center_coords=self.center_coords,
-            crs_coords=self.crs_coords,
-        )
-        if obs_factor is None:
-            require_geoarray(
-                gt,
-                "ReflectanceToRadiance",
-                hint="The solar geometry is derived from the footprint when "
-                "neither `sza_deg` nor `center_coords` is provided.",
-            )
-        out = reflectance_to_radiance(
-            to_engine(gt),
-            solar_irradiance=self.solar_irradiance,
-            date_of_acquisition=self.acquisition_date,
-            center_coords=self.center_coords,
-            crs_coords=self.crs_coords,
-            observation_date_corr_factor=obs_factor,
-        )
-        # georeader's result carries no ``attrs``; rewrap onto the input.
-        return _rewrap_carried(gt, np.asarray(out))
+        return _rewrap_lit(gt, out, zenith)
 
     def get_config(self) -> dict[str, Any]:
         return {
@@ -577,9 +591,8 @@ class EarthSunDistanceCorrection(Operator):
     Graph source: computed from its configuration alone. An optional
     input is accepted and ignored, so it can close a ``Sequential``.
 
-    .. math::
-
-        d \;=\; 1 - 0.01673 \cdot \cos\!\bigl(0.0172 \cdot (t - 4)\bigr)
+    The Astronomical Almanac's formula (`radiomax.geometry.earth_sun_distance`),
+    within 8.7e-5 AU of SPA over 2000–2050.
 
     Perihelion (~Jan 3-4) → ``d ≈ 0.983 AU``; aphelion (~Jul 4) →
     ``d ≈ 1.017 AU``. The irradiance reaching Earth scales as
@@ -591,7 +604,8 @@ class EarthSunDistanceCorrection(Operator):
     operator (e.g. an in-graph reflectance conversion).
 
     Args:
-        acquisition_date: UTC datetime; only the day of year is used.
+        acquisition_date: Date and time of acquisition, UTC unless it
+            carries a time zone.
 
     Examples:
         >>> from datetime import datetime
@@ -600,10 +614,6 @@ class EarthSunDistanceCorrection(Operator):
         >>> # Perihelion -> ~0.983 AU.
         >>> round(d, 3)
         0.983
-
-    References:
-        Spencer, J. W. (1971). Fourier series representation of the
-        position of the sun. *Search* 2(5), 172.
     """
 
     backends: ClassVar[tuple[str, ...]] = ("numpy",)
@@ -629,8 +639,9 @@ class ComputeSZA(Operator):
     Graph source: computed from its configuration alone. An optional
     input is accepted and ignored, so it can close a ``Sequential``.
 
-    Thin wrapper over :func:`geoops.radiometry._src.solar.compute_sza`
-    (which delegates to ``pysolar``). The SZA is the complement of the
+    The Astronomical Almanac's solar position
+    (`radiomax.geometry.solar_zenith`), without refraction, within 0.0121°
+    of SPA over 2000–2050. The SZA is the complement of the
     solar altitude — ``SZA = 90° - altitude`` — and enters the TOA
     reflectance equation through ``cos(θ_z)``.
 
@@ -669,6 +680,7 @@ class ComputeSZA(Operator):
         self.crs_coords = crs_coords
 
     def _apply(self, _input: Any | None = None) -> float:
+        reject_geotensor(_input, type(self).__name__)
         return compute_sza(
             self.center_coords,
             self.acquisition_date,
@@ -694,8 +706,10 @@ class IntegratedIrradiance(Operator):
         E_k \;=\; \frac{\displaystyle \int E_{\text{sun}}(\lambda) \, R_k(\lambda) \, d\lambda}
                        {\displaystyle \int R_k(\lambda) \, d\lambda}
 
-    Convolves a TOA solar spectrum (Thuillier 2003 by default) with a
-    per-band spectral response function ``R_k(λ)`` to yield the
+    Integrates a TOA solar spectrum (Thuillier 2003 by default, from
+    georeader) over a per-band spectral response function ``R_k(λ)``,
+    both read as linear between their samples
+    (`radiomax.radiometry.response_matrix`), to yield the
     band-effective irradiance ``E_k`` that feeds
     `RadianceToReflectance`. Output units match the input solar
     spectrum (``mW/m²/nm`` for the default Thuillier table — divide by
@@ -711,8 +725,8 @@ class IntegratedIrradiance(Operator):
         solar_irradiance: Optional solar-spectrum DataFrame with
             columns ``["Nanometer", "Radiance(mW/m2/nm)"]``. Defaults
             to Thuillier 2003.
-        epsilon_srf: SRF threshold below which a band's contribution is
-            ignored. Default ``1e-4``.
+        epsilon_srf: The ends of the SRF table where no band's response is
+            above this are dropped. Default ``1e-4``.
 
     Examples:
         >>> import numpy as np
@@ -755,29 +769,31 @@ class IntegratedIrradiance(Operator):
         self.epsilon_srf = epsilon_srf
 
     def _apply(self, _input: Any | None = None) -> np.ndarray:
-        integrated_irradiance = optional_name(
-            "georeader.reflectance",
-            "integrated_irradiance",
-            "sensors",
-            feature="geoops.radiometry.IntegratedIrradiance",
-        )
-        load_thuillier_irradiance = optional_name(
-            "georeader.reflectance",
-            "load_thuillier_irradiance",
-            "sensors",
-            feature="geoops.radiometry.IntegratedIrradiance",
-        )
         reject_geotensor(_input, type(self).__name__)
-        solar_irradiance = (
-            load_thuillier_irradiance()
-            if self.solar_irradiance is None
-            else self.solar_irradiance
+        solar = self.solar_irradiance
+        if solar is None:
+            solar = optional_name(
+                "georeader.reflectance",
+                "load_thuillier_irradiance",
+                "sensors",
+                feature="geoops.radiometry.IntegratedIrradiance (the default "
+                "solar spectrum)",
+            )()
+        # the table without its tails, where every band is at most epsilon
+        seen = np.flatnonzero((self.srf > self.epsilon_srf).any(axis=1))
+        if seen.size == 0:
+            raise ValueError(
+                f"no band of the SRF has a response above {self.epsilon_srf:g}"
+            )
+        table = self.srf.iloc[seen[0] : seen[-1] + 1]
+        wavelength = table.index.to_numpy(dtype=float)
+        nodes = solar["Nanometer"].to_numpy(dtype=float)
+        inside = (nodes >= wavelength[0]) & (nodes <= wavelength[-1])
+        matrix = response_matrix(
+            table.to_numpy(dtype=float).T, wavelength, nodes[inside]
         )
-        return integrated_irradiance(
-            self.srf,
-            solar_irradiance=solar_irradiance,
-            epsilon_srf=self.epsilon_srf,
-        )
+        # E_k = ∫ E R_k dλ / ∫ R_k dλ
+        return matrix @ solar["Radiance(mW/m2/nm)"].to_numpy(dtype=float)[inside]
 
     def get_config(self) -> dict[str, Any]:
         # Debug payload: summarise the DataFrames instead of embedding them.
