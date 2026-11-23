@@ -823,7 +823,9 @@ def _bincount_rows(idx: Any, nbins: int, xp: Any) -> Any:
     """``(R, nbins)`` counts of each row of integer ``idx`` in ``[0, nbins)``."""
     n_rows = idx.shape[0]
     flat = xp.reshape(idx + xp.arange(n_rows)[:, None] * nbins, (-1,))
-    if xp.__name__ == "numpy":
+    # by the array, not by the namespace's name: with array-api-compat installed
+    # NumPy's is `array_api_compat.numpy`
+    if isinstance(flat, np.ndarray):
         counts = np.bincount(flat, minlength=n_rows * nbins)
     else:  # jax.numpy: a static length keeps the shape known under jit
         counts = xp.bincount(flat, length=n_rows * nbins)
@@ -863,7 +865,7 @@ def _redistribute(hist: Any, excess: Any, clim: int, xp: Any) -> Any:
     """Spread the excess left after clipping, until none is left or none moves."""
     nbins = hist.shape[-1]
     alive = excess > 0
-    if xp.__name__ != "numpy":  # jax.numpy: the same loops as lax primitives
+    if not isinstance(hist, np.ndarray):  # JAX: the same loops as lax primitives
         from jax import lax
 
         def one_pass(state: tuple[Any, Any, Any]) -> tuple[Any, Any, Any]:

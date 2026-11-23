@@ -35,6 +35,12 @@ from geophysix.earth import SPHERE, WGS84, geodetic_to_ecef, sphere
 from pipekit_array import array_namespace
 from pipekit_ops import Operator, backend_of, get_adapter
 from pyproj import CRS
+from radiomax.geometry import (
+    apparent_position,
+    bowtie_detector_positions,
+    scan_angles,
+    scan_pixel_growth,
+)
 from scipy.ndimage import shift as ndi_shift
 
 from geoops._src.bands import band_count
@@ -65,7 +71,6 @@ from geoops._src.wrap import adopt_attrs, rewrap_attrs, rewrap_dims, wrap_like
 from geoops.geom._src.array import (
     adaptive_difference,
     adaptive_gradient_2d,
-    bowtie_detector_positions,
     center_offsets,
     difference,
     feather_weights,
@@ -75,8 +80,6 @@ from geoops.geom._src.array import (
     resolve_interpolation,
     resolve_resampling,
     resolve_scheme,
-    scan_angles,
-    scan_pixel_growth,
     target_slices,
     valid_pixel_mask,
 )
@@ -89,8 +92,6 @@ from geoops.geom._src.sampling import (
 from geoops.geom._src.stencils import difference_offsets
 from geoops.geom._src.warp import target_coordinates, warp
 
-
-_RAY_DISCRIMINANT_TOLERANCE = 1.0e-6
 
 #: attrs keys `AntimeridianSplit` reads longitudes from, in order.
 _LON_KEYS: tuple[str, ...] = ("lons", "lon", "longitude")
@@ -1534,7 +1535,7 @@ class BowtieCorrection(Operator):
     duplication, per column, from the scan geometry alone.
 
     **Geometry** (spherical Earth, radius ``R``; altitude ``h``; see
-    :func:`~geoops.geom._src.array.scan_pixel_growth`)::
+    `radiomax.geometry.scan_pixel_growth`)::
 
         β(θ) = arcsin(((R + h)/R)·sin θ) − θ          Earth central angle
         s(θ) = (R + h)·cos θ − √(R² − (R + h)²·sin² θ)  slant range
@@ -1544,7 +1545,7 @@ class BowtieCorrection(Operator):
     (the coordinate in which every scan advances by the same amount),
     relative to nadir; ``g(0) = 1`` and the flat-Earth limit is
     ``1 / cos θ``. The column scan angles ``θ_c`` follow the constant
-    mirror rate (see :func:`~geoops.geom._src.array.scan_angles`),
+    mirror rate (see `radiomax.geometry.scan_angles`),
     including VIIRS along-scan aggregation when ``aggregation_zones`` is
     given.
 
@@ -1734,7 +1735,9 @@ class BowtieCorrection(Operator):
                 f"multiple of detectors_per_scan={n}."
             )
         theta = scan_angles(width, self.max_scan_angle_deg, self.aggregation_zones)
-        _, growth, _ = scan_pixel_growth(theta, self.altitude_km, self.earth_radius_km)
+        _, growth, _ = scan_pixel_growth(
+            theta, 1e3 * self.altitude_km, radius=1e3 * self.earth_radius_km
+        )
         k0, k1, step = bowtie_detector_positions(growth, n)
 
         values = np.asarray(gt)
@@ -1866,12 +1869,13 @@ class AntimeridianSplit(Operator):
 class GeostationaryParallaxCorrect(Operator):
     """Shift pixels from apparent geostationary view position to nadir.
 
-    A spherical Earth ray-intersection model is used: for each output ground
-    pixel, the operator finds where an elevated target would appear to a
-    geostationary satellite and samples the input there, treating each
-    input value as located at its pixel centre. ``target_height_m=0``
-    is an exact identity. Off-limb pixels (whose viewing ray misses the Earth
-    sphere) are filled with ``gt.fill_value`` (``0`` when it is ``None``).
+    For each output ground pixel, the operator finds where an elevated target
+    would appear to a geostationary satellite, on the ellipsoid
+    (`radiomax.geometry.apparent_position`), and samples the input there,
+    treating each input value as located at its pixel centre.
+    ``target_height_m=0`` is an exact identity. Pixels without an apparent
+    position (the target is above the limb or behind it) are filled with
+    ``gt.fill_value`` (``0`` when it is ``None``).
 
     Geo-dependent: requires a georeferenced ``GeoArray`` input on an
     EPSG:4326 grid; plain arrays raise ``TypeError``.
@@ -1880,7 +1884,8 @@ class GeostationaryParallaxCorrect(Operator):
         satellite_lon_deg: Sub-satellite longitude.
         satellite_height_m: Satellite height above the equator.
         target_height_m: Scalar height, same-grid array, or same-grid GeoArray.
-        earth_radius_m: Earth radius (spherical model).
+        earth_radius_m: Radius of a spherical Earth; ``None`` (the default)
+            is the WGS84 ellipsoid, which the grid's latitudes refer to.
         method: ``"nearest"`` or ``"bilinear"``.
     """
 
@@ -1896,7 +1901,7 @@ class GeostationaryParallaxCorrect(Operator):
         satellite_lon_deg: float,
         satellite_height_m: float = 35_786_023.0,
         target_height_m: float | np.ndarray | GeoArray = 0.0,
-        earth_radius_m: float = WGS84.semi_major,
+        earth_radius_m: float | None = None,
         method: str = "bilinear",
     ) -> None:
         self.satellite_lon_deg = satellite_lon_deg
@@ -1919,16 +1924,19 @@ class GeostationaryParallaxCorrect(Operator):
         if lons_lats is None:
             raise ValueError("GeostationaryParallaxCorrect requires EPSG:4326 grids.")
         lons, lats = lons_lats
-        apparent_lon, apparent_lat, off_limb = _apparent_lonlat(
-            lons,
-            lats,
-            heights,
-            satellite_lon_deg=self.satellite_lon_deg,
-            satellite_height_m=self.satellite_height_m,
-            earth_radius_m=self.earth_radius_m,
+        earth = WGS84 if self.earth_radius_m is None else sphere(self.earth_radius_m)
+        satellite = geodetic_to_ecef(
+            self.satellite_lon_deg, 0.0, self.satellite_height_m, earth=earth
+        )
+        apparent_lon, apparent_lat, visible = apparent_position(
+            lons, lats, heights, *satellite, earth=earth
         )
         inv = ~affine_of(gt)
-        src_cols, src_rows = inv * (apparent_lon, apparent_lat)
+        # a hidden pixel has no position; its own is as good, being filled below
+        src_cols, src_rows = inv * (
+            np.where(visible, apparent_lon, lons),
+            np.where(visible, apparent_lat, lats),
+        )
         # ``~transform`` yields continuous pixel coordinates in which pixel
         # ``(r, c)`` is centred at ``(r + 0.5, c + 0.5)``; the samplers index
         # ``arr[r]`` at coordinate ``r``, so shift to centre-indexed space.
@@ -1939,8 +1947,8 @@ class GeostationaryParallaxCorrect(Operator):
             method=self.method,
             fill=gt.fill_value,
         )
-        if np.any(off_limb):
-            sampled = _apply_invalid_fill(sampled, ~off_limb, gt.fill_value)
+        if not np.all(visible):
+            sampled = _apply_invalid_fill(sampled, visible, gt.fill_value)
         return wrap_like(gt, sampled)
 
     def get_config(self) -> dict[str, Any]:
@@ -2734,56 +2742,6 @@ def _height_array(
     if heights.ndim > 2:
         heights = heights.reshape(-1, *shape)[0]
     return heights
-
-
-def _apparent_lonlat(
-    lons: np.ndarray,
-    lats: np.ndarray,
-    heights: np.ndarray,
-    *,
-    satellite_lon_deg: float,
-    satellite_height_m: float,
-    earth_radius_m: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    lon_rad = np.deg2rad(lons)
-    lat_rad = np.deg2rad(lats)
-    sat_lon = np.deg2rad(satellite_lon_deg)
-    surface = _spherical_xyz(lon_rad, lat_rad, earth_radius_m)
-    # Scale each surface radial vector outward by the target height.
-    elevated = surface * ((earth_radius_m + heights)[None, ...] / earth_radius_m)
-    satellite = np.array(
-        [
-            (earth_radius_m + satellite_height_m) * np.cos(sat_lon),
-            (earth_radius_m + satellite_height_m) * np.sin(sat_lon),
-            0.0,
-        ],
-        dtype=np.float64,
-    )[:, None, None]
-    direction = elevated - satellite
-    a = np.sum(direction * direction, axis=0)
-    b = 2.0 * np.sum(satellite * direction, axis=0)
-    c = np.sum(satellite * satellite, axis=0) - earth_radius_m**2
-    discriminant = b * b - 4.0 * a * c
-    off_limb = discriminant < -_RAY_DISCRIMINANT_TOLERANCE
-    near = (-b - np.sqrt(np.maximum(discriminant, 0.0))) / (2.0 * a)
-    apparent = satellite + direction * near[None, ...]
-    apparent_lon = np.rad2deg(np.arctan2(apparent[1], apparent[0]))
-    apparent_lat = np.rad2deg(
-        np.arctan2(apparent[2], np.hypot(apparent[0], apparent[1]))
-    )
-    return _normalise_longitudes(apparent_lon), apparent_lat, off_limb
-
-
-def _spherical_xyz(
-    lon_rad: np.ndarray,
-    lat_rad: np.ndarray,
-    radius: float,
-) -> np.ndarray:
-    # (x, y, z) = R (cos φ cos λ, cos φ sin λ, sin φ)
-    return np.stack(
-        geodetic_to_ecef(lon_rad, lat_rad, earth=sphere(radius), degrees=False),
-        axis=0,
-    )
 
 
 def _segment_axis(direction: str) -> int:

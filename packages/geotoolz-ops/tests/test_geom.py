@@ -20,6 +20,7 @@ from _helpers import toy_fill
 from affine import Affine
 from geoarray import FrozenAttrs, GeoArray
 from geopatcher import spatial
+from radiomax.geometry import apparent_position, scan_angles
 from rasterio.enums import Resampling
 from rasterio.windows import WindowError
 from shapely.geometry import box
@@ -661,59 +662,12 @@ def test_bowtie_correction_is_identity_for_zero_scan_angle() -> None:
         assert str(out.crs) == str(gt.crs)
 
 
-def test_bowtie_scan_pixel_growth_matches_published_sensor_numbers() -> None:
-    # MODIS: 1 km nadir pixel grows to ≈ 2.0 km along track and ≈ 4.8 km
-    # along scan at 55° (Wolfe et al. 2002, RSE 83:31-49).
-    along, orbit, cross = geom_array.scan_pixel_growth(np.deg2rad(55.0), 705.0, _R_KM)
-    np.testing.assert_allclose(along, 2.0, rtol=0.01)
-    np.testing.assert_allclose(cross, 4.8, rtol=0.01)
-    assert orbit > along  # orbit-angle growth adds the 1/cos β factor
-    # VIIRS: scan width 11.7 km at nadir, 25.8 km at 56.28° (NOAA NESDIS 142,
-    # VIIRS SDR User's Guide §2.2).
-    along, orbit, _ = geom_array.scan_pixel_growth(np.deg2rad(56.28), 824.0, _R_KM)
-    np.testing.assert_allclose(along, 25.8 / 11.7, rtol=0.01)
-    # Same guide: scan-to-scan overlap starts at ≈ 19° and exceeds 1 (2)
-    # M-band detectors per scan edge beyond 31.72° (44.86°), which is why
-    # 1 (2) rows per edge are deleted on board. Overlap per edge in
-    # detectors: N·(1 - 1/g)/2.
-    _, g, _ = geom_array.scan_pixel_growth(
-        np.deg2rad([19.0, 31.72, 44.86]), 824.0, _R_KM
-    )
-    per_edge = 16 * (1 - 1 / g) / 2
-    np.testing.assert_allclose(2 * per_edge[0], 1.0, atol=0.05)
-    assert per_edge[1] > 1.0
-    assert per_edge[2] > 2.0
-    # Flat-Earth limit R → ∞: g → 1/cos θ.
-    _, g_flat, _ = geom_array.scan_pixel_growth(np.deg2rad(40.0), 705.0, 1e9)
-    np.testing.assert_allclose(g_flat, 1 / np.cos(np.deg2rad(40.0)), rtol=1e-6)
-
-
-def test_bowtie_viirs_scan_angles_follow_aggregation_zones() -> None:
-    theta = np.rad2deg(
-        geom_array.scan_angles(3200, 56.28, ((1776, 3), (736, 2), (640, 1)))
-    )
-    assert theta.shape == (3200,)
-    np.testing.assert_allclose(theta, -theta[::-1])
-    right = theta[1600:]
-    # Zone boundaries (guide: 31.72° and 44.86°) fall between the last
-    # 3-sample pixel and the first 2-sample one, and so on.
-    step = 56.28 / 3152
-    assert right[591] < 1776 * step < right[592]
-    assert abs(1776 * step - 31.72) < 0.02
-    assert abs((1776 + 736) * step - 44.86) < 0.02
-    np.testing.assert_allclose(np.diff(right[:592]), 3 * step)
-    np.testing.assert_allclose(np.diff(right[592:960]), 2 * step)
-    np.testing.assert_allclose(np.diff(right[960:]), step)
-    with pytest.raises(ValueError, match="describe 3200 columns"):
-        geom_array.scan_angles(3000, 56.28, ((1776, 3), (736, 2), (640, 1)))
-
-
 def test_bowtie_viirs_refills_onboard_deleted_rows() -> None:
     # VIIRS M-band: bowtie-deleted rows (1 per scan edge in the 2-sample
     # zone, 2 in the unaggregated zone) arrive as fill; the corrected swath
     # has no gaps and matches the ground truth.
     op = gz.geom.BowtieCorrection.viirs(method="linear")
-    theta = geom_array.scan_angles(3200, 56.28, op.aggregation_zones)
+    theta = np.deg2rad(scan_angles(3200, 56.28, op.aggregation_zones))
     swath, _ = _simulate_swath(
         _smooth_scene,
         detectors=16,
@@ -950,6 +904,44 @@ def test_geostationary_parallax_fills_off_limb_pixels() -> None:
     # The corner pixels are far off-limb relative to the sub-satellite point.
     assert (arr == fill).any()
     assert affine_of(out) == affine_of(gt)
+
+
+def _parallax_row(lat: float, **kwargs: float) -> float:
+    """The latitude at which a 12 km target at (lat, 0°E) is read, from 0°E."""
+    values = np.zeros((1, 101, 3))
+    gt = GeoArray(
+        values + (lat + 0.5 - 0.01 * np.arange(101))[None, :, None],
+        transform=Affine(0.01, 0, -0.015, 0, -0.01, lat + 0.505),
+        crs="EPSG:4326",
+        fill_value=np.nan,
+    )
+    out = gz.geom.GeostationaryParallaxCorrect(
+        satellite_lon_deg=0.0, target_height_m=12_000.0, **kwargs
+    )(gt)
+    return float(np.asarray(out)[0, 50, 1])
+
+
+def test_geostationary_parallax_is_on_the_ellipsoid() -> None:
+    _, lat, _ = apparent_position(0.0, 45.0, 12e3, 42_164_160.0, 0.0, 0.0)
+    assert _parallax_row(45.0) == pytest.approx(float(lat), abs=1e-9)
+    # on a sphere the same target appears elsewhere: 74 m at 60° (measured)
+    on_sphere = _parallax_row(60.0, earth_radius_m=6_378_137.0)
+    assert (on_sphere - _parallax_row(60.0)) * 111.2e3 == pytest.approx(74.0, abs=2.0)
+
+
+def test_geostationary_parallax_fills_pixels_behind_the_limb() -> None:
+    # 100° away a target at 10 km is hidden by the Earth; the pixel used to
+    # read the near side.
+    gt = GeoArray(
+        np.ones((1, 3, 3), dtype=np.float32),
+        transform=Affine(50.0, 0, -25.0, 0, -1.0, 1.5),
+        crs="EPSG:4326",
+        fill_value=-1.0,
+    )
+    out = gz.geom.GeostationaryParallaxCorrect(
+        satellite_lon_deg=0.0, target_height_m=10_000.0, method="nearest"
+    )(gt)
+    assert np.asarray(out)[0, 1].tolist() == [1.0, 1.0, -1.0]
 
 
 def test_segment_stitch_orders_segments_and_fills_missing_scan() -> None:

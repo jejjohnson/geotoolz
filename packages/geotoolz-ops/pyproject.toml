@@ -27,6 +27,8 @@ dependencies = [
     "numpy>=1.26",
     # Earth radius, column unit conversion and the shared constants (NumPy-only; JAX stays optional in geophysix).
     "geophysix>=0.0.4",
+    # Scan geometry, parallax, calibration arithmetic and solar geometry (NumPy-only; JAX stays optional in radiomax).
+    "radiomax>=0.0.5",
     # Shape/dtype annotations on the Tier-A numpy primitives (the
     # `Float[np.ndarray, "c h w"]` aliases). Annotation-only usage — no
     # runtime checking decorators — so the import cost is trivial.
