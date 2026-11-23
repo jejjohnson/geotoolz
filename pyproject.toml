@@ -80,7 +80,7 @@ dev = [
     # pooling) come with them, so a plain `uv sync` runs the same fast
     # tier as CI's `--all-extras`.
     "geotoolz-ops[hydra,vector-cube,netcdf,zarr,interp]",
-    # Reference solar geometry for radiometry.ComputeSZA (no geotoolz
+    # Reference solar geometry for the ComputeSZA tests (no geotoolz
     # extra declares it).
     "pysolar>=0.11",
     "geotoolz-cloud[cog]",

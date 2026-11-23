@@ -6,13 +6,15 @@ round-trip, Hydra-zen `builds()` round-trip.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
 import pytest
 from _helpers import toy_geoarray, uint16_dn_cube
+from affine import Affine
 from geoarray import GeoArray
+from pyproj import Transformer
 
 from geoops.radiometry import (
     DOS1,
@@ -42,6 +44,7 @@ from geoops.radiometry import (
 )
 from geoops.radiometry._src.solar import (
     earth_sun_distance_correction_factor,
+    footprint_zenith,
     observation_date_correction_factor,
 )
 
@@ -728,6 +731,41 @@ def test_integrated_irradiance_operator_with_flat_solar_spectrum() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_integrated_irradiance_is_the_integral_on_an_uneven_solar_table() -> None:
+    """georeader sums over the solar table's nodes, so a band across a change of
+    their spacing is biased towards the dense side: by 11 % at 833 nm on
+    Thuillier's table, whose spacing falls from 0.9 to 0.08 nm there.
+    """
+    from georeader.reflectance import load_thuillier_irradiance
+
+    wavelength = np.arange(400.0, 1000.0)
+    sigma = 106.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+    response = np.exp(-((wavelength - 700.0) ** 2) / (2.0 * sigma**2))
+    shifted = np.exp(-((wavelength - 833.0) ** 2) / (2.0 * sigma**2))
+    srf = pd.DataFrame({"a": response, "b": shifted}, index=wavelength)
+    solar = load_thuillier_irradiance()
+    fine = np.arange(400.0, 999.0, 0.005)
+    energy = np.interp(fine, solar["Nanometer"], solar["Radiance(mW/m2/nm)"])
+    reference = [
+        np.trapezoid(np.interp(fine, wavelength, r) * energy, fine)
+        / np.trapezoid(np.interp(fine, wavelength, r), fine)
+        for r in (response, shifted)
+    ]
+    # the ends of the table (responses of at most 1e-4) are dropped
+    np.testing.assert_allclose(
+        IntegratedIrradiance(srf=srf, epsilon_srf=0.0)(), reference, rtol=1e-6
+    )
+
+
+def test_integrated_irradiance_without_any_response_is_an_error() -> None:
+    srf = pd.DataFrame({"a": [0.0, 0.0]}, index=[500.0, 501.0])
+    solar = pd.DataFrame(
+        {"Nanometer": [499.0, 502.0], "Radiance(mW/m2/nm)": [2.0, 2.0]}
+    )
+    with pytest.raises(ValueError, match="no band of the SRF"):
+        IntegratedIrradiance(srf=srf, solar_irradiance=solar)()
+
+
 def test_radiance_to_reflectance_parity_with_georeader() -> None:
     """`RadianceToReflectance` must produce exactly the values that come
     out of `georeader.reflectance.radiance_to_reflectance` when given
@@ -770,6 +808,86 @@ def test_radiance_to_reflectance_parity_with_georeader() -> None:
     assert str(out.crs) == str(radiance.crs)
 
 
+def _utm_scene(size: int, pixel_m: float, value: float = 10.0) -> GeoArray:
+    """A cube of constant radiance over the Ebro valley, UTM 31N."""
+    return GeoArray(
+        np.full((1, size, size), value),
+        transform=Affine(pixel_m, 0.0, 300_000.0, 0.0, -pixel_m, 4_600_000.0),
+        crs="EPSG:32631",
+        fill_value=0.0,
+        dims=("band", "y", "x"),
+    )
+
+
+def test_every_pixel_has_its_own_sun() -> None:
+    date = datetime(2024, 12, 21, 10, 30)
+    gt = _utm_scene(5, 25_000.0)
+    out = np.asarray(
+        RadianceToReflectance(solar_irradiance=[1.9], acquisition_date=date)(gt)
+    )
+    to_lonlat = Transformer.from_crs("EPSG:32631", "EPSG:4326", always_xy=True)
+    for row, col in ((0, 0), (2, 3), (4, 4)):
+        x, y = 300_000.0 + (col + 0.5) * 25e3, 4_600_000.0 - (row + 0.5) * 25e3
+        one = RadianceToReflectance(
+            solar_irradiance=[1.9],
+            acquisition_date=date,
+            center_coords=to_lonlat.transform(x, y),
+        )(gt)
+        np.testing.assert_allclose(
+            out[0, row, col], np.asarray(one)[0, row, col], rtol=1e-12
+        )
+    # 100 km of latitude is 0.9° of zenith, a percent or two of a winter sun
+    assert 0.01 < out[0].max() / out[0].min() - 1.0 < 0.05
+
+
+def test_the_zenith_between_tie_points_is_interpolated_closely() -> None:
+    date = datetime(2024, 12, 21, 10, 30)
+    gt = _utm_scene(700, 150.0)
+    zenith = footprint_zenith(gt, date)
+    exact = footprint_zenith(_utm_scene(700, 150.0), date, tie_spacing_m=0.0)
+    np.testing.assert_allclose(zenith, exact, rtol=0.0, atol=2e-5)
+
+
+def test_pixels_at_night_hold_the_fill() -> None:
+    gt = GeoArray(
+        np.full((1, 1, 8), 10.0),
+        transform=Affine(45.0, 0.0, -180.0, 0.0, -1.0, 0.5),
+        crs="EPSG:4326",
+        fill_value=-1.0,
+        dims=("band", "y", "x"),
+    )
+    options = {"solar_irradiance": [1.9], "acquisition_date": "2024-03-20T12:00:00"}
+    forward = np.asarray(RadianceToReflectance(**options)(gt))[0, 0]
+    back = np.asarray(ReflectanceToRadiance(**options)(gt))[0, 0]
+    assert (forward[[0, 1, 6, 7]] == -1.0).all()
+    assert (back[[0, 1, 6, 7]] == -1.0).all()
+    assert (forward[2:6] > 0.0).all()
+
+
+def test_the_distance_against_georeaders() -> None:
+    from georeader.reflectance import (
+        earth_sun_distance_correction_factor as georeader_distance,
+    )
+
+    # georeader's is off SPA by up to 8.0e-4 AU, radiomax's by up to 8.7e-5
+    dates = [datetime(2024, 1, 1) + timedelta(days=d) for d in range(0, 366, 7)]
+    ours = np.array([earth_sun_distance_correction_factor(d) for d in dates])
+    theirs = np.array([georeader_distance(d) for d in dates])
+    assert 1e-4 < np.abs(ours - theirs).max() < 9e-4
+
+
+def test_radiance_to_reflectance_rejects_unknown_units_and_band_counts() -> None:
+    options = {"acquisition_date": datetime(2024, 6, 21), "sza_deg": 30.0}
+    with pytest.raises(ValueError, match="units must be one of"):
+        RadianceToReflectance(solar_irradiance=[1.9], units="W", **options)(
+            np.ones((1, 2, 2))
+        )
+    with pytest.raises(ValueError, match="C solar irradiances"):
+        ReflectanceToRadiance(solar_irradiance=[1.9, 1.8], **options)(
+            np.ones((1, 2, 2))
+        )
+
+
 def test_radiance_to_reflectance_accepts_iso_string_for_yaml_roundtrip() -> None:
     """`acquisition_date` must accept either a datetime or an ISO string
     so that hydra-zen / YAML configs can round-trip without datetime
@@ -793,18 +911,25 @@ def test_radiance_to_reflectance_accepts_iso_string_for_yaml_roundtrip() -> None
 
 def test_compute_sza_operator_summer_solstice_noon() -> None:
     """Solar noon at the equator on the summer solstice gives SZA ≈ 23.4°
-    (the Earth's axial tilt). Loose tolerance because pysolar applies
-    higher-order corrections (equation of time, atmospheric refraction).
+    (the Earth's axial tilt); loose, because 12:00 UTC is not exactly noon.
     """
-    pytest.importorskip("pysolar")
-    # June 21 ~12:00 UTC at 0°N, 0°E -- close to local solar noon.
-    # pysolar requires a tz-aware datetime.
     op = ComputeSZA(
         center_coords=(0.0, 0.0),
         acquisition_date=datetime(2024, 6, 21, 12, 0, tzinfo=UTC),
     )
     sza = op()
     assert 22.0 < sza < 25.0
+
+
+def test_compute_sza_against_pysolar() -> None:
+    """pysolar adds refraction, 0.04° at a zenith of 65°; otherwise they agree."""
+    pytest.importorskip("pysolar")
+    from georeader.reflectance import compute_sza as georeader_sza
+
+    for month in (3, 6, 9, 12):
+        when = datetime(2024, month, 21, 10, 30, tzinfo=UTC)
+        ours = ComputeSZA(center_coords=(3.0, 41.5), acquisition_date=when)()
+        assert abs(ours - georeader_sza((3.0, 41.5), when)) < 0.05
 
 
 def test_dn_to_reflectance_parity_with_georeader_scalar_path() -> None:
