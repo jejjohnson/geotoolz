@@ -36,6 +36,9 @@ anywhere else).
 - **Indexing and nodata** (`GeoArray.__getitem__`, `isel`, `squeeze`,
   `valid_mask`, in `_src/array.py`) — spatial slices move the transform
   through `shift_scale_transform`, the one place slice maths lives.
+- **`to_geoswath`** (`_src/model.py`) — a cell-centred model field on a
+  lat-lon grid as a `GeoSwath`. The field and the grid are duck-typed:
+  geoarray never imports gridax.
 - **Geometry functions** (`_src/geometry.py`) — `crop`, `read_window`,
   `write_window`, `pad`, `pixel_coords`, `footprint`, and the joins
   `combine` / `stack` / `concatenate` (`GridMismatchError`).
@@ -64,7 +67,7 @@ geoarray: re-indexes and re-describes; computes no values of its own
   re-index     isel, sel, crop, read_window, write_window, pad
   join         stack, concatenate, concat        one grid
   carry        combine, map_over, GeoArray.map    one grid; your fn computes
-  re-describe  dims, coords, pixel_coords, footprint
+  re-describe  dims, coords, pixel_coords, footprint, to_geoswath
   locate       to_pixel                           coordinates → pixels
   exceptions   valid_mask, astype                 documented below
 

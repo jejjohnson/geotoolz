@@ -12,7 +12,7 @@ The *where* decides the carrier class; everything else is a named dim.
 | Carrier | Georeference | Spatial dims (last) | Typical data |
 | --- | --- | --- | --- |
 | `GeoArray` | an affine transform `(…, 6)` | `y x` | a Sentinel-2 scene, an SLA analysis, a geopatcher batch |
-| `GeoSwath` | per-pixel `lat`, `lon` `(…, row, col)` | `row col` | EMIT or TROPOMI in sensor geometry, an ORCA model grid |
+| `GeoSwath` | per-pixel `lat`, `lon` `(…, row, col)` | `row col` | EMIT or TROPOMI in sensor geometry, an ORCA model grid, a model field on a lat-lon grid (`to_geoswath`) |
 | `GeoPoints` | `xy (obs, 2)`; optional `z`, `time`, `valid (obs,)` | `obs` | Argo profiles, weather stations, along-track altimetry |
 
 Every axis has a name, stored on the carrier (`dims`), and a non-spatial

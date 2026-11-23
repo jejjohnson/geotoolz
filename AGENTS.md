@@ -39,7 +39,7 @@ geoarray: re-indexes and re-describes; computes no values of its own
   re-index     isel, sel, crop, read_window, write_window, pad
   join         stack, concatenate, concat        one grid
   carry        combine, map_over, GeoArray.map    one grid; your fn computes
-  re-describe  dims, coords, pixel_coords, footprint
+  re-describe  dims, coords, pixel_coords, footprint, to_geoswath
   locate       to_pixel                           coordinates → pixels
   exceptions   valid_mask, astype                 in geotoolz-array/AGENTS.md
 

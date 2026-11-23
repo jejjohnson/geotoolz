@@ -22,7 +22,9 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   ``y`` or ``x`` is a ``pipekit_array.DimArray`` (`to_dimarray`).
 - `GeoSwath` (per-pixel lat/lon on ``row col``) and `GeoPoints` (xy, and
   optional z, time and valid on ``obs``): the carriers whose georeference
-  is not an affine grid; `pad_points` pads a point set to a fixed N.
+  is not an affine grid; `pad_points` pads a point set to a fixed N, and
+  `to_geoswath` puts a cell-centred model field (a ``gridax.CField``) on its
+  grid's lat/lon.
 - `Grid` — a pixel grid with no data: transform, CRS and ``(H, W)``;
   hashable, so it can be a warp target or static config.
 - `PixelWindow` — a rectangle of pixels (``col_off``, ``row_off``,
@@ -112,6 +114,7 @@ from geoarray._src.geometry import (
     write_window,
 )
 from geoarray._src.grid import Grid, PixelWindow, as_crs, as_transform
+from geoarray._src.model import to_geoswath
 from geoarray._src.options import HostTransferWarning, get_options, set_options
 from geoarray._src.sampling import to_pixel
 from geoarray._src.source import AsyncRasterSource, RasterSource
@@ -173,6 +176,7 @@ __all__ = [
     "stack_items",
     "take_along",
     "to_dimarray",
+    "to_geoswath",
     "to_pixel",
     "transpose",
     "write_window",
