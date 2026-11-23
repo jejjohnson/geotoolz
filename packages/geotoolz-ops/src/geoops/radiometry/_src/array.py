@@ -1,5 +1,8 @@
 """Tier-A primitives — pure-numpy radiometric transforms.
 
+The calibration formulas are radiomax's (`radiomax.radiometry` and
+`radiomax.thermal`), under geoops' argument names and with its ``scale``.
+
 These are the deliberately *generic* radiometry primitives that work
 regardless of sensor: they take user-supplied gain / offset / scale
 constants rather than reading them from sensor metadata. Sensor-specific
@@ -47,9 +50,22 @@ from typing import Any
 
 import numpy as np
 from jaxtyping import Float, Num, Shaped
+from radiomax.radiometry import (
+    counts_to_radiance,
+    counts_to_reflectance,
+    radiance_to_counts,
+)
+from radiomax.thermal import PlanckLinear, brightness_temperature_band
 
 from geoops._src.dtype import as_float
 from geoops._src.stretch import percentile_stretch
+
+
+def _over(gain: Any, scale: Any) -> Any:
+    """``gain / scale``, and the gain itself, untouched, for a scale of 1."""
+    if isinstance(scale, (int, float)) and scale == 1.0:
+        return gain
+    return np.asarray(gain) / scale if isinstance(gain, (list, tuple)) else gain / scale
 
 
 def dn_to_radiance(
@@ -88,8 +104,8 @@ def dn_to_radiance(
         coefficients can't overflow the DN dtype (cast outside if you
         want float32 to save memory); float input keeps its precision.
     """
-    dn = as_float(dn, np.float64)
-    return gain * dn / scale + offset
+    # L = (gain / scale) DN + offset
+    return counts_to_radiance(dn, _over(gain, scale), offset)
 
 
 def radiance_to_dn(
@@ -114,8 +130,8 @@ def radiance_to_dn(
         DN array in floating point. Cast or round outside if integer DN are
         required. Integer radiance is promoted to float64 first.
     """
-    radiance = as_float(radiance, np.float64)
-    return (radiance - offset) * scale / gain
+    # DN = (L - offset) / (gain / scale)
+    return radiance_to_counts(radiance, _over(gain, scale), offset)
 
 
 def dn_to_reflectance(
@@ -163,8 +179,8 @@ def dn_to_reflectance(
         well-calibrated inputs. Integer DN are promoted to float64
         before any arithmetic.
     """
-    dn = as_float(dn, np.float64)
-    return scale * dn + offset
+    # rho = scale DN + offset
+    return counts_to_reflectance(dn, scale, offset)
 
 
 def min_max_normalize(
@@ -306,9 +322,10 @@ def bt_from_radiance(
         k2: Planck ``K2`` constant. Scalar or per-band array.
 
     Returns:
-        Brightness temperature in Kelvin.
+        Brightness temperature in Kelvin; NaN where the radiance is not
+        positive.
     """
-    return k2 / np.log((k1 / radiance) + 1.0)
+    return brightness_temperature_band(radiance, PlanckLinear(k1, k2))
 
 
 def dos1(
