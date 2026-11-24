@@ -12,7 +12,6 @@ from geophysix import columns, thermo
 from geophysix.constants import CH4, STANDARD, Gas
 from xrproducts.types import Variable, apply_cf_attrs
 
-from xrops._src.elementwise import elementwise
 from xrops.atm._src.vertical import column_integral
 
 
@@ -121,7 +120,7 @@ def dry_air_column(
         ``ds`` with ``name`` added [molecules m⁻²].
     """
     water = 0.0 if water_vapour_column is None else ds[water_vapour_column]
-    n_dry = elementwise(columns.dry_air_column, ds[surface_pressure], water)
+    n_dry = columns.dry_air_column(ds[surface_pressure], water)
     n_dry = n_dry * STANDARD.avogadro
     out = ds.copy()
     out[name] = apply_cf_attrs(n_dry, _DRY_AIR_COLUMN, overwrite=True)
@@ -201,9 +200,9 @@ def column_mass_to_delta_vmr(
         ``column_mass`` broadcast against the layer parameters.
     """
     gas = Gas("gas", molar_mass_kg_mol)
-    n_air = elementwise(thermo.number_density, pressure_pa, temperature_k)
-    molecules_per_m2 = elementwise(
-        columns.convert, column_mass, "kg_m2", "molecules_m2", gas=gas
+    n_air = thermo.number_density(pressure_pa, temperature_k)
+    molecules_per_m2 = columns.convert(
+        column_mass, "kg_m2", "molecules_m2", gas=gas
     )
     delta = molecules_per_m2 / (n_air * path_length_m)
     return delta.assign_attrs(long_name="Mixing-ratio enhancement", units="1")

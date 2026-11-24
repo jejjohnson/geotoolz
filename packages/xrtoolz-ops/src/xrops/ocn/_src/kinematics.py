@@ -43,7 +43,6 @@ from geophysix import rotation
 from geophysix.seawater import LINEAR_EOS
 
 from xrops import grad
-from xrops._src.elementwise import elementwise
 
 
 type Geometry = Literal["cartesian", "rectilinear", "spherical"]
@@ -63,9 +62,9 @@ def coriolis_parameter(
     Returns:
         Coriolis parameter with the same shape as ``lat``.
     """
-    if isinstance(lat, xr.DataArray):
-        return elementwise(rotation.coriolis, lat)
     f = rotation.coriolis(lat)
+    if isinstance(f, xr.DataArray):
+        return f
     return float(f) if np.ndim(f) == 0 else f
 
 

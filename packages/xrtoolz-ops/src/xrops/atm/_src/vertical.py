@@ -16,7 +16,6 @@ from geophysix.constants import STANDARD
 from geophysix.thermo import virtual_temperature
 from xrproducts.types import Variable, apply_cf_attrs
 
-from xrops._src.elementwise import elementwise
 
 
 #: ``R_d / g₀`` [m K⁻¹], the hypsometric scale per kelvin.
@@ -181,11 +180,7 @@ def hypsometric_height(
     for label, da in ((pressure, p), (temperature, t)):
         if level not in da.dims:
             raise ValueError(f"{label!r} does not carry the level dim {level!r}")
-    tv = (
-        elementwise(virtual_temperature, t, ds[specific_humidity])
-        if specific_humidity
-        else t
-    )
+    tv = virtual_temperature(t, ds[specific_humidity]) if specific_humidity else t
     ps = ds[surface_pressure]
     # 1-D pressure axes may run top-down (CDS/ERA5 style); integrate
     # surface-first and flip the result back into the dataset's order.

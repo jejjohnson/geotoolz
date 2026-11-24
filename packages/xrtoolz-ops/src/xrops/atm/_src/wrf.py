@@ -23,7 +23,6 @@ from geophysix.constants import STANDARD
 from geophysix.thermo import temperature_from_potential_temperature
 from xrproducts.types import Variable, apply_cf_attrs
 
-from xrops._src.elementwise import elementwise
 
 
 #: Gravitational acceleration WRF itself uses for the geopotential [m s⁻²]; the
@@ -231,11 +230,8 @@ def wrf_temperature(ds: xr.Dataset) -> xr.DataArray:
     """
     pressure = ds["P"] + ds["PB"]
     # T = θ (p / p₀)^κ,  θ = T' + θ_base
-    return elementwise(
-        temperature_from_potential_temperature,
-        ds["T"] + THETA_BASE,
-        pressure,
-        reference_pressure=P_REFERENCE,
+    return temperature_from_potential_temperature(
+        ds["T"] + THETA_BASE, pressure, reference_pressure=P_REFERENCE
     )
 
 
