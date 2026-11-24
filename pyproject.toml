@@ -45,13 +45,15 @@ pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = 
 # install is NumPy-only (geoarray's affine kernels); `functax[jax]` brings
 # the plans (geoops' `interp` extra).
 functax = { git = "https://github.com/jejjohnson/functax", tag = "v0.0.6" }
-# geophysix (constants and closed-form Earth and air maths, NumPy-only with
-# JAX optional) is not on PyPI either, so it comes from GitHub at a release tag.
-geophysix = { git = "https://github.com/jejjohnson/geophysix", tag = "v0.0.4" }
+# geophysix (constants and closed-form Earth and air maths on any array library
+# and on DataArrays, JAX optional) is not on PyPI either, so it comes from GitHub
+# at a release tag. It and radiomax source pipekit at the tag above: the three
+# move together.
+geophysix = { git = "https://github.com/jejjohnson/geophysix", tag = "v0.0.7" }
 # radiomax (observation geometry and radiometry on any array library, on
 # geophysix) is not on PyPI either. It sources geophysix from this same URL:
 # uv reads `….git` as another one.
-radiomax = { git = "https://github.com/jejjohnson/radiomax", tag = "v0.0.6" }
+radiomax = { git = "https://github.com/jejjohnson/radiomax", tag = "v0.0.9" }
 
 [build-system]
 requires = ["hatchling"]

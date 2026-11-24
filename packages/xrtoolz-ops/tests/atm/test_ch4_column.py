@@ -241,3 +241,20 @@ def test_column_mass_to_delta_vmr_broadcasts_layer_parameters():
     assert float(out[2]) == pytest.approx(
         2.0 * float(out[1]) * 300.0 / 290.0, rel=1e-12
     )
+
+
+def test_columns_stay_lazy_on_dask():
+    pytest.importorskip("dask")
+    ds = xr.Dataset(
+        {"sp": ("x", [1.0e5, 9.0e4, 8.0e4]), "tcwv": ("x", [20.0, 5.0, 1.0])}
+    )
+    lazy = dry_air_column(ds.chunk({"x": 1}), water_vapour_column="tcwv")
+    eager = dry_air_column(ds, water_vapour_column="tcwv")
+    assert lazy["dry_air_column"].chunks is not None
+    xr.testing.assert_allclose(lazy.compute(), eager)
+
+    mass = xr.DataArray([0.0, 0.01, 0.02], dims="x")
+    layer = {"pressure_pa": 1.0e5, "temperature_k": 288.15, "path_length_m": 100.0}
+    delta = column_mass_to_delta_vmr(mass.chunk({"x": 1}), **layer)
+    assert delta.chunks is not None
+    xr.testing.assert_allclose(delta.compute(), column_mass_to_delta_vmr(mass, **layer))

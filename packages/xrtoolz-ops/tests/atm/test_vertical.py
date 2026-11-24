@@ -141,6 +141,17 @@ def test_surface_height_offset_and_humidity(ds_isothermal):
     np.testing.assert_allclose(wet, dry * (1.0 + excess * 0.01), rtol=1e-12)
 
 
+def test_moist_height_stays_lazy_on_dask(ds_isothermal):
+    pytest.importorskip("dask")
+    moist = ds_isothermal.assign(q=(("level", "x"), np.full((6, 2), 0.01)))
+    kwargs = {"pressure": "level", "specific_humidity": "q"}
+    lazy = hypsometric_height(moist.chunk({"x": 1}), **kwargs)["height"]
+    assert lazy.chunks is not None
+    xr.testing.assert_allclose(
+        lazy.compute(), hypsometric_height(moist, **kwargs)["height"]
+    )
+
+
 def test_hypsometric_nan_temperature_invalidates_levels_above(ds_isothermal):
     # NaN at level 2 of column 0: levels 0-1 are still anchored to the
     # surface, level 2 and everything above are NaN; column 1 is untouched.

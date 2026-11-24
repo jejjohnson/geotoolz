@@ -13,8 +13,6 @@ import xarray as xr
 from geophysix import wind
 from xrproducts.types import Variable, apply_cf_attrs
 
-from xrops._src.elementwise import elementwise
-
 
 _WIND_SPEED = Variable(
     name="wind_speed",
@@ -56,7 +54,7 @@ def wind_speed(
         components).
     """
     # |V| = √(u² + v²)
-    speed = elementwise(wind.wind_speed, ds[u], ds[v])
+    speed = wind.wind_speed(ds[u], ds[v])
     out = ds.copy()
     out[name] = apply_cf_attrs(speed, _WIND_SPEED, overwrite=True)
     return out
@@ -94,7 +92,7 @@ def wind_direction(
     if convention not in ("from", "to"):
         raise ValueError(f"convention must be 'from' or 'to', got {convention!r}")
     # θ = (270° − atan2(v, u)) mod 360°, plus 180° under "to"
-    theta = elementwise(wind.wind_direction, ds[u], ds[v], convention=convention)
+    theta = wind.wind_direction(ds[u], ds[v], convention=convention)
     out = ds.copy()
     variable = _WIND_FROM if convention == "from" else _WIND_TO
     out[name] = apply_cf_attrs(theta, variable, overwrite=True)
@@ -134,16 +132,7 @@ def wind_components(
     if convention not in ("from", "to"):
         raise ValueError(f"convention must be 'from' or 'to', got {convention!r}")
     # u = −|V| sin θ,  v = −|V| cos θ  (signs flip under "to")
-    east = elementwise(
-        lambda s, d: wind.wind_components(s, d, convention=convention)[0],
-        ds[speed],
-        ds[direction],
-    )
-    north = elementwise(
-        lambda s, d: wind.wind_components(s, d, convention=convention)[1],
-        ds[speed],
-        ds[direction],
-    )
+    east, north = wind.wind_components(ds[speed], ds[direction], convention=convention)
     out = ds.copy()
     out[u] = apply_cf_attrs(east, "u", overwrite=True)
     out[v] = apply_cf_attrs(north, "v", overwrite=True)
