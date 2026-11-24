@@ -395,7 +395,7 @@ class CLAHE(Operator):
                 "nbins": self.nbins,
             },
         )
-        return unwrap(_declare_fill(op(carrier), np.nan))
+        return unwrap(_declare_fill(op(carrier), np.nan, carrier))
 
     def get_config(self) -> dict[str, Any]:
         if isinstance(self.window, tuple):
