@@ -51,8 +51,8 @@ and a float64 transform, so ``jit`` reuses compiled code across scenes and
   EPSG code or WKT.
 - Backends (C1): NumPy and JAX carriers mix eagerly. ``np.asarray(g)``
   copies JAX data to the host (and raises `GeoArrayTraceError` under a
-  trace); joins and writes promote NumPy inputs to JAX. `set_options`
-  (``warn_on_transfer``) / `get_options`, `HostTransferWarning`.
+  trace); in joins and writes NumPy inputs join JAX ones. Both are silent
+  unless `pipekit_ops.guard` is on.
 - `geoarray.coords` — the standard coordinates of named dims:
   `SpectralAxis`, `VariableAxis`, `VerticalAxis` / `Vertical`, `TimeAxis`,
   and the grids `PixelGrid`, `SwathGrid`, `CurvilinearGrid`, `PointAxis`.
@@ -115,7 +115,6 @@ from geoarray._src.geometry import (
 )
 from geoarray._src.grid import Grid, PixelWindow, as_crs, as_transform
 from geoarray._src.model import to_geoswath
-from geoarray._src.options import HostTransferWarning, get_options, set_options
 from geoarray._src.sampling import to_pixel
 from geoarray._src.source import AsyncRasterSource, RasterSource
 
@@ -150,7 +149,6 @@ __all__ = [
     "GeoSwathAdapter",
     "Grid",
     "GridMismatchError",
-    "HostTransferWarning",
     "LabelError",
     "PixelWindow",
     "RasterSource",
@@ -163,7 +161,6 @@ __all__ = [
     "concatenate",
     "crop",
     "footprint",
-    "get_options",
     "isel",
     "map_over",
     "pad",
@@ -171,7 +168,6 @@ __all__ = [
     "pixel_coords",
     "read_window",
     "sel",
-    "set_options",
     "stack",
     "stack_items",
     "take_along",

@@ -248,14 +248,17 @@ def test_nodata_and_off_grid_pixels_hold_the_fill() -> None:
     assert np.isfinite(values[:20, :20][values[:20, :20] != -9999.0]).all()
 
 
-def test_a_jax_carrier_needs_the_interp_engine(x64: ModuleType) -> None:
+def test_a_traced_carrier_needs_the_interp_engine(x64: ModuleType) -> None:
     from pipekit_ops import BackendError
 
     scene = _scene(1, 1)[0].to_jax()
-    with pytest.raises(BackendError, match="Reproject"):
-        gz.geom.Reproject(dst_crs="EPSG:4326")(scene)
-    with pytest.raises(BackendError, match="Reproject"):
-        gz.geom.Reproject(target=_lonlat_target())(scene)
+    for gdal in (
+        gz.geom.Reproject(dst_crs="EPSG:4326"),
+        gz.geom.Reproject(target=_lonlat_target()),
+    ):
+        assert gdal(scene).backend == "jax"  # on the host and back
+        with pytest.raises(BackendError, match="Reproject"):
+            x64.jit(gdal)(scene)
     out = gz.geom.Reproject(target=_lonlat_target(), engine="interp")(scene)
     assert type(out.data).__module__.startswith("jax")
 

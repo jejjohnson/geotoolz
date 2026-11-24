@@ -297,11 +297,7 @@ def test_points_with_another_vertical_do_not_combine() -> None:
 
 
 def test_points_with_times_combine_across_backends(x64: ModuleType) -> None:
-    """datetime64 times (NumPy) and int64 ns (JAX) are the same geolocation.
-
-    Through the adapter's check: ``combine`` itself refuses mixed backends
-    (pipekit's BackendError, decision GA-C1), but the check must not.
-    """
+    """datetime64 times (NumPy) and int64 ns (JAX) are the same geolocation."""
     p = _profile()
     GeoPointsAdapter().check_compatible(p, p.to_jax())
     j = p.to_jax()

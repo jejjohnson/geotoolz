@@ -15,6 +15,8 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
+from pipekit_array.dims import join_backends
+from pipekit_ops import guard_level, report_move
 
 from geoarray._src.array import INHERIT, GeoArray, _normalize_fill, infer_dims
 from geoarray._src.attrs import concat_bands
@@ -140,34 +142,19 @@ def _require_same_fill(carriers: list[GeoArray], what: str) -> None:
             )
 
 
-_PROMOTION_WARNING = (
-    "{what}: NumPy and JAX inputs are moved to JAX here, which is deprecated "
-    "(it hides a host-to-device copy); from geotoolz-array 0.4 it raises "
-    "pipekit_array.BackendError, as KernelOp already does. Call .to_jax() on "
-    "the NumPy inputs first."
-)
-
-
-def _warn_promotion(what: str) -> None:
-    warnings.warn(
-        _PROMOTION_WARNING.format(what=what), DeprecationWarning, stacklevel=4
-    )
-
-
 def _promote(carriers: list[GeoArray], what: str) -> list[GeoArray]:
-    """All carriers on JAX when any is, with a `DeprecationWarning` (removal of C1).
+    """All carriers on JAX when any is: NumPy joins JAX (C1, pipekit#253).
 
-    Under a trace a NumPy carrier is a constant of the traced function, as
-    in any ``jax.jit`` closure, so it joins without a warning.
+    `pipekit_ops.guard` reports an eager join, and a dtype it widens. Under a
+    trace a NumPy carrier is a constant of the traced function.
 
     Raises:
-        X64Error: Promotion needs ``jax_enable_x64`` (float64 transforms).
+        X64Error: A join needs ``jax_enable_x64`` (float64 transforms).
     """
-    backends = {g.backend for g in carriers}
-    if backends == {"numpy"}:
+    if {g.backend for g in carriers} == {"numpy"}:
         return carriers
-    if "numpy" in backends and not any(is_tracer(g.data) for g in carriers):
-        _warn_promotion(what)
+    if guard_level() != "off":
+        join_backends([g.data for g in carriers], what)  # reports a mix
     return [g.to_jax() if g.backend == "numpy" else g for g in carriers]
 
 
@@ -341,7 +328,7 @@ def stack_items_carriers(carriers: Sequence[GeoArray], dim: str) -> GeoArray:
         ValueError: ``dim`` is already a dim, an item is batched, or the
             items differ in dims, shape, fill, coordinates or attrs.
         GridMismatchError: The items' CRS or spatial shape differ.
-        pipekit_array.BackendError: NumPy and JAX items are mixed.
+        X64Error: A NumPy item must join JAX and x64 is off.
 
     Example:
         >>> import numpy as np
@@ -363,14 +350,8 @@ def stack_items_carriers(carriers: Sequence[GeoArray], dim: str) -> GeoArray:
                 f"stack_items: item {i} is already batched {g.batch_dims}; "
                 "concat along its batch dim instead"
             )
-    backends = {g.backend for g in gs}
-    if len(backends) > 1:
-        from pipekit_array import BackendError
-
-        raise BackendError(
-            f"stack_items: items on {sorted(backends)}; call .to_jax() on the "
-            "NumPy ones first (inputs never move between backends silently)."
-        )
+    gs = _promote(gs, "stack_items")
+    first = gs[0]
     _require_same_crs_and_shape(gs, "stack_items")
     _require_same_fill(gs, "stack_items")
     for i, g in enumerate(gs[1:], start=1):
@@ -746,7 +727,7 @@ def write_window(g: GeoArray, values: Any, window: PixelWindow) -> GeoArray:
         )
     if g.backend == "numpy" and backend_of(part) == "jax":
         if not is_tracer(part):
-            _warn_promotion("write_window")
+            report_move("write_window", "NumPy data joined jax")
         g = g.to_jax()
     if g.backend == "numpy":
         data = np.array(g.data, copy=True)

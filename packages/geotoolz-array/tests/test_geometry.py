@@ -9,7 +9,9 @@ from types import ModuleType
 import numpy as np
 import pytest
 from conftest import CRS, TRANSFORM
+from pipekit_ops import BackendError, guard
 
+import geoarray
 from geoarray import (
     GeoArray,
     Grid,
@@ -238,11 +240,10 @@ class TestReadWriteWindow:
         )
         assert float(out[0, 0]) == 0.0
         assert float(out[2, 2]) == float(g.data[2, 2])
-        with pytest.warns(DeprecationWarning, match="write_window"):
-            eager = write_window(
-                g, x64.numpy.ones((2, 2), dtype=x64.numpy.float32), window
-            )
-        assert eager.backend == "jax"
+        values = x64.numpy.ones((2, 2), dtype=x64.numpy.float32)
+        assert write_window(g, values, window).backend == "jax"
+        with guard("raise"), pytest.raises(BackendError, match="write_window: NumPy"):
+            write_window(g, values, window)
 
     def test_write_window_jax(self, x64: ModuleType) -> None:
         g = _scene().to_jax()
@@ -360,39 +361,47 @@ class TestJoins:
         assert stack([single, single], axis=1).shape == (2, 2, 4, 4)
         assert stack([single, single], axis=1).batch_shape == (2,)
 
-    def test_mixed_backends_promote_to_jax_with_a_warning(
-        self, x64: ModuleType
-    ) -> None:
-        """C1 is deprecated: mixed inputs still promote in 0.3, and warn."""
+    def test_numpy_joins_jax(self, x64: ModuleType) -> None:
+        """C1, as pipekit#253 has it: either order, on JAX, and no warning."""
         g = _scene()
-        with pytest.warns(DeprecationWarning, match=r"combine: .*to_jax\(\)"):
-            out = combine(x64.numpy.add, g, g.to_jax())
-        assert out.backend == "jax"
-        # Output stays where the computation ran: a NumPy function -> NumPy.
-        with pytest.warns(DeprecationWarning, match="0.4"):
-            assert combine(np.add, g, g.to_jax()).backend == "numpy"
-        with pytest.warns(DeprecationWarning, match="stack"):
-            assert stack([g, g.to_jax()], "time").backend == "jax"
-        with pytest.warns(DeprecationWarning, match="concat"):
-            assert concatenate([g.to_jax(), g]).backend == "jax"
-
-    def test_one_backend_and_traced_closures_do_not_warn(self, x64: ModuleType) -> None:
-        g = _scene()
+        on_jax = g.to_jax()
         with warnings.catch_warnings():
-            warnings.simplefilter("error", DeprecationWarning)
-            combine(np.add, g, g)
-            combine(x64.numpy.add, g.to_jax(), g.to_jax())
+            warnings.simplefilter("error")
+            for pair in ([g, on_jax], [on_jax, g]):
+                for out in (
+                    combine(lambda a, b: a + b, *pair),
+                    stack(pair, "time"),
+                    geoarray.concat(pair, "band"),
+                ):
+                    assert out.backend == "jax"
+                    assert type(out.transform).__module__.startswith("jax")
+            # the output stays where the computation ran
+            assert combine(np.add, g, on_jax).backend == "numpy"
+
+    @pytest.mark.parametrize("what", ["combine", "stack", "concat"])
+    def test_the_guard_reports_a_join(self, what: str, x64: ModuleType) -> None:
+        join = {
+            "combine": lambda *gs: combine(lambda a, b: a + b, *gs),
+            "stack": lambda *gs: stack(gs, "time"),
+            "concat": lambda *gs: geoarray.concat(gs, "band"),
+        }[what]
+        g = _scene()
+        with guard("raise"):
+            join(g, g)
+            join(g.to_jax(), g.to_jax())
             # under jit a NumPy carrier is a constant of the trace
-            x64.jit(lambda d: combine(x64.numpy.add, g, g.to_jax().with_data(d)).data)(
+            x64.jit(lambda d: join(g, g.to_jax().with_data(d)).data)(
                 x64.numpy.asarray(g.data)
             )
+            with pytest.raises(BackendError, match=rf"^{what}: NumPy data joined jax"):
+                join(g, g.to_jax())
 
-    def test_promotion_needs_x64(self, x64: ModuleType) -> None:
+    def test_a_join_needs_x64(self, x64: ModuleType) -> None:
         g = _scene()
         on_jax = g.to_jax()
         x64.config.update("jax_enable_x64", False)
         try:
-            with pytest.raises(X64Error), pytest.warns(DeprecationWarning):
+            with pytest.raises(X64Error):
                 stack([g, on_jax], "time")
         finally:
             x64.config.update("jax_enable_x64", True)

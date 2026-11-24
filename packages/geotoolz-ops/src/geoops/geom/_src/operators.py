@@ -295,8 +295,8 @@ class Reproject(Operator):
     :func:`georeader.read.read_to_crs`: the destination grid is anchored to
     the input's bounding box reprojected into ``dst_crs``, and the
     resolution defaults to the input's pixel size expressed in the
-    destination CRS; it runs on NumPy only, and a JAX carrier raises
-    `pipekit_ops.BackendError`. ``engine="interp"`` warps onto ``target``
+    destination CRS; it runs on NumPy only (a JAX carrier goes to the host
+    and back, and a trace is refused). ``engine="interp"`` warps onto ``target``
     through a functax plan (the ``[interp]`` extra): the target pixel
     centres go through pyproj to the source CRS once, a scheme plans the
     read-out H on the source grid, and every frame and band is H y. It runs
@@ -386,10 +386,16 @@ class Reproject(Operator):
         # runtime only: X_* = φ(target centres) per source CRS, not config
         self._coordinates: dict[Any, np.ndarray] = {}
 
-    def _check_backends(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+    def _place_inputs(
+        self,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        backends: tuple[str, ...] | None = None,
+    ) -> tuple[tuple[Any, ...], dict[str, Any], bool]:
         # the functax engine runs on NumPy and JAX; GDAL on NumPy only
-        if self.engine == "gdal":
-            super()._check_backends(args, kwargs)
+        if self.engine == "interp":
+            return args, kwargs, False
+        return super()._place_inputs(args, kwargs, backends)
 
     def _apply(self, gt: GeoArray) -> GeoArray:
         if self.engine == "interp":

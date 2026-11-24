@@ -345,11 +345,13 @@ def assert_backends(op: Any, sample: Any, *others: Any) -> None:
     """``op`` declares its backends and keeps them (#532).
 
     - ``backends`` is a non-empty tuple of known backend names.
-    - When JAX is installed: an operator that does not list ``"jax"``
-      refuses a JAX carrier with `pipekit_ops.BackendError` naming itself; one
-      that lists it matches its NumPy result on JAX carriers, returns JAX
-      data, and traces once under ``jax.jit`` for two same-shape inputs
-      on different grids (the transform is a leaf, never static).
+    - When JAX is installed: an operator that does not list ``"jax"`` runs on
+      the host when it is called eagerly, matches its NumPy result and returns
+      JAX data, and refuses a trace with `pipekit_ops.BackendError` naming
+      itself (pipekit#253); one that lists it matches its NumPy result on JAX
+      carriers, returns JAX data, and traces once under ``jax.jit`` for two
+      same-shape inputs on different grids (the transform is a leaf, never
+      static).
     - An operator that sets ``traceable = False`` (it stores what it
       computes on itself, as a tap does) runs eagerly on JAX and must
       refuse ``jax.jit`` with a ``TypeError`` naming itself instead.
@@ -383,17 +385,6 @@ def assert_backends(op: Any, sample: Any, *others: Any) -> None:
     jax.config.update("jax_enable_x64", True)
     try:
         jaxed = [c.to_jax() for c in carriers]
-        if "jax" not in backends:
-            try:
-                copy.deepcopy(op)(*jaxed)
-            except BackendError as exc:
-                assert name in str(exc), f"BackendError does not name {name}: {exc}"
-            else:
-                raise AssertionError(
-                    f"{name} lists {backends} but ran on JAX carriers: refuse them "
-                    "(pipekit's backends check) or list 'jax' and keep its contract"
-                )
-            return
         want = copy.deepcopy(op)(*carriers)
         got = copy.deepcopy(op)(*jaxed)
         for g, w in zip(geoarrays(got), geoarrays(want), strict=True):
@@ -404,7 +395,18 @@ def assert_backends(op: Any, sample: Any, *others: Any) -> None:
                 equal_nan=True,
                 err_msg=f"{name} on JAX does not match its NumPy result",
             )
-        if not getattr(op, "traceable", True):
+        if "jax" not in backends:
+            try:
+                jax.jit(lambda *xs: copy.deepcopy(op)(*xs))(*jaxed)
+            except BackendError as exc:
+                assert name in str(exc), f"BackendError does not name {name}: {exc}"
+            else:
+                raise AssertionError(
+                    f"{name} lists {backends} but ran under jax.jit: list 'jax' and "
+                    "keep its contract"
+                )
+            return
+        if not op.traceable:
             try:
                 jax.jit(lambda *xs: copy.deepcopy(op)(*xs))(*jaxed)
             except TypeError as exc:

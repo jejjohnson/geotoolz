@@ -43,8 +43,7 @@ anywhere else).
   `write_window`, `pad`, `pixel_coords`, `footprint`, and the joins
   `combine` / `stack` / `concatenate` (`GridMismatchError`).
 - **The backend dispatch** (`_src/backend.py`) — the one place that tells
-  NumPy from JAX and imports JAX on demand; `_src/options.py` holds
-  `set_options` (``warn_on_transfer``).
+  NumPy from JAX and imports JAX on demand.
 - **`RasterSource`, `AsyncRasterSource`** (`_src/source.py`) — the
   protocols every lazy reader of the stack implements (grid, shape, dtype,
   fill, attrs; `read_window` / `load`, or `aread_window` / `aload`). A
@@ -143,13 +142,13 @@ ensemble draw) are kept for dim names, never function names.
   `(time, band, y, x)` into `(time, y, x)` raises, because 0.2 code (the
   geoops kernels, `axis=-3`) reads `(T, H, W)` as `(C, H, W)`. By name
   (`isel`, `sel`) the stored dims say what is left, so it is allowed.
-- **NumPy and JAX never mix silently (C1 is deprecated).** Mixed eager
-  inputs to the joins and `write_window` still promote to JAX in 0.3, with a
-  `DeprecationWarning` (`_promote` in `_src/geometry.py`); from 0.4 they
-  raise `pipekit_array.BackendError`, as `KernelOp` already does. Under a
-  trace a NumPy carrier is a constant of the traced function and joins
-  without a warning. `__array__` copies JAX data to the host eagerly and
-  raises `GeoArrayTraceError` under a trace.
+- **NumPy joins JAX (C1, pipekit#253).** In the joins and `write_window`
+  a NumPy carrier next to a JAX one moves to JAX (`_promote` in
+  `_src/geometry.py`), and `__array__` copies JAX data to the host. Both are
+  silent, and both call `pipekit_ops.report_move`, so that
+  `pipekit_ops.guard` reports them. Under a trace a NumPy carrier is a
+  constant of the traced function, and `__array__` raises
+  `GeoArrayTraceError`.
 - JAX is optional. Import it through `_src/backend.py` (`import_jax`,
   `is_jax_array`, `is_tracer`); a NumPy-only install never loads it.
   Importing geoarray never imports JAX, even when it is installed (gate

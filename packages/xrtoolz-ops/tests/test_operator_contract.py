@@ -10,7 +10,7 @@ import numpy as np
 import pipekit_ops
 import pytest
 import xarray as xr
-from pipekit_ops.adapters import BackendError
+from pipekit_ops import BackendError, backend_of, guard
 
 import xrops
 from xrops.metrics import RMSE
@@ -64,15 +64,54 @@ def _field() -> xr.DataArray:
     )
 
 
-def test_a_jax_backed_dataarray_is_refused_naming_the_conversion() -> None:
+def _on_jax(field: xr.DataArray) -> xr.DataArray:
     jnp = pytest.importorskip("jax.numpy")
+    return field.copy(data=jnp.asarray(field.values))
+
+
+def test_a_jax_backed_input_goes_to_the_host_and_back() -> None:
+    field = _field().astype("float32")
+    on_jax = _on_jax(field)
+    gradient = xrops.Gradient(dims=("lat", "lon"))
+    out, want = gradient(on_jax), gradient(field)  # a DataArray
+    for name, part in (
+        out.data_vars.items() if isinstance(out, xr.Dataset) else [("", out)]
+    ):
+        reference = want[name] if isinstance(want, xr.Dataset) else want
+        assert backend_of(part) == "jax"
+        np.testing.assert_allclose(part.values, reference.values, rtol=1e-5)
+    ds, host = on_jax.to_dataset(), field.to_dataset()
+    rmse = RMSE(variable="ssh", dims=("time",))
+    for pair in ([ds, ds], [ds, host], [host, ds]):  # a Dataset, by its variables
+        result = rmse(*pair)
+        assert backend_of(result) == "jax"
+        np.testing.assert_allclose(result.values, rmse(host, host).values, atol=1e-6)
+
+
+def test_the_guard_names_the_operator_that_copies_jax_data() -> None:
     field = _field()
-    on_jax = field.copy(data=jnp.asarray(field.values))
-    with pytest.raises(BackendError, match="not jax"):
-        xrops.Gradient(dims=("lat", "lon"))(on_jax)  # a DataArray
-    ds = on_jax.to_dataset()
-    with pytest.raises(BackendError, match="not jax"):
-        RMSE(variable="ssh", dims=("time",))(ds, ds)  # a Dataset, by its variables
+    ds = _on_jax(field).to_dataset()
+    rmse = RMSE(variable="ssh", dims=("time",))
+    with guard("raise"):
+        rmse(field.to_dataset(), field.to_dataset())
+        with pytest.raises(BackendError, match="RMSE: JAX data copied to the host"):
+            rmse(ds, ds)
+
+
+def test_traced_data_and_jax_beside_dask_are_refused() -> None:
+    jax = pytest.importorskip("jax")
+    pytest.importorskip("dask")
+    field = _field()
+    rmse = RMSE(variable="ssh", dims=("time",))
+    with pytest.raises(BackendError, match="RMSE: inputs on"):
+        rmse(_on_jax(field).to_dataset(), field.chunk().to_dataset())
+
+    def run(values):
+        ds = field.copy(data=values).to_dataset()
+        return rmse(ds, ds).data
+
+    with pytest.raises(BackendError, match=r"RMSE runs on .*jax\.jit"):
+        jax.jit(run)(jax.numpy.asarray(field.values))
 
 
 def test_numpy_beside_dask_is_one_lazy_computation() -> None:
@@ -109,19 +148,22 @@ def test_a_geometry_operator_on_a_dataarray_names_lift_and_lift_runs_it() -> Non
     )
 
 
-def test_a_jax_backed_datatree_is_refused_too() -> None:
-    jnp = pytest.importorskip("jax.numpy")
+def test_a_jax_backed_datatree_goes_to_the_host_and_back() -> None:
     field = _field()
-    ds = field.copy(data=jnp.asarray(field.values)).to_dataset()
+    ds = _on_jax(field).to_dataset()
     tree = xr.DataTree.from_dict({"a": ds, "b": ds})
     rmse = RMSE(variable="ssh", dims=("time",))
-    with pytest.raises(BackendError, match="not jax"):
-        rmse(tree, tree)  # the leaf-wise map
+    out = rmse(tree, tree)  # the leaf-wise map
+    for leaf in ("a", "b"):
+        assert all(backend_of(v) == "jax" for v in out[leaf].data_vars.values())
+    numpy_tree = xr.DataTree.from_dict(
+        {"a": field.to_dataset(), "b": field.to_dataset()}
+    )
+    assert isinstance(rmse(numpy_tree, numpy_tree), xr.DataTree)
     from xrops.learn import XarrayEstimator
 
     sklearn = pytest.importorskip("sklearn")
     est = XarrayEstimator(sklearn.preprocessing.StandardScaler(), sample_dims="time")
-    with pytest.raises(BackendError, match="not jax"):
-        est(tree)  # a whole-tree override
-    numpy_tree = xr.DataTree.from_dict({"a": field.to_dataset()})
-    assert isinstance(rmse(numpy_tree, numpy_tree), xr.DataTree)
+    scaled = est.fit(numpy_tree)(tree)  # a whole-tree override
+    for leaf in ("a", "b"):
+        assert all(backend_of(v) == "jax" for v in scaled[leaf].data_vars.values())

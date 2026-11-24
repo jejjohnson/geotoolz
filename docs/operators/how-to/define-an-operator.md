@@ -59,9 +59,10 @@ assert gz.Operator.from_state(op.state).get_config() == op.get_config()
 - the per-band `attrs` keys match the output bands;
 - the fill suits the output dtype, the input's nodata stays nodata, and
   the input is left untouched;
-- `backends` is declared: a NumPy-only operator refuses a JAX carrier
-  with `pipekit_ops.BackendError`, and one that lists `"jax"` matches its
-  NumPy result and traces once under `jax.jit`;
+- `backends` is declared: called eagerly, a NumPy-only operator runs on the
+  host for a JAX carrier and returns JAX; under `jax.jit` it raises
+  `pipekit_ops.BackendError`. One that lists `"jax"` matches its NumPy result
+  and traces once under `jax.jit`;
 - a `(T, C, H, W)` stack matches the per-frame results, or is rejected
   with an error naming the operator;
 - a georeader `GeoTensor` is refused with a `TypeError` naming
@@ -77,7 +78,7 @@ assert gz.Operator.from_state(op.state).get_config() == op.get_config()
 | Hold configuration only, never a carrier | A second raster is a positional `_apply` argument, so a `Graph` can wire it in. |
 | Implement `_apply`, never `__call__` | `__call__` switches between eager runs and graph recording. |
 | Read with `np.asarray(gt)`, rewrap with `wrap_like` | Plain arrays and GeoArrays both work; CRS, transform and attrs carry over. |
-| Declare `backends` | `("numpy",)` for an `_apply` that reads with `np.asarray`; `("numpy", "jax")` only when it computes with the carrier's namespace and runs under `jax.jit`. A carrier on another backend is refused before `_apply` runs, never converted. |
+| Declare `backends` | `("numpy",)` for an `_apply` that reads with `np.asarray`; `("numpy", "jax")` only when it computes with the carrier's namespace and runs under `jax.jit`. pipekit moves the carrier to a backend you list and the result back to JAX, and refuses a trace or a dask carrier you do not list. |
 | Never mutate the input | The same scene may feed other branches. |
 | Declare the output fill | `False` for masks, `0` for labels and counts, `NaN` for new float quantities, `carried_fill(gt, dtype)` for carried values. |
 | Use the shared parameter names | `red` / `nir` / `qa_band` for one band, `bands`, `fill_value`, `window`, `seed`, `eps`. |
