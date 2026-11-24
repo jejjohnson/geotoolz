@@ -2,7 +2,8 @@
 
 - 1-D axes, stored in a carrier's ``coords``: `SpectralAxis` (``band``),
   `VariableAxis` (``variable``), `VerticalAxis` (``level``, with a
-  `Vertical`) and `TimeAxis` (``time``).
+  `Vertical`), `TimeAxis` (``time``) and `LabelAxis` (plain labels on any
+  other dim).
 - Grids, describing the spatial dims: `PixelGrid` (``y x``), `SwathGrid`
   and `CurvilinearGrid` (``row col``), `PointAxis` (``obs``).
 - `Coordinate` — the protocol the 1-D axes satisfy.
@@ -18,6 +19,7 @@ from __future__ import annotations
 from geoarray._src.coords import (
     Coordinate,
     CurvilinearGrid,
+    LabelAxis,
     PixelGrid,
     PointAxis,
     SpectralAxis,
@@ -34,6 +36,7 @@ from geoarray._src.coords import (
 __all__ = [
     "Coordinate",
     "CurvilinearGrid",
+    "LabelAxis",
     "PixelGrid",
     "PointAxis",
     "SpectralAxis",

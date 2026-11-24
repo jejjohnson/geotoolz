@@ -41,6 +41,7 @@ from geoarray._src.backend import is_tracer
 from geoarray._src.carriers import GeoPoints, GeoSwath
 from geoarray._src.coords import (
     Coordinate,
+    LabelAxis,
     SpectralAxis,
     TimeAxis,
     VariableAxis,
@@ -109,6 +110,10 @@ def _spatial_ref(crs: pyproj.CRS | None, transform: np.ndarray | None) -> Any:
     return xr.Variable((), np.int32(0), attrs)
 
 
+#: marks a coordinate written from a `LabelAxis`, so that only those are read back
+_LABEL_AXIS = "geoarray_label_axis"
+
+
 def _coordinate_vars(coords: tuple[Coordinate, ...]) -> dict[str, Any]:
     """The xarray coordinates of the 1-D axes."""
     out: dict[str, Any] = {}
@@ -133,6 +138,13 @@ def _coordinate_vars(coords: tuple[Coordinate, ...]) -> dict[str, Any]:
             out["level"] = ("level", np.asarray(c.values), attrs)
         elif isinstance(c, TimeAxis):
             out["time"] = ("time", np.asarray(c.to_host().stamps))
+        elif isinstance(c, LabelAxis):
+            # one object per label: np.asarray would spread tuples over an axis
+            values = np.empty(c.size, dtype=object)
+            values[:] = c.values
+            if not any(isinstance(v, tuple) for v in c.values):
+                values = np.asarray(c.values)
+            out[c.dim] = (c.dim, values, {_LABEL_AXIS: 1})
     return out
 
 
@@ -470,6 +482,12 @@ def _coords_in(obj: Any, dims: tuple[str, ...]) -> tuple[Coordinate, ...]:
         values = np.asarray(c["time"].values)
         if values.dtype.kind == "M":
             out.append(TimeAxis(values))
+    for d in dims:
+        if d in c and c[d].dims == (d,) and _LABEL_AXIS in c[d].attrs:
+            values = c[d].values
+            # tolist() turns datetime64 into integers; keep the scalars
+            labels = values if values.dtype.kind in "mM" else values.tolist()
+            out.append(LabelAxis(d, tuple(labels)))
     return tuple(out)
 
 

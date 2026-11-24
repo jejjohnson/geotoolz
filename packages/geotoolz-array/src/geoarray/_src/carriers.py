@@ -39,7 +39,7 @@ from geoarray._src.array import (
     coords_to_host,
     coords_to_jax,
     join_stamps,
-    label_indexers,
+    select_labels,
     sliced_coord,
     split_stamps,
 )
@@ -202,15 +202,14 @@ class _Named:
         return data, tuple(dims), tuple(coords), attrs, key
 
     def sel(self, selection: dict[str, Any] | None = None, **by_dim: Any) -> Any:
-        """Select by exact label (one drops the dim, a list keeps it).
+        """Select by exact label (one drops the dim; a list or tuple keeps it).
 
         Raises:
             LabelError: The dim has no labels, a label is missing, or the
                 value is a range (select by value in xarray).
         """
         wanted = {**(selection or {}), **by_dim}
-        indexers = label_indexers(wanted, self.labels, self.spatial_dims)
-        return cast(Any, self).isel(indexers)
+        return select_labels(self, wanted)
 
     def _identical_static(self, other: _Named) -> bool:
         fill_equal = self.fill_value is other.fill_value or (

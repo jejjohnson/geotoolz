@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import textwrap
@@ -17,8 +18,22 @@ from pipekit_array.testing import check_adapter, check_kernel_op
 from pipekit_ops import get_adapter
 
 import geoarray
-from geoarray import GeoArray, GeoArrayAdapter, GridMismatchError, LabelError
-from geoarray.coords import PixelGrid, SpectralAxis, TimeAxis, VariableAxis
+from geoarray import (
+    GeoArray,
+    GeoArrayAdapter,
+    GeoSwath,
+    GridMismatchError,
+    LabelError,
+)
+from geoarray.coords import (
+    LabelAxis,
+    PixelGrid,
+    SpectralAxis,
+    TimeAxis,
+    VariableAxis,
+    coord_from_config,
+    coord_to_config,
+)
 
 
 TRANSFORM = (20.0, 0.0, 600000.0, 0.0, -20.0, 3550000.0)
@@ -454,3 +469,136 @@ def test_bool_carrier_keeps_a_float_fill_the_constructor_accepts() -> None:
     out = pa.reduce(g, "any", "time")
     assert out.dtype == bool
     assert out.fill_value == 0.0
+
+
+# -- sel and relabel follow pipekit (#771) ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "wanted", ["B8", ["B8", "B2"], ("B8", "B2"), np.array(["B2"])], ids=str
+)
+def test_sel_is_pipekits(wanted: Any) -> None:
+    g = _labelled()
+    got, want = g.sel(band=wanted), pa.sel(g, band=wanted)
+    assert got.identical(want)
+
+
+def test_sel_errors_keep_their_types() -> None:
+    g = _labelled()
+    with pytest.raises(LabelError, match="not a label"):
+        g.sel(band="B9")
+    with pytest.raises(LabelError, match="no labels"):
+        g.sel(x=1)
+    with pytest.raises(LabelError, match="is a range"):
+        g.sel(band=slice("B2", "B8"))
+    with pytest.raises(KeyError, match="cannot select") as unknown:
+        g.sel(level=1)
+    assert not isinstance(unknown.value, LabelError)
+
+
+def _labelled() -> GeoArray:
+    bands = SpectralAxis(("B2", "B4", "B8"), (490.0, 665.0, 842.0))
+    data = np.arange(2 * 3 * 4 * 5.0).reshape(2, 3, 4, 5)
+    return GeoArray(
+        data, (20, 0, 0, 0, -20, 0), 32613, dims="time band y x", coords=(bands,)
+    )
+
+
+def test_rename_keeps_the_names_and_drops_the_wavelengths() -> None:
+    out = pa.rename(_labelled(), band="channel")
+    assert isinstance(out, GeoArray)
+    assert out.dims == ("time", "channel", "y", "x")
+    assert out.coords == (LabelAxis("channel", ("B2", "B4", "B8")),)
+    assert out.sel(channel="B8").dims == ("time", "y", "x")
+    back = pa.rename(out, channel="band")
+    assert back.labels("band") == ("B2", "B4", "B8")
+
+
+def test_renaming_another_dim_keeps_the_spectral_axis() -> None:
+    g = _labelled()
+    out = pa.rename(g, time="month")
+    assert out.coords == g.coords
+    assert type(pa.rename(g, x="col")) is pa.DimArray
+
+
+def test_merge_dims_of_a_geoarray_keeps_the_labels() -> None:
+    g = _labelled()
+    # the merged dim goes last, so the values are on no grid any more
+    merged = pa.merge_dims(g, sample=("time", "band"))
+    assert type(merged) is DimArray and merged.dims == ("y", "x", "sample")
+    assert merged.labels["sample"][1] == (0, "B4")
+    parts = pa.split_dims(merged, sample={"time": 2, "band": 3})
+    assert parts.labels["band"] == ("B2", "B4", "B8")
+
+
+def test_expand_and_broadcast_of_a_geoarray() -> None:
+    g = _labelled()
+    out = pa.broadcast_like(pa.isel(g, band=0), g)
+    assert set(out.dims) == set(g.dims)
+
+
+def test_relabel() -> None:
+    adapter, g = GeoArrayAdapter(), _labelled()
+    assert adapter.relabel(g, {"band": ("B2", "B4", "B8")}).coords == g.coords
+    assert adapter.relabel(g, {"band": None}).coords == ()
+    out = adapter.relabel(g, {"time": ("a", "b")})
+    assert out.labels("time") == ("a", "b") and out.labels("band") is not None
+    for labels, match in (
+        ({"level": (1,)}, "unknown"),
+        ({"x": tuple("abcde")}, "spatial"),
+        ({"time": ("a",)}, "entries"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            adapter.relabel(g, labels)
+
+
+def test_label_axis_round_trips() -> None:
+    axis = LabelAxis("sample", ((0, "B2"), (1, "B4")))
+    config = json.loads(json.dumps(coord_to_config(axis)))
+    assert coord_from_config(config) == axis
+    assert hash(axis) == hash(LabelAxis("sample", axis.values))
+    g = _labelled()
+    joined = geoarray.concat(
+        [pa.rename(g, band="channel"), _other_channels(g)], "channel"
+    )
+    assert joined.labels("channel") == ("B2", "B4", "B8", "C1", "C2", "C3")
+
+
+def _other_channels(g: GeoArray) -> GeoArray:
+    renamed = pa.rename(g, band="channel")
+    return GeoArrayAdapter().relabel(renamed, {"channel": ("C1", "C2", "C3")})
+
+
+@pytest.mark.parametrize(
+    "values", [("a", "b"), (1, 2), ((0, "B2"), (1, "B4"))], ids=["str", "int", "tuple"]
+)
+def test_label_axis_crosses_to_xarray_and_back(values: tuple[Any, ...]) -> None:
+    pytest.importorskip("xarray")
+    g = _labelled()
+    out = GeoArrayAdapter().relabel(
+        pa.rename(pa.isel(g, band=slice(0, 2)), band="sample"), {"sample": values}
+    )
+    back = GeoArray.from_xarray(out.to_xarray())
+    assert back.coord("sample") == LabelAxis("sample", values)
+
+
+def test_relabel_on_a_swath() -> None:
+    lat, lon = np.meshgrid(np.arange(3.0), np.arange(4.0), indexing="ij")
+    s = GeoSwath(
+        np.ones((2, 3, 4)),
+        lat,
+        lon,
+        dims="band row col",
+        coords=(SpectralAxis(("b1", "b2")),),
+    )
+    out = pa.rename(s, band="channel")
+    assert isinstance(out, GeoSwath) and out.labels("channel") == ("b1", "b2")
+
+
+def test_label_axis_is_static_under_jit(x64: ModuleType) -> None:
+    g = pa.rename(_labelled(), band="channel").to_jax()
+    traces = []
+    run = x64.jit(lambda v: traces.append(1) or v.sel(channel="B4"))
+    assert run(g).dims == ("time", "y", "x")
+    run(g.with_data(2 * g.data))
+    assert len(traces) == 1

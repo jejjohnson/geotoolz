@@ -19,6 +19,8 @@ adapter, never through the carrier importing pipekit-array's machinery:
 - The fast paths ``combine``, ``stack`` and ``concat`` keep geoarray's own
   rules: NumPy joins JAX when mixed (C1), fills must agree, and
   coordinates and per-band attrs are joined.
+- ``relabel`` sets the labels of a leading dim, for ``rename``,
+  ``merge_dims`` and the like.
 - ``to_backend`` moves every leaf of a carrier, and ``keep_missing`` keeps
   nodata through ``pipekit_array.functions.elementwise`` (pipekit#253).
 """
@@ -27,7 +29,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from importlib import import_module
 from typing import Any, Literal
 
@@ -39,6 +41,7 @@ from geoarray._src.array import SPATIAL_DIMS, GeoArray, build, fill_fits
 from geoarray._src.attrs import PER_BAND_KEYS, concat_bands, drop_band_keys
 from geoarray._src.backend import backend_of, namespace
 from geoarray._src.carriers import GeoPoints, GeoSwath, _as_int_leaf, _build
+from geoarray._src.coords import LabelAxis
 from geoarray._src.errors import GridMismatchError
 from geoarray._src.geometry import (
     _require_carriers,
@@ -68,8 +71,37 @@ def _fill_for_dtype(fill: Any, dtype: Any) -> Any:
     return fill if fill_fits(fill, dtype) else None
 
 
-class _MovesAndMisses:
+class _SharedMethods:
     """The optional adapter methods that are the same for every carrier."""
+
+    def relabel(self, x: Any, labels: Mapping[str, tuple[Any, ...] | None]) -> Any:
+        """``x`` with the labels of the named leading dims set; None removes them.
+
+        A dim whose labels do not change keeps its coordinate, with its
+        wavelengths, units or stamps; new labels are a `LabelAxis`. A
+        ``DimArray``, which `rewrap` gives off the geometry, is relabelled as
+        one.
+
+        Raises:
+            ValueError: A dim is not in ``x.dims``, a spatial dim is given
+                labels, or a tuple's length differs from its dim's size.
+        """
+        if isinstance(x, DimArray):
+            return _DIMARRAY.relabel(x, labels)
+        unknown = sorted(set(labels) - set(x.dims))
+        if unknown:
+            raise ValueError(f"relabel: unknown dim(s) {unknown}; dims are {x.dims}")
+        kept = {c.dim: c for c in x.coords}
+        for dim, values in labels.items():
+            if dim in getattr(x, "spatial_dims", SPATIAL_DIMS) and values is not None:
+                raise ValueError(f"relabel: {dim!r} is a spatial dim of {x.dims}")
+            old = kept.pop(dim, None)
+            if values is None:
+                continue
+            same = old is not None and old.labels == tuple(values)
+            kept[dim] = old if same else LabelAxis(dim, tuple(values))
+        # the constructor checks each size and sorts by dim
+        return dataclasses.replace(x, coords=tuple(kept.values()))
 
     def to_backend(self, x: Any, backend: Literal["numpy", "jax"]) -> Any:
         """``x`` with every array on ``backend``; NumPy data is writable.
@@ -122,7 +154,7 @@ def _nodata(x: Any, dims: tuple[str, ...], xp: Any) -> Any:
     return bad
 
 
-class GeoArrayAdapter(_MovesAndMisses):
+class GeoArrayAdapter(_SharedMethods):
     """The `pipekit_ops.NamedArrayAdapter` for `GeoArray`.
 
     Example:
@@ -396,7 +428,7 @@ def _map_over_jax(x: GeoArray, fn: Callable[[Any], Any], dim: str) -> Any:
     )
 
 
-class _GeolocatedAdapter(_MovesAndMisses):
+class _GeolocatedAdapter(_SharedMethods):
     """The adapter of a carrier located by per-point leaves (swath, points).
 
     Subclasses name the carrier, its geometry leaves and how a rewrap

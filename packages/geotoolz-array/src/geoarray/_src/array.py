@@ -24,11 +24,11 @@ from __future__ import annotations
 import dataclasses
 import math
 import warnings
-from collections.abc import Callable
 from typing import Any, cast
 
 import numpy as np
 import pyproj
+from pipekit_array import sel as pipekit_sel
 from pipekit_array.dimarray import core_dims, vmapped_dims
 from pipekit_ops import on_import, report_move
 
@@ -198,45 +198,29 @@ def sliced_coord(c: Coordinate, index: Any) -> Coordinate | None:
     return c.isel(index)
 
 
-def label_indexers(
-    wanted: dict[str, Any],
-    labels_of: Callable[[str], tuple[Any, ...] | None],
-    spatial_dims: tuple[str, ...],
-) -> dict[str, Any]:
-    """Positions for a label selection: one label → an int, a list → a list.
-
-    Shared by every carrier's ``sel``, so the rules are one: exact labels
-    only, from the dim's coordinate; a list or 1-D array keeps the dim.
+def select_labels(x: Any, wanted: dict[str, Any]) -> Any:
+    """``pipekit_array.sel`` with geoarray's errors (every carrier's ``sel``).
 
     Raises:
+        KeyError: A name is not one of the carrier's dims.
         LabelError: The dim has no labels or is spatial, a label is missing,
             or the value is a range (select by value in xarray).
     """
-    indexers: dict[str, Any] = {}
+    unknown = sorted(set(wanted) - set(x.dims))
+    if unknown:
+        raise KeyError(f"cannot select {unknown}; dims are {x.dims}")
     for dim, value in wanted.items():
-        labels = labels_of(dim) if dim not in spatial_dims else None
-        if labels is None:
-            raise LabelError(
-                f"sel: dim {dim!r} has no labels; use isel, or select by value "
-                "in xarray (to_xarray().sel(...))"
-            )
         if isinstance(value, slice):
             raise LabelError(
                 f"sel: {dim}={value} is a range; sel takes exact labels only: "
                 "select by value in xarray (to_xarray().sel(...))"
             )
-        position = {label: i for i, label in enumerate(labels)}
-        many = isinstance(value, list) or getattr(value, "ndim", 0) == 1
-        picked = (
-            list(value.tolist() if hasattr(value, "tolist") else value)
-            if many
-            else [value]
-        )
-        for label in picked:
-            if label not in position:
-                raise LabelError(f"sel: {label!r} is not a label of {dim!r}: {labels}")
-        indexers[dim] = [position[v] for v in picked] if many else position[value]
-    return indexers
+    try:
+        return pipekit_sel(x, **wanted)
+    except KeyError as exc:
+        raise LabelError(
+            f"{exc.args[0]} (by value: to_xarray().sel(...), in xarray)"
+        ) from exc
 
 
 def _index_in_order(
@@ -1011,8 +995,8 @@ class GeoArray:
     def sel(self, selection: dict[str, Any] | None = None, **by_dim: Any) -> GeoArray:
         """Select by exact label: ``g.sel(band="B12")``, ``g.sel(band=["B8", "B4"])``.
 
-        One label drops its dim; a list keeps it. Labels come from the dim's
-        coordinate (`labels`).
+        One label drops its dim; a list, a tuple or a 1-D array keeps it.
+        Labels come from the dim's coordinate (`labels`).
 
         Raises:
             LabelError: The dim has no labels or is spatial, a label is
@@ -1030,7 +1014,7 @@ class GeoArray:
             ('y', 'x')
         """
         wanted = {**(selection or {}), **by_dim}
-        return self.isel(label_indexers(wanted, self.labels, SPATIAL_DIMS))
+        return select_labels(self, wanted)
 
     def shift_origin(self, delta: Any) -> GeoArray:
         """Move the grid by ``delta = (Δx, Δy)`` in CRS units: c + Δx, f + Δy.
