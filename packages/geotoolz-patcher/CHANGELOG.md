@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.15.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.14.3...geotoolz-patcher-v0.15.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **array:** carriers join NumPy and JAX, on pipekit's backend rule and guard ([#778](https://github.com/jejjohnson/geotoolz/issues/778))
+
+### Code Refactoring
+
+* **array:** carriers join NumPy and JAX, on pipekit's backend rule and guard ([#778](https://github.com/jejjohnson/geotoolz/issues/778)) ([f120d74](https://github.com/jejjohnson/geotoolz/commit/f120d749fe51968c3102dc3727ea687d22c4c8b8))
+
 ## [0.14.3](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.14.2...geotoolz-patcher-v0.14.3) (2026-11-04)
 
 
