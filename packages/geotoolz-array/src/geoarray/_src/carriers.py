@@ -23,8 +23,8 @@ from typing import Any, ClassVar, cast
 
 import numpy as np
 import pyproj
-from pipekit_array.dimarray import vmapped_dims
-from pipekit_ops import on_import
+from pipekit_array.dimarray import core_dims, vmapped_dims
+from pipekit_ops import on_import, report_move
 
 from geoarray._src.array import (
     _check_coords,
@@ -444,6 +444,8 @@ class GeoSwath(_Named):
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
         """The data as a NumPy array (a host copy for JAX data)."""
         out = _host(self.data, "np.asarray(GeoSwath)")
+        if self.backend == "jax":
+            report_move("np.asarray(GeoSwath)", "JAX data copied to the host")
         return np.array(out, dtype=dtype, copy=True) if copy else np.asarray(out, dtype)
 
     def to_xarray(self) -> Any:
@@ -478,7 +480,7 @@ def _swath_flatten(s: GeoSwath) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
     # TimeAxis stamps are leaves (int64 ns), as on GeoArray
     coords, stamps = split_stamps(s.coords)
     return (s.data, s.lat, s.lon, *stamps), (
-        s.dims,
+        core_dims(s.dims),
         coords,
         s.crs,
         s.fill_value,
@@ -719,6 +721,8 @@ class GeoPoints(_Named):
     def __array__(self, dtype: Any = None, copy: bool | None = None) -> np.ndarray:
         """The values as a NumPy array (a host copy for JAX data)."""
         out = _host(self.data, "np.asarray(GeoPoints)")
+        if self.backend == "jax":
+            report_move("np.asarray(GeoPoints)", "JAX data copied to the host")
         return np.array(out, dtype=dtype, copy=True) if copy else np.asarray(out, dtype)
 
     def to_xarray(self) -> Any:
@@ -762,7 +766,7 @@ def _points_flatten(p: GeoPoints) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
     leaves = tuple(_as_int_leaf(getattr(p, k)) for k in present)
     # TimeAxis stamps are leaves (int64 ns), as on GeoArray
     coords, stamps = split_stamps(p.coords)
-    aux = (present, p.vertical, p.dims, coords, p.crs, p.fill_value, p.attrs)
+    aux = (present, p.vertical, core_dims(p.dims), coords, p.crs, p.fill_value, p.attrs)
     return (p.data, *leaves, *stamps), aux
 
 

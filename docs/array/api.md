@@ -37,7 +37,7 @@ fast paths:
 | `reduce(x, fn, dim)`, `argreduce(x, fn, dim)`, `take_along(x, index, dim)` | a carrier while the spatial (and batch) dims survive; else a `DimArray` |
 | `map_over(x, fn, dim)` | one `jax.vmap` over the data and the matching leaves on JAX; a loop on NumPy |
 | `concat(xs, dim)` | joins coordinates, per-band attrs and, along a batch dim, transforms |
-| `combine(fn, *xs)` | one exact grid, one fill; mixed NumPy and JAX inputs warn (0.3) and raise `BackendError` from 0.4 |
+| `combine(fn, *xs)` | one exact grid, one fill; NumPy inputs join JAX ones (`pipekit_ops.guard` reports it) |
 
 ## The named-array adapters
 
@@ -102,14 +102,18 @@ What a reader provides so code can read windows of it on demand; a
 ## Backends and interop
 
 `to_jax()` / `to_numpy()` cross between the backends (see
-[When to jit](how-to/when-to-jit.md)). Nothing crosses silently: mixed
-NumPy and JAX inputs to the joins warn in 0.3 and raise `BackendError` from
-0.4, so call `to_jax()` first. `np.asarray(g)` copies JAX data to the host
-and raises `GeoArrayTraceError` under a trace.
+[When to jit](how-to/when-to-jit.md)). NumPy inputs of a join move to JAX
+when another input is on JAX, and `np.asarray(g)` copies JAX data to the host
+(it raises `GeoArrayTraceError` under a trace). Neither says so, unless
+`pipekit_ops.guard` is on:
 
-::: geoarray.set_options
-::: geoarray.get_options
-::: geoarray.HostTransferWarning
+```python
+import pipekit_ops as pk
+
+with pk.guard("warn"):  # or "raise", in a test
+    out = pipeline(scene)
+```
+
 ::: geoarray.interop.georeader.from_georeader
 ::: geoarray.interop.georeader.to_georeader
 ::: geoarray.interop.georeader.source_from_georeader

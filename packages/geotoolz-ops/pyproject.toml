@@ -48,11 +48,11 @@ dependencies = [
     # `pipekit_ops.Operator`, which carries the `Operator.backends` every
     # geoops operator declares and pipekit-ops enforces (#532). The
     # workspace root's [tool.uv.sources] pins the dev-time git source.
-    "pipekit-ops>=0.2.1",
+    "pipekit-ops>=0.2.3",
     # `KernelOp` and the dim-level functions: the index kernels run once
     # on NumPy, JAX and xarray carriers through it (#533). Pure Python on
     # pipekit-ops; xarray loads only when a DataArray arrives.
-    "pipekit-array>=0.1.1",
+    "pipekit-array>=0.1.4",
     # Universal tensor-notation layer: the `geoops.einx` operator
     # family AND the internal linear algebra of the Tier-A primitives
     # (matched_filter covariance/scoring, restore PCA, SRF fill

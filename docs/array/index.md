@@ -111,7 +111,7 @@ NumPy and JAX carriers mix eagerly, as NumPy and `jnp` arrays do. Inside
 
 | Call | NumPy carrier | JAX carrier |
 |---|---|---|
-| `np.asarray(g)` | the data, no copy | a host copy; raises under a trace; warns with `set_options(warn_on_transfer=True)` |
+| `np.asarray(g)` | the data, no copy | a host copy; raises under a trace; `pipekit_ops.guard` reports it |
 | `combine`, `stack`, `concatenate`, `write_window` with mixed inputs | — | NumPy inputs move to JAX (needs x64) |
 | `from_georeader(gt)` / `to_georeader(g)` | `GeoTensor` ↔ `GeoArray`, sharing memory | `to_georeader` needs `g.to_numpy()` first |
 
@@ -153,7 +153,6 @@ back: GeoTensor = to_georeader(g[..., :256, :256])  # (C, 256, 256), origin kept
 | `stack`, `concatenate` | join carriers that share a grid (`stack(gs, "time")`; `concatenate` is `concat` by position) | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#joining-carriers) |
 | `FrozenAttrs` | keep metadata hashable, so it can key a compiled function | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#frozenattrs) |
 | `RasterSource`, `AsyncRasterSource` | describe a lazy reader: its grid, and reads that return a `GeoArray` (`read_window`, `load`); a `GeoArray` is one | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#lazy-readers) |
-| `set_options`, `get_options`, `HostTransferWarning` | find the NumPy steps that copy JAX data to the host | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#backends-and-interop) |
 | `from_georeader`, `to_georeader` | bridge to georeader's `GeoTensor`, zero-copy, and (`source_from_georeader` / `source_to_georeader`) its lazy readers (`[georeader]`) | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#backends-and-interop) |
 | `as_transform`, `as_crs` | coerce an `affine.Affine`, six numbers, an EPSG code or WKT | [Reference](https://jejjohnson.github.io/geotoolz/reference/array/api/#coercions) |
 

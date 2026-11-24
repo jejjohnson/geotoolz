@@ -201,7 +201,7 @@ def band_kernel(
     out = _run(kernel, selected, [fill_of(carrier)] * len(selected), params)
     if "time" in dims and len(dims) == 4 and not _is_dataarray(carrier):
         out = _expand(out, dims.index(dim), dim)
-    return unwrap(_declare_fill(out, np.nan))
+    return unwrap(_declare_fill(out, np.nan, carrier))
 
 
 def carrier_kernel(
@@ -245,7 +245,7 @@ def carrier_kernel(
         out = _run(kernel, carriers, [fill_of(c) for c in carriers], params)
     except GridMismatchError as exc:
         raise GridMismatchError(f"{message}: {exc}") from exc
-    return pairs[0][1](_declare_fill(out, np.nan))
+    return pairs[0][1](_declare_fill(out, np.nan, *carriers))
 
 
 def mask_kernel(
@@ -300,7 +300,7 @@ def mask_kernel(
         and not _is_dataarray(carrier)
     ):
         out = _expand(out, dims.index(dim), dim)
-    return unwrap(_declare_fill(out, False))
+    return unwrap(_declare_fill(out, False, carrier))
 
 
 def pixel_kernel(
@@ -351,7 +351,7 @@ def pixel_kernel(
             "params": params,
         },
     )
-    return unwrap(_declare_fill(op(carrier), np.nan))
+    return unwrap(_declare_fill(op(carrier), np.nan, carrier))
 
 
 def _pixel_masked(
@@ -386,11 +386,18 @@ def _run(
     return op(*inputs)
 
 
-def _declare_fill(out: Any, fill: Any) -> Any:
-    """Declare ``fill`` as the output's fill, where the carrier declares one."""
+def _declare_fill(out: Any, fill: Any, *inputs: Any) -> Any:
+    """Declare ``fill`` as the output's fill, where the carrier declares one.
+
+    A DataArray declares one when an input did: a kernel's output has no
+    attributes of its own (pipekit-array 0.1.2).
+    """
     if isinstance(out, GeoArray):
         return out.replace(fill_value=fill)
-    if _is_dataarray(out) and {"fill_value", "_FillValue"} & set(out.attrs):
+    if not _is_dataarray(out):
+        return out
+    declared = [x for x in (out, *inputs) if _is_dataarray(x)]
+    if any({"fill_value", "_FillValue"} & set(x.attrs) for x in declared):
         out = out.copy(deep=False)
         out.attrs = {k: v for k, v in out.attrs.items() if k != "_FillValue"}
         out.attrs["fill_value"] = fill

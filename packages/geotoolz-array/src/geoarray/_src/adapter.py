@@ -17,15 +17,19 @@ adapter, never through the carrier importing pipekit-array's machinery:
 - ``batch_dims`` tells ``KernelOp`` that a batched carrier has one
   geometry per item (F4).
 - The fast paths ``combine``, ``stack`` and ``concat`` keep geoarray's own
-  rules: NumPy promotes to JAX when mixed (C1), fills must agree, and
+  rules: NumPy joins JAX when mixed (C1), fills must agree, and
   coordinates and per-band attrs are joined.
+- ``to_backend`` moves every leaf of a carrier, and ``keep_missing`` keeps
+  nodata through ``pipekit_array.functions.elementwise`` (pipekit#253).
 """
 
 from __future__ import annotations
 
+import dataclasses
+import math
 from collections.abc import Callable, Sequence
 from importlib import import_module
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from pipekit_array import DimArray, DimArrayAdapter
@@ -33,7 +37,7 @@ from pipekit_ops import Signature, get_adapter, register_adapter
 
 from geoarray._src.array import SPATIAL_DIMS, GeoArray, build, fill_fits
 from geoarray._src.attrs import PER_BAND_KEYS, concat_bands, drop_band_keys
-from geoarray._src.backend import backend_of
+from geoarray._src.backend import backend_of, namespace
 from geoarray._src.carriers import GeoPoints, GeoSwath, _as_int_leaf, _build
 from geoarray._src.errors import GridMismatchError
 from geoarray._src.geometry import (
@@ -64,7 +68,61 @@ def _fill_for_dtype(fill: Any, dtype: Any) -> Any:
     return fill if fill_fits(fill, dtype) else None
 
 
-class GeoArrayAdapter:
+class _MovesAndMisses:
+    """The optional adapter methods that are the same for every carrier."""
+
+    def to_backend(self, x: Any, backend: Literal["numpy", "jax"]) -> Any:
+        """``x`` with every array on ``backend``; NumPy data is writable.
+
+        Raises:
+            X64Error: To JAX with ``jax_enable_x64`` off.
+        """
+        if x.backend == backend:
+            return x
+        if backend == "jax":
+            return x.to_jax()
+        out = x.to_numpy()
+        # np.asarray of a JAX array is read-only
+        return dataclasses.replace(out, data=np.array(out.data))
+
+    def keep_missing(self, out: Any, *inputs: Any) -> Any:
+        """``out`` marked missing wherever an element of an input was nodata.
+
+        An input's element is nodata when it equals its ``fill_value`` or is
+        not finite; a carrier without a fill has no nodata. The mark is
+        ``out``'s fill, or NaN when it has none. Integer or bool data without
+        a fill cannot hold a mark, and stays as it is.
+        """
+        xp = namespace(out.data)
+        missing = None
+        for x in inputs:
+            if x.fill_value is None:
+                continue
+            theirs = _nodata(x, out.dims, xp)
+            missing = theirs if missing is None else missing | theirs
+        fill = getattr(out, "fill_value", None)
+        if fill is None and out.dtype.kind == "f":
+            fill = math.nan
+        if missing is None or fill is None:
+            return out
+        return dataclasses.replace(out, data=xp.where(missing, fill, out.data))
+
+
+def _nodata(x: Any, dims: tuple[str, ...], xp: Any) -> Any:
+    """Where ``x`` is nodata, with size-1 axes for the dims of ``dims`` it lacks."""
+    data = x.data
+    bad = data == x.fill_value
+    if data.dtype.kind == "f":
+        bad = bad | ~xp.isfinite(data)
+    order = tuple(x.dims.index(d) for d in dims if d in x.dims)
+    bad = xp.transpose(bad, order)
+    for position, d in enumerate(dims):
+        if d not in x.dims:
+            bad = xp.expand_dims(bad, axis=position)
+    return bad
+
+
+class GeoArrayAdapter(_MovesAndMisses):
     """The `pipekit_ops.NamedArrayAdapter` for `GeoArray`.
 
     Example:
@@ -268,7 +326,8 @@ def _map_over_jax(x: GeoArray, fn: Callable[[Any], Any], dim: str) -> Any:
 
     axis = x.dims.index(dim)
     batched = dim in x.batch_dims
-    leaves, (crs, fill, attrs, dims, coords) = _flatten(x)
+    leaves, (crs, fill, attrs, _, coords) = _flatten(x)
+    dims = x.dims  # with the batch dims that the static part leaves out
     over_time = dim == "time"
     if over_time:
         leaves = leaves[:2]
@@ -293,7 +352,8 @@ def _map_over_jax(x: GeoArray, fn: Callable[[Any], Any], dim: str) -> Any:
     template = captured["out"]
     own = tuple(c for c in x.coords if c.dim == dim)
     if isinstance(template, GeoArray):
-        _, (o_crs, o_fill, o_attrs, o_dims, o_coords) = _flatten(template)
+        _, (o_crs, o_fill, o_attrs, _, o_coords) = _flatten(template)
+        o_dims = template.dims
         data, transform, *stamps = flat
         if not batched:
             # one grid for every item, as on NumPy: checked, traced or not
@@ -336,7 +396,7 @@ def _map_over_jax(x: GeoArray, fn: Callable[[Any], Any], dim: str) -> Any:
     )
 
 
-class _GeolocatedAdapter:
+class _GeolocatedAdapter(_MovesAndMisses):
     """The adapter of a carrier located by per-point leaves (swath, points).
 
     Subclasses name the carrier, its geometry leaves and how a rewrap
@@ -426,7 +486,12 @@ class _GeolocatedAdapter:
         return xs
 
     def rewrap(self, x: Any, data: Any, dims: tuple[str, ...]) -> Any:
-        """The carrier while its spatial and batch dims survive; else a DimArray."""
+        """The carrier while its spatial and batch dims survive; else a DimArray.
+
+        The geometry goes to the data's backend, as a GeoArray's transform does.
+        """
+        if backend_of(data) != x.backend:
+            x = x.to_jax() if x.backend == "numpy" else x.to_numpy()
         dims = tuple(dims)
         shape = tuple(data.shape)
         spatial = x.spatial_dims

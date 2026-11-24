@@ -29,8 +29,8 @@ from typing import Any, cast
 
 import numpy as np
 import pyproj
-from pipekit_array.dimarray import vmapped_dims
-from pipekit_ops import on_import
+from pipekit_array.dimarray import core_dims, vmapped_dims
+from pipekit_ops import on_import, report_move
 
 from geoarray._src.attrs import FrozenAttrs, drop_band_keys, select_bands
 from geoarray._src.backend import (
@@ -53,7 +53,6 @@ from geoarray._src.grid import (
     as_transform,
     shift_scale_transform,
 )
-from geoarray._src.options import warn_host_transfer
 
 
 __all__ = ["DIMS", "SPATIAL_DIMS", "GeoArray"]
@@ -1258,8 +1257,7 @@ class GeoArray:
         NumPy data is returned as it is (no copy unless ``copy=True`` or a
         cast). JAX data is copied to the host, eagerly only: inside ``jit``,
         ``grad`` or ``vmap`` the data are tracers, and NumPy code cannot run
-        on them. With ``set_options(warn_on_transfer=True)`` each host copy
-        warns (`HostTransferWarning`).
+        on them. `pipekit_ops.guard` reports each host copy.
 
         Raises:
             GeoArrayTraceError: The data are traced.
@@ -1285,7 +1283,7 @@ class GeoArray:
             raise ValueError(
                 "a JAX GeoArray cannot become a NumPy array without a copy"
             )
-        warn_host_transfer("np.asarray(GeoArray)", stacklevel=2)
+        report_move("np.asarray(GeoArray)", "JAX data copied to the host")
         if copy:
             # np.asarray of a CPU JAX array can be a read-only view; a copy
             # the caller asked for must be writable.
@@ -1482,9 +1480,11 @@ def coords_to_host(coords: tuple[Coordinate, ...]) -> tuple[Coordinate, ...]:
 
 def _flatten(g: GeoArray) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
     # leaves: data, transform, then TimeAxis stamps (int64 ns) if any;
-    # static: everything else, with the TimeAxis replaced by a slot
+    # static: everything else, with the TimeAxis replaced by a slot and the
+    # batch dims that _unflatten adds back left out, so that a stack of
+    # carriers has the tree structure of one
     coords, stamps = split_stamps(g.coords)
-    aux = (g.crs, g.fill_value, g.attrs, g.dims, coords)
+    aux = (g.crs, g.fill_value, g.attrs, core_dims(g.dims), coords)
     return (g.data, g.transform, *stamps), aux
 
 

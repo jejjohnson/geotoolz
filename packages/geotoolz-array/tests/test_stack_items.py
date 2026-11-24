@@ -7,7 +7,7 @@ from types import ModuleType
 import numpy as np
 import pipekit_array as pa
 import pytest
-from pipekit_array import BackendError
+from pipekit_ops import BackendError, guard
 
 import geoarray
 from geoarray import GeoArray, GridMismatchError
@@ -112,9 +112,13 @@ def test_an_already_batched_item_is_refused() -> None:
         geoarray.stack_items([batch, batch], "scene")
 
 
-def test_numpy_and_jax_items_never_mix(x64: ModuleType) -> None:
-    with pytest.raises(BackendError, match="to_jax"):
-        geoarray.stack_items([_patch(0), _patch(4).to_jax()], "patch")
+def test_numpy_items_join_jax_ones(x64: ModuleType) -> None:
+    items = [_patch(0), _patch(4).to_jax()]
+    for given in (items, items[::-1]):
+        batch = geoarray.stack_items(given, "patch")
+        assert batch.backend == "jax" and batch.transform.shape == (2, 6)
+    with guard("raise"), pytest.raises(BackendError, match="stack_items: NumPy data"):
+        geoarray.stack_items(items, "patch")
 
 
 def test_jax_items_stack_on_jax(x64: ModuleType) -> None:

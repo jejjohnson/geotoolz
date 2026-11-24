@@ -12,20 +12,21 @@ import numpy as np
 import pytest
 from affine import Affine
 from conftest import CRS, TRANSFORM
+from pipekit_ops import BackendError, Operator, guard, to_backend
 
+import geoarray
 from geoarray import (
     GeoArray,
     GeoArrayTraceError,
-    HostTransferWarning,
+    GeoPoints,
+    GeoSwath,
     PixelWindow,
     combine,
     concatenate,
     crop,
-    get_options,
     pad,
     pixel_coords,
     read_window,
-    set_options,
     stack,
     write_window,
 )
@@ -144,33 +145,88 @@ class TestNumpyInterop:
         with pytest.raises(GeoArrayTraceError, match=r"jax\.numpy"):
             run()
 
-    def test_transfers_warn_only_when_asked(self, x64: ModuleType) -> None:
-        on_numpy = _scene()
+    @pytest.mark.parametrize("kind", ["GeoArray", "GeoSwath", "GeoPoints"])
+    def test_the_guard_reports_a_host_copy(self, kind: str, x64: ModuleType) -> None:
+        on_numpy = CARRIERS[kind]()
         on_jax = on_numpy.to_jax()
-        assert get_options()["warn_on_transfer"] is False
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             np.asarray(on_jax)
-            np.asarray(on_numpy)
-        with set_options(warn_on_transfer=True):
-            with pytest.warns(HostTransferWarning, match="host"):
+        with guard("raise"):
+            np.asarray(on_numpy)  # NumPy data: no transfer
+            with pytest.raises(BackendError, match=rf"np\.asarray\({kind}\): JAX data"):
                 np.asarray(on_jax)
-            with warnings.catch_warnings():
-                warnings.simplefilter("error")
-                np.asarray(on_numpy)  # NumPy data: no transfer, no warning
-        assert get_options()["warn_on_transfer"] is False
 
-    def test_set_options_without_a_with_block(self) -> None:
-        set_options(warn_on_transfer=True)
-        try:
-            assert get_options()["warn_on_transfer"] is True
-        finally:
-            set_options(warn_on_transfer=False)
-        before = get_options()
-        set_options()
-        assert get_options() == before
-        with pytest.raises(TypeError, match="bool"):
-            set_options(warn_on_transfer=1)  # type: ignore[arg-type]
+
+def _swath() -> GeoSwath:
+    lat, lon = np.meshgrid(np.arange(3.0), np.arange(4.0), indexing="ij")
+    return GeoSwath(np.ones((3, 4), "f4"), lat, lon, dims="row col", fill_value=-1.0)
+
+
+def _points() -> GeoPoints:
+    return GeoPoints(
+        np.ones(3, "f4"),
+        xy=np.zeros((3, 2)),
+        time=np.array(["2026-01-01"] * 3, "datetime64[ns]"),
+        dims="obs",
+        fill_value=-1.0,
+    )
+
+
+CARRIERS = {"GeoArray": _scene, "GeoSwath": _swath, "GeoPoints": _points}
+
+
+def _is_jax(leaf: Any) -> bool:
+    return type(leaf).__module__.startswith("jax")
+
+
+@pytest.mark.parametrize("make", list(CARRIERS.values()), ids=list(CARRIERS))
+class TestPipekitBackends:
+    """The adapters' part of pipekit#253, on every carrier."""
+
+    def test_to_backend_moves_every_leaf(self, make: Any, x64: ModuleType) -> None:
+        given = make()
+        on_jax = to_backend(given, "jax")
+        assert all(map(_is_jax, x64.tree.leaves(on_jax)))
+        back = to_backend(on_jax, "numpy")
+        assert not any(map(_is_jax, x64.tree.leaves(back)))
+        assert back.data.flags.writeable
+        assert back.identical(given)
+        assert to_backend(given, "numpy") is given
+
+    def test_a_numpy_operator_takes_jax_and_returns_it(
+        self, make: Any, x64: ModuleType
+    ) -> None:
+        class Double(Operator):
+            backends = ("numpy",)
+
+            def _apply(self, x: Any) -> Any:
+                assert x.backend == "numpy"
+                return x.with_data(2 * x.data)
+
+        out = Double()(make().to_jax())
+        assert all(map(_is_jax, x64.tree.leaves(out)))
+        np.testing.assert_array_equal(np.asarray(out), 2 * make().data)
+        with pytest.raises(BackendError, match="Double runs on numpy only"):
+            x64.jit(Double())(make().to_jax())
+
+    def test_a_mix_of_carriers_has_every_leaf_on_jax(
+        self, make: Any, x64: ModuleType
+    ) -> None:
+        given = make()
+        for pair in ([given, given.to_jax()], [given.to_jax(), given]):
+            out = geoarray.combine(lambda a, b: a + b, *pair)
+            assert type(out) is type(given)
+            assert all(map(_is_jax, x64.tree.leaves(out)))
+
+    def test_a_scan_stack_has_the_structure_of_one(
+        self, make: Any, x64: ModuleType
+    ) -> None:
+        x = make().to_jax()
+        _, xs = x64.lax.scan(lambda c, _: (c, c), x, None, length=3)
+        assert x64.tree.structure(xs) == x64.tree.structure(x)
+        written = x64.tree.map(lambda stack, one: stack.at[1].set(one), xs, x)
+        assert written.dims == ("batch", *x.dims)
 
 
 # -- georeader (GC2) --------------------------------------------------------

@@ -37,18 +37,49 @@ This is the implementation of "PR α" from the design doc.
 from __future__ import annotations
 
 import functools
-from typing import Any, ClassVar
+from collections.abc import Iterator
+from typing import Any, ClassVar, Literal
 
 import xarray as xr
-from pipekit_ops import Node, Operator as _PipekitOperator, backend_of
+from pipekit_ops import (
+    Node,
+    Operator as _PipekitOperator,
+    backend_of,
+    report_move,
+    to_backend,
+)
 from pipekit_ops.adapters import BackendError
 
 
-def _leaves(value: Any) -> Any:
-    """A DataTree's data-bearing nodes as Datasets; anything else unchanged."""
+def _parts(value: Any) -> Iterator[Any]:
+    """What of ``value`` has a backend: its variables, leaves or items, or itself."""
     if isinstance(value, xr.DataTree):
-        return [node.to_dataset() for node in value.subtree if node.data_vars]
-    return value
+        for node in value.subtree:
+            yield from node.data_vars.values()
+    elif isinstance(value, xr.Dataset):
+        yield from value.data_vars.values()
+    elif isinstance(value, list | tuple):
+        for item in value:
+            yield from _parts(item)
+    else:
+        yield value
+
+
+def _raw(part: Any) -> Any:
+    """The array inside a DataArray; anything else unchanged."""
+    return part.data if isinstance(part, xr.DataArray) else part
+
+
+def _moved(value: Any, backend: Literal["numpy", "jax"]) -> Any:
+    """`pipekit_ops.to_backend`, into Datasets and DataTrees too."""
+    if isinstance(value, xr.DataTree):
+        return value.map_over_datasets(lambda ds: _moved(ds, backend))
+    if isinstance(value, xr.Dataset):
+        arrays = {name: to_backend(da, backend) for name, da in value.data_vars.items()}
+        return value.assign(arrays)
+    if type(value) in (list, tuple):
+        return type(value)(_moved(item, backend) for item in value)
+    return to_backend(value, backend)
 
 
 class Operator(_PipekitOperator):
@@ -84,42 +115,65 @@ class Operator(_PipekitOperator):
 
     #: The backends of its inputs' data (OP-O6): every xrops operator takes
     #: NumPy- and dask-backed carriers; one that runs elsewhere (or refuses
-    #: dask) overrides this. A Dataset counts by its data variables.
+    #: dask) overrides this. A Dataset counts by its data variables. JAX-backed
+    #: carriers go to the host and back (pipekit#253).
     backends: ClassVar[tuple[str, ...] | None] = ("numpy", "dask")
 
-    def _check_backends(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
-        """pipekit's backend rule, with NumPy beside dask counted as dask.
+    def _place_inputs(
+        self,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        backends: tuple[str, ...] | None = None,
+    ) -> tuple[tuple[Any, ...], dict[str, Any], bool]:
+        """The inputs as they are: :meth:`__call__` has placed them."""
+        return args, kwargs, False
 
-        In the xarray lane a NumPy operand (a static mask, an in-memory
-        reference field) joins a dask graph without moving: xarray folds it
-        into the lazy computation. Any other mix, or a backend not in
-        ``backends`` (a JAX-backed DataArray), raises as in pipekit.
+    def _placed(
+        self, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> tuple[tuple[Any, ...], dict[str, Any], bool]:
+        """pipekit's backend rule on xarray, and whether JAX data left JAX.
+
+        A NumPy operand beside a dask one (a static mask, an in-memory
+        reference field) joins the dask graph without moving: xarray folds it
+        into the lazy computation. JAX-backed inputs of an operator that does
+        not list JAX go to the host, and :meth:`__call__` returns the result to
+        JAX; `pipekit_ops.guard` reports it. A Dataset counts by its data
+        variables, a DataTree by its leaves.
+
+        Raises:
+            BackendError: JAX beside dask, traced data in an operator without
+                JAX, or a backend that cannot move to one it lists.
         """
         if self.backends is None:
-            return
-        found = set()
-        for value in (*args, *kwargs.values()):
-            for item in value if isinstance(value, list | tuple) else (value,):
-                # a Dataset has no backend of its own: its variables do
-                parts = (
-                    item.data_vars.values() if isinstance(item, xr.Dataset) else (item,)
-                )
-                for part in parts:
-                    if (backend := backend_of(part)) is not None:
-                        found.add(backend)
+            return args, kwargs, False
+        name, runs = type(self).__name__, " and ".join(self.backends)
+        parts = [p for value in (*args, *kwargs.values()) for p in _parts(value)]
+        found = {backend_of(part) for part in parts} - {None}
         if found == {"numpy", "dask"}:
             found = {"dask"}
+        if len(found) < 2 and found <= set(self.backends):
+            return args, kwargs, False
+        if found <= {"numpy", "jax"} and {"numpy", "jax"} & set(self.backends):
+            target = "jax" if "jax" in self.backends else "numpy"
+            if target == "jax":
+                report_move(name, "NumPy data joined jax")
+            elif any("Tracer" in type(_raw(part)).__name__ for part in parts):
+                raise BackendError(
+                    f"{name} runs on {runs} only, so it cannot run inside jax.jit, "
+                    "grad or vmap: the data is traced and has no values."
+                )
+            else:
+                report_move(name, "JAX data copied to the host")
+            moved = tuple(_moved(value, target) for value in args)
+            named = {key: _moved(value, target) for key, value in kwargs.items()}
+            return moved, named, target == "numpy"
         if len(found) > 1:
             raise BackendError(
-                f"{type(self).__name__}: inputs on {sorted(found)}; put them on one "
-                "backend first (inputs never move between backends silently)."
+                f"{name}: inputs on {sorted(map(str, found))}; put them on one first."
             )
-        if found and (got := found.pop()) not in self.backends:
-            raise BackendError(
-                f"{type(self).__name__} runs on {' and '.join(self.backends)} only, "
-                f"not {got}. Convert the input first; inputs never move between "
-                "backends silently."
-            )
+        raise BackendError(
+            f"{name} runs on {runs} only, not {found.pop()}. Convert the input first."
+        )
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Make each ``compute_output_signature`` override pass an unknown on.
@@ -166,11 +220,13 @@ class Operator(_PipekitOperator):
         """
         if any(isinstance(a, Node) for a in args):
             return super().__call__(*args, **kwargs)
+        # the declared backends hold for every leaf of a tree too
+        args, kwargs, on_host = self._placed(args, kwargs)
         if any(isinstance(a, xr.DataTree) for a in args):
-            # the declared backends hold for a tree too: check every leaf
-            self._check_backends(tuple(_leaves(a) for a in args), kwargs)
-            return self._apply_tree(*args, **kwargs)
-        return super().__call__(*args, **kwargs)
+            out = self._apply_tree(*args, **kwargs)
+        else:
+            out = super().__call__(*args, **kwargs)
+        return _moved(out, "jax") if on_host else out
 
     def _apply_tree(self, *args: Any, **kwargs: Any) -> Any:
         """Handle a call whose positional arguments include a ``DataTree``.

@@ -1997,7 +1997,8 @@ def test_matched_filter_fits_on_a_renamed_band_dim(fit_on_call: bool) -> None:
 def test_operators_declare_and_keep_their_backends(cls: type) -> None:
     """Every operator lists its backends and keeps them (#532).
 
-    A NumPy-only operator refuses a JAX carrier with ``BackendError``; one
+    A NumPy-only operator runs on the host for a JAX carrier, returns JAX
+    and refuses a trace with ``BackendError``; one
     that lists ``"jax"`` matches its NumPy result on JAX carriers and
     traces once under ``jax.jit`` for two grids (``assert_backends``).
     """
@@ -2041,8 +2042,8 @@ def test_assert_backends_catches_a_false_jax_claim() -> None:
         assert_backends(HostNDVI(), scene)
 
 
-def test_a_numpy_operator_refuses_a_jax_carrier() -> None:
-    """The refusal names the operator and says how to convert (#532)."""
+def test_a_numpy_operator_refuses_a_trace() -> None:
+    """Eagerly it runs on the host; the refusal names it (#532, pipekit#253)."""
     jax = pytest.importorskip("jax")
     from pipekit_ops import BackendError
 
@@ -2052,10 +2053,9 @@ def test_a_numpy_operator_refuses_a_jax_carrier() -> None:
     jax.config.update("jax_enable_x64", True)
     try:
         scene = _attributed_inputs()[1].to_jax()
-        with pytest.raises(
-            BackendError, match=r"DespeckleLee runs on numpy only, not jax"
-        ):
-            DespeckleLee()(scene)
+        assert DespeckleLee()(scene).backend == "jax"
+        with pytest.raises(BackendError, match=r"DespeckleLee runs on numpy only"):
+            jax.jit(DespeckleLee())(scene)
     finally:
         jax.config.update("jax_enable_x64", x64)
 
