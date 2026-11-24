@@ -24,7 +24,6 @@ from geophysix.thermo import temperature_from_potential_temperature
 from xrproducts.types import Variable, apply_cf_attrs
 
 
-
 #: Gravitational acceleration WRF itself uses for the geopotential [m s⁻²]; the
 #: file's ``PH`` is ``9.81 z``, so this is the model's constant, not geophysix's
 #: standard gravity.

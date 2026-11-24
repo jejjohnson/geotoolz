@@ -257,6 +257,4 @@ def test_columns_stay_lazy_on_dask():
     layer = {"pressure_pa": 1.0e5, "temperature_k": 288.15, "path_length_m": 100.0}
     delta = column_mass_to_delta_vmr(mass.chunk({"x": 1}), **layer)
     assert delta.chunks is not None
-    xr.testing.assert_allclose(
-        delta.compute(), column_mass_to_delta_vmr(mass, **layer)
-    )
+    xr.testing.assert_allclose(delta.compute(), column_mass_to_delta_vmr(mass, **layer))

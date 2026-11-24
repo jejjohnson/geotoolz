@@ -201,8 +201,6 @@ def column_mass_to_delta_vmr(
     """
     gas = Gas("gas", molar_mass_kg_mol)
     n_air = thermo.number_density(pressure_pa, temperature_k)
-    molecules_per_m2 = columns.convert(
-        column_mass, "kg_m2", "molecules_m2", gas=gas
-    )
+    molecules_per_m2 = columns.convert(column_mass, "kg_m2", "molecules_m2", gas=gas)
     delta = molecules_per_m2 / (n_air * path_length_m)
     return delta.assign_attrs(long_name="Mixing-ratio enhancement", units="1")

@@ -14,7 +14,6 @@ from geophysix import wind
 from xrproducts.types import Variable, apply_cf_attrs
 
 
-
 _WIND_SPEED = Variable(
     name="wind_speed",
     standard_name="wind_speed",
@@ -133,9 +132,7 @@ def wind_components(
     if convention not in ("from", "to"):
         raise ValueError(f"convention must be 'from' or 'to', got {convention!r}")
     # u = −|V| sin θ,  v = −|V| cos θ  (signs flip under "to")
-    east, north = wind.wind_components(
-        ds[speed], ds[direction], convention=convention
-    )
+    east, north = wind.wind_components(ds[speed], ds[direction], convention=convention)
     out = ds.copy()
     out[u] = apply_cf_attrs(east, "u", overwrite=True)
     out[v] = apply_cf_attrs(north, "v", overwrite=True)

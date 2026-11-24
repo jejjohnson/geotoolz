@@ -17,7 +17,6 @@ from geophysix.thermo import virtual_temperature
 from xrproducts.types import Variable, apply_cf_attrs
 
 
-
 #: ``R_d / g₀`` [m K⁻¹], the hypsometric scale per kelvin.
 _R_D_OVER_G = STANDARD.dry_air_gas_constant / STANDARD.standard_gravity
 
