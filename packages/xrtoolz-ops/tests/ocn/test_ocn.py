@@ -815,3 +815,13 @@ def test_coriolis_parameter_is_lazy_on_dask_and_keeps_coords():
         f.values, 2.0 * 7.292115e-5 * np.sin(np.deg2rad(lat.values)), rtol=1e-12
     )
     assert f["lat"].equals(lat["lat"])
+
+
+def test_coriolis_parameter_has_no_attributes_of_the_latitude():
+    attrs = {"units": "degrees_north", "standard_name": "latitude"}
+    lat = xr.DataArray([10.0, 20.0], dims="lat", coords={"lat": [10.0, 20.0]})
+    lat["lat"].attrs = attrs
+    f = coriolis_parameter(lat["lat"])
+    assert f.attrs == {}
+    assert f.name is None
+    assert f["lat"].attrs == attrs

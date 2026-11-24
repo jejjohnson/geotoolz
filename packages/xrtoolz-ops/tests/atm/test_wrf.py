@@ -381,3 +381,15 @@ def test_wrf_temperature_is_the_previous_inline_formula():
     expected = (ds["T"] + THETA_BASE) * ((ds["P"] + ds["PB"]) / P_REFERENCE) ** KAPPA
     np.testing.assert_array_equal(wrf_temperature(ds).values, expected.values)
     assert wrf_temperature(ds).dims == expected.dims
+
+
+def test_wrf_temperature_has_no_attributes_of_wrf_t():
+    attrs = {"units": "K", "description": "perturbation potential temperature"}
+    ds = xr.Dataset(
+        {
+            "T": ("x", [0.0, 1.0], attrs),
+            "P": ("x", [0.0, 10.0]),
+            "PB": ("x", [1e5, 9e4]),
+        }
+    )
+    assert wrf_temperature(ds).attrs == {}

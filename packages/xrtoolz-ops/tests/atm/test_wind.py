@@ -109,3 +109,5 @@ def test_wind_stays_lazy_on_dask(ds_uv):
     lazy = ds_uv.chunk({"y": 2})
     assert wind_speed(lazy)["wind_speed"].chunks is not None
     assert wind_direction(lazy)["wind_direction"].chunks is not None
+    polar = wind_direction(wind_speed(lazy))
+    assert wind_components(polar, u="ue", v="vn")["ue"].chunks is not None
