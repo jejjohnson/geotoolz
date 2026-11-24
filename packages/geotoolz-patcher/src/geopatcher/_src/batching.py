@@ -104,7 +104,7 @@ def batch_split(
         geoarray.GridMismatchError: The patches of one batch differ in CRS.
         TypeError: A patch is not a raster carrier (a plain array, a
             ``DataArray`` with no grid): use the deprecated
-            `BatchedPatch.split` for those, until geotoolz-patcher 0.15.
+            `BatchedPatch.split` for those, until geotoolz-patcher 0.16.
 
     Example:
         >>> batches = list(batch_split(patcher, field, batch_size=16))
@@ -138,7 +138,7 @@ def unbatch(
     ``patcher.merge(unbatch(...), domain)`` reassembles the field.
 
     Args:
-        batch: A `PatchBatch` from `batch_split` (or, until 0.15, a
+        batch: A `PatchBatch` from `batch_split` (or, until 0.16, a
             deprecated `BatchedPatch`, which carries its own anchors).
         data: Optional replacement payload, typically the model output for
             the batch: a `GeoArray` with the ``patch`` dim (from
@@ -242,7 +242,7 @@ def _not_a_raster(data: Any) -> TypeError:
         "batch_split batches raster patches (a GeoArray, or a DataArray on an "
         f"affine grid), got {type(data).__name__}. For other patches use the "
         "deprecated geopatcher.run.BatchedPatch.split (removed in "
-        "geotoolz-patcher 0.15)."
+        "geotoolz-patcher 0.16)."
     )
 
 
@@ -430,7 +430,7 @@ class BatchedPatch:
     """Deprecated: a leading-axis batch of patches with per-patch lists.
 
     Replaced by `PatchBatch` (ADR-013) and removed in geotoolz-patcher
-    0.15. `BatchedPatch.split` still batches patches that are not raster
+    0.16. `BatchedPatch.split` still batches patches that are not raster
     carriers (plain arrays, ``DataArray`` with no grid); `batch_split`
     raises for those.
 
@@ -469,7 +469,7 @@ class BatchedPatch:
         """Deprecated: the 0.12 `batch_split`, NumPy only.
 
         Yields `BatchedPatch` objects whose short final batch is
-        zero-padded (``pad_last``). Removed in geotoolz-patcher 0.15.
+        zero-padded (``pad_last``). Removed in geotoolz-patcher 0.16.
 
         Raises:
             ValueError: ``batch_size`` is not positive, or the patches of
@@ -481,7 +481,7 @@ class BatchedPatch:
         """
         warnings.warn(
             "BatchedPatch.split is deprecated and is removed in geotoolz-patcher "
-            "0.15; batch_split yields a PatchBatch (one GeoArray with a 'patch' "
+            "0.16; batch_split yields a PatchBatch (one GeoArray with a 'patch' "
             "dim) for raster patches",
             DeprecationWarning,
             stacklevel=2,
