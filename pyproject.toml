@@ -34,12 +34,12 @@ xrtoolz-products = { workspace = true }
 # still carries the PyPI-flavoured `pipekit-ops>=…` requirement from each
 # member's [project] table.
 # All three come from one repo whose members point at each other at the
-# same commit, so uv needs them at one tag: `pipekit-ops-v0.2.1` (8e357a1)
-# carries ops 0.2.1, array 0.1.1 and train 0.2.0. Per-package tags make uv
+# same commit, so uv needs them at one tag: `pipekit-array-v0.1.4` (30a6c19)
+# carries ops 0.2.3, array 0.1.4 and train 0.2.0. Per-package tags make uv
 # report conflicting URLs for pipekit-ops.
-pipekit-ops = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-ops", tag = "pipekit-ops-v0.2.1" }
-pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", tag = "pipekit-ops-v0.2.1" }
-pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", tag = "pipekit-ops-v0.2.1" }
+pipekit-ops = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-ops", tag = "pipekit-array-v0.1.4" }
+pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", tag = "pipekit-array-v0.1.4" }
+pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", tag = "pipekit-array-v0.1.4" }
 # functax (interpolation plans with adjoints, the affine raster kernels) is
 # not on PyPI either, so it comes from GitHub at a release tag. Its base
 # install is NumPy-only (geoarray's affine kernels); `functax[jax]` brings

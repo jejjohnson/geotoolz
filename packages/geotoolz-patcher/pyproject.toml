@@ -55,7 +55,7 @@ dependencies = [
     # `run.batch_split` groups, pads and masks with `pipekit_array.batch`
     # (imported when it runs); geotoolz-array already depends on it, so this
     # declares the import rather than adding an install.
-    "pipekit-array>=0.1.1",
+    "pipekit-array>=0.1.4",
 ]
 
 [project.optional-dependencies]
@@ -93,7 +93,7 @@ patch-full = [
 # `geopatcher.integrations.pipekit` (GridSampler / ApplyToChips / MergePatches).
 # The patcher core stays framework-free; only this integration module
 # imports `pipekit_ops.Operator`.
-pipekit = ["pipekit-ops>=0.2.1"]
+pipekit = ["pipekit-ops>=0.2.3"]
 # Training-data bridge: `geopatcher.integrations.train.XarrayWindowDataset`, a
 # pipekit-train `TrainingDataset` of windows from lazy xarray / Zarr stores.
 # It rides the Equinox adapter's Grain path, so the extra pulls that adapter
