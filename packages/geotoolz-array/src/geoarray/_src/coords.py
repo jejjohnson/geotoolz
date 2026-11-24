@@ -46,6 +46,7 @@ from geoarray._src.grid import apply_transform, as_crs, shift_scale_transform
 __all__ = [
     "Coordinate",
     "CurvilinearGrid",
+    "LabelAxis",
     "PixelGrid",
     "PointAxis",
     "SpectralAxis",
@@ -201,6 +202,45 @@ class VariableAxis:
 
 
 _VERTICAL_KINDS = ("height", "depth", "pressure", "level")
+
+
+@dataclasses.dataclass(frozen=True)
+class LabelAxis:
+    """Plain labels on a dim that has no coordinate type of its own.
+
+    What ``pipekit_array`` gives a renamed, merged or split dim. It holds the
+    labels only: renaming ``band`` keeps the band names and drops their
+    wavelengths.
+
+    Args:
+        dim: The dim's name.
+        values: One hashable label per index.
+
+    Example:
+        >>> channels = LabelAxis("channel", ("B4", "B8"))
+        >>> channels.isel([1]).labels
+        ('B8',)
+    """
+
+    dim: str
+    values: tuple[Any, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", tuple(self.values))
+
+    @property
+    def size(self) -> int:
+        """The number of labels."""
+        return len(self.values)
+
+    @property
+    def labels(self) -> tuple[Any, ...]:
+        """The labels."""
+        return self.values
+
+    def isel(self, index: Any) -> LabelAxis:
+        """The labels at ``index``."""
+        return LabelAxis(self.dim, _take(self.values, _positions(index, self.size)))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -605,6 +645,9 @@ def concat_coords(parts: Sequence[Coordinate | None]) -> Coordinate | None:
         )
     if isinstance(first, VariableAxis):
         return VariableAxis(names, _joined(parts, "units"))
+    if isinstance(first, LabelAxis):
+        values = _joined(parts, "values")
+        return LabelAxis(first.dim, values) if len(set(values)) == len(values) else None
     if isinstance(first, VerticalAxis):
         verticals = {cast(VerticalAxis, p).vertical for p in parts}
         if len(verticals) > 1:
@@ -625,8 +668,9 @@ def coord_to_config(coord: Coordinate) -> dict[str, Any]:
     """A strict-JSON config of a carrier coordinate; `coord_from_config` inverts it.
 
     Covers the coordinates of a `GeoArray`'s non-spatial dims: `SpectralAxis`,
-    `VariableAxis`, `VerticalAxis` and `TimeAxis` (stamps as ISO strings,
-    ``"NaT"`` for a missing time).
+    `VariableAxis`, `VerticalAxis`, `TimeAxis` (stamps as ISO strings,
+    ``"NaT"`` for a missing time) and `LabelAxis` (labels that JSON holds, and
+    tuples of them).
 
     Raises:
         TypeError: Another kind of coordinate.
@@ -664,6 +708,10 @@ def coord_to_config(coord: Coordinate) -> dict[str, Any]:
     if isinstance(coord, TimeAxis):
         stamps = np.datetime_as_string(coord.to_host().stamps, unit="ns")
         return {"kind": "TimeAxis", "stamps": [str(t) for t in stamps]}
+    if isinstance(coord, LabelAxis):
+        # JSON has no tuples: merged labels become lists, and come back below
+        values = [list(v) if isinstance(v, tuple) else v for v in coord.values]
+        return {"kind": "LabelAxis", "dim": coord.dim, "values": values}
     raise TypeError(f"coord_to_config: no config for a {type(coord).__name__}")
 
 
@@ -690,6 +738,9 @@ def coord_from_config(config: dict[str, Any]) -> Coordinate:
         )
     if kind == "TimeAxis":
         return TimeAxis(np.array(config["stamps"], dtype="datetime64[ns]"))
+    if kind == "LabelAxis":
+        values = (tuple(v) if isinstance(v, list) else v for v in config["values"])
+        return LabelAxis(config["dim"], tuple(values))
     raise ValueError(f"coord_from_config: unknown coordinate kind {kind!r}")
 
 
