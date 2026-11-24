@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/xrtoolz-ops-v0.5.1...xrtoolz-ops-v0.6.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **array:** carriers join NumPy and JAX, on pipekit's backend rule and guard ([#778](https://github.com/jejjohnson/geotoolz/issues/778))
+
+### Bug Fixes
+
+* **xrops:** geophysix takes the DataArrays itself, so the elementwise wrapper goes ([#781](https://github.com/jejjohnson/geotoolz/issues/781)) ([a02cebc](https://github.com/jejjohnson/geotoolz/commit/a02cebcbf1e57ff205507b8bd0f9687f6fc4184c))
+
+
+### Code Refactoring
+
+* **array:** carriers join NumPy and JAX, on pipekit's backend rule and guard ([#778](https://github.com/jejjohnson/geotoolz/issues/778)) ([f120d74](https://github.com/jejjohnson/geotoolz/commit/f120d749fe51968c3102dc3727ea687d22c4c8b8))
+
 ## [0.5.1](https://github.com/jejjohnson/xrtoolz/compare/xrtoolz-ops-v0.5.0...xrtoolz-ops-v0.5.1) (2026-11-12)
 
 

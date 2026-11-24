@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.4.1...geotoolz-array-v0.5.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **array:** carriers join NumPy and JAX, on pipekit's backend rule and guard ([#778](https://github.com/jejjohnson/geotoolz/issues/778))
+
+### Features
+
+* **array:** add to_geoswath for model fields on lat-lon grids ([#759](https://github.com/jejjohnson/geotoolz/issues/759)) ([4a1d7c5](https://github.com/jejjohnson/geotoolz/commit/4a1d7c58b438b9341d4378ef3e91d274964a5cf3))
+
+
+### Code Refactoring
+
+* **array:** carriers join NumPy and JAX, on pipekit's backend rule and guard ([#778](https://github.com/jejjohnson/geotoolz/issues/778)) ([f120d74](https://github.com/jejjohnson/geotoolz/commit/f120d749fe51968c3102dc3727ea687d22c4c8b8))
+
 ## [0.4.1](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.4.0...geotoolz-array-v0.4.1) (2026-11-11)
 
 

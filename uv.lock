@@ -1612,7 +1612,7 @@ dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "geotoolz-array"
-version = "0.4.1"
+version = "0.5.0"
 source = { editable = "packages/geotoolz-array" }
 dependencies = [
     { name = "affine" },
@@ -2024,7 +2024,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-ops"
-version = "0.18.1"
+version = "0.19.0"
 source = { editable = "packages/geotoolz-ops" }
 dependencies = [
     { name = "affine" },
@@ -2193,7 +2193,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-patcher"
-version = "0.14.3"
+version = "0.15.0"
 source = { editable = "packages/geotoolz-patcher" }
 dependencies = [
     { name = "geophysix" },
@@ -7000,7 +7000,7 @@ provides-extras = ["wavelets", "image", "functax", "maps", "sklearn", "vector"]
 
 [[package]]
 name = "xrtoolz-ops"
-version = "0.5.1"
+version = "0.6.0"
 source = { editable = "packages/xrtoolz-ops" }
 dependencies = [
     { name = "dask", extra = ["array"] },
@@ -7144,7 +7144,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "xrtoolz-products"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "packages/xrtoolz-products" }
 dependencies = [
     { name = "geophysix" },
