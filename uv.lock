@@ -2193,7 +2193,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.35" }]
 
 [[package]]
 name = "geotoolz-patcher"
-version = "0.15.0"
+version = "0.16.0"
 source = { editable = "packages/geotoolz-patcher" }
 dependencies = [
     { name = "geophysix" },

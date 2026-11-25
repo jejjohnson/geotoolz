@@ -62,7 +62,7 @@ from geopatcher._src.spatial_time import SpatioTemporalPatcher
 from geopatcher._src.temporal.patcher import TemporalPatcher
 
 
-__version__ = "0.15.0"  # x-release-please-version
+__version__ = "0.16.0"  # x-release-please-version
 
 __all__ = [
     "AsyncField",
