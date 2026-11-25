@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.16.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.15.0...geotoolz-patcher-v0.16.0) (2026-11-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **patcher:** geopatcher.run.BatchedPatch and BatchedPatch.split are removed. Use batch_split (a PatchBatch) for raster patches and stack_patches for any other patch. unbatch requires patcher= and domain=.
+
+### Features
+
+* **patcher:** batch_split takes raster patches only, and BatchedPatch is gone ([#784](https://github.com/jejjohnson/geotoolz/issues/784)) ([c2f3831](https://github.com/jejjohnson/geotoolz/commit/c2f38311ad2ee347cd9b7a7752ffaaea88187cdf))
+
+
+### Bug Fixes
+
+* **patcher:** BatchedPatch goes in 0.16, since 0.15 still has it ([#782](https://github.com/jejjohnson/geotoolz/issues/782)) ([da66220](https://github.com/jejjohnson/geotoolz/commit/da66220a83de26ef4a31794cc523a1caf9f8cc2b))
+
 ## [0.15.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-patcher-v0.14.3...geotoolz-patcher-v0.15.0) (2026-11-24)
 
 
