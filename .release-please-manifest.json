@@ -5,8 +5,8 @@
   "packages/geotoolz-catalog": "0.9.0",
   "packages/geotoolz-products": "0.7.1",
   "packages/geotoolz-cloud": "0.7.1",
-  "packages/geotoolz-array": "0.6.0",
+  "packages/geotoolz-array": "0.6.1",
   "packages/xrtoolz": "0.4.1",
-  "packages/xrtoolz-ops": "0.7.0",
+  "packages/xrtoolz-ops": "0.7.1",
   "packages/xrtoolz-products": "0.5.1"
 }
