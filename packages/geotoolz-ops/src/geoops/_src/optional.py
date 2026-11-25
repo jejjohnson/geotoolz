@@ -2,21 +2,25 @@
 
 Families that need a third-party package outside the base install (e.g.
 ``viz`` → matplotlib, ``learn`` → scikit-learn / joblib, ``io.WriteZarr``
-→ zarr) import it through :func:`import_optional` at call time, so
+→ zarr) import it through :func:`optional_module` at call time, so
 ``import geoops`` works on a base install and only *using* the
 operator fails — with an ``ImportError`` that names the extra to add.
 """
 
 from __future__ import annotations
 
-import importlib
 import sys
 from types import ModuleType
 from typing import Any
 
+from pipekit_ops import import_optional
 
-def import_optional(module: str, extra: str, *, feature: str) -> ModuleType:
+
+def optional_module(module: str, extra: str, *, feature: str) -> ModuleType:
     """Import ``module``, or raise an ``ImportError`` naming the extra.
+
+    It is `pipekit_ops.import_optional` with geotoolz-ops's install command. A module
+    that is installed and fails while it is imported raises its own error.
 
     Args:
         module: Dotted module name to import (e.g. ``"sklearn.impute"``).
@@ -30,14 +34,7 @@ def import_optional(module: str, extra: str, *, feature: str) -> ModuleType:
         ImportError: ``module`` is not installed; the message names the
             ``geotoolz-ops[extra]`` install command.
     """
-    try:
-        return importlib.import_module(module)
-    except ImportError as exc:
-        raise ImportError(
-            f"{feature} requires the optional dependency {module.split('.')[0]!r}, "
-            f"which is not installed. Install it with "
-            f"`pip install 'geotoolz-ops[{extra}]'`."
-        ) from exc
+    return import_optional(module, install=f"geotoolz-ops[{extra}]", needed_by=feature)
 
 
 def optional_root(module: str, extra: str, *, feature: str) -> ModuleType:
@@ -47,7 +44,7 @@ def optional_root(module: str, extra: str, *, feature: str) -> ModuleType:
         >>> optional_root("json.decoder", "base", feature="doc").__name__
         'json'
     """
-    import_optional(module, extra, feature=feature)
+    optional_module(module, extra, feature=feature)
     return sys.modules[module.split(".")[0]]
 
 
@@ -61,8 +58,8 @@ def optional_name(module: str, name: str, extra: str, *, feature: str) -> Any:
         >>> optional_name("json", "decoder", "base", feature="doc").__name__
         'json.decoder'
     """
-    parent = import_optional(module, extra, feature=feature)
+    parent = optional_module(module, extra, feature=feature)
     try:
         return getattr(parent, name)
     except AttributeError:
-        return import_optional(f"{module}.{name}", extra, feature=feature)
+        return optional_module(f"{module}.{name}", extra, feature=feature)

@@ -24,7 +24,7 @@ from typing import Any, ClassVar, cast
 import numpy as np
 import pyproj
 from pipekit_array.dimarray import core_dims, vmapped_dims
-from pipekit_ops import on_import, report_move
+from pipekit_ops import is_traced, on_import, report_move
 
 from geoarray._src.array import (
     _check_coords,
@@ -47,7 +47,6 @@ from geoarray._src.attrs import FrozenAttrs, select_bands
 from geoarray._src.backend import (
     backend_of,
     import_jax,
-    is_tracer,
     namespace,
     require_x64,
     xarray_module,
@@ -64,7 +63,7 @@ _WGS84 = "EPSG:4326"
 
 def _float_leaf(value: Any, backend: str, name: str) -> Any:
     """A float64 leaf on ``backend`` (tracers kept as they are)."""
-    if is_tracer(value):
+    if is_traced(value):
         return value
     if backend == "jax":
         require_x64()
@@ -76,7 +75,7 @@ def _float_leaf(value: Any, backend: str, name: str) -> Any:
 
 def _time_leaf(value: Any, backend: str) -> Any:
     """Per-point times: ``datetime64[ns]`` on NumPy, ``int64`` ns on JAX."""
-    if is_tracer(value):
+    if is_traced(value):
         return value
     if backend == "jax":
         require_x64()
@@ -105,7 +104,7 @@ def _to_jax_leaf(value: Any, device: Any) -> Any:
 
 
 def _host(value: Any, what: str) -> np.ndarray:
-    if is_tracer(value):
+    if is_traced(value):
         raise GeoArrayTraceError(
             f"{what} needs concrete values, but this carrier is traced (inside "
             "jit / grad / vmap): call it outside the transform"
@@ -592,7 +591,7 @@ class GeoPoints(_Named):
             object.__setattr__(self, "time", time)
         if self.valid is not None:
             valid = self.valid
-            if not is_tracer(valid):
+            if not is_traced(valid):
                 valid = namespace(self.data).asarray(valid, dtype=bool)
             if tuple(valid.shape) != (n,):
                 raise ValueError(f"valid is (obs,) = ({n},), got {tuple(valid.shape)}")
@@ -635,7 +634,7 @@ class GeoPoints(_Named):
                 "GeoPoints.isel: an integer on obs would not leave a point set; "
                 "take obs=[k]"
             )
-        if is_tracer(k):
+        if is_traced(k):
             raise GeoArrayTraceError("an obs index must be concrete")
         data, dims, coords, attrs, _ = self._leading_index(wanted)
         leaves = {name: leaf[k] for name, leaf in self._leaves().items()}

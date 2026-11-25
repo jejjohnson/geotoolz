@@ -16,7 +16,7 @@ from geoarray import DIMS, GeoArray
 
 from geoops._src.engine import to_engine
 from geoops._src.geo import affine_of
-from geoops._src.optional import import_optional
+from geoops._src.optional import optional_module
 from geoops._src.scattered import inverse_distance
 from geoops._src.shape import require_ndim
 from geoops.geom._src.array import resolve_resampling
@@ -94,7 +94,7 @@ def _values_to_dataarray(values: np.ndarray, transform: Any, op_name: str) -> An
     ``band`` dim for 3-D input. Errors (non-axis-aligned affine,
     unsupported rank) name ``op_name``.
     """
-    xr = import_optional("xarray", "vector-cube", feature=op_name)
+    xr = optional_module("xarray", "vector-cube", feature=op_name)
 
     _require_axis_aligned(transform, op_name)
     arr = np.asarray(values)

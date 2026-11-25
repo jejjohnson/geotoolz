@@ -17,13 +17,12 @@ mode and comes back as NumPy. It runs under ``jit`` / ``grad`` on JAX.
 
 from __future__ import annotations
 
-import sys
 import warnings
 from types import ModuleType
 from typing import Any
 
 from geoarray import SPATIAL_DIMS, GeoArray, GeoPoints
-from pipekit_ops import backend_of
+from pipekit_ops import backend_of, is_traced
 
 from geoops._src.scattered import functax_module, x64
 
@@ -35,12 +34,6 @@ _PROMOTION_WARNING = (
     "deprecated (it hides a host-to-device copy); call .to_jax() on the grid "
     "first."
 )
-
-
-def is_tracer(x: Any) -> bool:
-    """Whether ``x`` is a JAX tracer (JAX is already imported for JAX data)."""
-    jax = sys.modules.get("jax")
-    return jax is not None and isinstance(x, jax.core.Tracer)
 
 
 def interp_at(
@@ -141,7 +134,7 @@ def interp_with_plan(
     if grid.backend == "numpy" and backend_of(points.xy) == "jax":
         # compute where the positions live; eagerly that hides a host-to-
         # device copy (C1's deprecation), under a trace the grid is a constant
-        if not is_tracer(points.xy):
+        if not is_traced(points.xy):
             warnings.warn(_PROMOTION_WARNING, DeprecationWarning, stacklevel=2)
         grid = grid.to_jax()
     if frame is not None and along not in grid.dims:

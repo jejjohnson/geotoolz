@@ -33,7 +33,7 @@ from affine import Affine
 from geoarray import DIMS, FrozenAttrs, GeoArray, GeoPoints, GridMismatchError
 from geophysix.earth import SPHERE, WGS84, geodetic_to_ecef, sphere
 from pipekit_array import array_namespace
-from pipekit_ops import Operator, backend_of, get_adapter
+from pipekit_ops import Operator, backend_of, get_adapter, is_traced
 from pyproj import CRS
 from radiomax.geometry import (
     apparent_position,
@@ -86,7 +86,6 @@ from geoops.geom._src.array import (
 from geoops.geom._src.sampling import (
     check_args,
     interp_with_plan,
-    is_tracer,
     plan_at,
 )
 from geoops.geom._src.stencils import difference_offsets
@@ -106,7 +105,7 @@ if TYPE_CHECKING:
     from shapely.geometry.base import BaseGeometry
 
 from geoops._src.coupling import Coupling
-from geoops._src.optional import import_optional, optional_name, optional_root
+from geoops._src.optional import optional_module, optional_name, optional_root
 
 
 if TYPE_CHECKING:
@@ -199,7 +198,7 @@ def _resize_to_shape(
     feature = "geoops.geom.Resize / Resample"
     engine = to_engine(gt, feature)
     # georeader's resize is skimage.transform.resize underneath.
-    import_optional("skimage.transform", "morph", feature=feature)
+    optional_module("skimage.transform", "morph", feature=feature)
     resized = from_engine(
         engine.resize(
             output_shape=(out_h, out_w),
@@ -4097,7 +4096,7 @@ class InterpAt(Operator):
 
         # the key reads the positions and validity on the host: concrete only
         inputs = (grid.transform, points.xy, points.valid)
-        concrete = not any(is_tracer(leaf) for leaf in inputs)
+        concrete = not any(is_traced(leaf) for leaf in inputs)
         key = self._plan_key(grid, points) if concrete else None
         if key is not None and key in self._plans:
             self._plans.move_to_end(key)
@@ -4108,7 +4107,7 @@ class InterpAt(Operator):
         # inside a trace even concrete inputs give a plan of tracers, which
         # must not outlive it: keep only plans whose leaves are all concrete
         leaves = jax.tree_util.tree_leaves(plan)
-        if key is not None and not any(is_tracer(leaf) for leaf in leaves):
+        if key is not None and not any(is_traced(leaf) for leaf in leaves):
             self._plans[key] = plan
             while len(self._plans) > self._MAX_PLANS:
                 self._plans.popitem(last=False)

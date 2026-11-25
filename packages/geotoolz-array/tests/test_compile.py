@@ -174,7 +174,7 @@ def test_to_jax_without_jax_names_the_extra() -> None:
         class Block(importlib.abc.MetaPathFinder):
             def find_spec(self, name, path=None, target=None):
                 if name.split(".")[0] in ("jax", "jaxlib"):
-                    raise ImportError(name)
+                    raise ModuleNotFoundError(name, name=name)
 
         sys.meta_path.insert(0, Block())
         import geoarray, numpy as np

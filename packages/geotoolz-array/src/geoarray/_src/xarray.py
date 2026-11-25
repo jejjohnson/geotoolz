@@ -34,10 +34,10 @@ from typing import Any
 import numpy as np
 import pyproj
 import xarray as xr
+from pipekit_ops import is_traced
 
 from geoarray._src.array import SPATIAL_DIMS, GeoArray
 from geoarray._src.attrs import FrozenAttrs
-from geoarray._src.backend import is_tracer
 from geoarray._src.carriers import GeoPoints, GeoSwath
 from geoarray._src.coords import (
     Coordinate,
@@ -80,7 +80,7 @@ _PIXEL_TOL = 1e-9
 
 
 def _host(data: Any, what: str) -> np.ndarray:
-    if is_tracer(data):
+    if is_traced(data):
         raise GeoArrayTraceError(
             f"{what} needs concrete data; call it outside jit / grad / vmap"
         )

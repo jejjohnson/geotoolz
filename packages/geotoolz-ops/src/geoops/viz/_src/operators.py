@@ -59,7 +59,7 @@ from geoops._src.geo import (
     require_geoarray,
     require_projected_crs,
 )
-from geoops._src.optional import import_optional, optional_name
+from geoops._src.optional import optional_module, optional_name
 from geoops._src.shape import band_dim, dim_axis, over_frames
 from geoops._src.valid import (
     carried_fill,
@@ -881,7 +881,7 @@ class AnnotatePolygons(Operator):
     @over_frames
     def _apply(self, gt: GeoArray) -> GeoArray:
         feature = "geoops.viz.AnnotatePolygons"
-        gpd = import_optional("geopandas", "vector", feature=feature)
+        gpd = optional_module("geopandas", "vector", feature=feature)
         rasterize_geopandas_like = optional_name(
             "georeader.rasterize",
             "rasterize_geopandas_like",
@@ -1012,7 +1012,7 @@ def _get_colormap(name: str) -> Any:
             ) from exc
         return getattr(cmocean_cm, name.split(".", 1)[1])
 
-    matplotlib = import_optional("matplotlib", "viz", feature=f"Colormap {name!r}")
+    matplotlib = optional_module("matplotlib", "viz", feature=f"Colormap {name!r}")
 
     return matplotlib.colormaps[name]
 

@@ -15,7 +15,7 @@ from typing import Any
 from geoarray import GeoArray, RasterSource
 
 from geoops._src.geo import is_geotensor, reject_georeader
-from geoops._src.optional import import_optional
+from geoops._src.optional import optional_module
 
 
 __all__ = ["from_engine", "to_engine"]
@@ -38,7 +38,7 @@ def to_engine(x: Any, op_name: str = "geotoolz") -> Any:
             ``geotoolz-ops[sensors]``.
     """
     if isinstance(x, GeoArray | RasterSource):
-        import_optional("georeader", "sensors", feature=op_name)
+        optional_module("georeader", "sensors", feature=op_name)
     from geoarray.interop.georeader import source_to_georeader, to_georeader
 
     if isinstance(x, GeoArray):

@@ -12,7 +12,7 @@ import numpy as np
 from jaxtyping import Bool, Num, Shaped
 
 from geoops._src.dtype import as_float
-from geoops._src.optional import import_optional
+from geoops._src.optional import optional_module
 from geoops._src.samples import SampleLayout, cube_to_samples, samples_to_cube
 from geoops._src.valid import invalid_values
 from geoops._src.wrap import wrap_like
@@ -320,7 +320,7 @@ class GeoArrayEstimator:
         """
         state_path = Path(path)
         state_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib = import_optional("joblib", "learn", feature="save_state")
+        joblib = optional_module("joblib", "learn", feature="save_state")
         joblib.dump(
             {
                 "estimator": self.estimator,
@@ -350,7 +350,7 @@ class GeoArrayEstimator:
         state_path = Path(path)
         if not state_path.exists():
             raise FileNotFoundError(f"Sklearn state file not found: {state_path}")
-        joblib = import_optional("joblib", "learn", feature="load_state")
+        joblib = optional_module("joblib", "learn", feature="load_state")
         state = joblib.load(state_path)
         self.estimator = state["estimator"]
         self.imputer = state.get("imputer")
@@ -546,7 +546,7 @@ def _make_imputer(
     knn_n_neighbors: int,
     iterative_max_iter: int,
 ) -> Any:
-    impute = import_optional(
+    impute = optional_module(
         "sklearn.impute", "learn", feature=f"NaN strategy {strategy!r}"
     )
     if strategy == "impute_simple":
@@ -556,7 +556,7 @@ def _make_imputer(
     if strategy == "impute_iterative":
         # Importing this module intentionally enables sklearn's experimental
         # IterativeImputer before the estimator class is reachable.
-        import_optional(
+        optional_module(
             "sklearn.experimental.enable_iterative_imputer",
             "learn",
             feature="IterativeImputer",
@@ -571,7 +571,7 @@ def _write_metadata(
     fit_geoarray_shape: tuple[int, ...] | None,
     fit_n_samples: int | None,
 ) -> None:
-    sklearn = import_optional("sklearn", "learn", feature="save_state(write_meta=True)")
+    sklearn = optional_module("sklearn", "learn", feature="save_state(write_meta=True)")
 
     metadata = {
         "sklearn_version": sklearn.__version__,

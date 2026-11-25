@@ -20,7 +20,7 @@ from pipekit_array import array_namespace
 
 from geoops._src.blending import triangular_weights
 from geoops._src.geotensor import reject_geotensor
-from geoops._src.optional import import_optional, optional_name
+from geoops._src.optional import optional_module, optional_name
 from geoops.geom._src.stencils import (
     METHODS,
     Method,
@@ -111,7 +111,7 @@ def resolve_scheme(name: str) -> tuple[Any, str]:
         ImportError: functax's plans are missing (the ``[interp]`` extra).
     """
     scheme, kwargs, boundary = _FUNCTAX_SCHEMES[interp_resampling(name)]
-    interp = import_optional(
+    interp = optional_module(
         "functax.interp", "interp", feature="geoops.geom.Reproject(engine='interp')"
     )
     return getattr(interp, scheme)(**kwargs), boundary

@@ -30,7 +30,7 @@ import numpy as np
 import pyproj
 from pipekit_array import sel as pipekit_sel
 from pipekit_array.dimarray import core_dims, vmapped_dims
-from pipekit_ops import on_import, report_move
+from pipekit_ops import is_traced, on_import, report_move
 
 from geoarray._src.attrs import FrozenAttrs, drop_band_keys, select_bands
 from geoarray._src.backend import (
@@ -38,7 +38,6 @@ from geoarray._src.backend import (
     backend_of,
     import_jax,
     is_jax_array,
-    is_tracer,
     namespace,
     require_x64,
     xarray_module,
@@ -280,7 +279,7 @@ def _check_fill_fits(fill: _FillValue, dtype: Any) -> None:
 def _coerce_transform(transform: Any, backend: Backend) -> Any:
     """The transform as a ``(6,)`` float64 array of the data's backend."""
     if backend == "numpy":
-        if is_tracer(transform):
+        if is_traced(transform):
             raise GeoArrayTraceError(
                 "NumPy data cannot take a traced JAX transform: build the GeoArray "
                 "from JAX data (jnp.asarray(data)) inside jit / grad / vmap"
@@ -341,7 +340,7 @@ def _require_concrete_spatial(spatial: tuple[Any, ...]) -> None:
     """Raise `GeoArrayTraceError` for slice bounds that are JAX tracers."""
     for s in spatial:
         bounds = (s.start, s.stop, s.step) if isinstance(s, slice) else (s,)
-        if any(is_tracer(v) for v in bounds):
+        if any(is_traced(v) for v in bounds):
             raise GeoArrayTraceError(
                 "spatial slices need concrete bounds (the output shape and "
                 "transform depend on them); use geoarray.crop for traced offsets"
@@ -677,7 +676,7 @@ class GeoArray:
                 f"{what} is per scene, but this carrier is batched {self.batch_shape}: "
                 "index it, or read it inside jax.vmap"
             )
-        if is_tracer(self.transform):
+        if is_traced(self.transform):
             raise GeoArrayTraceError(
                 f"{what} needs a concrete transform, but this GeoArray is traced "
                 "(inside jit / grad / vmap): read g.transform there, or compute "
@@ -944,7 +943,7 @@ class GeoArray:
                 attrs = select_bands(attrs, k, self.count)
             if c is None or d in dropped:
                 continue
-            if not full and is_tracer(k):
+            if not full and is_traced(k):
                 raise GeoArrayTraceError(
                     f"an index on {d!r} must be concrete: its coordinate is static, "
                     "so the selection must be known when tracing; index g.data "
@@ -1219,7 +1218,7 @@ class GeoArray:
         """
         if self.backend == "numpy":
             return self
-        if is_tracer(self.data) or is_tracer(self.transform):
+        if is_traced(self.data) or is_traced(self.transform):
             raise GeoArrayTraceError(
                 "to_numpy needs concrete data, but this GeoArray is traced "
                 "(inside jit / grad / vmap): call it outside the transform"
@@ -1257,7 +1256,7 @@ class GeoArray:
                     "but copy=False was passed"
                 )
             return np.asarray(self.data, dtype=dtype)
-        if is_tracer(self.data):
+        if is_traced(self.data):
             raise GeoArrayTraceError(
                 "NumPy code received a GeoArray's data inside jit / grad / vmap, "
                 "where the data are tracers; use a JAX function "
@@ -1345,7 +1344,7 @@ class GeoArray:
 
     def __repr__(self) -> str:
         head = f"{self.backend} {self.dtype} {self.shape}"
-        if is_tracer(self.data) or is_tracer(self.transform) or self.batch_shape:
+        if is_traced(self.data) or is_traced(self.transform) or self.batch_shape:
             where = "traced" if not self.batch_shape else f"batch={self.batch_shape}"
         else:
             grid = self.grid

@@ -25,7 +25,7 @@ from geoops._src.geo import (
     require_grid_match,
     require_projected_crs,
 )
-from geoops._src.optional import import_optional, optional_name, optional_root
+from geoops._src.optional import optional_module, optional_name, optional_root
 from geoops._src.shape import gather_inputs
 from geoops._src.valid import carried_fill, carrier_fill_value, wrap_filled
 from geoops._src.wrap import wrap_like
@@ -900,7 +900,7 @@ def _rasterize_geometry_like(
     crs: str | None,
     all_touched: bool,
 ) -> np.ndarray:
-    gpd = import_optional(
+    gpd = optional_module(
         "geopandas",
         "vector",
         feature="geoops.mask",
@@ -957,7 +957,7 @@ def _load_natural_earth(kind: str, source: str) -> gpd.GeoDataFrame:
     :func:`clear_natural_earth_cache`. The downloaded zip and extracted
     shapefile are cached separately on disk across sessions.
     """
-    gpd = import_optional("geopandas", "vector", feature="geoops.mask")
+    gpd = optional_module("geopandas", "vector", feature="geoops.mask")
     if source != "natural_earth_10m":
         return gpd.read_file(source)
 
@@ -1086,7 +1086,7 @@ def _geometry_config(
     dicts (with tuples cast to lists for strict JSON safety). GeoDataFrames
     are summarised by length + CRS to avoid embedding many features.
     """
-    gpd = import_optional("geopandas", "vector", feature="geoops.mask")
+    gpd = optional_module("geopandas", "vector", feature="geoops.mask")
     shapely = optional_root(
         "shapely.geometry.base",
         "vector",

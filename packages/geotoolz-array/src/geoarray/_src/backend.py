@@ -12,6 +12,7 @@ from types import ModuleType
 from typing import Any, Literal, Protocol
 
 import numpy as np
+from pipekit_ops import import_optional
 
 from geoarray._src.errors import X64Error
 
@@ -22,7 +23,6 @@ __all__ = [
     "backend_of",
     "import_jax",
     "is_jax_array",
-    "is_tracer",
     "jax_loaded",
     "namespace",
     "require_x64",
@@ -45,9 +45,6 @@ class SupportsArray(Protocol):
     def __getitem__(self, key: Any, /) -> Any: ...
 
 
-_JAX_HINT = "JAX data needs the jax extra: pip install 'geotoolz-array[jax]'"
-
-
 def jax_loaded() -> bool:
     """Whether JAX is already imported in this process (never imports it)."""
     return "jax" in sys.modules
@@ -55,11 +52,7 @@ def jax_loaded() -> bool:
 
 def import_jax() -> ModuleType:
     """Import JAX, or raise `ImportError` naming the ``[jax]`` extra."""
-    try:
-        import jax
-    except ImportError as exc:  # pragma: no cover - exercised by the base-install job
-        raise ImportError(_JAX_HINT) from exc
-    return jax
+    return import_optional("jax", install="geotoolz-array[jax]", needed_by="JAX data")
 
 
 def is_jax_array(x: Any) -> bool:
@@ -69,15 +62,6 @@ def is_jax_array(x: Any) -> bool:
     import jax
 
     return isinstance(x, jax.Array)
-
-
-def is_tracer(x: Any) -> bool:
-    """Whether ``x`` is a JAX tracer (inside ``jit``, ``grad``, ``vmap``, …)."""
-    if not jax_loaded():
-        return False
-    import jax.core
-
-    return isinstance(x, jax.core.Tracer)
 
 
 def backend_of(x: Any) -> Backend:

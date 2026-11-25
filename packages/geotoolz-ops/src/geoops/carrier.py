@@ -67,7 +67,7 @@ Coupling:
     `geoops.testing.assert_coupling` check a declaration.
 
 Optional dependencies:
-    `import_optional` imports an extra's module inside the function that
+    `optional_module` imports an extra's module inside the function that
     needs it, with an error naming the extra; `optional_name` is the
     ``from a import b`` form and `optional_root` the ``import a.b`` one.
 
@@ -127,7 +127,7 @@ from geoops._src.geo import (
     require_grid_match,
     require_projected_crs,
 )
-from geoops._src.optional import import_optional, optional_name, optional_root
+from geoops._src.optional import optional_module, optional_name, optional_root
 from geoops._src.samples import (
     SampleLayout,
     cube_to_samples,
@@ -173,7 +173,6 @@ __all__ = [
     "dim_axis",
     "fit_once",
     "grid_matches",
-    "import_optional",
     "invalid_values",
     "jsonable",
     "keep_band_axis",
@@ -182,6 +181,7 @@ __all__ = [
     "mapping_to_pairs",
     "mask_invalid_to_nan",
     "nested_config",
+    "optional_module",
     "optional_name",
     "optional_root",
     "over_frames",

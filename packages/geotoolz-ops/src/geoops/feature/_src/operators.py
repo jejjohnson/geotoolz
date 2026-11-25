@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from geoarray import GeoArray
 
 from geoops._src.coupling import Coupling
-from geoops._src.optional import import_optional, optional_name
+from geoops._src.optional import optional_module, optional_name
 
 
 if TYPE_CHECKING:
@@ -42,7 +42,7 @@ def _points(
     cols: np.ndarray,
     data: dict[str, Any] | None = None,
 ) -> gpd.GeoDataFrame:
-    gpd = import_optional("geopandas", "vector", feature="geoops.feature")
+    gpd = optional_module("geopandas", "vector", feature="geoops.feature")
     frame = pd.DataFrame({"row": rows, "col": cols, **(data or {})})
     xs, ys = pixel_xy(gt.transform, rows, cols)
     geometry = gpd.points_from_xy(xs, ys)
@@ -90,7 +90,7 @@ class PeakLocalMax(Operator):
         self.exclude_border = exclude_border
 
     def _apply(self, gt: GeoArray) -> gpd.GeoDataFrame:
-        gpd = import_optional(
+        gpd = optional_module(
             "geopandas", "vector", feature="geoops.feature.PeakLocalMax"
         )
         peak_local_max = optional_name(
@@ -169,7 +169,7 @@ class _BlobBase(Operator):
         return sigma * np.sqrt(2.0)
 
     def _apply(self, gt: GeoArray) -> gpd.GeoDataFrame:
-        gpd = import_optional("geopandas", "vector", feature="geoops.feature")
+        gpd = optional_module("geopandas", "vector", feature="geoops.feature")
         name = type(self).__name__
         require_geoarray(gt, name)
         detect = optional_name(
@@ -394,7 +394,7 @@ class CornerHarris(Operator):
             "morph",
             feature="geoops.feature.CornerHarris",
         )
-        gpd = import_optional(
+        gpd = optional_module(
             "geopandas", "vector", feature="geoops.feature.CornerHarris"
         )
         require_geoarray(gt, "CornerHarris")
