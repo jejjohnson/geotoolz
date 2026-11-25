@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.5.0...geotoolz-array-v0.6.0) (2026-11-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **geoops:** optional imports and the tracer check are pipekit's ([#815](https://github.com/jejjohnson/geotoolz/issues/815))
+
+### Code Refactoring
+
+* **geoops:** optional imports and the tracer check are pipekit's ([#815](https://github.com/jejjohnson/geotoolz/issues/815)) ([b10dd61](https://github.com/jejjohnson/geotoolz/commit/b10dd6132f0b9b429fd4e01a3e646e72a7699870))
+
 ## [0.5.0](https://github.com/jejjohnson/geotoolz/compare/geotoolz-array-v0.4.1...geotoolz-array-v0.5.0) (2026-11-24)
 
 

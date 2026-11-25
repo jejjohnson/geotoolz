@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.7.0](https://github.com/jejjohnson/geotoolz/compare/xrtoolz-ops-v0.6.0...xrtoolz-ops-v0.7.0) (2026-11-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **xrops:** spectral, physical and Diebold–Mariano metrics call diagnostix.skill ([#814](https://github.com/jejjohnson/geotoolz/issues/814))
+* **xrops:** pixel and ensemble metrics call diagnostix.skill ([#813](https://github.com/jejjohnson/geotoolz/issues/813))
+* **xrops:** the Torrence–Compo and 2-D Morlet wavelets call diagnostix.spectra ([#809](https://github.com/jejjohnson/geotoolz/issues/809))
+* **xrops:** eof calls diagnostix.eofs, with weights and land ([#808](https://github.com/jejjohnson/geotoolz/issues/808))
+* **xrops:** spectra, fluxes and shapes call diagnostix.spectra, and xrft goes ([#807](https://github.com/jejjohnson/geotoolz/issues/807))
+* **xrops:** budgets call diagnostix.budgets, and boundary_flux is the flux through a boundary ([#806](https://github.com/jejjohnson/geotoolz/issues/806))
+* **xrops:** climatologies have one slot per calendar date, and the smoothing is centred ([#805](https://github.com/jejjohnson/geotoolz/issues/805))
+* **xrops:** ocn's and atm's column diagnostics call diagnostix.columns ([#803](https://github.com/jejjohnson/geotoolz/issues/803))
+
+### Features
+
+* **xrops:** budgets call diagnostix.budgets, and boundary_flux is the flux through a boundary ([#806](https://github.com/jejjohnson/geotoolz/issues/806)) ([65d04d9](https://github.com/jejjohnson/geotoolz/commit/65d04d987c55371f34f06c5993f686847ea0ba83))
+* **xrops:** eof calls diagnostix.eofs, with weights and land ([#808](https://github.com/jejjohnson/geotoolz/issues/808)) ([a30fb26](https://github.com/jejjohnson/geotoolz/commit/a30fb26c4b7b7041a589f6b7dff499d72301ff2f))
+* **xrops:** spectra, fluxes and shapes call diagnostix.spectra, and xrft goes ([#807](https://github.com/jejjohnson/geotoolz/issues/807)) ([bed49c6](https://github.com/jejjohnson/geotoolz/commit/bed49c6370528e5e89e48c89d9cbf51f6dc1d032))
+
+
+### Bug Fixes
+
+* **xrops:** a diagnostic does not have the units of its input ([#811](https://github.com/jejjohnson/geotoolz/issues/811)) ([a0e31ca](https://github.com/jejjohnson/geotoolz/commit/a0e31ca42b2f911a1961ada32e76d3f83f66b41a))
+* **xrops:** climatologies have one slot per calendar date, and the smoothing is centred ([#805](https://github.com/jejjohnson/geotoolz/issues/805)) ([2b0e8b1](https://github.com/jejjohnson/geotoolz/commit/2b0e8b144043d0130931cfe97b2fac464a527834))
+* **xrops:** ocn's and atm's column diagnostics call diagnostix.columns ([#803](https://github.com/jejjohnson/geotoolz/issues/803)) ([2804109](https://github.com/jejjohnson/geotoolz/commit/28041097c915c1e3f8f292bbb33fbba5f866082d))
+* **xrops:** ocn's horizontal diagnostics call gridax and diagnostix, with the sphere's curvature terms ([#802](https://github.com/jejjohnson/geotoolz/issues/802)) ([030e333](https://github.com/jejjohnson/geotoolz/commit/030e33378daa88649c8f229e5c772c51fd4b88a8))
+* **xrops:** pixel and ensemble metrics call diagnostix.skill ([#813](https://github.com/jejjohnson/geotoolz/issues/813)) ([d7b29ff](https://github.com/jejjohnson/geotoolz/commit/d7b29ff8c11fe1b788b301372d184f99e0a49d9d))
+* **xrops:** spectral, physical and Diebold–Mariano metrics call diagnostix.skill ([#814](https://github.com/jejjohnson/geotoolz/issues/814)) ([fcb9506](https://github.com/jejjohnson/geotoolz/commit/fcb95062d68f141ee50a667298c66bf4436dd77c))
+* **xrops:** the Torrence–Compo and 2-D Morlet wavelets call diagnostix.spectra ([#809](https://github.com/jejjohnson/geotoolz/issues/809)) ([f49ece3](https://github.com/jejjohnson/geotoolz/commit/f49ece3792092e8e65459f38127959fe008a28b4))
+
 ## [0.6.0](https://github.com/jejjohnson/geotoolz/compare/xrtoolz-ops-v0.5.1...xrtoolz-ops-v0.6.0) (2026-11-24)
 
 
