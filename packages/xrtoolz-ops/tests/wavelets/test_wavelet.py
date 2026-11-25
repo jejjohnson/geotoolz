@@ -232,12 +232,11 @@ def test_the_significance_takes_the_mother_that_was_saved() -> None:
     assert int(other.sum()) != int(saved.sum())
 
 
-def test_cwt1d_fills_gaps() -> None:
+def test_cwt1d_fills_gaps_with_the_mean() -> None:
     da = _sine_wave()
     gappy = da.where(da["time"] != 30.0)
-    xr.testing.assert_allclose(
-        cwt1d(gappy)["wave"], cwt1d(gappy.fillna(gappy.mean("time")))["wave"]
-    )
+    filled = gappy.fillna(gappy.mean("time"))
+    np.testing.assert_allclose(cwt1d(gappy)["wave"], cwt1d(filled)["wave"])
 
 
 def test_cwt1d_on_dask_is_lazy_and_equal() -> None:
