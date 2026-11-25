@@ -74,15 +74,15 @@ class CalculateClimatologySmoothed(Operator):
     """Compute a day-of-year climatology smoothed with a rolling window.
 
     Args:
-        window: Width (in days) of the centred rolling-mean smoothing
-            applied around the day-of-year cycle.
+        window: Width (in days, odd) of the centred running mean around the
+            year.
         time: Name of the time coordinate.
 
     Returns:
         A smoothed day-of-year climatology dataset.
     """
 
-    def __init__(self, window: int = 60, time: str = "time"):
+    def __init__(self, window: int = 61, time: str = "time"):
         self.window = window
         self.time = time
 
