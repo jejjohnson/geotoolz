@@ -154,7 +154,7 @@ def _per_chunk(
     wide = {
         axis: _at_least_two(arrays[0].chunks[axis]) for axis in (ndim - 2, ndim - 1)
     }
-    arrays = [array.rechunk(wide) for array in arrays]
+    arrays = tuple(array.rechunk(wide) for array in arrays)
     chunks = arrays[0].chunks
     # Each block finds its part of the coordinates in a block of their indices,
     # of length 1 along every other axis.
