@@ -34,12 +34,12 @@ xrtoolz-products = { workspace = true }
 # still carries the PyPI-flavoured `pipekit-ops>=…` requirement from each
 # member's [project] table.
 # All three come from one repo whose members point at each other at the
-# same commit, so uv needs them at one tag: `pipekit-array-v0.1.4` (30a6c19)
-# carries ops 0.2.3, array 0.1.4 and train 0.2.0. Per-package tags make uv
+# same commit, so uv needs them at one tag: `pipekit-array-v0.1.6` (41864be)
+# carries ops 0.2.4, array 0.1.6 and train 0.2.0. Per-package tags make uv
 # report conflicting URLs for pipekit-ops.
-pipekit-ops = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-ops", tag = "pipekit-array-v0.1.4" }
-pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", tag = "pipekit-array-v0.1.4" }
-pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", tag = "pipekit-array-v0.1.4" }
+pipekit-ops = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-ops", tag = "pipekit-array-v0.1.6" }
+pipekit-array = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-array", tag = "pipekit-array-v0.1.6" }
+pipekit-train = { git = "https://github.com/jejjohnson/pipekit", subdirectory = "packages/pipekit-train", tag = "pipekit-array-v0.1.6" }
 # functax (interpolation plans with adjoints, the affine raster kernels) is
 # not on PyPI either, so it comes from GitHub at a release tag. Its base
 # install is NumPy-only (geoarray's affine kernels); `functax[jax]` brings
@@ -49,16 +49,16 @@ functax = { git = "https://github.com/jejjohnson/functax", tag = "v0.0.6" }
 # and on DataArrays, JAX optional) is not on PyPI either, so it comes from GitHub
 # at a release tag. It and radiomax source pipekit at the tag above: the three
 # move together.
-geophysix = { git = "https://github.com/jejjohnson/geophysix", tag = "v0.0.7" }
+geophysix = { git = "https://github.com/jejjohnson/geophysix", tag = "v0.0.8" }
 # radiomax (observation geometry and radiometry on any array library, on
 # geophysix) is not on PyPI either. It sources geophysix from this same URL:
 # uv reads `….git` as another one.
-radiomax = { git = "https://github.com/jejjohnson/radiomax", tag = "v0.0.9" }
+radiomax = { git = "https://github.com/jejjohnson/radiomax", tag = "v0.0.11" }
 # gridax (grids and the calculus on them, NumPy or JAX) and diagnostix (the
-# diagnostics built on it) are not on PyPI either. diagnostix v0.0.4 is the last
-# release on the pipekit tag above.
-gridax = { git = "https://github.com/jejjohnson/gridax", subdirectory = "packages/gridax", tag = "gridax-v0.3.1" }
-diagnostix = { git = "https://github.com/jejjohnson/diagnostix", tag = "v0.0.4" }
+# diagnostics built on it) are not on PyPI either, and source pipekit at the tag
+# above: they move with it.
+gridax = { git = "https://github.com/jejjohnson/gridax", subdirectory = "packages/gridax", tag = "gridax-v0.3.2" }
+diagnostix = { git = "https://github.com/jejjohnson/diagnostix", tag = "v0.0.6" }
 
 [build-system]
 requires = ["hatchling"]
