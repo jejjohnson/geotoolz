@@ -353,7 +353,7 @@ def test_fill_gaps_is_compiled_once_and_still_names_a_missing_extra(
 
     def without_functax(name: str, package: str | None = None):
         if name.split(".")[0] == "functax":
-            raise ImportError(f"simulated missing {name}")
+            raise ModuleNotFoundError(f"simulated missing {name}", name=name)
         return real_import_module(name, package)
 
     monkeypatch.setattr(importlib, "import_module", without_functax)
