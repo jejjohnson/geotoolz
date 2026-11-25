@@ -30,13 +30,13 @@ def cwt1d(
     dj: float = 0.25,
     j_max: int | None = None,
     pad: bool = True,
-    detrend: Literal["constant", "linear"] | None = None,
 ) -> xr.Dataset:
     """Compute a 1-D continuous wavelet transform along one dimension.
 
     Torrence and Compo (1998), from ``diagnostix.spectra.wavelet_transform``.
     The returned ``power_rect`` variable is Liu et al. (2007) rectified power,
     ``|W|² / scale``. A missing sample is filled with the mean of its series.
+    Nothing is taken away first: a mean or a trend is a step at both ends.
 
     Args:
         da: Input time series or array with one transform dimension.
@@ -49,8 +49,6 @@ def cwt1d(
         j_max: Largest scale index. Defaults to ``log2(n * dt / s0) / dj``.
         pad: If ``True``, pad with zeros to twice the length, so that nothing
             wraps; if ``False``, the series is periodic and has no cone.
-        detrend: What to take away first: the mean (``"constant"``), the line
-            (``"linear"``) or nothing. A mean left in is a step at both ends.
 
     Returns:
         Dataset with ``wave``, ``power``, ``power_rect``, ``coi``, and
@@ -71,7 +69,7 @@ def cwt1d(
             scale,
             mother=mother_name,
             param=param_value,
-            detrend=detrend,
+            detrend=None,
             periodic=not pad,
         ).coefficients
 
