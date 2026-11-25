@@ -26,14 +26,20 @@ import xarray as xr
 
 from xrops.geom import get_dataset_resolution
 from xrops.metrics import NRMSEScore, nrmse, nrmse_score
-from xrops.metrics._src._pixel_kernels import nrmse_score as array_nrmse_score
+
+
+def array_nrmse_score(pred: np.ndarray, ref: np.ndarray, *, axis: int) -> np.ndarray:
+    """The score of two arrays along one axis, through DataArrays."""
+    dims = [f"d{i}" for i in range(pred.ndim)]
+    fields = (xr.DataArray(a, dims=dims) for a in (pred, ref))
+    return nrmse_score(*fields, dim=dims[axis]).values
 
 
 # ---------- nrmse_score ----------------------------------------------------
 
 
 def test_nrmse_score_array_matches_mercator_formula() -> None:
-    """Private kernel: ``1 - RMSE / std(ref)``."""
+    """``1 - RMSE / std(ref)``."""
     rng = np.random.default_rng(0)
     pred = rng.standard_normal((4, 32))
     ref = rng.standard_normal((4, 32))
@@ -97,7 +103,7 @@ def test_nrmse_score_operator_get_config_roundtrips() -> None:
     cfg = op.get_config()
     # JSON-serialisable
     assert json.loads(json.dumps(cfg)) == cfg
-    assert cfg == {"variable": "x", "dims": ["a", "time"]}
+    assert cfg == {"variable": "x", "dims": ["a", "time"], "weights": None}
 
 
 def test_nrmse_score_constant_reference_returns_one_for_perfect_prediction() -> None:

@@ -124,7 +124,7 @@ def ensemble_pair() -> tuple[xr.Dataset, xr.Dataset]:
 
 
 def test_crps_against_xskillscore(ensemble_pair) -> None:
-    import xskillscore as xs
+    xs = pytest.importorskip("xskillscore")
 
     ds_e, ds_r = ensemble_pair
     op = CRPS("x")
@@ -183,10 +183,7 @@ def test_distributional_get_config_json() -> None:
 
 
 def test_spread_skill_ratio_calibrated_ensemble() -> None:
-    """Calibrated ensemble: truth and members drawn from the same dist.
-
-    Population spread/skill = sqrt(N/(N+1)).
-    """
+    """Calibrated ensemble: truth and members drawn from the same dist."""
     rng = np.random.default_rng(7)
     n_t = 5000
     n_m = 30
@@ -198,8 +195,7 @@ def test_spread_skill_ratio_calibrated_ensemble() -> None:
     )
     ds_r = xr.Dataset({"x": (("t",), truth)}, coords={"t": np.arange(n_t)})
     out = SpreadSkillRatio("x")(ds_e, ds_r)
-    expected = np.sqrt(n_m / (n_m + 1))
-    np.testing.assert_allclose(float(out.values), expected, rtol=0.05)
+    np.testing.assert_allclose(float(out.values), 1.0, rtol=0.02)
 
 
 def test_rank_histogram_calibrated_ensemble_uniform() -> None:
@@ -223,8 +219,8 @@ def test_ensemble_coverage_calibrated() -> None:
     ens = rng.standard_normal((n_m, n_t))
     ds_e = xr.Dataset({"x": (("member", "t"), ens)})
     ds_r = xr.Dataset({"x": (("t",), truth)})
-    out = EnsembleCoverage("x", q=(0.05, 0.95))(ds_e, ds_r)
-    np.testing.assert_allclose(float(out.values), 0.9, atol=0.05)
+    out = EnsembleCoverage("x", level=0.9)(ds_e, ds_r)
+    np.testing.assert_allclose(float(out.values), 0.9, atol=0.015)
 
 
 def test_reliability_curve_perfectly_calibrated() -> None:
@@ -248,12 +244,12 @@ def test_probabilistic_missing_member_dim_raises() -> None:
         SpreadSkillRatio("x")(ds_e, ds_r)
 
 
-def test_ensemble_coverage_invalid_q() -> None:
+def test_ensemble_coverage_invalid_level() -> None:
     rng = np.random.default_rng(11)
     ds_e = xr.Dataset({"x": (("member", "t"), rng.standard_normal((5, 3)))})
     ds_r = xr.Dataset({"x": (("t",), np.zeros(3))})
-    with pytest.raises(ValueError, match="q must be"):
-        EnsembleCoverage("x", q=(0.95, 0.05))(ds_e, ds_r)
+    with pytest.raises(ValueError, match="'level' must be"):
+        EnsembleCoverage("x", level=1.5)(ds_e, ds_r)
 
 
 # =========================================================================

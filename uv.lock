@@ -1949,6 +1949,7 @@ dev = [
     { name = "xrtoolz" },
     { name = "xrtoolz-ops" },
     { name = "xrtoolz-products" },
+    { name = "xskillscore" },
     { name = "zarr" },
 ]
 docs = [
@@ -2010,6 +2011,7 @@ dev = [
     { name = "xrtoolz", editable = "packages/xrtoolz" },
     { name = "xrtoolz-ops", editable = "packages/xrtoolz-ops" },
     { name = "xrtoolz-products", editable = "packages/xrtoolz-products" },
+    { name = "xskillscore", specifier = ">=0.0.26" },
     { name = "zarr", specifier = ">=3.1.6" },
 ]
 docs = [
@@ -7033,7 +7035,6 @@ dependencies = [
     { name = "scipy" },
     { name = "xarray" },
     { name = "xrtoolz-products" },
-    { name = "xskillscore" },
 ]
 
 [package.optional-dependencies]
@@ -7122,7 +7123,6 @@ requires-dist = [
     { name = "shapely", marker = "extra == 'vector'", specifier = ">=2.0" },
     { name = "xarray", specifier = ">=2024.10" },
     { name = "xrtoolz-products", editable = "packages/xrtoolz-products" },
-    { name = "xskillscore", specifier = ">=0.0.26" },
 ]
 provides-extras = ["wavelets", "image", "functax", "maps", "vector", "sklearn"]
 

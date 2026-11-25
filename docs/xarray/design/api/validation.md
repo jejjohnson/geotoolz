@@ -135,7 +135,7 @@ from xrtoolz.metrics.probabilistic import CRPS, SpreadSkillRatio, RankHistogram,
 
 ```python
 crps = CRPS(variable="ssh", ensemble_dim="member", dims=("time", "lat", "lon"))(ensemble, reference)
-coverage = EnsembleCoverage(variable="ssh", q=(0.05, 0.95), ensemble_dim="member")(ensemble, reference)
+coverage = EnsembleCoverage(variable="ssh", level=0.9, ensemble_dim="member")(ensemble, reference)
 ```
 
 ---

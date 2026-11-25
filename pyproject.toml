@@ -118,6 +118,8 @@ dev = [
     "loguru>=0.7.3",
     # scripts/family_parity.py (the geoops/xrops family-name check, gate D1).
     "cyclopts>=3",
+    # Reference oracle for xrops.metrics.crps_ensemble.
+    "xskillscore>=0.0.26",
     # NetCDF backend for xrtoolz-products's CDS cache round-trip tests.
     "netcdf4>=1.6",
     # zoneinfo data so xrtoolz-products's tz-aware TimeRange tests resolve
