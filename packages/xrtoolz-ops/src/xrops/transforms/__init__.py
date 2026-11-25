@@ -16,7 +16,8 @@ themselves. Any other sklearn-style estimator goes through
 
 from xrops.transforms._src.coord_remap import remap_axis, to_phase
 from xrops.transforms._src.dct import dct, dst, idct, idst
-from xrops.transforms._src.decompose import eof, ica, kmeans, nmf, pca
+from xrops.transforms._src.decompose import ica, kmeans, nmf, pca
+from xrops.transforms._src.eof import eof, eof_project, eof_reconstruct
 from xrops.transforms._src.fourier import (
     coherence,
     compensated_spectrum,
@@ -93,6 +94,8 @@ __all__ = [
     "dwt",
     "enstrophy_spectral_flux",
     "eof",
+    "eof_project",
+    "eof_reconstruct",
     "fit_spectral_slope",
     "ica",
     "idct",

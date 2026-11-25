@@ -7,12 +7,8 @@ on N-D xarray inputs by flattening the non-sample dims into features,
 delegating to sklearn, and rebuilding the result. scikit-learn is imported
 when a preset is built: install the ``xrtoolz-ops[sklearn]`` extra.
 
-Naming convention:
-
-- ``feature_dim="component"`` for PCA / ICA / NMF / KMeans
-- ``feature_dim="mode"`` for EOF (Empirical Orthogonal Functions —
-  the geophysics dialect of PCA, where the convention is "modes" not
-  "components")
+The new feature axis is ``"component"``. EOFs, which have ``"mode"`` and take
+weights and land, are :func:`xrops.transforms.eof`.
 """
 
 from __future__ import annotations
@@ -57,32 +53,6 @@ def pca(
         ),
         sample_dims=sample_dims,
         feature_dim="component",
-    )
-
-
-def eof(
-    sample_dims: Hashable | Sequence[Hashable],
-    n_modes: int | None = None,
-    *,
-    whiten: bool = False,
-    random_state: int | None = None,
-    **kwargs: Any,
-) -> XarrayEstimator:
-    """Empirical Orthogonal Functions — geophysical PCA.
-
-    Identical numerics to :func:`pca`, but the new feature axis is
-    named ``"mode"`` rather than ``"component"`` to match the
-    geosciences convention.
-    """
-    return XarrayEstimator(
-        _sklearn("decomposition", "PCA")(
-            n_components=n_modes,
-            whiten=whiten,
-            random_state=random_state,
-            **kwargs,
-        ),
-        sample_dims=sample_dims,
-        feature_dim="mode",
     )
 
 
