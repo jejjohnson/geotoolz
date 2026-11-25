@@ -68,6 +68,7 @@ def on_columns(
         input_core_dims=[[dim]] * len(fields),
         output_core_dims=[[] if reduces else [dim]],
         dask="parallelized",
+        keep_attrs=False,
         output_dtypes=[np.result_type(*(f.dtype for f in fields), np.float32)],
         dask_gufunc_kwargs={"allow_rechunk": True},
     )

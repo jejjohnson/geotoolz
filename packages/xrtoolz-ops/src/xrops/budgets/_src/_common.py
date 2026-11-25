@@ -92,4 +92,5 @@ def _cell_residual(
     )
     for source in sources:
         res = res - ds[source]
-    return res.transpose(*q.dims, ...).rename(name)
+    # a residual is per second, so the units of q are not its own
+    return res.transpose(*q.dims, ...).rename(name).drop_attrs(deep=False)

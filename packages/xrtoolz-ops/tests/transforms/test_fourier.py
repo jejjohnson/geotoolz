@@ -505,3 +505,17 @@ def test_the_phase_of_an_stft_is_that_of_the_coordinate():
         for s in range(0, 49, 8)
     ]
     np.testing.assert_allclose(out.isel(freq_t=11), expected)
+
+
+def test_a_spectrum_does_not_have_the_units_of_its_field(da_grid_daily):
+    da = da_grid_daily.isel(time=slice(0, 32)).assign_attrs(units="m")
+    for out in (
+        power_spectrum(da, "time"),
+        isotropic_power_spectrum(da, ("lat", "lon")),
+        cross_spectrum(da, da, "time"),
+        coherence(da, da, "time", average="lat"),
+        stft(da, "time", window_size=16),
+        rotary_spectrum(da, da, dim="time")["psd_cw"],
+        ke_spectral_flux(da, da, dim=("lon", "lat"))["flux"],
+    ):
+        assert out.attrs == {}

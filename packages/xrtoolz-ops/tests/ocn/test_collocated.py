@@ -199,3 +199,24 @@ def test_no_flow_is_geostrophic_at_the_equator() -> None:
 def test_an_unknown_geometry_raises() -> None:
     with pytest.raises(ValueError, match="Unknown geometry"):
         ocn.divergence(_flow(), geometry="polar")  # ty: ignore[invalid-argument-type]
+
+
+@pytest.mark.parametrize(
+    "name", [n for n in CALLS if n not in ("geostrophic", "ageostrophic")]
+)
+def test_a_diagnostic_does_not_have_the_units_of_its_input(name: str) -> None:
+    ds = _flow()
+    for variable in ds.data_vars.values():
+        variable.attrs["units"] = "furlong"
+    out = CALLS[name](ds)
+    variables = out.data_vars.values() if isinstance(out, xr.Dataset) else [out]
+    assert all("units" not in v.attrs for v in variables)
+
+
+def test_energies_do_not_have_the_units_of_a_velocity() -> None:
+    ds = _flow()
+    ds["u"].attrs["units"] = ds["v"].attrs["units"] = "m s-1"
+    assert "units" not in ocn.kinetic_energy(ds)["ke"].attrs
+    assert "units" not in ocn.eddy_kinetic_energy(ds, "u", "v")["eke"].attrs
+    assert "units" not in ocn.enstrophy(ds, "u")["ens"].attrs
+    assert ocn.kinetic_energy(ds)["ke"].attrs["long_name"] == "Kinetic Energy"

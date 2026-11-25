@@ -234,7 +234,7 @@ def kinetic_energy(
     v: str = "v",
 ) -> xr.Dataset:
     """Kinetic energy ``0.5 (u² + v²)``."""
-    ke = 0.5 * (ds[u] ** 2 + ds[v] ** 2)
+    ke = (0.5 * (ds[u] ** 2 + ds[v] ** 2)).drop_attrs(deep=False)
     ke.attrs.update(long_name="Kinetic Energy", standard_name="kinetic_energy")
     return ke.to_dataset(name="ke")
 
@@ -345,7 +345,7 @@ def enstrophy(
     variable: str = "vort_r",
 ) -> xr.Dataset:
     """Enstrophy ``0.5 ζ²``."""
-    ens = 0.5 * (ds[variable] ** 2)
+    ens = (0.5 * (ds[variable] ** 2)).drop_attrs(deep=False)
     ens.attrs.update(long_name="Enstrophy", standard_name="enstrophy")
     return ens.to_dataset(name="ens")
 
@@ -821,7 +821,7 @@ def eddy_kinetic_energy(
     Returns:
         Dataset with a single variable ``"eke"``.
     """
-    eke = 0.5 * (ds[u_anom] ** 2 + ds[v_anom] ** 2)
+    eke = (0.5 * (ds[u_anom] ** 2 + ds[v_anom] ** 2)).drop_attrs(deep=False)
     eke.attrs.update(
         long_name="Eddy Kinetic Energy", standard_name="eddy_kinetic_energy"
     )
