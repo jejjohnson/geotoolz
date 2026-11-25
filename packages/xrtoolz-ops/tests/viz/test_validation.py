@@ -350,7 +350,7 @@ def test_psd_isotropic_score_panel_resolves_scale(_psd_fixtures):
     fig = panel(_psd_fixtures["iso_score"])
     # The smoothed twin must produce a resolved-scale crossing — a
     # legend entry containing "Resolved scale" is the panel's
-    # observable signal that find_intercept_1D succeeded.
+    # observable signal that resolved_scale succeeded.
     legend = fig.axes[0].get_legend()
     assert legend is not None
     labels = [t.get_text() for t in legend.get_texts()]

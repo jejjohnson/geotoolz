@@ -28,7 +28,7 @@ from xrops.interpolate import (
     refine,
     resample_time,
 )
-from xrops.metrics import find_intercept_1D, psd_score, resolved_scale
+from xrops.metrics import psd_score, resolved_scale
 from xrops.transforms.encoders import (
     cyclical_encode,
     encode_time_cyclical,
@@ -72,30 +72,12 @@ def test_psd_score_perfect_prediction_is_one(ds_grid_daily):
     )
 
 
-def test_find_intercept_1d_linear():
-    x = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
-    y = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
-    assert find_intercept_1D(x=x, y=y, level=0.5) == pytest.approx(2.0)
-
-
-def test_find_intercept_1d_handles_duplicate_y_values():
-    """Regression: plateaued PSD scores (repeated y values) must not
-    crash interp1d, which otherwise rejects non-monotone x."""
-    x = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
-    # Two pairs of duplicates at y=0.2 and y=0.8
-    y = np.array([0.0, 0.2, 0.2, 0.8, 0.8, 1.0])
-    crossover = find_intercept_1D(x=x, y=y, level=0.5)
-    # Somewhere between the first x corresponding to y=0.2 (idx 1)
-    # and the first x corresponding to y=0.8 (idx 3)
-    assert 1.0 <= crossover <= 3.0
-
-
 def test_resolved_scale_returns_wavelength():
     freq = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
     score_vals = np.array([0.9, 0.8, 0.5, 0.2, 0.1])
     score = xr.DataArray(score_vals, coords={"freq_r": freq}, dims=("freq_r",))
     wavelength = resolved_scale(score, frequency="freq_r", level=0.5)
-    assert wavelength == pytest.approx(1.0 / 0.3, rel=1e-3)
+    assert float(wavelength) == pytest.approx(1.0 / 0.3)
 
 
 # ============== interpolate ================================================

@@ -27,9 +27,8 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
+from diagnostix import skill
 from geophysix.earth import SPHERE, meridian_degree_length
-from jaxtyping import Float
-from scipy.interpolate import interp1d
 
 from xrops._src.operator import Operator
 from xrops.transforms._src.fourier import (
@@ -143,8 +142,12 @@ def resolved_scale(
     score: xr.DataArray | xr.Dataset,
     frequency: str,
     level: float = 0.5,
-) -> float:
-    """Wavelength (``1 / frequency``) at which a PSD score crosses ``level``.
+) -> xr.DataArray:
+    """The wavelength down to which a PSD score stays above ``level``.
+
+    ``1 / frequency`` at the first positive frequency where the score falls to
+    ``level``, interpolated in its logarithm
+    (``diagnostix.skill.resolved_scale``).
 
     Args:
         score: DataArray of PSD-score values along ``frequency``, or a
@@ -154,16 +157,32 @@ def resolved_scale(
             "resolved scale" threshold).
 
     Returns:
-        Scalar wavelength at which the score first crosses ``level``.
+        The wavelength, without the dim of the frequencies. NaN where the score
+        never falls to the level; the longest wavelength where it is below it
+        at the first frequency.
     """
     score_da = score["score"] if isinstance(score, xr.Dataset) else score
-    freqs = np.asarray(score_da[frequency].values)
-    vals = np.asarray(score_da.values)
-    positive = freqs > 0
-    freqs = freqs[positive]
-    vals = vals[positive]
-    wavelengths = 1.0 / freqs
-    return find_intercept_1D(x=wavelengths, y=vals, level=level)
+    score_da = score_da.sortby(frequency)
+    k = np.asarray(score_da[frequency].values, dtype=np.float64)
+    positive = k > 0
+    # the kernel leaves its first bin, the mean, out
+    bins = np.concatenate([[0.0], k[positive]])
+
+    def kernel(values: np.ndarray) -> np.ndarray:
+        values = values[..., positive]
+        padded = np.concatenate([values[..., :1], values], axis=-1)
+        return skill.resolved_scale(skill.PSDScore(bins, padded), level=level)
+
+    out = xr.apply_ufunc(
+        kernel,
+        score_da.astype(np.float64),
+        input_core_dims=[[frequency]],
+        dask="parallelized",
+        keep_attrs=False,
+        output_dtypes=[np.float64],
+        dask_gufunc_kwargs={"allow_rechunk": True},
+    )
+    return out.rename("resolved_scale")
 
 
 def resolved_scale_2d(
@@ -321,100 +340,25 @@ def wavelet_resolved_scale_map(
         ntheta=ntheta,
     )["score"]
     scale_dim = scales.dims[0]
-    wavelengths = (
-        1.0
-        / np.asarray(
-            scale_to_wavenumber(scales, x0=x0).values,
-            dtype=float,
-        )
-        * wavelength_scale
+    # from the largest scale to the smallest, as wavenumbers ascend
+    wavenumber = np.asarray(scale_to_wavenumber(scales, x0=x0).values, dtype=float)
+    score = score.drop_vars("wavenumber", errors="ignore").assign_coords(
+        wavenumber=(scale_dim, wavenumber / wavelength_scale)
     )
-    out = xr.apply_ufunc(
-        _resolved_scale_column,
-        score,
-        input_core_dims=[[scale_dim]],
-        output_core_dims=[[]],
-        kwargs={"wavelengths_km": wavelengths, "threshold": threshold},
-        vectorize=True,
-        dask="forbidden",
-        output_dtypes=[float],
-    )
+    score = score.swap_dims({scale_dim: "wavenumber"}).sortby("wavenumber")
+    # A scale outside the cone is not the one where the skill is lost: it reads
+    # as resolved, and a column that is below the threshold at its largest
+    # trusted scale has no crossing.
+    trusted = score.notnull()
+    largest = score.isel(wavenumber=trusted.argmax("wavenumber"), drop=True)
+    crossing = resolved_scale(score.where(trusted, np.inf), "wavenumber", threshold)
+    enough = trusted.sum("wavenumber") >= 2
+    out = crossing.where(enough & (largest >= threshold))
+    out = out.drop_vars([name for name in out.coords if name not in out.dims])
     out.name = "wavelet_resolved_scale"
     out.attrs["units"] = wavelength_units
     out.attrs["threshold"] = threshold
     return out
-
-
-def find_intercept_1D(
-    x: Float[np.ndarray, "n"],
-    y: Float[np.ndarray, "n"],
-    level: float = 0.5,
-    kind: str = "slinear",
-    **kwargs: Any,
-) -> float:
-    """Invert a 1-D monotone-ish curve at ``y = level`` and return ``x``.
-
-    Uses :class:`scipy.interpolate.interp1d` on ``(y, x)``. Duplicate
-    ``y`` values (common for plateaued PSD scores) are collapsed to
-    their first occurrence in the sorted order before interpolating,
-    because ``interp1d`` requires a strictly monotone x-axis.
-    Extrapolates silently when ``level`` falls outside the range of the
-    deduplicated ``y``.
-    """
-    y_arr = np.asarray(y, dtype=float)
-    x_arr = np.asarray(x, dtype=float)
-    order = np.argsort(y_arr)
-    y_sorted = y_arr[order]
-    x_sorted = x_arr[order]
-
-    _, first_idx = np.unique(y_sorted, return_index=True)
-    first_idx.sort()
-    y_unique = y_sorted[first_idx]
-    x_unique = x_sorted[first_idx]
-
-    if y_unique.size < 2:
-        return float(x_unique.item()) if x_unique.size else float("nan")
-
-    f = interp1d(
-        y_unique,
-        x_unique,
-        fill_value=kwargs.pop("fill_value", "extrapolate"),
-        kind=kind,
-        **kwargs,
-    )
-    try:
-        return float(np.asarray(f(level)).item())
-    except ValueError:
-        warnings.warn(
-            f"level={level} outside range of y — returning edge value.",
-            stacklevel=2,
-        )
-        y_min, y_max = float(y_unique.min()), float(y_unique.max())
-        edge = y_min if level < y_min else y_max
-        return float(np.asarray(f(edge)).item())
-
-
-def _resolved_scale_column(
-    score: Float[np.ndarray, "freq"],
-    *,
-    wavelengths_km: Float[np.ndarray, "freq"],
-    threshold: float,
-) -> float:
-    """Find the threshold wavelength for one spatial score column.
-
-    Returns NaN when the column lacks two valid samples *or* when the
-    threshold isn't bracketed by the column — without this guard
-    ``find_intercept_1D`` extrapolates and reports an arbitrary edge
-    wavelength for perfect-skill (all > threshold) or hopeless-skill
-    (all < threshold) columns.
-    """
-    valid = np.isfinite(score)
-    if valid.sum() < 2:
-        return float("nan")
-    valid_scores = score[valid]
-    if threshold < valid_scores.min() or threshold > valid_scores.max():
-        return float("nan")
-    return find_intercept_1D(wavelengths_km[valid], valid_scores, level=threshold)
 
 
 def find_intercept_2D(
@@ -425,7 +369,7 @@ def find_intercept_2D(
 ) -> list[xr.DataArray]:
     """Extract the threshold contour of a 2-D ``(space, time)`` score field.
 
-    Counterpart to :func:`find_intercept_1D` for the 2-D space-time
+    Counterpart to :func:`resolved_scale` for the 2-D space-time
     score: returns the boundary where ``score == level`` as data so it
     can be quoted in a paper or compared across methods quantitatively
     rather than only overlaid on a figure.
@@ -931,7 +875,6 @@ __all__ = [
     "PSDScore",
     "band_limited_rmse",
     "evaluate_by_frequency_band",
-    "find_intercept_1D",
     "psd_error",
     "psd_score",
     "resolved_scale",
