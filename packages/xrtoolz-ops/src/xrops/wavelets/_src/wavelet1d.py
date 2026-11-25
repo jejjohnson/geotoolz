@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import math
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import xarray as xr
-from jaxtyping import Complex, Float
-from scipy.fft import fft, fftfreq, ifft
-from scipy.special import gammaincinv
+from diagnostix import spectra
+from jaxtyping import Float
 
 from xrops.utils._src.spacing import coord_spacing
 
@@ -17,6 +15,9 @@ from xrops.utils._src.spacing import coord_spacing
 Mother = Literal["morlet", "paul", "dog"]
 NullModel = Literal["red", "white"]
 DominantReduce = Literal["argmax", "median_argmax"]
+
+#: The distance of an end that is felt at a scale of 1, as in the records' cone.
+COI_REACH = {"morlet": np.sqrt(2.0), "paul": np.sqrt(0.5), "dog": np.sqrt(2.0)}
 
 
 def cwt1d(
@@ -32,11 +33,10 @@ def cwt1d(
 ) -> xr.Dataset:
     """Compute a 1-D continuous wavelet transform along one dimension.
 
-    The implementation follows Torrence and Compo (1998): zero-pad to the
-    next power of two, multiply the FFT of the signal by the analytic Fourier
-    transform of the selected mother wavelet, and strip the padding after the
-    inverse FFT. The returned ``power_rect`` variable is Liu et al. (2007)
-    rectified power, ``|W|² / scale``.
+    Torrence and Compo (1998), from ``diagnostix.spectra.wavelet_transform``.
+    The returned ``power_rect`` variable is Liu et al. (2007) rectified power,
+    ``|W|² / scale``. A missing sample is filled with the mean of its series.
+    Nothing is taken away first: a mean or a trend is a step at both ends.
 
     Args:
         da: Input time series or array with one transform dimension.
@@ -47,7 +47,8 @@ def cwt1d(
         s0: Smallest scale. Defaults to ``2 * dt``.
         dj: Scale spacing in octaves. ``0.25`` gives four voices per octave.
         j_max: Largest scale index. Defaults to ``log2(n * dt / s0) / dj``.
-        pad: If ``True``, zero-pad to the next power of two before the FFT.
+        pad: If ``True``, pad with zeros to twice the length, so that nothing
+            wraps; if ``False``, the series is periodic and has no cone.
 
     Returns:
         Dataset with ``wave``, ``power``, ``power_rect``, ``coi``, and
@@ -59,26 +60,39 @@ def cwt1d(
     scale = _scale_grid(da.sizes[dim], dt=dt, s0=s0, dj=dj, j_max=j_max)
     mother_name = _normalize_mother(mother)
     param_value = _default_param(mother_name, param)
-    fourier_factor, coi_factor, _ = _wavelet_factors(mother_name, param_value)
-    period = scale * fourier_factor
+    series = da.fillna(da.mean(dim)) if da.dtype.kind == "f" else da.astype(float)
+
+    def transform(x: Any) -> Any:
+        return spectra.wavelet_transform(
+            x,
+            dt,
+            scale,
+            mother=mother_name,
+            param=param_value,
+            detrend=None,
+            periodic=not pad,
+        ).coefficients
 
     wave = xr.apply_ufunc(
-        _cwt1d_numpy,
-        da,
+        transform,
+        series,
         input_core_dims=[[dim]],
         output_core_dims=[["scale", dim]],
-        kwargs={
-            "dt": dt,
-            "scale": scale,
-            "mother": mother_name,
-            "param": param_value,
-            "pad": pad,
-        },
-        vectorize=True,
         dask="parallelized",
-        output_dtypes=[np.complex128],
+        output_dtypes=[np.result_type(series.dtype, np.complex64)],
         dask_gufunc_kwargs={"output_sizes": {"scale": scale.size}},
     )
+    # the period and the cone do not depend on the coefficients
+    record = _record(
+        np.broadcast_to(np.complex128(0.0), (scale.size, da.sizes[dim])),
+        scale,
+        dt=dt,
+        mother=mother_name,
+        param=param_value,
+        periodic=not pad,
+    )
+    period = record.period
+    fourier_factor = float(period[0] / scale[0])
     outer_dims = tuple(d for d in da.dims if d != dim)
     wave = wave.transpose("scale", dim, *outer_dims)
     coords = {
@@ -95,6 +109,8 @@ def cwt1d(
             "param": param_value,
             "dt": dt,
             "dj": dj,
+            # an integer: NetCDF has no boolean attributes
+            "periodic": int(not pad),
             "lag1_autocorrelation": _lag1_autocorrelation(da, dim),
         }
     )
@@ -103,15 +119,20 @@ def cwt1d(
     # series with different amplitudes.
     source_variance = da.var(dim, skipna=True)
     wave = wave.assign_coords(source_variance=source_variance)
-    power = (xr.apply_ufunc(np.abs, wave) ** 2).rename("power")
+    power = (abs(wave) ** 2).rename("power")
     power.attrs.update(wave.attrs)
     power_rect = (
         power / xr.DataArray(scale, dims=("scale",), coords={"scale": scale})
     ).rename("power_rect")
     power_rect.attrs.update(power.attrs)
     power_rect.attrs["bias_corrected"] = "liu_2007"
-    coi = _coi(da[dim], dt=dt, fourier_factor=fourier_factor, coi_factor=coi_factor)
-    coi_mask = _coi_mask(scale=scale, period=period, coi=coi, dim=dim)
+    coi = _coi(da[dim], record, fourier_factor=fourier_factor)
+    coi_mask = xr.DataArray(
+        record.inside_cone,
+        dims=("scale", dim),
+        coords={"scale": scale, dim: da[dim]},
+        name="coi_mask",
+    )
     return xr.Dataset(
         {
             "wave": wave,
@@ -131,10 +152,14 @@ def wavelet_significance(
     null: NullModel = "red",
     alpha: float | None = None,
     confidence: float = 0.95,
-    mother: str = "morlet",
+    mother: str | None = None,
     param: float | None = None,
 ) -> xr.DataArray:
     """Return a mask where wavelet power exceeds a red/white-noise threshold.
+
+    The threshold is the χ² quantile of Torrence and Compo (1998), eqs. 16–18,
+    with two degrees of freedom for the complex mothers and one for the real
+    ``"dog"`` (``diagnostix.spectra.wavelet_significance``).
 
     Args:
         power: Wavelet power with scale and time dimensions.
@@ -144,8 +169,8 @@ def wavelet_significance(
         alpha: Lag-1 autocorrelation. When omitted, the value saved by
             :func:`cwt1d` is used, falling back to white noise.
         confidence: Chi-square confidence level.
-        mother: Mother wavelet name, used for the scale-period mapping if no
-            ``period`` coordinate is attached.
+        mother: Mother wavelet name. When omitted, the one saved by
+            :func:`cwt1d` is used, falling back to ``"morlet"``.
         param: Optional mother parameter.
 
     Returns:
@@ -166,13 +191,7 @@ def wavelet_significance(
         raise ValueError("alpha must be between -1 and 1")
 
     scale = np.asarray(power[dim_scale].values, dtype=float)
-    if "period" in power.coords and power["period"].dims == (dim_scale,):
-        period = np.asarray(power["period"].values, dtype=float)
-    else:
-        mother_name = _normalize_mother(mother)
-        param_value = _default_param(mother_name, param)
-        fourier_factor, _, _ = _wavelet_factors(mother_name, param_value)
-        period = scale * fourier_factor
+    mother_name, param_value = _mother_of(power, mother, param)
     # source_variance is per-outer-index when written by cwt1d so the
     # threshold broadcasts correctly across stacks of series. Fall back to
     # the per-series wavelet-power mean if the coord is missing (e.g. when
@@ -183,19 +202,25 @@ def wavelet_significance(
         variance = float(power.attrs["source_variance"])
     else:
         variance = power.mean(dim_time, skipna=True).mean(dim_scale, skipna=True)
-    if null_model == "white":
-        background = np.ones_like(period)
-    else:
-        dt = float(power.attrs.get("dt", 1.0))
-        background = (1.0 - alpha_value**2) / (
-            1.0 + alpha_value**2 - 2.0 * alpha_value * np.cos(2.0 * np.pi * dt / period)
-        )
-    background_da = xr.DataArray(
-        background,
-        dims=(dim_scale,),
-        coords={dim_scale: power[dim_scale]},
+    record = _record(
+        np.broadcast_to(np.complex128(0.0), (scale.size, 2)),
+        scale,
+        dt=float(power.attrs.get("dt", 1.0)),
+        mother=mother_name,
+        param=param_value,
+        periodic=False,
     )
-    threshold = variance * background_da * _chi2_ppf(confidence, df=2.0) / 2.0
+    lag1 = 0.0 if null_model == "white" else alpha_value
+    threshold = xr.apply_ufunc(
+        lambda sigma2: spectra.wavelet_significance(
+            record, sigma2, lag1=lag1, confidence=confidence
+        ),
+        xr.DataArray(variance),
+        output_core_dims=[[dim_scale]],
+        dask="parallelized",
+        output_dtypes=[float],
+        dask_gufunc_kwargs={"output_sizes": {dim_scale: scale.size}},
+    ).assign_coords({dim_scale: power[dim_scale]})
     if power.attrs.get("bias_corrected") == "liu_2007":
         threshold = threshold / xr.DataArray(
             scale, dims=(dim_scale,), coords={dim_scale: power[dim_scale]}
@@ -215,50 +240,52 @@ def icwt1d(
     wave: xr.DataArray,
     *,
     band: tuple[float, float] | None = None,
-    mother: str = "morlet",
+    mother: str | None = None,
     param: float | None = None,
-    dj: float | None = None,
     dt: float | None = None,
 ) -> xr.DataArray:
     """Reconstruct a signal from 1-D CWT coefficients.
 
+    The sum over scales of Torrence and Compo (1998), eq. 11, with the constant
+    of the mother computed (``diagnostix.spectra.inverse_wavelet_transform``).
+    The mean is at no scale, and is not given back.
+
     Args:
         wave: Complex coefficients from :func:`cwt1d`.
-        band: Optional ``(min, max)`` band to reconstruct. Interpreted in
-            **period** units when ``wave`` carries a ``period`` coordinate
-            (the usual case after :func:`cwt1d`); otherwise interpreted in
-            **scale** units.
-        mother: Mother wavelet name.
-        param: Optional mother parameter. Reconstruction constants are
-            available for the Torrence-Compo defaults.
-        dj: Scale spacing used by :func:`cwt1d`. Defaults to the value
-            stored in ``wave.attrs["dj"]`` (falling back to ``0.25`` if
-            absent). Reconstruction is only correct when ``dj`` matches
-            the value used during decomposition.
+        band: Optional ``(min, max)`` band of periods to reconstruct.
+        mother: Mother wavelet name. When omitted, the one saved by
+            :func:`cwt1d` is used, falling back to ``"morlet"``.
+        param: Optional mother parameter.
         dt: Sample spacing. Defaults to the coefficient ``dt`` attribute.
 
     Returns:
         Reconstructed DataArray without the scale dimension.
     """
     _require_dim(wave, "scale")
-    mother_name = _normalize_mother(mother)
-    param_value = _default_param(mother_name, param)
-    _, _, cdelta = _wavelet_factors(mother_name, param_value)
-    psi0 = _psi0(mother_name, param_value)
+    mother_name, param_value = _mother_of(wave, mother, param)
     dt_value = float(wave.attrs.get("dt", 1.0) if dt is None else dt)
-    dj_value = float(wave.attrs.get("dj", 0.25) if dj is None else dj)
-    coeffs = wave
+    scale = np.asarray(wave["scale"].values, dtype=float)
     if band is not None:
-        band_coord = coeffs["period"] if "period" in coeffs.coords else coeffs["scale"]
-        lo, hi = sorted((float(band[0]), float(band[1])))
-        coeffs = coeffs.where((band_coord >= lo) & (band_coord <= hi), other=0.0)
-    scale = xr.DataArray(
-        np.asarray(coeffs["scale"].values, dtype=float),
-        dims=("scale",),
-        coords={"scale": coeffs["scale"]},
-    )
-    reconstructed = (coeffs.real / np.sqrt(scale)).sum("scale") * (
-        dj_value * np.sqrt(dt_value) / (cdelta * psi0)
+        band = (min(band), max(band))
+
+    def inverse(coefficients: Any) -> Any:
+        record = _record(
+            coefficients[..., None],
+            scale,
+            dt=dt_value,
+            mother=mother_name,
+            param=param_value,
+            periodic=bool(wave.attrs.get("periodic", False)),
+        )
+        return spectra.inverse_wavelet_transform(record, band=band)[..., 0]
+
+    reconstructed = xr.apply_ufunc(
+        inverse,
+        wave,
+        input_core_dims=[["scale"]],
+        dask="parallelized",
+        output_dtypes=[wave.real.dtype],
+        dask_gufunc_kwargs={"allow_rechunk": True},
     )
     reconstructed.name = (
         _strip_suffix(str(wave.name) if wave.name is not None else None, "_wave")
@@ -305,55 +332,35 @@ def dominant_period_map(
     return out
 
 
-def _cwt1d_numpy(
-    values: Float[np.ndarray, "time"],
+def _record(
+    coefficients: Any,
+    scale: Float[np.ndarray, "scale"],
     *,
     dt: float,
-    scale: Float[np.ndarray, "scale"],
     mother: str,
     param: float,
-    pad: bool,
-) -> Complex[np.ndarray, "scale time"]:
-    arr = np.asarray(values, dtype=float)
-    n = arr.size
-    if n < 2:
-        raise ValueError("CWT requires at least two samples")
-    nan_mask = np.isnan(arr)
-    if nan_mask.any():
-        fill = float(np.nanmean(arr)) if not np.all(nan_mask) else 0.0
-        arr = np.where(nan_mask, fill, arr)
-    npad = _next_power_of_two(n) if pad else n
-    padded = np.zeros(npad, dtype=float)
-    padded[:n] = arr
-    omega = 2.0 * np.pi * fftfreq(npad, d=dt)
-    omega_step = abs(omega[1]) if omega.size > 1 else 1.0
-    signal_ft = fft(padded)
-    out = np.empty((scale.size, n), dtype=np.complex128)
-    for i, s in enumerate(scale):
-        daughter = _mother_ft(s * omega, mother=mother, param=param)
-        daughter = daughter * np.sqrt(s * omega_step) * np.sqrt(npad)
-        out[i] = ifft(signal_ft * daughter)[:n]
-    return out
+    periodic: bool,
+) -> spectra.WaveletTransform:
+    """The coefficients, and what they were made with."""
+    return spectra.WaveletTransform(
+        coefficients=coefficients,
+        scales=tuple(scale.tolist()),
+        spacing=dt,
+        mother=mother,
+        param=param,
+        periodic=periodic,
+    )
 
 
-def _mother_ft(
-    eta: Float[np.ndarray, "freq"], *, mother: str, param: float
-) -> Complex[np.ndarray, "freq"]:
-    positive = eta > 0.0
-    out = np.zeros_like(eta, dtype=np.complex128)
-    if mother == "morlet":
-        out[positive] = np.pi ** (-0.25) * np.exp(-0.5 * (eta[positive] - param) ** 2)
-    elif mother == "paul":
-        m = int(param)
-        norm = 2.0**m / np.sqrt(m * np.prod(np.arange(2, 2 * m, dtype=float)))
-        out[positive] = norm * eta[positive] ** m * np.exp(-eta[positive])
-    elif mother == "dog":
-        m = int(param)
-        norm = np.sqrt(1.0 / math.gamma(m + 0.5))
-        out = ((-1j) ** m) * norm * eta**m * np.exp(-0.5 * eta**2)
-    else:
-        raise ValueError("mother must be 'morlet', 'paul', or 'dog'")
-    return out
+def _mother_of(
+    da: xr.DataArray, mother: str | None, param: float | None
+) -> tuple[str, float]:
+    """The mother and its parameter: those given, or those `cwt1d` saved."""
+    if mother is None:
+        mother = str(da.attrs.get("mother", "morlet"))
+        param = da.attrs.get("param") if param is None else param
+    name = _normalize_mother(mother)
+    return name, _default_param(name, param)
 
 
 def _scale_grid(
@@ -380,59 +387,17 @@ def _scale_grid(
 
 
 def _coi(
-    coord: xr.DataArray,
-    *,
-    dt: float,
-    fourier_factor: float,
-    coi_factor: float,
+    coord: xr.DataArray, record: spectra.WaveletTransform, *, fourier_factor: float
 ) -> xr.DataArray:
+    """The longest period that the ends do not touch, at each sample."""
     n = coord.size
-    distance = np.minimum(
-        np.arange(n, dtype=float), np.arange(n - 1, -1, -1, dtype=float)
+    distance = record.spacing * np.minimum(np.arange(n), n - 1 - np.arange(n))
+    if record.periodic:
+        distance = np.full(n, np.inf)
+    coi = np.maximum(
+        distance * fourier_factor / COI_REACH[record.mother], np.finfo(float).tiny
     )
-    coi = np.maximum(distance * dt * fourier_factor / coi_factor, np.finfo(float).tiny)
     return xr.DataArray(coi, dims=coord.dims, coords={coord.dims[0]: coord}, name="coi")
-
-
-def _coi_mask(
-    *,
-    scale: Float[np.ndarray, "scale"],
-    period: Float[np.ndarray, "scale"],
-    coi: xr.DataArray,
-    dim: str,
-) -> xr.DataArray:
-    mask = period[:, None] <= np.asarray(coi.values, dtype=float)[None, :]
-    return xr.DataArray(
-        mask,
-        dims=("scale", dim),
-        coords={"scale": scale, dim: coi[dim]},
-        name="coi_mask",
-    )
-
-
-def _wavelet_factors(mother: str, param: float) -> tuple[float, float, float]:
-    if mother == "morlet":
-        fourier_factor = 4.0 * np.pi / (param + np.sqrt(2.0 + param**2))
-        return float(fourier_factor), np.sqrt(2.0), 0.776
-    if mother == "paul":
-        m = int(param)
-        fourier_factor = 4.0 * np.pi / (2.0 * m + 1.0)
-        return float(fourier_factor), np.sqrt(2.0), 1.132
-    if mother == "dog":
-        m = int(param)
-        fourier_factor = 2.0 * np.pi * np.sqrt(2.0 / (2.0 * m + 1.0))
-        return float(fourier_factor), np.sqrt(2.0), 3.541
-    raise ValueError("mother must be 'morlet', 'paul', or 'dog'")
-
-
-def _psi0(mother: str, param: float) -> float:
-    if mother == "morlet":
-        return float(np.pi ** (-0.25))
-    if mother == "paul" and int(param) == 4:
-        return 1.079
-    if mother == "dog" and int(param) == 2:
-        return 0.867
-    raise ValueError("icwt1d only supports default reconstruction constants")
 
 
 def _default_param(mother: str, param: float | None) -> float:
@@ -461,14 +426,6 @@ def _lag1_autocorrelation(da: xr.DataArray, dim: str) -> float:
     corr = xr.corr(current, previous, dim=dim)
     value = float(corr.mean(skipna=True))
     return value if np.isfinite(value) else 0.0
-
-
-def _chi2_ppf(confidence: float, *, df: float) -> float:
-    return float(2.0 * gammaincinv(df / 2.0, confidence))
-
-
-def _next_power_of_two(n: int) -> int:
-    return 1 << (int(n) - 1).bit_length()
 
 
 def _require_dim(da: xr.DataArray, dim: str) -> None:

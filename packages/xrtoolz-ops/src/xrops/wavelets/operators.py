@@ -141,9 +141,7 @@ class WaveletPowerSpectrum(Operator):
         scales: Wavelet scales (a sequence or DataArray).
         dim: The two spatial dims ``(y, x)``.
         x0: Reference length scale (m).
-        ntheta: Number of orientation angles.
-        k0: Morlet central wavenumber.
-        isotropic: Average over orientation when ``True``.
+        ntheta: Number of directions.
         output_var: Name for the output variable (default
             ``"<variable>_wpsd"``).
 
@@ -158,9 +156,7 @@ class WaveletPowerSpectrum(Operator):
         *,
         dim: tuple[str, str] = ("y", "x"),
         x0: float = 50e3,
-        ntheta: int = 16,
-        k0: float = 1.0,
-        isotropic: bool = True,
+        ntheta: int = 24,
         output_var: str | None = None,
     ) -> None:
         self.variable = variable
@@ -168,8 +164,6 @@ class WaveletPowerSpectrum(Operator):
         self.dim = tuple(dim)
         self.x0 = float(x0)
         self.ntheta = int(ntheta)
-        self.k0 = float(k0)
-        self.isotropic = bool(isotropic)
         self.output_var = output_var
 
     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
@@ -182,8 +176,6 @@ class WaveletPowerSpectrum(Operator):
             dim=self.dim,
             x0=self.x0,
             ntheta=self.ntheta,
-            k0=self.k0,
-            isotropic=self.isotropic,
         ).rename(out_name)
         return ds.assign({out_name: spectrum})
 
@@ -194,8 +186,6 @@ class WaveletPowerSpectrum(Operator):
             "dim": list(self.dim),
             "x0": self.x0,
             "ntheta": self.ntheta,
-            "k0": self.k0,
-            "isotropic": self.isotropic,
             "output_var": self.output_var,
         }
 
@@ -284,7 +274,7 @@ class WaveletSignificance(Operator):
         null: Null spectrum — ``"red"`` (AR(1)) or ``"white"`` noise.
         alpha: Lag-1 autocorrelation; ``None`` uses the stored value.
         confidence: Chi-square confidence level.
-        mother: Mother wavelet name.
+        mother: Mother wavelet name; ``None`` uses the stored one.
         param: Optional mother parameter.
         output_var: Name for the mask variable (default
             ``"<variable>_signif_mask"``).
@@ -302,7 +292,7 @@ class WaveletSignificance(Operator):
         null: Literal["red", "white"] = "red",
         alpha: float | None = None,
         confidence: float = 0.95,
-        mother: str = "morlet",
+        mother: str | None = None,
         param: float | None = None,
         output_var: str | None = None,
     ) -> None:

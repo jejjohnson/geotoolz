@@ -78,8 +78,8 @@ def test_cwt1d_supports_paul_and_dog_mothers() -> None:
 
 def test_icwt1d_reconstructs_morlet_signal() -> None:
     da = _sine_wave(n=128, period=8.0)
-    out = cwt1d(da, dj=0.125)
-    rec = icwt1d(out["wave"], dj=0.125)
+    out = cwt1d(da, dj=0.125, pad=False)
+    rec = icwt1d(out["wave"])
     corr = np.corrcoef(da.values, rec.values)[0, 1]
     assert corr == pytest.approx(1.0, abs=1e-3)
     np.testing.assert_allclose(rec, da, atol=0.02)
@@ -147,12 +147,107 @@ def test_per_series_source_variance_drives_per_index_threshold() -> None:
     assert int(sig.sel(series=1).sum()) == int(sig.sel(series=0).sum())
 
 
-def test_icwt1d_defaults_dj_from_wave_attrs() -> None:
-    da = _sine_wave(n=128, period=8.0)
-    out = cwt1d(da, dj=0.125)
-    rec_explicit = icwt1d(out["wave"], dj=0.125)
-    rec_default = icwt1d(out["wave"])
-    np.testing.assert_allclose(rec_default, rec_explicit)
+@pytest.mark.parametrize("mother", ["morlet", "paul", "dog"])
+def test_icwt1d_gives_the_signal_back(mother: str) -> None:
+    """The hat came back with its sign flipped (#786)."""
+    t = 0.25 * np.arange(300)
+    x = np.sin(2 * np.pi * t / 8) * np.exp(-(((t - 37) / 12) ** 2))
+    da = xr.DataArray(x - x.mean(), dims="time", coords={"time": t})
+    wave = cwt1d(da, mother=mother, s0=0.1, dj=0.125)["wave"]
+    back = icwt1d(wave)
+    assert back.dims == ("time",)
+    assert float((back * da).sum() / (da**2).sum()) == pytest.approx(1.0, abs=0.01)
+    xr.testing.assert_allclose(icwt1d(wave, mother=mother), back)
+
+
+def test_icwt1d_of_a_band_keeps_the_waves_in_it() -> None:
+    t = np.arange(512.0)
+    slow, fast = np.cos(2 * np.pi * t / 64), np.cos(2 * np.pi * t / 8)
+    da = xr.DataArray(slow + fast, dims="time", coords={"time": t})
+    out = cwt1d(da, dj=0.125, pad=False)
+    back = icwt1d(out["wave"], band=(16.0, 4.0))
+    np.testing.assert_allclose(back, fast, atol=0.05)
+
+
+def test_icwt1d_of_a_stack_and_of_an_odd_derivative() -> None:
+    da = xr.concat([_sine_wave(), 2.0 * _sine_wave()], dim="lat")
+    wave = cwt1d(da, dj=0.125)["wave"]
+    back = icwt1d(wave)
+    assert back.dims == ("time", "lat")
+    np.testing.assert_allclose(back.isel(lat=1), 2.0 * back.isel(lat=0))
+    with pytest.raises(ValueError, match="has no inverse"):
+        icwt1d(cwt1d(da, mother="dog", param=3)["wave"])
+
+
+@pytest.mark.parametrize("mother", ["morlet", "paul", "dog"])
+def test_white_noise_passes_at_its_level(mother: str) -> None:
+    """The hat, which has one degree of freedom, passed 8.3 % at 5 % (#787)."""
+    x = np.random.default_rng(0).standard_normal((20, 2048))
+    da = xr.DataArray(x, dims=("series", "time"), coords={"time": np.arange(2048.0)})
+    out = cwt1d(da, mother=mother, j_max=16)
+    passed = wavelet_significance(out["power"], null="white").where(out["coi_mask"])
+    assert float(passed.mean()) == pytest.approx(0.05, abs=0.006)
+
+
+@pytest.mark.parametrize("mother", ["morlet", "paul", "dog"])
+def test_the_cone_is_where_a_spike_at_the_end_has_fallen_by_e2(mother: str) -> None:
+    """The cone of Paul's was twice as wide (#789)."""
+    t = 0.0125 * np.arange(4000)
+    spike = xr.DataArray(np.zeros(4000), dims="time", coords={"time": t})
+    spike[0] = 1.0
+    out = cwt1d(spike, mother=mother, s0=1.0, j_max=0)
+    power, inside = out["power"].isel(scale=0), out["coi_mask"].isel(scale=0)
+    start = int(inside.argmax("time"))
+    ratio = float(power[start] / power[0])
+    assert ratio == pytest.approx(np.exp(-2.0), rel=0.06)
+    # the line of the cone crosses the period at the same sample
+    crossing = int((out["coi"] >= float(out["period"][0])).argmax("time"))
+    assert crossing == start
+
+
+def test_a_periodic_series_has_no_cone() -> None:
+    out = cwt1d(_sine_wave(), pad=False)
+    assert bool(out["coi_mask"].all())
+    assert np.isinf(out["coi"]).all()
+
+
+@pytest.mark.parametrize("pad", [True, False])
+@pytest.mark.parametrize("engine", ["netcdf4", "h5netcdf"])
+def test_the_power_is_saved_and_read_back(tmp_path, pad: bool, engine) -> None:
+    pytest.importorskip({"netcdf4": "netCDF4"}.get(engine, engine))
+    power = cwt1d(_sine_wave(), pad=pad)["power"]
+    power.to_netcdf(tmp_path / "power.nc", engine=engine)
+    back = xr.open_dataarray(tmp_path / "power.nc", engine=engine)
+    xr.testing.assert_identical(
+        wavelet_significance(back.load()), wavelet_significance(power)
+    )
+
+
+def test_the_significance_takes_the_mother_that_was_saved() -> None:
+    out = cwt1d(_sine_wave(), mother="dog")
+    saved = wavelet_significance(out["power"], null="white")
+    given = wavelet_significance(out["power"], null="white", mother="dog")
+    xr.testing.assert_identical(saved, given)
+    other = wavelet_significance(out["power"], null="white", mother="morlet")
+    assert int(other.sum()) != int(saved.sum())
+
+
+def test_cwt1d_fills_gaps_with_the_mean() -> None:
+    da = _sine_wave()
+    gappy = da.where(da["time"] != 30.0)
+    filled = gappy.fillna(gappy.mean("time"))
+    np.testing.assert_allclose(cwt1d(gappy)["wave"], cwt1d(filled)["wave"])
+
+
+def test_cwt1d_on_dask_is_lazy_and_equal() -> None:
+    pytest.importorskip("dask.array")
+    da = xr.concat([_sine_wave(), _sine_wave(period=16.0)], dim="lat")
+    lazy = cwt1d(da.chunk({"lat": 1}))["wave"]
+    assert lazy.chunks is not None
+    xr.testing.assert_allclose(lazy.compute(), cwt1d(da)["wave"])
+    back = icwt1d(lazy)
+    assert back.chunks is not None
+    xr.testing.assert_allclose(back.compute(), icwt1d(cwt1d(da)["wave"]))
 
 
 def test_wavelet_scalogram_and_significance_operators_compose() -> None:
@@ -183,30 +278,50 @@ def test_cwt2_outputs_directional_coefficients_and_coi() -> None:
 def test_plane_wave_power_peaks_at_matching_scale() -> None:
     da = _plane_wave(wavelength=4.0)
     scales = xr.DataArray([2.0, 4.0, 8.0], dims="scale")
-    power = wvlt_power_spectrum(da, scales, x0=1.0, ntheta=8, isotropic=False)
+    power = wvlt_power_spectrum(da, scales, x0=1.0)
     trusted = power.where(power["coi_mask"]).mean(("y", "x"), skipna=True)
-    peak = trusted.max("angle").idxmax("scale")
-    assert float(peak) == pytest.approx(4.0)
+    # per unit of log wavenumber, a density times k has its peak at the wave
+    assert float((trusted * trusted["wavenumber"]).idxmax("scale")) == 4.0
 
 
-def test_power_normalization_recovers_variance_on_trusted_pixels() -> None:
-    rng = np.random.default_rng(0)
+def test_the_integral_over_the_scales_is_the_variance() -> None:
+    n = 128
+    y, x = np.mgrid[:n, :n]
     da = xr.DataArray(
-        rng.standard_normal((48, 48)),
+        3.0 * np.cos(2 * np.pi * (5 * x + 12 * y) / n),
         dims=("y", "x"),
-        coords={"y": np.arange(48.0), "x": np.arange(48.0)},
+        coords={"y": np.arange(float(n)), "x": np.arange(float(n))},
         name="ssh",
     )
-    scales = xr.DataArray([1.0, 2.0, 4.0, 8.0], dims="scale")
-    power = wvlt_power_spectrum(da, scales, x0=0.5, ntheta=8, isotropic=False)
-    dlog = xr.DataArray(
-        np.gradient(np.log(scales.values)),
-        dims=("scale",),
-        coords={"scale": scales},
-    )
-    integral = (power * dlog).sum("scale") * (2.0 * np.pi / power.sizes["angle"])
-    recovered = float(integral.sum("angle").where(power["coi_mask"]).mean())
-    assert recovered == pytest.approx(float(da.var()), rel=0.01)
+    scales = geometric_scales(0.4, octaves=2.6, voices_per_octave=12)
+    power = wvlt_power_spectrum(da, scales, x0=10.0)
+    centre = power.isel(y=64, x=64)
+    area = -np.trapezoid(centre, centre["wavenumber"])
+    assert area == pytest.approx(4.5, rel=0.02)
+
+
+def test_the_power_of_a_plane_wave_does_not_depend_on_its_direction() -> None:
+    """It changed by 55 % with eight distinct directions (#788)."""
+    n, wavelength = 64, 8.0
+    y, x = np.mgrid[:n, :n] - n // 2
+    scales = xr.DataArray([1.0], dims="scale", coords={"scale": [1.0]})
+    values = []
+    for angle in np.deg2rad(np.arange(0.0, 90.0, 5.0)):
+        wave = np.cos(2 * np.pi * (x * np.cos(angle) + y * np.sin(angle)) / wavelength)
+        da = xr.DataArray(
+            wave, dims=("y", "x"), coords={"y": np.arange(n), "x": np.arange(n)}
+        )
+        power = wvlt_power_spectrum(da, scales, x0=wavelength)
+        values.append(float(power.isel(scale=0, y=32, x=32)))
+    assert np.ptp(values) < 1e-3 * np.mean(values)
+
+
+def test_a_missing_cell_is_filled_and_masked() -> None:
+    da = _plane_wave(nx=32, ny=32)
+    da[10, 12] = np.nan
+    power = wvlt_power_spectrum(da, xr.DataArray([2.0], dims="scale"), x0=1.0)
+    assert np.isfinite(power).all()
+    assert not bool(power["coi_mask"].isel(scale=0, y=10, x=12))
 
 
 def test_coi_mask_shrinks_with_scale_and_nan_cells() -> None:
@@ -244,7 +359,7 @@ def test_wavelet_plot_helpers_return_axes() -> None:
 
     da = _plane_wave()
     scales = xr.DataArray([2.0, 4.0], dims="scale")
-    spectrum = wvlt_power_spectrum(da, scales, x0=1.0, ntheta=4, isotropic=False)
+    spectrum = abs(cwt2(da, scales, x0=1.0, ntheta=4)) ** 2
     assert (
         plot_resolved_scale_map(spectrum.isel(scale=0, angle=0)).name == "rectilinear"
     )
@@ -285,24 +400,15 @@ def test_morlet2_ft_peaks_at_expected_wavenumber() -> None:
     np.testing.assert_allclose(KY[peak_idx], 0.0, atol=2 * (ky[1] - ky[0]))
 
 
-def test_wvlt_cross_spectrum_self_matches_power_spectrum_up_to_constant() -> None:
-    """Cross-spectrum of a field with itself is the *raw* auto-power
-    (no variance normalization), so it differs from
-    ``wvlt_power_spectrum`` by a single overall scalar — verifying the
-    ratio is spatially constant locks in the cross-spectrum's
-    normalization convention."""
+def test_wvlt_cross_spectrum_of_a_field_with_itself_is_its_power() -> None:
     from xrops.wavelets._src.wavelet import wvlt_cross_spectrum
 
     da = _plane_wave(nx=32, ny=32, wavelength=4.0)
     scales = xr.DataArray([2.0, 4.0], dims="scale")
-    csd = wvlt_cross_spectrum(da, da, scales, x0=1.0, ntheta=4, isotropic=True)
-    psd = wvlt_power_spectrum(da, scales, x0=1.0, ntheta=4, isotropic=True)
-    assert csd.dims == psd.dims
+    csd = wvlt_cross_spectrum(da, da, scales, x0=1.0, ntheta=4)
+    power = (abs(cwt2(da, scales, x0=1.0, ntheta=4)) ** 2).mean("angle")
     np.testing.assert_allclose(np.asarray(csd.imag), 0.0, atol=1e-12)
-    psd_arr = np.asarray(psd)
-    ratio = np.asarray(csd.real)[psd_arr > 1e-10] / psd_arr[psd_arr > 1e-10]
-    if ratio.size:
-        np.testing.assert_allclose(ratio, ratio.mean(), rtol=1e-6)
+    np.testing.assert_allclose(csd.real, power)
 
 
 def test_plot_wavelet_spectrum_1d_rejects_higher_dimensional_input() -> None:
@@ -313,7 +419,7 @@ def test_plot_wavelet_spectrum_1d_rejects_higher_dimensional_input() -> None:
 
     da = _plane_wave()
     scales = xr.DataArray([2.0, 4.0], dims="scale")
-    spectrum = wvlt_power_spectrum(da, scales, x0=1.0, ntheta=4, isotropic=False)
+    spectrum = wvlt_power_spectrum(da, scales, x0=1.0, ntheta=4)
     with pytest.raises(ValueError, match="1-D"):
         plot_wavelet_spectrum_1d(spectrum)
 
