@@ -2,11 +2,11 @@
 
 The stateless transforms (Fourier / DCT / wavelet) compose cleanly into
 ``Sequential`` / ``Graph`` pipelines. The stateful estimators
-(PCA / EOF / …) are intentionally **not** wrapped as ``Operator``
+(PCA / ICA / …) are intentionally **not** wrapped as ``Operator``
 subclasses — they need ``.fit()`` before ``.transform()``, which the
 stateless ``Operator.__call__`` contract cannot express. Use the
 factory functions from :mod:`xrops.transforms` directly for those:
-``pca(...)``, ``eof(...)``, etc.
+``pca(...)``, ``ica(...)``, etc.
 
 The Operators here all accept an :class:`xr.Dataset`, pull the named
 variable, run the underlying ``DataArray``-first function, and

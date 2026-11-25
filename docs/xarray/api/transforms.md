@@ -78,13 +78,19 @@ These return `xrops.learn.XarrayEstimator` instances configured for the named de
 
 ::: xrops.transforms.pca
 
-::: xrops.transforms.eof
-
 ::: xrops.transforms.ica
 
 ::: xrops.transforms.nmf
 
 ::: xrops.transforms.kmeans
+
+## Empirical orthogonal functions
+
+::: xrops.transforms.eof
+
+::: xrops.transforms.eof_project
+
+::: xrops.transforms.eof_reconstruct
 
 ## Mask morphology
 

@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from xrops.transforms import eof, ica, kmeans, nmf, pca
+from xrops.transforms import ica, kmeans, nmf, pca
 
 
 @pytest.fixture
@@ -44,14 +44,6 @@ def test_pca_inverse_transform_returns_grid(da_3d):
     recon = est.inverse_transform(scores)
     assert set(recon.dims) == {"time", "lat", "lon"}
     assert recon.shape == da_3d.shape
-
-
-def test_eof_uses_mode_axis_name(da_3d):
-    """EOF is just PCA with feature_dim='mode' (geophysics convention)."""
-    est = eof(sample_dims="time", n_modes=2)
-    scores = est.fit_transform(da_3d)
-    assert scores.dims == ("time", "mode")
-    assert scores.sizes["mode"] == 2
 
 
 def test_ica_fits_and_transforms(da_3d):
