@@ -38,18 +38,15 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+import gridax
 import numpy as np
 import xarray as xr
+from diagnostix import kinematics
 
 from xrops import grad
+from xrops._src.collocated import Geometry, on_grid
 from xrops._src.operator import Operator
-from xrops.ocn._src.kinematics import (
-    Coriolis,
-    Geometry,
-    _coriolis_field,
-    _geom_kw,
-    _partial,
-)
+from xrops.ocn._src.kinematics import Coriolis, _coriolis_field, _coriolis_on
 
 
 # ---------- Layer-0: geostrophic balance ---------------------------------
@@ -76,7 +73,7 @@ def geostrophic_balance_error(
         r_v = f * v - g * ∂η/∂x
 
     Both should be ≈ 0 for a geostrophic flow. Differencing uses
-    :func:`xrops.grad.partial` under ``geometry`` (spherical metric by
+    :func:`gridax.gradient` under ``geometry`` (spherical metric by
     default).
 
     Args:
@@ -102,14 +99,22 @@ def geostrophic_balance_error(
     eta = ds[ssh_var]
     u = ds[u_var]
     v = ds[v_var]
-    f_field = _coriolis_field(eta, xy, geometry, f)
+    f_field = _coriolis_on(eta, xy, geometry, f)
 
-    deta_dx = _partial(eta, xy[0], xy, geometry)
-    deta_dy = _partial(eta, xy[1], xy, geometry)
+    def component(index: int) -> xr.DataArray:
+        return on_grid(
+            lambda u_, v_, height, coriolis, grid: kinematics.geostrophic_residual(
+                u_, v_, height, grid, f=coriolis, gravity=g
+            )[index],
+            u,
+            v,
+            eta,
+            f_field,
+            dims=xy,
+            geometry=geometry,
+        )
 
-    r_u = (f_field * u + g * deta_dy).rename("r_u")
-    r_v = (f_field * v - g * deta_dx).rename("r_v")
-    return xr.Dataset({"r_u": r_u, "r_v": r_v})
+    return xr.Dataset({"r_u": component(0), "r_v": component(1)})
 
 
 def geostrophic_imbalance(
@@ -189,7 +194,7 @@ def divergence_error(
 
     For a purely geostrophic flow this is ≈ 0; values away from zero
     indicate either ageostrophic flow or numerical noise. Uses
-    :func:`xrops.grad.divergence`, so the spherical curvature term is
+    :func:`gridax.divergence`, so the spherical curvature term is
     included on the default geometry.
 
     Args:
@@ -210,14 +215,7 @@ def divergence_error(
         ``"rms_divergence"`` (scalar, 1/s).
     """
     xy = (lon, lat) if dims is None else dims
-    flow = ds[[u_var, v_var]]
-    div = grad.divergence(
-        flow,
-        (u_var, v_var),
-        dims=xy,
-        geometry=geometry,
-        **_geom_kw(xy, geometry),
-    )
+    div = on_grid(gridax.divergence, ds[u_var], ds[v_var], dims=xy, geometry=geometry)
     if reduce is None:
         return div.rename("divergence")
     if reduce == "rms":

@@ -1081,6 +1081,19 @@ wheels = [
 ]
 
 [[package]]
+name = "diagnostix"
+version = "0.0.4"
+source = { git = "https://github.com/jejjohnson/diagnostix?tag=v0.0.4#363927dedc4df58062a38c94f750d6349deb74fb" }
+dependencies = [
+    { name = "geophysix" },
+    { name = "gridax" },
+    { name = "jaxtyping" },
+    { name = "numpy" },
+    { name = "pipekit-array", extra = ["compat", "numpy"] },
+    { name = "pipekit-ops" },
+]
+
+[[package]]
 name = "distlib"
 version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2586,6 +2599,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/0f/31/07c861e8b0a782d2b17b3e8a7b9191420d30d4a9ce86a9882502d4d883eb/grain-0.2.18-cp314-cp314-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:09bef4e8290d06e79cfddc71e777d0b5f60316e5a43af61f8a3d0e6a2d9feccc", size = 610928, upload-time = "2026-06-17T20:57:58.901Z" },
     { url = "https://files.pythonhosted.org/packages/b7/60/b257f1173a6c71c67a1de81798427a7e73ceb71cd6573ccccf7f528018f5/grain-0.2.18-cp314-cp314-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:fc7204490aff21620fbdbd69e088991a4ae1ebc31586456191c11f9f61a8c0e6", size = 610179, upload-time = "2026-06-17T20:58:00.154Z" },
     { url = "https://files.pythonhosted.org/packages/a2/c8/d3f559b3691559054d57779ce9e9dbb832c7631b622e94c8c092ce26ca18/grain-0.2.18-cp314-cp314-win_amd64.whl", hash = "sha256:fe83461d55e81c9c9cdba3d9d9ed0185db7b41cddb8e28223aa495ca3516877c", size = 547828, upload-time = "2026-06-17T20:58:01.419Z" },
+]
+
+[[package]]
+name = "gridax"
+version = "0.3.1"
+source = { git = "https://github.com/jejjohnson/gridax?subdirectory=packages%2Fgridax&tag=gridax-v0.3.1#7c266f4d0ce192e1e732b09b95781f937fbedea5" }
+dependencies = [
+    { name = "geophysix" },
+    { name = "jaxtyping" },
+    { name = "numpy" },
+    { name = "pipekit-array", extra = ["compat", "numpy"] },
+    { name = "pipekit-ops" },
+    { name = "scipy" },
 ]
 
 [[package]]
@@ -7004,9 +7030,11 @@ version = "0.6.0"
 source = { editable = "packages/xrtoolz-ops" }
 dependencies = [
     { name = "dask", extra = ["array"] },
+    { name = "diagnostix" },
     { name = "geophysix" },
     { name = "geotoolz-array" },
     { name = "geotoolz-ops" },
+    { name = "gridax" },
     { name = "jaxtyping" },
     { name = "matplotlib" },
     { name = "netcdf4" },
@@ -7084,11 +7112,13 @@ typecheck = [
 requires-dist = [
     { name = "cartopy", marker = "extra == 'maps'", specifier = ">=0.22" },
     { name = "dask", extras = ["array"], specifier = ">=2024.10" },
+    { name = "diagnostix", git = "https://github.com/jejjohnson/diagnostix?tag=v0.0.4" },
     { name = "functax", extras = ["jax", "scipy"], marker = "extra == 'functax'", git = "https://github.com/jejjohnson/functax?tag=v0.0.6" },
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=1.1.3" },
     { name = "geophysix", git = "https://github.com/jejjohnson/geophysix?tag=v0.0.7" },
     { name = "geotoolz-array", editable = "packages/geotoolz-array" },
     { name = "geotoolz-ops", editable = "packages/geotoolz-ops" },
+    { name = "gridax", git = "https://github.com/jejjohnson/gridax?subdirectory=packages%2Fgridax&tag=gridax-v0.3.1" },
     { name = "jaxtyping", specifier = ">=0.2.34" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "netcdf4", specifier = ">=1.6" },

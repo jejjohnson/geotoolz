@@ -54,6 +54,11 @@ geophysix = { git = "https://github.com/jejjohnson/geophysix", tag = "v0.0.7" }
 # geophysix) is not on PyPI either. It sources geophysix from this same URL:
 # uv reads `….git` as another one.
 radiomax = { git = "https://github.com/jejjohnson/radiomax", tag = "v0.0.9" }
+# gridax (grids and the calculus on them, NumPy or JAX) and diagnostix (the
+# diagnostics built on it) are not on PyPI either. diagnostix v0.0.4 is the last
+# release on the pipekit tag above.
+gridax = { git = "https://github.com/jejjohnson/gridax", subdirectory = "packages/gridax", tag = "gridax-v0.3.1" }
+diagnostix = { git = "https://github.com/jejjohnson/diagnostix", tag = "v0.0.4" }
 
 [build-system]
 requires = ["hatchling"]
