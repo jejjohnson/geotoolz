@@ -116,7 +116,7 @@ ensemble draw) are kept for dim names, never function names.
   `DeprecationWarning` reaches users only). The first `transform.ndim - 1`
   dims are batch dims.
 - **A bare `jax.vmap` maps the leading dim only**: `_unflatten` matches the
-  static dims to the leaves (`pipekit_array.dimarray.vmapped_dims`). Map a
+  static dims to the leaves (`pipekit_array.named.vmapped_dims`). Map a
   named dim with `geoarray.map_over`.
 - **Static fields must be hashable and compare equal when equal.** `attrs`
   go through `FrozenAttrs`; every NaN (fill or attr) is normalised to the

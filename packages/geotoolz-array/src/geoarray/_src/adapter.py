@@ -22,7 +22,7 @@ adapter, never through the carrier importing pipekit-array's machinery:
 - ``relabel`` sets the labels of a leading dim, for ``rename``,
   ``merge_dims`` and the like.
 - ``to_backend`` moves every leaf of a carrier, and ``keep_missing`` keeps
-  nodata through ``pipekit_array.functions.elementwise`` (pipekit#253).
+  nodata through ``pipekit_array.kernels.elementwise`` (pipekit#253).
 """
 
 from __future__ import annotations

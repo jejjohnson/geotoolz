@@ -11,7 +11,7 @@ keep reaching for:
 
 | Module             | Bridges                       | Purpose                                                                                                                          |
 | ------------------ | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `xrtoolz.einx`     | [einx]                        | Retired: the named-dims einx bridge is `pipekit_array.einx` (geostack OP-O2); its design pages were removed with `xreinx`.       |
+| `xrtoolz.einx`     | [einx]                        | Retired: the named-dims einx bridge is `pipekit_array.bridges.einx` (geostack OP-O2); its design pages were removed with `xreinx`.       |
 | `xrtoolz.linalg`   | [gaussx] / [lineax] / [matfree] | Structured linear operators, solvers, logdet, sampling — all in DataArray-space, with physical dims as the row/column labels.    |
 | `xrtoolz.prob`     | [numpyro] / [pyrox]           | Probability/statistics on DataArrays: distributions parameterized by named tensors, sampling, log-probability, and posterior IO. |
 
@@ -89,7 +89,7 @@ These hold for all three modules; see `overview.md` for the reasoning.
 
 ## Status
 
-- **`einx`** — **retired**. The named-dims einx bridge is `pipekit_array.einx` (geostack OP-O2), and `pack_dataset` / `unpack_dataset` live in `xrops.utils`.
+- **`einx`** — **retired**. The named-dims einx bridge is `pipekit_array.bridges.einx` (geostack OP-O2), and `pack_dataset` / `unpack_dataset` live in `xrops.utils`.
 - **`linalg`**, **`prob`** — still **draft / pre-implementation**.
 
 The docs describe the proposed API surface; concrete signatures may

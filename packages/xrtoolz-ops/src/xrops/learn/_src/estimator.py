@@ -13,7 +13,7 @@ from typing import Any, ClassVar, Literal, Self, get_args
 
 import xarray as xr
 from pipekit_array import DimArray, Estimator, to_rows
-from pipekit_array.estimator import NanPolicy
+from pipekit_array.bridges.sklearn import NanPolicy
 
 from xrops._src.operator import Operator
 from xrops.learn._src.layout import (

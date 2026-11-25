@@ -15,7 +15,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
-from pipekit_array.dims import join_backends
+from pipekit_array.named import join_backends
 from pipekit_ops import guard_level, is_traced, report_move
 
 from geoarray._src.array import INHERIT, GeoArray, _normalize_fill, infer_dims

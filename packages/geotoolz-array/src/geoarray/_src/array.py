@@ -29,7 +29,7 @@ from typing import Any, cast
 import numpy as np
 import pyproj
 from pipekit_array import sel as pipekit_sel
-from pipekit_array.dimarray import core_dims, vmapped_dims
+from pipekit_array.named import core_dims, vmapped_dims
 from pipekit_ops import is_traced, on_import, report_move
 
 from geoarray._src.attrs import FrozenAttrs, drop_band_keys, select_bands
