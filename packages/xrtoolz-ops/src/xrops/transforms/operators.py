@@ -45,7 +45,8 @@ def _datetime_to_jsonable(value: str | np.datetime64 | None) -> str | None:
 
 class PowerSpectrum(Operator):
     """Power spectrum of ``ds[variable]``. Set ``isotropic=True`` for the
-    radial (2-D) variant."""
+    radial (2-D) variant. ``window=`` and ``detrend=`` as in
+    :func:`xrops.transforms.power_spectrum`."""
 
     def __init__(
         self,
@@ -83,7 +84,7 @@ class CrossSpectrum(Operator):
         self,
         var_a: str,
         var_b: str,
-        dim: str | Sequence[str],
+        dim: str,
         **kwargs: Any,
     ) -> None:
         self.var_a = var_a
@@ -98,23 +99,23 @@ class CrossSpectrum(Operator):
         return out.to_dataset()
 
     def get_config(self) -> dict[str, Any]:
-        dim = list(self.dim) if not isinstance(self.dim, str) else self.dim
         return {
             "var_a": self.var_a,
             "var_b": self.var_b,
-            "dim": dim,
+            "dim": self.dim,
             **self.kwargs,
         }
 
 
 class Coherence(Operator):
-    """Magnitude-squared coherence of two variables."""
+    """Magnitude-squared coherence of two variables, averaged over ``average=``
+    dims or over segments of ``segment=`` samples."""
 
     def __init__(
         self,
         var_a: str,
         var_b: str,
-        dim: str | Sequence[str],
+        dim: str,
         **kwargs: Any,
     ) -> None:
         self.var_a = var_a
@@ -129,11 +130,10 @@ class Coherence(Operator):
         return out.to_dataset()
 
     def get_config(self) -> dict[str, Any]:
-        dim = list(self.dim) if not isinstance(self.dim, str) else self.dim
         return {
             "var_a": self.var_a,
             "var_b": self.var_b,
-            "dim": dim,
+            "dim": self.dim,
             **self.kwargs,
         }
 
@@ -145,14 +145,12 @@ class KESpectralFlux(Operator):
         u: Name of the zonal velocity variable in the input Dataset.
         v: Name of the meridional velocity variable in the input Dataset.
         dim: Two spatial dimensions to Fourier transform.
-        window: Optional Fourier window.
-        detrend: Optional Fourier detrending mode.
+        window: Optional taper; a tapered flow is not a periodic box.
+        detrend: Optional detrending mode.
         avg_dims: Optional non-spectral dimensions to average.
-        return_2d: If ``True``, include ``transfer_2d`` in the output Dataset.
 
     Returns:
-        Dataset with ``transfer`` and ``flux`` variables, plus ``transfer_2d``
-        when requested.
+        Dataset with ``transfer`` and ``flux`` variables.
 
     Examples:
         ```pycon
@@ -167,10 +165,9 @@ class KESpectralFlux(Operator):
         v: str,
         dim: Sequence[str],
         *,
-        window: str | None = "tukey",
-        detrend: str | None = "linear",
+        window: _fourier.Window = None,
+        detrend: _fourier.Detrend = None,
         avg_dims: str | Sequence[str] | None = None,
-        return_2d: bool = False,
     ) -> None:
         self.u = u
         self.v = v
@@ -178,7 +175,6 @@ class KESpectralFlux(Operator):
         self.window = window
         self.detrend = detrend
         self.avg_dims = avg_dims
-        self.return_2d = return_2d
 
     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
         return _fourier.ke_spectral_flux(
@@ -188,7 +184,6 @@ class KESpectralFlux(Operator):
             window=self.window,
             detrend=self.detrend,
             avg_dims=self.avg_dims,
-            return_2d=self.return_2d,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -205,7 +200,6 @@ class KESpectralFlux(Operator):
             "window": self.window,
             "detrend": self.detrend,
             "avg_dims": avg_dims,
-            "return_2d": self.return_2d,
         }
 
 
@@ -216,14 +210,13 @@ class EnstrophySpectralFlux(Operator):
         u: Name of the zonal velocity variable in the input Dataset.
         v: Name of the meridional velocity variable in the input Dataset.
         dim: Two spatial dimensions to Fourier transform.
-        window: Optional Fourier window.
-        detrend: Optional Fourier detrending mode.
+        window: Optional taper; a tapered flow is not a periodic box.
+        detrend: Optional detrending mode.
         avg_dims: Optional non-spectral dimensions to average.
-        return_2d: If ``True``, include ``transfer_2d`` in the output Dataset.
 
     Returns:
         Dataset with vorticity-based enstrophy ``transfer`` and ``flux``
-        variables, plus ``transfer_2d`` when requested.
+        variables.
 
     Examples:
         ```pycon
@@ -238,10 +231,9 @@ class EnstrophySpectralFlux(Operator):
         v: str,
         dim: Sequence[str],
         *,
-        window: str | None = "tukey",
-        detrend: str | None = "linear",
+        window: _fourier.Window = None,
+        detrend: _fourier.Detrend = None,
         avg_dims: str | Sequence[str] | None = None,
-        return_2d: bool = False,
     ) -> None:
         self.u = u
         self.v = v
@@ -249,7 +241,6 @@ class EnstrophySpectralFlux(Operator):
         self.window = window
         self.detrend = detrend
         self.avg_dims = avg_dims
-        self.return_2d = return_2d
 
     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
         return _fourier.enstrophy_spectral_flux(
@@ -259,7 +250,6 @@ class EnstrophySpectralFlux(Operator):
             window=self.window,
             detrend=self.detrend,
             avg_dims=self.avg_dims,
-            return_2d=self.return_2d,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -276,7 +266,6 @@ class EnstrophySpectralFlux(Operator):
             "window": self.window,
             "detrend": self.detrend,
             "avg_dims": avg_dims,
-            "return_2d": self.return_2d,
         }
 
 
@@ -340,8 +329,8 @@ class STFT(Operator):
         *,
         window_size: int,
         hop: int | None = None,
-        window: str = "tukey",
-        detrend: str | None = "linear",
+        window: str | None = "tukey",
+        detrend: _fourier.Detrend = "linear",
     ) -> None:
         self.variable = variable
         self.dim = dim

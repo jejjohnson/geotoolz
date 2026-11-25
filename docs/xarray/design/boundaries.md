@@ -30,7 +30,7 @@ geo_toolz owns the xarray geoprocessing operator layer: preprocessing, inference
 | Regridding (scipy-based) | **geo_toolz** | No ESMF dependency |
 | Land/ocean/country masks | **geo_toolz** | Via regionmask |
 | Climatology, anomalies, detrending | **geo_toolz** | `detrend` submodule |
-| Spectral analysis (PSD, cross-spectrum) | **geo_toolz** | Via xrft |
+| Spectral analysis (PSD, cross-spectrum) | **geo_toolz** | Via diagnostix |
 | Evaluation metrics (RMSE, PSD score, etc.) | **geo_toolz** | Via xskillscore + custom |
 | Kinematics (oceanography, remote sensing) | **geo_toolz** | `kinematics` submodule |
 | Operator/Sequential/Graph abstraction | **geo_toolz** | `core` submodule |
@@ -68,7 +68,7 @@ geo_toolz owns the xarray geoprocessing operator layer: preprocessing, inference
 | **scipy** | Regridding, interpolation, spectral | Compute backend for L0 functions |
 | **sklearn** | Preprocessing transforms, models | Via `SklearnOp` / `SklearnModelOp` |
 | **regionmask** | Land/ocean/country masks | `masks` submodule wraps regionmask |
-| **xrft** | Fourier transforms | `spectral` submodule wraps xrft |
+| **diagnostix** | Diagnostics on plain arrays | `transforms` wraps its spectra |
 | **xskillscore** | Verification metrics | `metrics` submodule wraps xskillscore |
 | **hydra-zen** | Config generation from operators | `get_config()` + `builds()` |
 | **xarray_sklearn** | Full sklearn bridge with NaN policies | Optional, `SklearnOp` can delegate |

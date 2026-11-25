@@ -616,7 +616,7 @@ Analysis dependencies — required for spectral and metrics:
 
 | Package | Role |
 |---|---|
-| `xrft` | Fourier transforms on xarray objects |
+| `gridax` / `diagnostix` | Collocated grids and the diagnostics on them; spectra and their fluxes |
 | `xskillscore` | Deterministic and probabilistic verification metrics |
 
 Optional / domain-specific (not in core install):

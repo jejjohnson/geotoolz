@@ -73,7 +73,7 @@ def psd_score_spacetime(
     time_dim: str = "time",
     avg_dims: Sequence[str] | None = ("lat",),
     level: float = 0.5,
-    **xrft_kwargs: Any,
+    **kwargs: Any,
 ) -> tuple[xr.Dataset, dict[str, float]]:
     """Compute a 2-D space-time PSD score and resolved-scale summary.
 
@@ -84,7 +84,7 @@ def psd_score_spacetime(
         time_dim: Temporal dimension used in the PSD.
         avg_dims: Optional dimensions averaged out after the PSD.
         level: Threshold used by :func:`resolved_scale_2d`.
-        **xrft_kwargs: Extra keyword arguments forwarded to
+        **kwargs: ``window`` and ``detrend``, forwarded to
             :func:`psd_score`.
 
     Returns:
@@ -97,7 +97,7 @@ def psd_score_spacetime(
         >>> score, summary = psd_score_spacetime(pred_da, ref_da)
         ```
     """
-    if xrft_kwargs.get("isotropic"):
+    if kwargs.get("isotropic"):
         # Isotropic mode collapses the two spatial axes into a single
         # radial frequency, so the freq_<space_dim>/freq_<time_dim>
         # plane this function indexes into below would not exist.
@@ -113,7 +113,7 @@ def psd_score_spacetime(
         ref,
         psd_dims=(space_dim, time_dim),
         avg_dims=avg_dims,
-        **xrft_kwargs,
+        **kwargs,
     )
     positive = (score[freq_space_dim] > 0.0) & (score[freq_time_dim] > 0.0)
     score = score.where(positive, drop=True).transpose(freq_space_dim, freq_time_dim)
