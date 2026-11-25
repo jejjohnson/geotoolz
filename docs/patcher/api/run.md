@@ -47,7 +47,6 @@ has the shape of its `Padded`, `(value, valid)`), with
 ::: geopatcher.run.PatchBatch
 ::: geopatcher.run.batch_split
 ::: geopatcher.run.unbatch
-::: geopatcher.run.BatchedPatch
 ::: geopatcher.run.stack_patches
 
 ## Caching and random access
