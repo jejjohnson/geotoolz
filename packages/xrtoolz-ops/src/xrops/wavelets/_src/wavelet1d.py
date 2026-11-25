@@ -111,7 +111,8 @@ def cwt1d(
             "param": param_value,
             "dt": dt,
             "dj": dj,
-            "periodic": not pad,
+            # an integer: NetCDF has no boolean attributes
+            "periodic": int(not pad),
             "lag1_autocorrelation": _lag1_autocorrelation(da, dim),
         }
     )

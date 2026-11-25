@@ -211,6 +211,18 @@ def test_a_periodic_series_has_no_cone() -> None:
     assert np.isinf(out["coi"]).all()
 
 
+@pytest.mark.parametrize("pad", [True, False])
+@pytest.mark.parametrize("engine", ["netcdf4", "h5netcdf"])
+def test_the_power_is_saved_and_read_back(tmp_path, pad: bool, engine) -> None:
+    pytest.importorskip({"netcdf4": "netCDF4"}.get(engine, engine))
+    power = cwt1d(_sine_wave(), pad=pad)["power"]
+    power.to_netcdf(tmp_path / "power.nc", engine=engine)
+    back = xr.open_dataarray(tmp_path / "power.nc", engine=engine)
+    xr.testing.assert_identical(
+        wavelet_significance(back.load()), wavelet_significance(power)
+    )
+
+
 def test_the_significance_takes_the_mother_that_was_saved() -> None:
     out = cwt1d(_sine_wave(), mother="dog")
     saved = wavelet_significance(out["power"], null="white")
