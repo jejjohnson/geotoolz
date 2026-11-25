@@ -1,7 +1,7 @@
 """``pack_dataset`` / ``unpack_dataset`` — multi-variable convenience.
 
 Both are pure xarray. They turn a Dataset into the one ``DataArray`` that a
-carrier-agnostic operator (`pipekit_array.einx`, a `pipekit_array.KernelOp`)
+carrier-agnostic operator (`pipekit_array.bridges.einx`, a `pipekit_array.KernelOp`)
 takes, with a ``variable`` dim, and back.
 
 Per design decision D6, these are plain functions — not ``Operator``

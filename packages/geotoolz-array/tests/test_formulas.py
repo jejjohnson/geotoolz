@@ -1,6 +1,6 @@
-"""Formulas of ``pipekit_array.functions`` on carriers: nodata stays nodata.
+"""Formulas of ``pipekit_array.arrays`` on carriers: nodata stays nodata.
 
-``functions`` needs array-api-compat, which geoarray does not.
+``arrays`` needs array-api-compat, which geoarray does not.
 """
 
 from __future__ import annotations
@@ -16,8 +16,9 @@ from test_interop import CARRIERS
 from geoarray import GeoArray
 
 
-functions = pytest.importorskip("pipekit_array.functions", exc_type=ImportError)
-elementwise, floating_inputs = functions.elementwise, functions.floating_inputs
+pytest.importorskip("pipekit_array.arrays", exc_type=ImportError)
+from pipekit_array.arrays import floating_inputs
+from pipekit_array.kernels import elementwise
 
 
 @elementwise()

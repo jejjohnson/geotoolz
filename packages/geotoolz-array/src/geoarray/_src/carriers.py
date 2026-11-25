@@ -23,7 +23,7 @@ from typing import Any, ClassVar, cast
 
 import numpy as np
 import pyproj
-from pipekit_array.dimarray import core_dims, vmapped_dims
+from pipekit_array.named import core_dims, vmapped_dims
 from pipekit_ops import is_traced, on_import, report_move
 
 from geoarray._src.array import (

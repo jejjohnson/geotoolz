@@ -33,7 +33,7 @@ dependencies = [
     # `on_import`, which registers the pytrees once JAX is imported.
     # pipekit 0.2.0 moved the core from `pipekit` to `pipekit-ops`.
     "pipekit-ops>=0.2.4",
-    "pipekit-array>=0.1.4",
+    "pipekit-array>=0.2.0",
     # The affine raster kernels (`to_pixel`, `Grid.window`): functax's base
     # install is NumPy-only and imports JAX only when a JAX array arrives.
     # `Grid.to_functax` needs functax[jax] (geotoolz-ops[interp] brings it).

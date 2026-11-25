@@ -10,7 +10,7 @@ from collections.abc import Hashable, Sequence
 from typing import Any
 
 import xarray as xr
-from pipekit_array.estimator import NanPolicy
+from pipekit_array.bridges.sklearn import NanPolicy
 
 from xrops.learn._src.estimator import TreeMode, XarrayEstimator
 
