@@ -1622,6 +1622,9 @@ upstream, not here.
 | `get_adapter` | function | The adapter for ``x``'s type, or ``None`` for an unnamed value. |
 | `guard` | function | Report each move between NumPy and JAX inside the ``with`` block. |
 | `guard_level` | function | The level of the innermost `guard`; ``"off"`` outside any. |
+| `import_optional` | function | Import a module of an optional extra, or say what to install. |
+| `is_concrete` | function | Return whether no leaf of any value is traced, so that they can be compared. |
+| `is_traced` | function | Return whether ``x`` is, or is a pytree containing, a JAX tracer. |
 | `jit_report` | function | Try each step of ``op`` under a JAX trace, and say which ones work. |
 | `juxt` | function | Return a callable that applies each operator to its input and tuples the results. |
 | `loads` | function | Decode an operator from its JSON state record. |
