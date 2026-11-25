@@ -1,75 +1,74 @@
-"""Region-integrated face-flux primitive — V4.2.
-
-Returns the area-weighted advective flux ``∑ φ u A_face`` summed over
-the cells of a region (or the full grid). This is **not** a strict
-boundary-only integral — it sums every face the region covers, so
-interior contributions cancel only when the region is a closed
-control volume on a divergence-free flow. For a domain-boundary
-diagnostic, supply ``region`` as a boundary mask shifted to face
-centres.
-"""
+"""The flux of a quantity out of a region."""
 
 from __future__ import annotations
 
+import numpy as np
 import xarray as xr
+from diagnostix import budgets
+
+from xrops._src.collocated import Geometry, over_grid
 
 
 def boundary_flux(
     ds: xr.Dataset,
     *,
-    variable: str | None,
-    velocity_vars: dict[str, str],
-    face_metrics: xr.Dataset,
-    region: xr.DataArray | None = None,
-    time_dim: str = "time",
-) -> xr.Dataset:
-    """Region-integrated advective face flux.
+    region: xr.DataArray,
+    variable: str | None = None,
+    u: str = "u",
+    v: str = "v",
+    thickness: str | None = None,
+    dims: tuple[str, str] = ("lon", "lat"),
+    geometry: Geometry = "spherical",
+) -> xr.DataArray:
+    """The net flux of a quantity out of a region, through its own faces.
 
-    Computes ``∑ φ u A_face`` over each face direction. By Gauss's
-    theorem the same sum equals the closed-boundary flux when ``φ u``
-    is divergence-free over the integration domain; for general flows
-    the result is the area-weighted total of the face-flux field
-    rather than a pure boundary integral. See the module docstring.
+    ``∮ q H u·n dl`` over the faces between the cells of the region and the
+    others (``diagnostix.budgets.boundary_flux``): what passes from one cell of
+    the region to another cancels. Its sum over a partition of a region is the
+    flux out of the whole.
 
     Args:
-        ds: Dataset containing ``variable`` (or ``None`` for volume
-            flux only) and the velocity components.
-        variable: Tracer name or ``None``. If ``None`` the flux is the
-            volume flux ``u A_face`` (used by the volume budget).
-        velocity_vars: Mapping ``{"u": "u_var", "v": "v_var", "w": "w_var"}``;
-            ``"w"`` is optional. Names are looked up in ``ds``.
-        face_metrics: Dataset carrying ``area_e`` (east face area, m²),
-            ``area_n`` (north face area, m²), and optionally ``area_top``.
-        region: Optional boolean mask. ``True`` cells contribute; the
-            mask should be shifted to face centres if a boundary-only
-            integral is desired.
-        time_dim: Name of the time coordinate to preserve as a non-
-            spatial dim. Default ``"time"``.
+        ds: Dataset with the velocities and, if named, the quantity and the
+            thickness.
+        region: Boolean mask on the two horizontal dims, ``True`` inside. It may
+            not touch an edge of the domain; a whole circle of longitudes has
+            none along ``lon``.
+        variable: Name of the quantity ``q``; ``None`` for 1, the volume flux.
+        u, v: Velocity component names (m/s).
+        thickness: Name of the thickness ``H`` (m) of a layer, such as the
+            heights of the levels; ``None`` for 1, the flux per metre of depth.
+        dims: ``(x_dim, y_dim)`` horizontal dims. Default ``("lon", "lat")``.
+        geometry: ``"spherical"`` (default; lon/lat in degrees),
+            ``"cartesian"`` or ``"rectilinear"``.
 
     Returns:
-        Dataset with one scalar (or ``time_dim``-indexed) variable per
-        active face direction: ``flux_x``, ``flux_y``, optionally
-        ``flux_z``.
+        DataArray ``"boundary_flux"``, positive outward, on the dims of the
+        fields but the two horizontal ones. The units are those of ``q`` m²/s,
+        or m³/s with a thickness. A NaN beside a face of the boundary gives NaN.
+
+    Raises:
+        ValueError: If ``region`` is not boolean on the two dims, has no cell or
+            every cell, or touches an edge of the domain.
     """
-    out: dict[str, xr.DataArray] = {}
-    tracer = ds[variable] if variable is not None else None
+    xdim, ydim = dims
+    if set(region.dims) != set(dims) or region.dtype != bool:
+        raise ValueError(
+            f"region must be boolean on the dims {dims!r}; got {region.dtype} on "
+            f"{region.dims!r}."
+        )
+    inside = np.asarray(region.transpose(ydim, xdim).values)
+    q = xr.ones_like(ds[u]) if variable is None else ds[variable]
+    fields = [q, ds[u], ds[v]]
+    if thickness is not None:
+        # the kernel multiplies q by H, whatever dims H has
+        fields[0] = q * ds[thickness]
 
-    for axis, area_key in (("u", "area_e"), ("v", "area_n"), ("w", "area_top")):
-        if axis not in velocity_vars:
-            continue
-        if area_key not in face_metrics:
-            continue
-        u = ds[velocity_vars[axis]]
-        a = face_metrics[area_key]
-        flux = u if tracer is None else tracer * u
-        flux = flux * a
-        if region is not None:
-            flux = flux.where(region)
-        flux_dim = {"u": "x", "v": "y", "w": "z"}[axis]
-        spatial_dims = [d for d in flux.dims if d != time_dim]
-        out[f"flux_{flux_dim}"] = flux.sum(dim=spatial_dims, skipna=True)
+    def kernel(q_, u_, v_, grid):
+        volume = budgets.ControlVolume.from_region(inside, grid)
+        return budgets.boundary_flux(q_, u_, v_, grid, volume)
 
-    return xr.Dataset(out)
+    out = over_grid(kernel, *fields, dims=dims, geometry=geometry)
+    return out.rename("boundary_flux")
 
 
 __all__ = ["boundary_flux"]

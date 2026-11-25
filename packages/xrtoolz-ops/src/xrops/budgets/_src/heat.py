@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import xarray as xr
 
-from xrops.budgets._src._common import _tracer_budget_residual
+from xrops.budgets._src._common import _cell_residual
 
 
 def heat_budget_residual(
@@ -38,24 +38,27 @@ def heat_budget_residual(
         depth: Vertical coord name. ``None`` skips vertical advection.
 
     Returns:
-        Per-cell residual, same dims as ``ds[temp_var]``.
+        Per-cell residual, same dims as ``ds[temp_var]``, NaN on the edge
+        cells of the domain, which have a face outside the data; a whole
+        circle of longitudes has no edge.
 
     Notes:
         ``ρ c_p θ`` would be the proper heat content; we use ``θ``
         directly so the closure test does not require a density field.
         Multiply the output by ``ρ_0 c_p`` upstream if you need W/m³.
     """
-    return _tracer_budget_residual(
+    return _cell_residual(
         ds,
-        tracer_var=temp_var,
+        ds[temp_var],
         u_var=u_var,
         v_var=v_var,
         w_var=w_var,
-        surface_flux_var=surface_flux_var,
+        sources=() if surface_flux_var is None else (surface_flux_var,),
         time_dim=time_dim,
         lat=lat,
         lon=lon,
         depth=depth,
+        name=f"{temp_var}_budget_residual",
     )
 
 

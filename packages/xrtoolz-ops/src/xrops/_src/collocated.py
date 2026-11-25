@@ -23,7 +23,9 @@ type Geometry = Literal["cartesian", "rectilinear", "spherical"]
 type Grid = gridax.CartesianAGrid2D | gridax.SphericalAGrid2D
 
 
-def horizontal_grid(x: np.ndarray, y: np.ndarray, geometry: Geometry) -> Grid:
+def horizontal_grid(
+    x: np.ndarray, y: np.ndarray, geometry: Geometry, *, periodic: bool = False
+) -> Grid:
     """The collocated grid of two coordinates: metres, or degrees on a sphere."""
     if geometry == "rectilinear":
         return gridax.CartesianAGrid2D.from_coords(y=y, x=x)
@@ -40,6 +42,7 @@ def horizontal_grid(x: np.ndarray, y: np.ndarray, geometry: Geometry) -> Grid:
         (x[0], x[0] + nx * dx),
         (y[0] - 0.5 * dy, y[0] + (ny - 0.5) * dy),
         R=EARTH_RADIUS,
+        periodic=("x",) if periodic else (),
     )
 
 
@@ -48,6 +51,7 @@ def on_grid(
     *fields: xr.DataArray,
     dims: tuple[str, str],
     geometry: Geometry,
+    wrap: bool = False,
 ) -> xr.DataArray:
     """``kernel(*arrays, grid)`` on the grid of two dims of the fields.
 
@@ -58,6 +62,7 @@ def on_grid(
         dims: The (x, y) dims, (lon, lat) on a sphere.
         geometry: ``"spherical"`` (degrees), ``"cartesian"`` (evenly spaced) or
             ``"rectilinear"``.
+        wrap: Whether a grid of the whole circle of longitudes is periodic.
 
     Returns:
         The result with the dims of the fields, in the order they come in, and
@@ -68,20 +73,14 @@ def on_grid(
             not 1-D, strictly monotonic and, but for ``"rectilinear"``, evenly
             spaced.
     """
-    if geometry not in ("cartesian", "rectilinear", "spherical"):
-        raise ValueError(
-            f"Unknown geometry {geometry!r}; expected one of "
-            "'cartesian', 'rectilinear', 'spherical'."
-        )
     xdim, ydim = dims
-    for field in fields:
-        _check_dims(field, dims, geometry)
-    x, y = (_coordinate(fields[0][dim], geometry) for dim in dims)
+    x, y = _coordinates(fields, dims, geometry)
+    periodic = wrap and whole_circle(x, geometry)
 
     def run(*arrays: Any) -> Any:
         if any(cartesian._is_dask(array) for array in arrays):
-            return _per_chunk(kernel, arrays, x, y, geometry)
-        return kernel(*arrays, horizontal_grid(x, y, geometry))
+            return _per_chunk(kernel, arrays, x, y, geometry, periodic)
+        return kernel(*arrays, horizontal_grid(x, y, geometry, periodic=periodic))
 
     out = xr.apply_ufunc(
         run,
@@ -93,6 +92,53 @@ def on_grid(
     )
     order = dict.fromkeys(dim for field in fields for dim in field.dims)
     return out.transpose(*order)
+
+
+def over_grid(
+    kernel: Callable[..., Any],
+    *fields: xr.DataArray,
+    dims: tuple[str, str],
+    geometry: Geometry,
+) -> xr.DataArray:
+    """As `on_grid`, for a kernel that takes the two dims away.
+
+    The grid of a whole circle of longitudes is periodic. On dask the two dims
+    become one chunk, and nothing is computed.
+    """
+    xdim, ydim = dims
+    x, y = _coordinates(fields, dims, geometry)
+    grid = horizontal_grid(x, y, geometry, periodic=whole_circle(x, geometry))
+    return xr.apply_ufunc(
+        lambda *arrays: kernel(*arrays, grid),
+        *fields,
+        input_core_dims=[[ydim, xdim]] * len(fields),
+        dask="parallelized",
+        output_dtypes=[np.result_type(*(f.dtype for f in fields), np.float32)],
+        dask_gufunc_kwargs={"allow_rechunk": True},
+        join="inner",
+    )
+
+
+def whole_circle(x: np.ndarray, geometry: Geometry) -> bool:
+    """Whether evenly spaced longitudes go once around, the last not the first."""
+    if geometry != "spherical":
+        return False
+    return bool(np.isclose(abs(x[-1] - x[0]) * x.size / (x.size - 1), 360.0))
+
+
+def _coordinates(
+    fields: tuple[xr.DataArray, ...], dims: tuple[str, str], geometry: Geometry
+) -> tuple[np.ndarray, np.ndarray]:
+    """The x and y of the fields, once their dims and spacing are checked."""
+    if geometry not in ("cartesian", "rectilinear", "spherical"):
+        raise ValueError(
+            f"Unknown geometry {geometry!r}; expected one of "
+            "'cartesian', 'rectilinear', 'spherical'."
+        )
+    for field in fields:
+        _check_dims(field, dims, geometry)
+    x, y = (_coordinate(fields[0][dim], geometry) for dim in dims)
+    return x, y
 
 
 def _check_dims(field: xr.DataArray, dims: tuple[str, str], geometry: Geometry) -> None:
@@ -134,8 +180,12 @@ def _per_chunk(
     x: np.ndarray,
     y: np.ndarray,
     geometry: Geometry,
+    periodic: bool,
 ) -> Any:
-    """``kernel`` per chunk, each with one cell of its neighbours and its own grid."""
+    """``kernel`` per chunk, each with one cell of its neighbours and its own grid.
+
+    A periodic axis becomes one chunk, which wraps by itself.
+    """
     import dask.array as dsa
 
     dtype = np.result_type(*(array.dtype for array in arrays), np.float32)
@@ -154,6 +204,8 @@ def _per_chunk(
     wide = {
         axis: _at_least_two(arrays[0].chunks[axis]) for axis in (ndim - 2, ndim - 1)
     }
+    if periodic:
+        wide[ndim - 1] = (shape[-1],)
     arrays = tuple(array.rechunk(wide) for array in arrays)
     chunks = arrays[0].chunks
     # Each block finds its part of the coordinates in a block of their indices,
@@ -167,9 +219,9 @@ def _per_chunk(
 
     def block(*blocks: Any) -> Any:
         *values, rows, columns = blocks
-        return kernel(
-            *values, horizontal_grid(x[columns.ravel()], y[rows.ravel()], geometry)
-        )
+        along_x, along_y = x[columns.ravel()], y[rows.ravel()]
+        grid = horizontal_grid(along_x, along_y, geometry, periodic=periodic)
+        return kernel(*values, grid)
 
     halo = [{ndim - 2: 1, ndim - 1: 1}] * len(arrays)
     halo += [{ndim - 2: 1}, {ndim - 1: 1}]

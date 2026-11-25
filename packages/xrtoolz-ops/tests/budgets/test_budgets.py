@@ -323,48 +323,132 @@ def test_control_volume_integral_operator(lonlat_grid):
     assert float(out) == pytest.approx(3.0 * float(vol["cell_volume"].sum()))
 
 
-def test_boundary_flux_uniform_flow_through_unit_face_recovers_speed():
-    lon = np.linspace(0.0, 1.0, 4)
-    lat = np.linspace(0.0, 1.0, 4)
-    u = xr.DataArray(
-        2.0 * np.ones((lat.size, lon.size)),
-        coords={"lat": lat, "lon": lon},
-        dims=("lat", "lon"),
-    )
-    v = xr.zeros_like(u)
-    face_metrics = xr.Dataset(
+def _swirl(n: int = 40) -> xr.Dataset:
+    """A flow with sources on an even plane, and a tracer."""
+    x = y = np.linspace(-1e5, 1e5, n)
+    X, Y = np.meshgrid(x, y)
+    return xr.Dataset(
         {
-            "area_e": xr.DataArray(
-                np.ones_like(u.values),
-                coords={"lat": lat, "lon": lon},
-                dims=("lat", "lon"),
-            ),
-            "area_n": xr.DataArray(
-                np.ones_like(u.values),
-                coords={"lat": lat, "lon": lon},
-                dims=("lat", "lon"),
-            ),
-        }
+            "u": (("y", "x"), 1e-5 * X - 2e-5 * Y + 1e-11 * X * Y),
+            "v": (("y", "x"), 2e-5 * X + 3e-5 * Y),
+            "c": (("y", "x"), 10.0 + X / 1e5),
+        },
+        coords={"x": x, "y": y},
     )
-    ds = xr.Dataset({"u": u, "v": v})
-    flux = boundary_flux(
-        ds, variable=None, velocity_vars={"u": "u", "v": "v"}, face_metrics=face_metrics
-    )
-    # 16 cells × 1 m² × 2 m/s = 32
-    assert float(flux["flux_x"]) == pytest.approx(32.0)
-    assert float(flux["flux_y"]) == pytest.approx(0.0)
 
 
-def test_boundary_flux_operator_returns_dataset():
-    lon = np.array([0.0, 1.0])
-    lat = np.array([0.0, 1.0])
-    u = xr.DataArray(
-        np.ones((2, 2)), coords={"lat": lat, "lon": lon}, dims=("lat", "lon")
+PLANE = {"dims": ("x", "y"), "geometry": "cartesian"}
+
+
+def _box(ds: xr.Dataset, x: slice, y: slice) -> xr.DataArray:
+    inside = xr.zeros_like(ds["u"], dtype=bool)
+    inside.loc[{"x": x, "y": y}] = True
+    return inside
+
+
+def test_boundary_flux_of_a_radial_flow_is_twice_its_area():
+    ds = _swirl()
+    radial = ds.assign(
+        u=ds["x"] * xr.ones_like(ds["u"]), v=ds["y"] * xr.ones_like(ds["u"])
     )
-    fm = xr.Dataset({"area_e": u})
-    ds = xr.Dataset({"u": u})
-    op = BoundaryFlux(variable=None, velocity_vars={"u": "u"}, face_metrics=fm)
-    assert isinstance(op(ds), xr.Dataset)
+    box = _box(ds, slice(-3e4, 3e4), slice(-2e4, 4e4))
+    area = int(box.sum()) * float(ds["x"].diff("x")[0]) ** 2
+    assert float(boundary_flux(radial, region=box, **PLANE)) == pytest.approx(2 * area)
+
+
+def test_boundary_flux_of_a_region_is_the_sum_over_its_parts():
+    ds = _swirl()
+    whole = _box(ds, slice(-6e4, 6e4), slice(-6e4, 6e4))
+    left = whole & (ds["x"] < 1e4)
+    parts = [
+        boundary_flux(ds, region=r, variable="c", **PLANE)
+        for r in (left, whole & ~left)
+    ]
+    total = boundary_flux(ds, region=whole, variable="c", **PLANE)
+    assert float(sum(parts)) == pytest.approx(float(total), rel=1e-12)
+
+
+def test_no_tracer_crosses_the_boundary_of_a_rotation():
+    ds = _swirl()
+    turning = ds.assign(
+        u=-ds["y"] * xr.ones_like(ds["u"]), v=ds["x"] * xr.ones_like(ds["u"])
+    )
+    box = _box(ds, slice(-3e4, 3e4), slice(-2e4, 4e4))
+    flux = boundary_flux(turning, region=box, **PLANE)
+    through = boundary_flux(abs(turning), region=box, **PLANE)
+    assert abs(float(flux)) < 1e-12 * abs(float(through)) + 1e-3
+
+
+def test_boundary_flux_is_the_area_integral_of_the_residual(lonlat_grid):
+    ds = _flowing(lonlat_grid)
+    inside = xr.zeros_like(ds["u"].isel(time=0, drop=True), dtype=bool)
+    inside[4:12, 5:20] = True
+    residual = volume_budget_residual(ds, depth=None).isel(time=0)
+    step = np.deg2rad(2.5) * np.deg2rad(1.5)
+    # gridax.area_weights: R² cos φ Δλ Δφ
+    area = calc.EARTH_RADIUS**2 * step * np.cos(np.deg2rad(ds["lat"]))
+    expected = (residual * area).where(inside).sum()
+    flux = boundary_flux(ds, region=inside).isel(time=0)
+    assert float(flux) == pytest.approx(float(expected), rel=1e-10)
+
+
+def test_boundary_flux_takes_a_thickness_per_level():
+    ds = (
+        _swirl()
+        .expand_dims(depth=[0.0, 10.0, 30.0])
+        .assign(h=("depth", [5.0, 10.0, 20.0]))
+    )
+    box = _box(ds.isel(depth=0, drop=True), slice(-3e4, 3e4), slice(-2e4, 4e4))
+    per_metre = boundary_flux(ds, region=box, **PLANE)
+    layers = boundary_flux(ds, region=box, thickness="h", **PLANE)
+    assert layers.dims == ("depth",)
+    np.testing.assert_allclose(layers, per_metre * ds["h"])
+
+
+def test_boundary_flux_wraps_around_the_circle():
+    lon, lat = np.arange(0.0, 360.0, 10.0), np.arange(-45.0, 50.0, 10.0)
+    rng = np.random.default_rng(0)
+    ds = xr.Dataset(
+        {k: (("lat", "lon"), rng.normal(size=(lat.size, lon.size))) for k in "uv"},
+        coords={"lat": lat, "lon": lon},
+    )
+    inside = xr.zeros_like(ds["u"], dtype=bool)
+    inside[3:6, 14:22] = True
+    rolled = ds.roll(lon=18)
+    np.testing.assert_allclose(
+        boundary_flux(rolled, region=inside.roll(lon=18)),
+        boundary_flux(ds, region=inside),
+    )
+
+
+def test_boundary_flux_rejects_a_region_at_the_edge_or_not_boolean():
+    ds = _swirl()
+    edge = _box(ds, slice(-2e5, 0.0), slice(-2e4, 4e4))
+    with pytest.raises(ValueError, match="touches an edge"):
+        boundary_flux(ds, region=edge, **PLANE)
+    with pytest.raises(ValueError, match="must be boolean"):
+        boundary_flux(ds, region=edge.astype(float), **PLANE)
+    with pytest.raises(ValueError, match="must be boolean"):
+        boundary_flux(ds, region=edge.isel(x=0), **PLANE)
+
+
+def test_boundary_flux_on_dask_is_lazy_and_equal():
+    pytest.importorskip("dask.array")
+    ds = _swirl().expand_dims(time=3)
+    box = _box(ds.isel(time=0), slice(-3e4, 3e4), slice(-2e4, 4e4))
+    lazy = boundary_flux(ds.chunk({"x": 11, "time": 1}), region=box, **PLANE)
+    assert lazy.chunks is not None
+    xr.testing.assert_allclose(lazy.compute(), boundary_flux(ds, region=box, **PLANE))
+
+
+def test_boundary_flux_operator_matches_the_function():
+    ds = _swirl()
+    box = _box(ds, slice(-3e4, 3e4), slice(-2e4, 4e4))
+    op = BoundaryFlux(box, variable="c", **PLANE)
+    xr.testing.assert_identical(
+        op(ds), boundary_flux(ds, region=box, variable="c", **PLANE)
+    )
+    assert op.get_config()["dims"] == ["x", "y"]
 
 
 def test_budget_residual_closes_for_known_balance():
@@ -405,10 +489,31 @@ def _closed_dataset(lonlat_grid):
     )
 
 
+def _inside(res: xr.DataArray) -> np.ndarray:
+    """The cells with all of their faces inside the domain."""
+    return res.isel(lat=slice(1, -1), lon=slice(1, -1)).values
+
+
+def _flowing(lonlat_grid) -> xr.Dataset:
+    lon, lat = lonlat_grid
+    L, P = np.deg2rad(lon), np.deg2rad(lat)[:, None]
+    t = np.array([0.0, 10.0, 40.0])
+    grow = (1.0 + t / 100.0)[:, None, None]
+    fields = {
+        "theta": 15.0 + np.sin(3 * L) * np.cos(2 * P),
+        "u": np.cos(P) * (1.0 + 0.3 * np.sin(4 * L)),
+        "v": 0.2 * np.cos(3 * L) * np.sin(4 * P),
+    }
+    return xr.Dataset(
+        {k: (("time", "lat", "lon"), grow * f) for k, f in fields.items()},
+        coords={"time": t, "lat": lat, "lon": lon},
+    )
+
+
 def test_heat_budget_residual_closes_on_constant_dataset(lonlat_grid):
     ds = _closed_dataset(lonlat_grid)
     res = heat_budget_residual(ds, depth=None)
-    np.testing.assert_allclose(res.values, 0.0, atol=1e-9)
+    np.testing.assert_allclose(_inside(res), 0.0, atol=1e-9)
 
 
 def test_heat_budget_residual_with_surface_flux_closes(lonlat_grid):
@@ -417,52 +522,52 @@ def test_heat_budget_residual_with_surface_flux_closes(lonlat_grid):
     # full closure; this just confirms the source term subtracts cleanly
     flux = xr.full_like(ds["theta"], 0.0)
     out = heat_budget_residual(ds.assign(F=flux), surface_flux_var="F", depth=None)
-    np.testing.assert_allclose(out.values, 0.0, atol=1e-9)
+    np.testing.assert_allclose(_inside(out), 0.0, atol=1e-9)
 
 
 def test_heat_budget_residual_operator(lonlat_grid):
     ds = _closed_dataset(lonlat_grid)
     op = HeatBudgetResidual(temp_var="theta", depth=None)
     out = op(ds)
-    np.testing.assert_allclose(out.values, 0.0, atol=1e-9)
+    np.testing.assert_allclose(_inside(out), 0.0, atol=1e-9)
 
 
 def test_salt_budget_residual_closes_on_constant_dataset(lonlat_grid):
     ds = _closed_dataset(lonlat_grid)
     res = salt_budget_residual(ds, depth=None)
-    np.testing.assert_allclose(res.values, 0.0, atol=1e-9)
+    np.testing.assert_allclose(_inside(res), 0.0, atol=1e-9)
 
 
 def test_salt_budget_residual_operator(lonlat_grid):
     ds = _closed_dataset(lonlat_grid)
     op = SaltBudgetResidual(salt_var="so", depth=None)
     out = op(ds)
-    np.testing.assert_allclose(out.values, 0.0, atol=1e-9)
+    np.testing.assert_allclose(_inside(out), 0.0, atol=1e-9)
 
 
 def test_volume_budget_residual_zero_on_zero_flow(lonlat_grid):
     ds = _closed_dataset(lonlat_grid)
     res = volume_budget_residual(ds, depth=None)
-    np.testing.assert_allclose(res.values, 0.0, atol=1e-12)
+    np.testing.assert_allclose(_inside(res), 0.0, atol=1e-12)
 
 
 def test_volume_budget_residual_operator(lonlat_grid):
     ds = _closed_dataset(lonlat_grid)
     op = VolumeBudgetResidual(depth=None)
     out = op(ds)
-    np.testing.assert_allclose(out.values, 0.0, atol=1e-12)
+    np.testing.assert_allclose(_inside(out), 0.0, atol=1e-12)
 
 
 def test_kinetic_energy_budget_residual_zero_on_zero_flow(lonlat_grid):
     ds = _closed_dataset(lonlat_grid)
     res = kinetic_energy_budget_residual(ds, depth=None)
-    np.testing.assert_allclose(res.values, 0.0, atol=1e-12)
+    np.testing.assert_allclose(_inside(res), 0.0, atol=1e-12)
 
 
 def test_kinetic_energy_budget_residual_operator(lonlat_grid):
     ds = _closed_dataset(lonlat_grid)
     op = KineticEnergyBudgetResidual(depth=None)
-    np.testing.assert_allclose(op(ds).values, 0.0, atol=1e-12)
+    np.testing.assert_allclose(_inside(op(ds)), 0.0, atol=1e-12)
 
 
 @pytest.mark.parametrize(
@@ -489,7 +594,7 @@ def test_kinetic_energy_budget_residual_subtracts_forcing(lonlat_grid):
     out = kinetic_energy_budget_residual(
         ds.assign(F=forcing), forcing_vars=["F"], depth=None
     )
-    np.testing.assert_allclose(out.values, 0.0, atol=1e-12)
+    np.testing.assert_allclose(_inside(out), 0.0, atol=1e-12)
 
 
 # ---- V4.5 kinematics audit ----------------------------------------------
@@ -596,3 +701,48 @@ def test_budgets_top_level_exposes_v4():
         "KineticEnergyBudgetResidual",
     ):
         assert hasattr(bdg, name), f"xrops.budgets is missing {name!r}"
+
+
+# ---- residuals on faces (#796) ------------------------------------------
+
+
+def test_the_edge_cells_are_nan_and_a_circle_of_longitudes_has_none(lonlat_grid):
+    res = volume_budget_residual(_flowing(lonlat_grid), depth=None)
+    assert np.isnan(res.isel(lat=0)).all() and np.isnan(res.isel(lon=-1)).all()
+    assert np.isfinite(_inside(res)).all()
+    lon = np.arange(0.0, 360.0, 15.0)
+    ds = _flowing((lon, lonlat_grid[1]))
+    around = volume_budget_residual(ds, depth=None)
+    assert np.isfinite(around.isel(lat=slice(1, -1))).all()
+    rolled = volume_budget_residual(ds.roll(lon=7), depth=None)
+    xr.testing.assert_allclose(rolled, around.roll(lon=7))
+
+
+@pytest.mark.parametrize("chunks", [{"lat": 5, "lon": 6}, {"time": 3}, {"lon": 1}])
+@pytest.mark.parametrize("around", [False, True])
+def test_residuals_on_dask_are_lazy_and_equal(lonlat_grid, chunks, around):
+    pytest.importorskip("dask.array")
+    grid = (np.arange(0.0, 360.0, 15.0), lonlat_grid[1]) if around else lonlat_grid
+    ds = _flowing(grid)
+    lazy = heat_budget_residual(ds.chunk(chunks), depth=None)
+    assert lazy.chunks is not None
+    xr.testing.assert_allclose(lazy.compute(), heat_budget_residual(ds, depth=None))
+
+
+def test_tendency_of_a_quadratic_is_exact_on_uneven_times(lonlat_grid):
+    ds = _closed_dataset(lonlat_grid).assign_coords(time=[0.0, 1.0, 4.0])
+    ds["theta"] = ds["theta"] * 0.0 + ds["time"] ** 2
+    res = heat_budget_residual(ds, depth=None)
+    np.testing.assert_allclose(_inside(res.isel(time=1)), 2.0)
+
+
+def test_vertical_flux_on_uneven_levels(lonlat_grid):
+    depth = np.array([0.0, 5.0, 15.0, 40.0])
+    ds = _closed_dataset(lonlat_grid).expand_dims(depth=depth)
+    ds = ds.assign(w=ds["u"] * 0.0 + ds["depth"] ** 2)
+    res = heat_budget_residual(ds, w_var="w")
+    # ∂(wθ)/∂z = 2 z θ at an inner level
+    expected = 2.0 * depth[1:3] * 15.0
+    got = res.isel(depth=slice(1, 3), time=0, lat=5, lon=5)
+    np.testing.assert_allclose(got, expected)
+    assert res.dims == ds["theta"].dims

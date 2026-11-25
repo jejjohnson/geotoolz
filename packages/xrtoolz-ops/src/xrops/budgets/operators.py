@@ -7,6 +7,7 @@ from typing import Any, ClassVar
 
 import xarray as xr
 
+from xrops._src.collocated import Geometry
 from xrops._src.operator import Operator
 from xrops.budgets._src.flux import boundary_flux
 from xrops.budgets._src.heat import heat_budget_residual
@@ -76,53 +77,65 @@ class ControlVolumeIntegral(Operator):
 
 
 class BoundaryFlux(Operator):
-    """Advective flux through the faces of a control volume.
+    """Net flux of a quantity out of a region, through its own faces.
 
-    Integrates the ``velocity_vars`` (optionally carrying ``variable``) over
-    the face areas in ``face_metrics``, optionally restricted to ``region``.
-    The metrics are explicit, never auto-derived.
+    See :func:`xrops.budgets.boundary_flux`.
 
     Args:
-        variable: Tracer carried by the flow, or ``None`` for a pure volume
-            (velocity) flux.
-        velocity_vars: Mapping of face direction → velocity variable name.
-        face_metrics: Dataset carrying the face-area weights.
-        region: Optional boolean mask selecting the control volume.
+        region: Boolean mask on the two horizontal dims.
+        variable: Name of the quantity carried by the flow, or ``None`` for
+            the volume flux.
+        u, v: Velocity component names.
+        thickness: Name of the layer thickness, or ``None``.
+        dims: ``(x_dim, y_dim)`` horizontal dims.
+        geometry: ``"spherical"``, ``"cartesian"`` or ``"rectilinear"``.
 
     Returns:
-        Dataset of per-boundary fluxes.
+        The flux as a DataArray, positive outward.
     """
 
     forbid_in_yaml: ClassVar[bool] = True
 
     def __init__(
         self,
+        region: xr.DataArray,
         *,
-        variable: str | None,
-        velocity_vars: dict[str, str],
-        face_metrics: xr.Dataset,
-        region: xr.DataArray | None = None,
+        variable: str | None = None,
+        u: str = "u",
+        v: str = "v",
+        thickness: str | None = None,
+        dims: tuple[str, str] = ("lon", "lat"),
+        geometry: Geometry = "spherical",
     ) -> None:
-        self.variable = variable
-        self.velocity_vars = dict(velocity_vars)
-        self.face_metrics = face_metrics
         self.region = region
+        self.variable = variable
+        self.u = u
+        self.v = v
+        self.thickness = thickness
+        self.dims = tuple(dims)
+        self.geometry = geometry
 
-    def _apply(self, ds: xr.Dataset) -> xr.Dataset:
+    def _apply(self, ds: xr.Dataset) -> xr.DataArray:
         return boundary_flux(
             ds,
-            variable=self.variable,
-            velocity_vars=self.velocity_vars,
-            face_metrics=self.face_metrics,
             region=self.region,
+            variable=self.variable,
+            u=self.u,
+            v=self.v,
+            thickness=self.thickness,
+            dims=self.dims,
+            geometry=self.geometry,
         )
 
     def get_config(self) -> dict[str, Any]:
         return {
+            "region": "<DataArray>",
             "variable": self.variable,
-            "velocity_vars": dict(self.velocity_vars),
-            "face_metrics": "<Dataset>",
-            "region": "<DataArray>" if self.region is not None else None,
+            "u": self.u,
+            "v": self.v,
+            "thickness": self.thickness,
+            "dims": list(self.dims),
+            "geometry": self.geometry,
         }
 
 
@@ -216,8 +229,8 @@ class _TracerBudgetOp(Operator):
 class HeatBudgetResidual(_TracerBudgetOp):
     """Per-cell heat-budget residual ``∂θ/∂t + ∇·(u θ) − Q``.
 
-    Uses the spherical-metric divergence from :mod:`xrops.grad`; returns
-    the per-cell residual (zero for a closed budget). It does **not** consume
+    Returns the per-cell residual (zero for a closed budget), with the flux
+    through the faces of each cell. It does **not** consume
     volume/face metrics — multiply by ``cell_volume`` and integrate with
     :class:`ControlVolumeIntegral` for a control-volume closure.
 
