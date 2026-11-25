@@ -2,7 +2,8 @@
 
 The same scene is split, scored and stitched two ways (patch by patch, and
 as `PatchBatch` carriers mapped with `geoarray.map_over`); both agree, for
-Hann and Tukey windows (#461). Gate GA-G15: 64 patches run in one trace and stitch the same.
+Hann and Tukey windows (#461). Gate GA-G15: 64 patches run in one trace and
+stitch the same.
 """
 
 from __future__ import annotations
