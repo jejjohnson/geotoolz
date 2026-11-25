@@ -91,8 +91,8 @@ def test_crps_operator_single_member_equals_absolute_error(single_member) -> Non
 
 
 def test_crps_single_member_matches_xskillscore_layout(single_member) -> None:
-    """Same dims, coords and (dropped) attrs as the xskillscore path."""
-    import xskillscore as xs
+    """Same dims, coords and (dropped) attrs as xskillscore."""
+    xs = pytest.importorskip("xskillscore")
 
     forecast, ref = single_member
     # Reference with its dims in another order, to pin the output order.
@@ -119,9 +119,8 @@ def test_crps_single_member_is_zero_against_itself(field) -> None:
     assert (out.values[finite] == 0.0).all()
 
 
-def test_crps_multi_member_unchanged(field) -> None:
-    """Two or more members still go through xskillscore, bit for bit."""
-    import xskillscore as xs
+def test_crps_multi_member_is_that_of_xskillscore(field) -> None:
+    xs = pytest.importorskip("xskillscore")
 
     rng = np.random.default_rng(3)
     forecast = xr.concat(
@@ -130,7 +129,8 @@ def test_crps_multi_member_unchanged(field) -> None:
     )
     out = crps_ensemble(forecast, field)
     expected = xs.crps_ensemble(field, forecast, member_dim="member", dim=[])
-    xr.testing.assert_identical(out, expected)
+    xr.testing.assert_allclose(out, expected, rtol=1e-12)
+    assert out.attrs == {}
 
 
 @pytest.mark.dask

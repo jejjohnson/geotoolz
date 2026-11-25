@@ -13,23 +13,22 @@ wrappers below carry the ``variable=`` selector so that pipelines
 threading Datasets still see a uniform Dataset-in interface; the
 selection happens in the operator ``_apply``, not in the primitive.
 
-The pointwise math lives in the private numpy kernels at
-:mod:`xrops.metrics._src._pixel_kernels`; the Layer 0 wrappers below
-delegate to those kernels via :func:`xr.apply_ufunc`.
+The scores are ``diagnostix.skill``'s. A cell where either field is missing is
+left out of every moment of a score, so the moments are of the same cells.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import numpy as np
 import xarray as xr
+from diagnostix import skill
 from pipekit_ops import Signature
 
 from xrops._src import signature as _sig
 from xrops._src.operator import Operator
-from xrops.metrics._src import _pixel_kernels as _kernels
 
 
 Dim = str | Sequence[str]
@@ -39,93 +38,154 @@ def _normalize_dim(dim: Dim) -> list[str]:
     return [dim] if isinstance(dim, str) else list(dim)
 
 
-def _apply_pixel_kernel(
-    fn: Any,
+def _score(
+    function: Callable[..., Any],
     pred: xr.DataArray,
     ref: xr.DataArray,
     dim: Dim,
+    weights: xr.DataArray | None,
+    **options: Any,
 ) -> xr.DataArray:
-    """Run a private pixel kernel on two DataArrays, reducing ``dim``.
+    """A score of two DataArrays over the cells of ``dim`` that both have.
 
-    Dispatches to the kernel via :func:`xr.apply_ufunc` with
-    ``dim`` as the input core dimensions. The kernel sees a flattened
-    trailing block of axes and reduces with
-    ``axis=tuple(range(-len(core), 0))``.
-
-    For dask-backed inputs, ``allow_rechunk=True`` is set so a core
-    dimension that is split across multiple chunks is rechunked into a
-    single chunk before the kernel runs. Without this, ``apply_ufunc``
-    raises on multi-chunk core dims, which is a common case for the
-    reduce dimension (e.g. ``time`` chunked monthly).
-
-    Output dtype is promoted to at least ``float64`` so that integer
-    inputs don't truncate floating-point reductions.
+    On dask a reduced dim becomes one chunk (``allow_rechunk``), and the result
+    is lazy. Integers become float64.
     """
     core = _normalize_dim(dim)
-    out_dtype = np.result_type(pred.dtype, np.float64)
-    out: xr.DataArray = xr.apply_ufunc(
-        lambda p, r: fn(p, r, axis=tuple(range(-len(core), 0))),
-        pred,
-        ref,
-        input_core_dims=[core, core],
+    fields = [pred, ref]
+    if weights is not None:
+        # on the dims that are pooled, whichever of them the weights have
+        missing = [d for d in core if d not in weights.dims]
+        shape = {d: pred.sizes[d] for d in missing}
+        fields.append(weights.expand_dims(shape) if missing else weights)
+    dtype = np.result_type(pred.dtype, ref.dtype, np.float32)
+
+    def kernel(p: Any, r: Any, w: Any = None) -> Any:
+        both = (p == p) & (r == r)
+        axis = tuple(range(-len(core), 0))
+        out = function(p, r, weights=w, valid=both, axis=axis, **options)
+        return out.astype(dtype)
+
+    return xr.apply_ufunc(
+        kernel,
+        *fields,
+        input_core_dims=[core] * len(fields),
         dask="parallelized",
-        output_dtypes=[out_dtype],
+        output_dtypes=[dtype],
         dask_gufunc_kwargs={"allow_rechunk": True},
     )
-    return out
 
 
 # ---------- Layer-0 (xarray DataArray-positional) -------------------------
+#
+# Each takes ``weights``, 0 or more, on any of the dims that are pooled: cell
+# areas, or ``cos(lat)`` on a lon–lat grid. 1 if not given.
 
 
-def mse(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray:
+def mse(
+    pred: xr.DataArray,
+    ref: xr.DataArray,
+    *,
+    dim: Dim,
+    weights: xr.DataArray | None = None,
+) -> xr.DataArray:
     """Mean squared error reduced over ``dim``."""
-    return _apply_pixel_kernel(_kernels.mse, pred, ref, dim)
+    return rmse(pred, ref, dim=dim, weights=weights) ** 2
 
 
-def rmse(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray:
+def rmse(
+    pred: xr.DataArray,
+    ref: xr.DataArray,
+    *,
+    dim: Dim,
+    weights: xr.DataArray | None = None,
+) -> xr.DataArray:
     """Root mean squared error reduced over ``dim``."""
-    return _apply_pixel_kernel(_kernels.rmse, pred, ref, dim)
+    return _score(skill.rmse, pred, ref, dim, weights)
 
 
-def nrmse(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray:
+def nrmse(
+    pred: xr.DataArray,
+    ref: xr.DataArray,
+    *,
+    dim: Dim,
+    weights: xr.DataArray | None = None,
+) -> xr.DataArray:
     """Normalized RMSE: ``1 - RMSE / sqrt(<ref^2>)``.
 
     Returns a score in ``(-inf, 1]`` where 1 means a perfect match and 0
     means the prediction is as wrong as a zero prediction.
     """
-    return _apply_pixel_kernel(_kernels.nrmse, pred, ref, dim)
+    return _score(skill.nrmse_score, pred, ref, dim, weights, normalise="rms")
 
 
-def nrmse_score(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray:
+def nrmse_score(
+    pred: xr.DataArray,
+    ref: xr.DataArray,
+    *,
+    dim: Dim,
+    weights: xr.DataArray | None = None,
+) -> xr.DataArray:
     """Mercator/OceanBench-flavour NRMSE skill: ``1 - RMSE / std(ref)``.
 
     Differs from :func:`nrmse` in the denominator: this uses the
     anomaly magnitude ``std(ref)`` while :func:`nrmse` uses the raw
     signal magnitude ``sqrt(<ref^2>)``. For zero-mean references the
-    two agree.
+    two agree. Against a constant reference a perfect prediction scores 1 and
+    any other ``-inf``.
     """
-    return _apply_pixel_kernel(_kernels.nrmse_score, pred, ref, dim)
+    return _score(skill.nrmse_score, pred, ref, dim, weights, normalise="std")
 
 
-def mae(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray:
+def mae(
+    pred: xr.DataArray,
+    ref: xr.DataArray,
+    *,
+    dim: Dim,
+    weights: xr.DataArray | None = None,
+) -> xr.DataArray:
     """Mean absolute error reduced over ``dim``."""
-    return _apply_pixel_kernel(_kernels.mae, pred, ref, dim)
+    return _score(skill.mae, pred, ref, dim, weights)
 
 
-def bias(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray:
+def bias(
+    pred: xr.DataArray,
+    ref: xr.DataArray,
+    *,
+    dim: Dim,
+    weights: xr.DataArray | None = None,
+) -> xr.DataArray:
     """Mean bias ``<pred - ref>`` reduced over ``dim``."""
-    return _apply_pixel_kernel(_kernels.bias, pred, ref, dim)
+    return _score(skill.bias, pred, ref, dim, weights)
 
 
-def correlation(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray:
-    """Pearson correlation between prediction and reference over ``dim``."""
-    return _apply_pixel_kernel(_kernels.correlation, pred, ref, dim)
+def correlation(
+    pred: xr.DataArray,
+    ref: xr.DataArray,
+    *,
+    dim: Dim,
+    weights: xr.DataArray | None = None,
+) -> xr.DataArray:
+    """Pearson correlation between prediction and reference over ``dim``.
+
+    NaN where either field is constant.
+    """
+    return _score(skill.correlation, pred, ref, dim, weights)
 
 
-def r2_score(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray:
-    """Coefficient of determination: ``1 - SS_res / SS_tot``."""
-    return _apply_pixel_kernel(_kernels.r2_score, pred, ref, dim)
+def r2_score(
+    pred: xr.DataArray,
+    ref: xr.DataArray,
+    *,
+    dim: Dim,
+    weights: xr.DataArray | None = None,
+) -> xr.DataArray:
+    """Coefficient of determination: ``1 - SS_res / SS_tot``.
+
+    Against a constant reference a perfect prediction scores 1 and any other
+    ``-inf``.
+    """
+    return _score(skill.r2_score, pred, ref, dim, weights)
 
 
 # ---------- Layer-1 (Operator wrappers) -----------------------------------
@@ -134,29 +194,33 @@ def r2_score(pred: xr.DataArray, ref: xr.DataArray, *, dim: Dim) -> xr.DataArray
 class _PixelMetricOp(Operator):
     """Base class for two-input pixel metrics.
 
-    The constructor carries the Dataset-level selector (``variable``)
-    and the reduce-axis spec (``dims``). ``_apply`` selects the named
+    The constructor carries the Dataset-level selector (``variable``),
+    the reduce-axis spec (``dims``) and, optionally, the name of a variable of
+    the reference that holds the ``weights``. ``_apply`` selects the named
     variable from each input Dataset and forwards the resulting
     DataArrays to the Layer-0 primitive.
     """
 
     _fn: Any = None
 
-    def __init__(self, variable: str, dims: Dim):
+    def __init__(self, variable: str, dims: Dim, weights: str | None = None):
         self.variable = variable
         self.dims = dims if isinstance(dims, str) else list(dims)
+        self.weights = weights
 
     def _apply(self, ds_pred: xr.Dataset, ds_ref: xr.Dataset) -> xr.DataArray:
         return self.__class__._fn(
             ds_pred[self.variable],
             ds_ref[self.variable],
             dim=self.dims,
+            weights=None if self.weights is None else ds_ref[self.weights],
         )
 
     def get_config(self) -> dict[str, Any]:
         return {
             "variable": self.variable,
             "dims": self.dims if isinstance(self.dims, str) else list(self.dims),
+            "weights": self.weights,
         }
 
     def compute_output_signature(
@@ -175,8 +239,8 @@ class _PixelMetricOp(Operator):
         else:
             signature = input_signature
         dims = (self.dims,) if isinstance(self.dims, str) else tuple(self.dims)
-        # Pixel metric kernels promote int inputs to float64 (see
-        # _apply_pixel_kernel above), so the inferred output dtype follows.
+        # Integers become float64 (see _score above), and the inferred output
+        # dtype is that of a float64 input.
         return _sig.make(_sig.sizes(_sig.drop_dims(signature, dims)), dtype=np.float64)
 
 
