@@ -20,7 +20,7 @@ import numpy as np
 import xarray as xr
 from matplotlib import colors
 
-from xrops.metrics import find_intercept_1D
+from xrops.metrics import resolved_scale
 from xrops.viz.validation._src.base import _NullContext, _ValidationPanel
 
 
@@ -228,7 +228,7 @@ class PSDIsotropicScorePanel(_PSDPanelBase):
     log-x axis, marks the score threshold with a horizontal dashed
     line, and annotates the resolved wavelength where the score first
     crosses ``threshold`` (computed via
-    :func:`xrops.metrics._src.spectral.find_intercept_1D`).
+    :func:`xrops.metrics.resolved_scale`).
 
     Args:
         freq_dim: Frequency dim name. Default ``"freq_r"``.
@@ -337,16 +337,12 @@ class PSDIsotropicScorePanel(_PSDPanelBase):
         # Resolved scale: wavelength where score crosses threshold.
         nonzero = f > 0
         if nonzero.any():
-            s_min = float(np.min(vals[nonzero]))
-            s_max = float(np.max(vals[nonzero]))
-            crosses = s_min < self.threshold < s_max
-            wavelengths = 1.0 / (f[nonzero] * self.space_scale)
-            if crosses:
+            above = bool(vals[nonzero][np.argmin(f[nonzero])] > self.threshold)
+            if above:
                 try:
-                    resolved = find_intercept_1D(
-                        x=wavelengths,
-                        y=vals[nonzero],
-                        level=self.threshold,
+                    resolved = (
+                        float(resolved_scale(da, self.freq_dim, self.threshold))
+                        / self.space_scale
                     )
                     if np.isfinite(resolved) and resolved > 0:
                         units = self._resolve_units()

@@ -126,8 +126,8 @@ def test_eddy_regions_returns_two_class_dataarray() -> None:
 def test_dm_test_identical_and_skewed_losses() -> None:
     losses = xr.DataArray(np.array([1.0, -2.0, 3.0, -4.0]), dims="time")
     out = dm_test(losses, losses)
-    np.testing.assert_allclose(out["statistic"].values, 0.0)
-    np.testing.assert_allclose(out["p_value"].values, 1.0)
+    # no difference has no spread to be compared with
+    assert np.isnan(out["statistic"]) and np.isnan(out["p_value"])
 
     out = dm_test(
         xr.DataArray(np.arange(1.0, 7.0), dims="time"),
@@ -148,24 +148,48 @@ def test_dm_test_hln_correction_changes_p_value() -> None:
     assert p_hln != p_normal
 
 
-def test_dm_test_matches_statsmodels_hac_reference() -> None:
-    sm = pytest.importorskip("statsmodels.api")
-    cov_hac = pytest.importorskip("statsmodels.stats.sandwich_covariance").cov_hac
-    a = np.array([2.0, 1.0, 3.0, 2.5, 4.0, 3.5, 5.0])
-    b = np.array([1.0, 1.2, 1.1, 1.4, 1.3, 1.5, 1.6])
-    d = np.abs(a) ** 2 - np.abs(b) ** 2
-    fit = sm.OLS(d, np.ones((d.size, 1))).fit()
-    cov = cov_hac(fit, nlags=1, use_correction=False)
-    expected = float(fit.params[0] / np.sqrt(cov[0, 0]))
+def test_dm_test_of_one_step_is_the_t_test() -> None:
+    from scipy import stats
 
-    out = dm_test(
-        xr.DataArray(a, dims="time"),
-        xr.DataArray(b, dims="time"),
-        h=2,
-        hln_correction=False,
-    )
+    rng = np.random.default_rng(0)
+    a, b = 1.2 * rng.standard_normal(40), rng.standard_normal(40)
+    out = dm_test(xr.DataArray(a, dims="t"), xr.DataArray(b, dims="t"))
+    expected = stats.ttest_1samp(a**2 - b**2, 0.0)
+    assert float(out["statistic"]) == pytest.approx(expected.statistic)
+    assert float(out["p_value"]) == pytest.approx(expected.pvalue)
 
-    np.testing.assert_allclose(out["statistic"].values, expected, rtol=1e-6, atol=1e-6)
+
+def test_dm_test_rejects_at_its_level_beyond_one_step() -> None:
+    """The tapered variance rejected 7.9 % of the time at 5 % (#791)."""
+    rng = np.random.default_rng(0)
+    h, n, trials = 3, 200, 2000
+
+    def errors() -> xr.DataArray:
+        z = rng.normal(size=(trials, n + h - 1))
+        return xr.DataArray(
+            sum(z[:, k : n + k] for k in range(h)), dims=("trial", "time")
+        )
+
+    p = dm_test(errors(), errors(), dim="time", h=h)["p_value"]
+    assert float((p < 0.05).mean()) == pytest.approx(0.05, abs=0.0125)
+
+
+def test_dm_test_with_a_missing_pair() -> None:
+    rng = np.random.default_rng(1)
+    a, b = (xr.DataArray(rng.standard_normal(30), dims="t") for _ in range(2))
+    gappy = a.where(np.arange(30) != 4)
+    kept = np.arange(30) != 4
+    xr.testing.assert_allclose(dm_test(gappy, b), dm_test(a[kept], b[kept]))
+    assert np.isnan(dm_test(gappy, b, h=2)["p_value"])
+
+
+@pytest.mark.parametrize("alternative", ["less", "greater"])
+def test_dm_test_one_sided(alternative: str) -> None:
+    rng = np.random.default_rng(2)
+    a = xr.DataArray(2.0 * rng.standard_normal(60), dims="t")
+    b = xr.DataArray(rng.standard_normal(60), dims="t")
+    p = float(dm_test(a, b, alternative=alternative)["p_value"])
+    assert (p < 0.01) == (alternative == "greater")
 
 
 def test_dm_test_dim_wise_broadcasts_over_remaining_dims() -> None:
@@ -250,8 +274,8 @@ def test_scores_by_region_count_is_zero_for_empty_region() -> None:
 def test_dm_test_accepts_errors_keyword_naming() -> None:
     """The renamed parameter names work as keyword args."""
     e = xr.DataArray(np.array([0.5, -0.5, 0.5, -0.5, 0.5]), dims="time")
-    out = dm_test(errors_a=e, errors_b=e)
-    np.testing.assert_allclose(out["statistic"].values, 0.0)
+    out = dm_test(errors_a=e, errors_b=2.0 * e[::-1] + 0.1)
+    xr.testing.assert_identical(out, dm_test(e, 2.0 * e[::-1] + 0.1))
 
 
 def _track_dataset() -> xr.Dataset:

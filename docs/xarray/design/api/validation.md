@@ -10,7 +10,7 @@ Only the following names are real and importable today:
   `correlation`, `r2_score`, plus `MSE`, `RMSE`, `NRMSE`, `MAE`,
   `Bias`, `Correlation`, `R2Score`.
 - **`xrtoolz.metrics.spectral`** — `psd_error`, `psd_score`,
-  `resolved_scale`, `find_intercept_1D`, plus `PSDScore`.
+  `resolved_scale`, plus `PSDScore`.
 
 Every other class referenced on this page (`NashSutcliffe`,
 `ResolvedScale`, `SkillByLeadTime`, `RMSEByLead`, `EvaluateByRegion`,

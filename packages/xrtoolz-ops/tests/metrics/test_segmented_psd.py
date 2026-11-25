@@ -173,13 +173,12 @@ def test_along_track_segment_longitude_uses_circular_mean() -> None:
 
 def test_resolved_scale_returns_exact_crossing_wavelength() -> None:
     score = xr.DataArray(
-        [0.2, 0.5, 0.8],
+        [0.8, 0.5, 0.2],
         dims=("wavenumber",),
         coords={"wavenumber": [0.01, 0.02, 0.04]},
     )
-    assert resolved_scale(score, frequency="wavenumber", level=0.5) == pytest.approx(
-        50.0
-    )
+    wavelength = resolved_scale(score, frequency="wavenumber", level=0.5)
+    assert float(wavelength) == pytest.approx(50.0)
 
 
 def test_psd_score_by_region_applies_min_segments_threshold() -> None:

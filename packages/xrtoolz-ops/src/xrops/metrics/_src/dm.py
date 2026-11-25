@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import xarray as xr
+from diagnostix import skill
 from jaxtyping import Float
 from scipy import stats
 
@@ -41,7 +42,10 @@ def dm_test(
             statistic / p-value pair is returned. When given, the test
             is computed independently along ``dim`` and broadcast over
             the remaining dimensions.
-        h: Forecast horizon (Newey–West lag truncation is ``h - 1``).
+        h: Forecast horizon: the errors of an ``h``-step forecast are
+            correlated up to lag ``h - 1``, and their autocovariances up to it
+            are summed with a weight of one (``diagnostix.skill``). A missing
+            pair is dropped for ``h = 1``, and makes the result NaN otherwise.
         alternative: ``"two-sided"``, ``"less"``, or ``"greater"``.
         power: Loss exponent applied to ``|e|``.
         hln_correction: Apply the Harvey–Leybourne–Newbold small-sample
@@ -50,7 +54,8 @@ def dm_test(
     Returns:
         Dataset with ``statistic`` and ``p_value`` variables. Both are
         scalars when ``dim`` is ``None``, otherwise DataArrays over the
-        non-reduced dimensions.
+        non-reduced dimensions. NaN where the loss differences are all the same,
+        or their long-run variance is estimated as negative.
     """
     if h < 1:
         raise ValueError("h must be at least 1.")
@@ -107,38 +112,17 @@ def _dm_stat_pvalue(
     a = np.asarray(errors_a, dtype=float)
     b = np.asarray(errors_b, dtype=float)
 
-    d = np.abs(a.ravel()) ** power - np.abs(b.ravel()) ** power
-    d = d[np.isfinite(d)]
-    n = d.size
-    if n <= h:
+    a, b = a.ravel(), b.ravel()
+    if h == 1:
+        # only a forecast of one step has errors that are not h apart
+        paired = np.isfinite(a) & np.isfinite(b)
+        a, b = a[paired], b[paired]
+    if a.size <= h:
         raise ValueError("dm_test requires more finite paired samples than h.")
-
-    mean = float(np.mean(d))
-    centered = d - mean
-    variance = _newey_west_variance(centered, lag=h - 1)
-    if variance <= 0.0:
-        stat = 0.0 if np.isclose(mean, 0.0) else np.copysign(np.inf, mean)
-    else:
-        stat = mean / np.sqrt(variance / n)
-
-    if hln_correction:
-        factor = np.sqrt((n + 1 - 2 * h + h * (h - 1) / n) / n)
-        stat *= factor
-        p_value = _p_value(stat, alternative, distribution=stats.t(df=n - 1))
-    else:
-        p_value = _p_value(stat, alternative, distribution=stats.norm)
-    return float(stat), float(p_value)
-
-
-def _newey_west_variance(centered: Float[np.ndarray, "n"], *, lag: int) -> float:
-    n = centered.size
-    gamma0 = float(np.dot(centered, centered) / n)
-    variance = gamma0
-    for k in range(1, lag + 1):
-        gamma = float(np.dot(centered[k:], centered[:-k]) / n)
-        weight = 1.0 - k / (lag + 1)
-        variance += 2.0 * weight * gamma
-    return variance
+    out = skill.diebold_mariano(a, b, horizon=h, power=power, correction=hln_correction)
+    distribution = stats.t(df=out.degrees_of_freedom) if hln_correction else stats.norm
+    statistic = float(out.statistic)
+    return statistic, _p_value(statistic, alternative, distribution=distribution)
 
 
 def _p_value(stat: float, alternative: str, *, distribution) -> float:

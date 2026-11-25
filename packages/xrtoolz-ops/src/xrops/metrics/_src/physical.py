@@ -41,12 +41,13 @@ from typing import Any, Literal
 import gridax
 import numpy as np
 import xarray as xr
-from diagnostix import kinematics
+from diagnostix import kinematics, skill
 
 from xrops import grad
-from xrops._src.collocated import Geometry, on_grid
+from xrops._src.collocated import Geometry, on_grid, over_grid
+from xrops._src.columns import levels_of, on_columns
 from xrops._src.operator import Operator
-from xrops.ocn._src.kinematics import Coriolis, _coriolis_field, _coriolis_on
+from xrops.ocn._src.kinematics import Coriolis, _coriolis_on
 
 
 # ---------- Layer-0: geostrophic balance ---------------------------------
@@ -127,15 +128,14 @@ def geostrophic_imbalance(
     geometry: Geometry = "spherical",
     f: Coriolis = None,
     g: float = grad.GRAVITY,
-    eps: float = 1e-30,
 ) -> xr.DataArray:
     """Dimensionless ageostrophic fraction ``rms(r) / rms(f k×u)``.
 
-    Reduces the :func:`geostrophic_balance_error` residual ``r`` over
-    every dim and normalises by the Coriolis acceleration, so the score
-    is scale-invariant: ``0`` for an exactly geostrophic flow, ``O(1)``
-    when ageostrophic accelerations rival Coriolis. NaN cells (land,
-    stencil halo) are skipped.
+    The :func:`geostrophic_balance_error` residual ``r`` against the Coriolis
+    acceleration, both as means over the area of each plane
+    (``diagnostix.skill.geostrophic_imbalance``): ``0`` for an exactly
+    geostrophic flow, ``O(1)`` when ageostrophic accelerations rival Coriolis.
+    A cell that is missing in any plane of any field is land, and is not read.
 
     Args:
         ds: Dataset containing ``ssh_var``, ``u_var``, ``v_var``.
@@ -145,10 +145,10 @@ def geostrophic_imbalance(
             ``"rectilinear"``.
         f: Coriolis parameter; see :func:`geostrophic_balance_error`.
         g: Gravitational acceleration (m/s²).
-        eps: Floor on the denominator so a motionless state stays finite.
 
     Returns:
-        Scalar :class:`xr.DataArray` named ``"geostrophic_imbalance"``.
+        :class:`xr.DataArray` named ``"geostrophic_imbalance"``, on the dims
+        that are not horizontal. NaN for a state of rest.
 
     Example:
         Score a β-plane model run in metres::
@@ -158,22 +158,41 @@ def geostrophic_imbalance(
                 geometry="cartesian", f=(1e-4, 1.6e-11),
             )
     """
-    res = geostrophic_balance_error(
-        ds,
-        ssh_var=ssh_var,
-        u_var=u_var,
-        v_var=v_var,
-        g=g,
+    eta, u, v = ds[ssh_var], ds[u_var], ds[v_var]
+    mask = _land_mask([u, v, eta], dims, geometry)
+
+    def kernel(u_, v_, height, coriolis, grid):
+        return skill.geostrophic_imbalance(
+            u_, v_, height, grid, f=coriolis, gravity=g, mask=mask
+        )
+
+    out = over_grid(
+        kernel,
+        u,
+        v,
+        eta,
+        _coriolis_on(eta, dims, geometry, f),
         dims=dims,
         geometry=geometry,
-        f=f,
     )
-    f_field = _coriolis_field(ds[ssh_var], dims, geometry, f)
-    cor_u = f_field * ds[v_var]
-    cor_v = f_field * ds[u_var]
-    residual = np.sqrt((res["r_u"] ** 2).mean() + (res["r_v"] ** 2).mean())
-    scale = np.sqrt((cor_u**2).mean() + (cor_v**2).mean())
-    return (residual / (scale + eps)).rename("geostrophic_imbalance")
+    return out.rename("geostrophic_imbalance")
+
+
+def _land_mask(
+    fields: list[xr.DataArray], dims: tuple[str, str], geometry: Geometry
+) -> gridax.Mask2D | None:
+    """The cells that every plane of every field has; none if that is all.
+
+    A row at a pole has no eastward derivative, and is land too.
+    """
+    wet = fields[0].notnull()
+    for field in fields[1:]:
+        wet = wet & field.notnull()
+    wet = wet.all([d for d in wet.dims if d not in dims])
+    inside = np.array(wet.transpose(dims[1], dims[0]).values)
+    if geometry == "spherical":
+        inside[np.isclose(np.abs(fields[0][dims[1]].values), 90.0)] = False
+    return None if inside.all() else gridax.Mask2D.from_mask(inside)
 
 
 # ---------- Layer-0: divergence ------------------------------------------
@@ -207,20 +226,30 @@ def divergence_error(
         geometry: ``"spherical"`` (default), ``"cartesian"`` or
             ``"rectilinear"``.
         reduce: ``None`` (default) returns the divergence field;
-            ``"rms"`` returns the scalar ``sqrt(mean((∇·u)²))`` over every
-            dim, skipping NaN.
+            ``"rms"`` returns ``sqrt(<(∇·u)²>)``, with the mean over the area
+            of each plane (``diagnostix.skill.rms_divergence``). A cell that is
+            missing in any plane is land, and is not read.
 
     Returns:
         :class:`xr.DataArray` named ``"divergence"`` (field, 1/s) or
-        ``"rms_divergence"`` (scalar, 1/s).
+        ``"rms_divergence"`` (1/s), on the dims that are not horizontal.
     """
     xy = (lon, lat) if dims is None else dims
-    div = on_grid(gridax.divergence, ds[u_var], ds[v_var], dims=xy, geometry=geometry)
+    u, v = ds[u_var], ds[v_var]
     if reduce is None:
+        div = on_grid(gridax.divergence, u, v, dims=xy, geometry=geometry)
         return div.rename("divergence")
-    if reduce == "rms":
-        return np.sqrt((div**2).mean()).rename("rms_divergence")
-    raise ValueError(f"reduce={reduce!r} must be None or 'rms'.")
+    if reduce != "rms":
+        raise ValueError(f"reduce={reduce!r} must be None or 'rms'.")
+    mask = _land_mask([u, v], xy, geometry)
+    out = over_grid(
+        lambda u_, v_, grid: skill.rms_divergence(u_, v_, grid, mask=mask),
+        u,
+        v,
+        dims=xy,
+        geometry=geometry,
+    )
+    return out.rename("rms_divergence")
 
 
 # ---------- Layer-0: density inversion -----------------------------------
@@ -232,21 +261,20 @@ def density_inversion_fraction(
     density_var: str = "rho",
     depth_dim: str = "depth",
 ) -> xr.DataArray:
-    """Fraction of inversion cells, averaged over all input dims.
+    """Share of neighbouring levels of each column with the denser one on top.
 
-    Counts ``∂ρ/∂z < 0`` along ``depth_dim`` then averages the
-    Boolean mask over **every** dim of the difference field
-    (including ``depth_dim``), returning a scalar.
+    Over the pairs of levels that both have data
+    (``diagnostix.skill.density_inversion_fraction``).
 
     Args:
         ds: Dataset with ``density_var`` on a vertical axis.
         density_var: Density variable name.
-        depth_dim: Vertical dimension name. Convention: increasing
-            ``depth`` points downward (deeper). Inversions are pairs
-            with ``∂ρ/∂z < 0``.
+        depth_dim: Vertical dimension name, with a coordinate that is positive
+            downward.
 
     Returns:
-        Scalar :class:`xr.DataArray` in ``[0, 1]``.
+        :class:`xr.DataArray` in ``[0, 1]``, on the dims that are not vertical.
+        NaN in a column without such a pair, such as land.
     """
     rho = ds[density_var]
     if depth_dim not in rho.dims:
@@ -254,10 +282,16 @@ def density_inversion_fraction(
             f"Density variable {density_var!r} is missing depth dim "
             f"{depth_dim!r}; got dims={tuple(rho.dims)}."
         )
-    drho_dz = rho.diff(depth_dim)
-    inversions = (drho_dz < 0).astype(float)
-    frac = inversions.mean()
-    return frac.rename("density_inversion_fraction")
+    out = on_columns(
+        lambda rho_, z: skill.density_inversion_fraction(
+            rho_, z, valid=~np.isnan(rho_)
+        ),
+        rho,
+        -levels_of(rho, depth_dim),
+        dim=depth_dim,
+        reduces=True,
+    )
+    return out.rename("density_inversion_fraction")
 
 
 # ---------- Layer-0: PV conservation -------------------------------------
@@ -353,7 +387,6 @@ class GeostrophicImbalance(Operator):
         geometry: Geometry = "spherical",
         f: Coriolis = None,
         g: float = grad.GRAVITY,
-        eps: float = 1e-30,
     ) -> None:
         self.ssh_var = ssh_var
         self.u_var = u_var
@@ -362,7 +395,6 @@ class GeostrophicImbalance(Operator):
         self.geometry = geometry
         self.f = f
         self.g = g
-        self.eps = eps
 
     def _apply(self, ds: xr.Dataset) -> xr.DataArray:
         return geostrophic_imbalance(ds, **self.get_config())
@@ -376,7 +408,6 @@ class GeostrophicImbalance(Operator):
             "geometry": self.geometry,
             "f": self.f,
             "g": self.g,
-            "eps": self.eps,
         }
 
 
