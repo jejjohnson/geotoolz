@@ -1625,7 +1625,7 @@ dev = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "geotoolz-array"
-version = "0.6.0"
+version = "0.6.1"
 source = { editable = "packages/geotoolz-array" }
 dependencies = [
     { name = "affine" },
@@ -7012,7 +7012,7 @@ provides-extras = ["wavelets", "image", "functax", "maps", "sklearn", "vector"]
 
 [[package]]
 name = "xrtoolz-ops"
-version = "0.7.0"
+version = "0.7.1"
 source = { editable = "packages/xrtoolz-ops" }
 dependencies = [
     { name = "dask", extra = ["array"] },

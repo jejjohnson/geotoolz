@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/jejjohnson/geotoolz/compare/xrtoolz-ops-v0.7.0...xrtoolz-ops-v0.7.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **deps:** pipekit-array 0.2.0 and its areas ([#816](https://github.com/jejjohnson/geotoolz/issues/816)) ([52c0583](https://github.com/jejjohnson/geotoolz/commit/52c0583b26701e4054fc027c1ec0c74c06e17af9))
+
 ## [0.7.0](https://github.com/jejjohnson/geotoolz/compare/xrtoolz-ops-v0.6.0...xrtoolz-ops-v0.7.0) (2026-11-25)
 
 
