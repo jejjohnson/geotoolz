@@ -9,7 +9,7 @@ r = \frac{\partial\theta}{\partial t} + \nabla\cdot\mathbf{F} - Q.
 $$
 
 `ControlVolumeIntegral` and `BoundaryFlux` assemble the volume and surface
-terms; the tracer-specific residuals specialise $\theta$ to heat, salt,
+terms, the second as the net flux through the faces that bound a region; the tracer-specific residuals specialise $\theta$ to heat, salt,
 volume, or kinetic energy.
 
 ## Building blocks

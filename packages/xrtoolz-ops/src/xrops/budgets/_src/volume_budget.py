@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import xarray as xr
 
-from xrops import grad
+from xrops.budgets._src._common import _flux_divergence
 
 
 def volume_budget_residual(
@@ -22,30 +22,21 @@ def volume_budget_residual(
     lon: str = "lon",
     depth: str | None = "depth",
 ) -> xr.DataArray:
-    """``∇·u`` with spherical curvature ``+ ∂w/∂z`` if ``w_var`` is given.
+    """``∇·u`` through the faces of each cell, ``+ ∂w/∂z`` if ``w_var`` is given.
 
-    Closes to ≈ 0 for an incompressible flow. ``w_var=None`` returns
-    the surface 2-D divergence only. Uses :func:`xrops.grad.divergence`
-    so the spherical curvature term is included; when the vertical
-    component is present it goes in the same call as a third
-    ``rectilinear`` axis rather than a separately added partial.
+    Closes to ≈ 0 for an incompressible flow. ``w_var=None`` returns the
+    surface 2-D divergence only. The edge cells of the domain are NaN, as in
+    :func:`~xrops.budgets.heat_budget_residual`.
     """
-    if w_var is not None and depth is not None and depth in ds[w_var].dims:
-        return grad.divergence(
-            ds[[u_var, v_var, w_var]],
-            (u_var, v_var, w_var),
-            dims=(lon, lat, depth),
-            geometry=("spherical", "spherical", "rectilinear"),
-            lon=lon,
-            lat=lat,
-        ).rename("volume_budget_residual")
-    return grad.divergence(
-        ds[[u_var, v_var]],
-        (u_var, v_var),
-        dims=(lon, lat),
-        geometry="spherical",
-        lon=lon,
+    u = ds[u_var]
+    return _flux_divergence(
+        xr.ones_like(u),
+        u=u,
+        v=ds[v_var],
+        w=ds[w_var] if w_var is not None else None,
         lat=lat,
+        lon=lon,
+        depth=depth,
     ).rename("volume_budget_residual")
 
 

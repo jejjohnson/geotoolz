@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import xarray as xr
 
-from xrops.budgets._src._common import _tracer_budget_residual
+from xrops.budgets._src._common import _cell_residual
 
 
 def salt_budget_residual(
@@ -20,18 +20,22 @@ def salt_budget_residual(
     lon: str = "lon",
     depth: str | None = "depth",
 ) -> xr.DataArray:
-    """Per-cell salt-budget residual ``∂S/∂t + ∇·(u S) - F_surface``."""
-    return _tracer_budget_residual(
+    """Per-cell salt-budget residual ``∂S/∂t + ∇·(u S) - F_surface``.
+
+    As :func:`~xrops.budgets.heat_budget_residual`, NaN on the edge cells too.
+    """
+    return _cell_residual(
         ds,
-        tracer_var=salt_var,
+        ds[salt_var],
         u_var=u_var,
         v_var=v_var,
         w_var=w_var,
-        surface_flux_var=surface_flux_var,
+        sources=() if surface_flux_var is None else (surface_flux_var,),
         time_dim=time_dim,
         lat=lat,
         lon=lon,
         depth=depth,
+        name=f"{salt_var}_budget_residual",
     )
 
 

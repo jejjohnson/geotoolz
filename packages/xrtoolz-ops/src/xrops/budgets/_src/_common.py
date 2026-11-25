@@ -1,19 +1,21 @@
-"""Shared helpers for V4.3 budget residuals."""
+"""Shared helpers of the budget residuals."""
 
 from __future__ import annotations
 
 import numpy as np
 import xarray as xr
+from diagnostix import budgets, columns
 
-from xrops import grad
+from xrops._src.collocated import on_grid
+from xrops._src.columns import levels_of, on_columns
+from xrops.budgets._src.residual import budget_residual
 
 
 def _time_derivative(da: xr.DataArray, time_dim: str) -> xr.DataArray:
-    """``∂da/∂t`` in per-second units.
+    """``∂da/∂t`` in per-second units, second-order on uneven times.
 
-    For datetime-typed coordinates uses
-    :meth:`xr.DataArray.differentiate` with ``datetime_unit="s"``;
-    otherwise treats the coordinate as already in seconds.
+    A datetime coordinate is converted to seconds; any other is taken to be in
+    seconds already.
     """
     if time_dim not in da.dims:
         return xr.zeros_like(da)
@@ -24,7 +26,7 @@ def _time_derivative(da: xr.DataArray, time_dim: str) -> xr.DataArray:
 
 
 def _flux_divergence(
-    tracer: xr.DataArray,
+    q: xr.DataArray,
     *,
     u: xr.DataArray,
     v: xr.DataArray,
@@ -33,60 +35,61 @@ def _flux_divergence(
     lon: str,
     depth: str | None,
 ) -> xr.DataArray:
-    """``∇·(u φ)`` with spherical curvature + rectilinear vertical.
+    """``∇·(u q)``: through the four faces of each cell, and along the vertical.
 
-    Uses :func:`xrops.grad.divergence` so the ``-(F_y tan φ)/R`` curvature
-    correction is included; otherwise spatially uniform meridional
-    fluxes would generate a spurious residual on lon/lat grids. A
-    vertical flux joins the same call as a third ``rectilinear`` axis.
+    The horizontal part is ``diagnostix.budgets.flux_divergence``, NaN on the
+    edge cells but for a whole circle of longitudes; the vertical part is the
+    derivative of ``w q`` along ``depth``, where there is a ``w``.
     """
-    flux_u = (u * tracer).rename("flux_u")
-    flux_v = (v * tracer).rename("flux_v")
-    if w is not None and depth is not None and depth in tracer.dims:
-        flux_w = (w * tracer).rename("flux_w")
-        return grad.divergence(
-            xr.Dataset({"flux_u": flux_u, "flux_v": flux_v, "flux_w": flux_w}),
-            ("flux_u", "flux_v", "flux_w"),
-            dims=(lon, lat, depth),
-            geometry=("spherical", "spherical", "rectilinear"),
-            lon=lon,
-            lat=lat,
-        )
-    return grad.divergence(
-        xr.Dataset({"flux_u": flux_u, "flux_v": flux_v}),
-        ("flux_u", "flux_v"),
+    out = on_grid(
+        budgets.flux_divergence,
+        q,
+        u,
+        v,
         dims=(lon, lat),
         geometry="spherical",
-        lon=lon,
-        lat=lat,
+        wrap=True,
     )
+    if w is None or depth is None or depth not in w.dims:
+        return out
+    flux = w * q
+    along = on_columns(
+        columns.vertical_derivative,
+        flux,
+        levels_of(flux, depth),
+        dim=depth,
+        reduces=False,
+    )
+    return out + along
 
 
-def _tracer_budget_residual(
+def _cell_residual(
     ds: xr.Dataset,
+    q: xr.DataArray,
     *,
-    tracer_var: str,
     u_var: str,
     v_var: str,
     w_var: str | None,
-    surface_flux_var: str | None,
+    sources: tuple[str, ...],
     time_dim: str,
     lat: str,
     lon: str,
     depth: str | None,
+    name: str,
 ) -> xr.DataArray:
-    """Return ``∂φ/∂t + ∇·(u φ) - F_surface`` as a per-cell residual.
-
-    A closed budget has ≈ 0; deviations measure the imbalance the
-    model leaves un-resolved.
-    """
-    phi = ds[tracer_var]
-    u = ds[u_var]
-    v = ds[v_var]
-    w = ds[w_var] if w_var is not None else None
-    tendency = _time_derivative(phi, time_dim)
-    flux_div = _flux_divergence(phi, u=u, v=v, w=w, lat=lat, lon=lon, depth=depth)
-    res = tendency + flux_div
-    if surface_flux_var is not None:
-        res = res - ds[surface_flux_var]
-    return res.rename(f"{tracer_var}_budget_residual")
+    """``∂q/∂t + ∇·(u q) − Σ sources`` of each cell, 0 in a closed budget."""
+    res = budget_residual(
+        _time_derivative(q, time_dim),
+        _flux_divergence(
+            q,
+            u=ds[u_var],
+            v=ds[v_var],
+            w=ds[w_var] if w_var is not None else None,
+            lat=lat,
+            lon=lon,
+            depth=depth,
+        ),
+    )
+    for source in sources:
+        res = res - ds[source]
+    return res.transpose(*q.dims, ...).rename(name)

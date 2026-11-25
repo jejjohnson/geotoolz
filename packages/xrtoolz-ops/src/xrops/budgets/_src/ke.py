@@ -6,7 +6,7 @@ from collections.abc import Sequence
 
 import xarray as xr
 
-from xrops.budgets._src._common import _flux_divergence, _time_derivative
+from xrops.budgets._src._common import _cell_residual
 
 
 def kinetic_energy_budget_residual(
@@ -28,19 +28,22 @@ def kinetic_energy_budget_residual(
         ∂E/∂t + ∇·(u E) - Σ forcings
 
     Forcings (e.g. wind-stress work) are supplied as additional source
-    fields summed into the source term.
+    fields summed into the source term. The edge cells of the domain are NaN,
+    as in :func:`~xrops.budgets.heat_budget_residual`.
     """
-    u = ds[u_var]
-    v = ds[v_var]
-    e = 0.5 * (u**2 + v**2)
-    tendency = _time_derivative(e, time_dim)
-    w = ds[w_var] if w_var is not None else None
-    flux_div = _flux_divergence(e, u=u, v=v, w=w, lat=lat, lon=lon, depth=depth)
-    res = tendency + flux_div
-    if forcing_vars:
-        for name in forcing_vars:
-            res = res - ds[name]
-    return res.rename("kinetic_energy_budget_residual")
+    return _cell_residual(
+        ds,
+        0.5 * (ds[u_var] ** 2 + ds[v_var] ** 2),
+        u_var=u_var,
+        v_var=v_var,
+        w_var=w_var,
+        sources=tuple(forcing_vars or ()),
+        time_dim=time_dim,
+        lat=lat,
+        lon=lon,
+        depth=depth,
+        name="kinetic_energy_budget_residual",
+    )
 
 
 __all__ = ["kinetic_energy_budget_residual"]
