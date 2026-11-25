@@ -17,25 +17,21 @@ from xrops.atm import (
 # ---------- column_integral ----------------------------------------------
 
 
-@pytest.mark.parametrize("method", ["trapezoid", "sum"])
-def test_uniform_field_on_endpoint_inclusive_grid(method):
-    # Non-uniform endpoint-inclusive grid on [0, 100]: both rules must give
-    # c * (z1 - z0), i.e. no n_z / (n_z - 1) over-count.
+def test_uniform_field_on_endpoint_inclusive_grid():
+    # Non-uniform endpoint-inclusive grid on [0, 100]: c * (z1 - z0), with no
+    # n_z / (n_z - 1) over-count.
     z = np.array([0.0, 10.0, 30.0, 60.0, 100.0])
     field = xr.DataArray(np.full((3, z.size), 2.5), dims=("t", "z"), coords={"z": z})
-    out = column_integral(field, method=method)
+    out = column_integral(field)
     assert out.dims == ("t",)
     np.testing.assert_allclose(out, 2.5 * 100.0, rtol=1e-12)
 
 
-@pytest.mark.parametrize("method", ["trapezoid", "sum"])
-def test_linear_field_matches_analytic_integral(method):
+def test_linear_field_matches_analytic_integral():
     z = np.linspace(0.0, 100.0, 11)
     field = xr.DataArray(3.0 + 0.5 * z, dims="z", coords={"z": z})
     # ∫ (3 + 0.5 z) dz on [0, 100] = 300 + 0.25 * 100²
-    np.testing.assert_allclose(
-        column_integral(field, method=method), 300.0 + 2500.0, rtol=1e-12
-    )
+    np.testing.assert_allclose(column_integral(field), 300.0 + 2500.0, rtol=1e-12)
 
 
 def test_sum_versus_naive_sum_dz_on_endpoint_grid():
@@ -44,7 +40,7 @@ def test_sum_versus_naive_sum_dz_on_endpoint_grid():
     field = xr.DataArray(np.ones(6), dims="z", coords={"z": z})
     naive = float(field.sum("z") * 20.0)
     assert naive == pytest.approx(120.0)
-    assert float(column_integral(field, method="sum")) == pytest.approx(100.0)
+    assert float(column_integral(field)) == pytest.approx(100.0)
 
 
 def test_column_integral_with_per_column_coordinate_stays_lazy():
@@ -64,21 +60,19 @@ def test_column_integral_with_per_column_coordinate_stays_lazy():
     np.testing.assert_allclose(out2.compute(), 100.0)
 
 
-@pytest.mark.parametrize("method", ["trapezoid", "sum"])
-def test_column_integral_nan_level_makes_column_nan(method):
+def test_column_integral_nan_level_makes_column_nan():
     # A NaN at any level must poison that column (no silent NaN skipping),
     # while untouched columns integrate as before.
     z = np.linspace(0.0, 100.0, 6)
     values = np.ones((2, z.size))
     values[0, 3] = np.nan
     field = xr.DataArray(values, dims=("x", "z"), coords={"z": z})
-    out = column_integral(field, method=method)
+    out = column_integral(field)
     assert np.isnan(float(out[0]))
     assert float(out[1]) == pytest.approx(100.0)
 
 
 def test_column_integral_errors():
-    z = np.array([0.0, 1.0])
     field = xr.DataArray(np.ones(2), dims="z")
     with pytest.raises(ValueError, match="no coordinate"):
         column_integral(field)
@@ -86,8 +80,6 @@ def test_column_integral_errors():
         column_integral(field, dim="q")
     with pytest.raises(ValueError, match="at least two"):
         column_integral(xr.DataArray([1.0], dims="z", coords={"z": [0.0]}))
-    with pytest.raises(ValueError, match="method"):
-        column_integral(field.assign_coords(z=z), method="simpson")  # type: ignore[arg-type]
 
 
 # ---------- hypsometric_height -------------------------------------------

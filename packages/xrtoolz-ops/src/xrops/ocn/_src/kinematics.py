@@ -40,12 +40,13 @@ from typing import cast
 import gridax
 import numpy as np
 import xarray as xr
-from diagnostix import kinematics
+from diagnostix import columns, kinematics
 from geophysix import rotation
 from geophysix.seawater import LINEAR_EOS
 
 from xrops import grad
 from xrops._src.collocated import Geometry, on_grid
+from xrops._src.columns import levels_of, on_columns
 
 
 type Coriolis = (
@@ -827,6 +828,12 @@ def eddy_kinetic_energy(
     return eke.rename(None).to_dataset(name="eke")
 
 
+def _height(da: xr.DataArray, depth: str, positive: str) -> xr.DataArray:
+    """The height of each level, positive upward."""
+    levels = levels_of(da, depth)
+    return -levels if positive == "down" else levels
+
+
 def brunt_vaisala_frequency(
     ds: xr.Dataset,
     density: str = "rho",
@@ -842,8 +849,9 @@ def brunt_vaisala_frequency(
     independent of how the input vertical coordinate is oriented;
     set ``positive`` to match the dataset.
 
-    Vertical FD uses the ``rectilinear`` geometry so non-uniform
-    pressure / depth grids are supported.
+    The derivative is exact for a quadratic at an inner level, however
+    uneven the levels, and one-sided at the two ends
+    (``diagnostix.columns.buoyancy_frequency_squared``).
 
     Args:
         ds: Dataset with a ``density`` variable on a vertical
@@ -862,9 +870,15 @@ def brunt_vaisala_frequency(
     if positive not in ("down", "up"):
         raise ValueError(f"positive={positive!r} must be 'down' or 'up'.")
     g_value = grad.GRAVITY if g is None else g
-    drho_dz = grad.partial(ds[density], depth, geometry="rectilinear")
-    sign = 1.0 if positive == "down" else -1.0
-    n_sq = sign * (g_value / rho0) * drho_dz
+    n_sq = on_columns(
+        lambda rho, z: columns.buoyancy_frequency_squared(
+            rho, z, reference_density=rho0, gravity=g_value
+        ),
+        ds[density],
+        _height(ds[density], depth, positive),
+        dim=depth,
+        reduces=False,
+    )
     n_sq.attrs.update(
         long_name="Squared Brunt-Väisälä Frequency",
         standard_name="square_of_brunt_vaisala_frequency_in_sea_water",
@@ -900,9 +914,13 @@ def lapse_rate(
     """
     if positive not in ("down", "up"):
         raise ValueError(f"positive={positive!r} must be 'down' or 'up'.")
-    dT_dz = grad.partial(ds[temperature], depth, geometry="rectilinear")
-    sign = 1.0 if positive == "down" else -1.0
-    gamma = sign * dT_dz
+    gamma = on_columns(
+        columns.lapse_rate,
+        ds[temperature],
+        _height(ds[temperature], depth, positive),
+        dim=depth,
+        reduces=False,
+    )
     gamma.attrs.update(
         long_name="Lapse Rate",
         standard_name="air_temperature_lapse_rate",
@@ -921,14 +939,15 @@ def mixed_layer_depth(
 
     Implements the criterion of [deBoyerMontegut2004]_::
 
-        MLD = first depth z below z_ref where ρ(z) − ρ(z_ref) > Δρ
+        MLD = first depth z below z_ref where ρ(z) − ρ(z_ref) = Δρ
 
     with ``z_ref = 10 m`` and ``Δρ = 0.03 kg/m³`` as the standard
-    defaults. The reference density is taken as the value of ``density``
-    at the model level closest to ``reference_depth``.
+    defaults, and ``ρ`` linear between the levels, at ``z_ref`` too
+    (``diagnostix.columns.mixed_layer_depth``).
 
-    For columns where the criterion is never met (fully mixed water
-    column), the returned value is the deepest depth in the profile.
+    A column where the criterion is never met (mixed to its bottom) gives
+    the deepest depth with data, and one without data gives NaN. A level
+    without data is left out of its column.
 
     Args:
         ds: Dataset with a ``density`` variable on a vertical coordinate
@@ -948,20 +967,23 @@ def mixed_layer_depth(
         raise ValueError(
             f"Density {density!r} is not defined on the {depth!r} dimension."
         )
-    z = rho[depth]
-    rho_ref = rho.sel({depth: reference_depth}, method="nearest")
-    excess = rho - rho_ref - threshold
-    # First index along ``depth`` (and below ``reference_depth``) where
-    # ``excess > 0``. ``argmax`` over a boolean field returns the first
-    # ``True`` index; if no level satisfies the criterion we fall back
-    # to the deepest level.
-    below_ref = (z >= reference_depth).astype(bool)
-    crossing = (excess > 0.0) & below_ref
-    found_any = crossing.any(dim=depth)
-    first_idx = crossing.argmax(dim=depth)
-    last_idx = xr.full_like(first_idx, fill_value=z.size - 1)
-    pick_idx = xr.where(found_any, first_idx, last_idx)
-    mld = z.isel({depth: pick_idx})
+    levels = levels_of(rho, depth)
+    if levels[0] > levels[-1]:
+        # the kernel reads a column downwards
+        rho, levels = (da.isel({depth: slice(None, None, -1)}) for da in (rho, levels))
+    mld = on_columns(
+        lambda rho_, z: columns.mixed_layer_depth(
+            rho_,
+            z,
+            reference_depth=reference_depth,
+            threshold=threshold,
+            valid=~np.isnan(rho_),
+        ),
+        rho,
+        levels,
+        dim=depth,
+        reduces=True,
+    )
     mld.attrs.update(
         long_name="Mixed Layer Depth",
         standard_name="ocean_mixed_layer_thickness_defined_by_sigma_t",

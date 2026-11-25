@@ -142,18 +142,15 @@ class WindComponents(Operator):
 
 
 class ColumnIntegral(Operator):
-    """Integrate a variable along its vertical coordinate.
+    """Integrate a variable along its vertical coordinate, by the trapezoid rule.
 
-    ``"trapezoid"`` applies the trapezoid rule on the coordinate values;
-    ``"sum"`` is ``Σ f_k Δz_k`` with cell widths from the coordinate. See
-    :func:`xrops.atm.column_integral`.
+    See :func:`xrops.atm.column_integral`.
 
     Args:
         variable: Name of the variable to integrate.
         dim: Vertical dimension.
         coord: Name of the coordinate locating the levels, or ``None`` for
             the index coordinate on ``dim``.
-        method: ``"trapezoid"`` or ``"sum"``.
         name: Name of the output variable; defaults to
             ``f"{variable}_column"``.
 
@@ -167,20 +164,18 @@ class ColumnIntegral(Operator):
         *,
         dim: str = "z",
         coord: str | None = None,
-        method: Literal["trapezoid", "sum"] = "trapezoid",
         name: str | None = None,
     ):
         self.variable = variable
         self.dim = dim
         self.coord = coord
-        self.method = method
         self.name = name
 
     def _apply(self, ds: xr.Dataset) -> xr.Dataset:
         name = self.name if self.name is not None else f"{self.variable}_column"
         out = ds.copy()
         out[name] = _vertical.column_integral(
-            ds[self.variable], dim=self.dim, coord=self.coord, method=self.method
+            ds[self.variable], dim=self.dim, coord=self.coord
         )
         return out
 
@@ -189,7 +184,6 @@ class ColumnIntegral(Operator):
             "variable": self.variable,
             "dim": self.dim,
             "coord": self.coord,
-            "method": self.method,
             "name": self.name,
         }
 

@@ -404,11 +404,9 @@ def test_brunt_vaisala_frequency_unit_attr(ds_density_profile):
 
 
 def test_mixed_layer_depth_returns_threshold_crossing(ds_density_profile):
-    """ρ jumps by 0.03 between 50 and 75 m ⇒ MLD ≈ 75 m."""
+    """ρ rises by 0.2 between 50 and 75 m, so by 0.03 at 53.75 m."""
     out = mixed_layer_depth(ds_density_profile)
-    # Threshold 0.03 — value at 75m is 1024.7 vs ref(10m)=1024.5,
-    # difference 0.2 > 0.03 ⇒ first crossing is at 75 m.
-    assert float(out["mld"].values) == pytest.approx(75.0)
+    assert float(out["mld"].values) == pytest.approx(53.75)
 
 
 def test_mixed_layer_depth_fully_mixed_returns_deepest():
@@ -435,7 +433,7 @@ def test_mixed_layer_depth_2d_horizontal_shape():
     out = mixed_layer_depth(ds)
     assert out["mld"].dims == ("x", "y")
     assert out["mld"].shape == (nx, ny)
-    np.testing.assert_allclose(out["mld"].values, 75.0)
+    np.testing.assert_allclose(out["mld"].values, 53.75)
 
 
 def test_lapse_rate_isothermal_column_is_zero():
