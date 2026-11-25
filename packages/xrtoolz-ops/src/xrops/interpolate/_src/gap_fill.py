@@ -24,6 +24,7 @@ import xarray as xr
 from jaxtyping import Float
 from scipy.interpolate import RBFInterpolator, griddata
 
+from xrops._src.calendar import day_of_year
 from xrops.interpolate._src._functax import (
     POLYHARMONIC_ORDERS,
     fill_gaps_slice,
@@ -135,7 +136,9 @@ def fillnan_climatology(
     Args:
         da: Input DataArray with a datetime-like time dimension.
         time: Name of the time dimension.
-        group: Calendar grouping used to compute the climatology.
+        group: Calendar grouping used to compute the climatology. A
+            ``"dayofyear"`` is a date on a leap-year calendar, 29 February 60
+            and 1 March 61 in every year.
         residual: ``"zero"`` fills missing values with climatology only;
             ``"linear"`` linearly interpolates the anomaly and adds it back.
         min_count: Minimum finite observations required for each climatology
@@ -156,7 +159,10 @@ def fillnan_climatology(
         raise ValueError(f"min_count must be >= 1, got {min_count}.")
 
     try:
-        grouper = getattr(da[time].dt, group)
+        times = da[time]
+        grouper = (
+            day_of_year(times) if group == "dayofyear" else getattr(times.dt, group)
+        )
     except AttributeError as exc:
         raise ValueError(
             f"{time!r} coordinate must be datetime-like for climatology grouping."
