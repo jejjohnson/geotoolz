@@ -150,7 +150,7 @@ ensemble draw) are kept for dim names, never function names.
   constant of the traced function, and `__array__` raises
   `GeoArrayTraceError`.
 - JAX is optional. Import it through `_src/backend.py` (`import_jax`,
-  `is_jax_array`, `is_tracer`); a NumPy-only install never loads it.
+  `is_jax_array`) and `pipekit_ops.is_traced`; a NumPy-only install never loads it.
   Importing geoarray never imports JAX, even when it is installed (gate
   G4, #528): the pytrees are registered by `pipekit_ops.on_import("jax", …)`
   the moment anything imports JAX. Never add an import-time `import jax`.

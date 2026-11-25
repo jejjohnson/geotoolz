@@ -241,7 +241,7 @@ def test_missing_extra_error_names_the_extra(
 
     def fake_import_module(name: str, package: str | None = None):
         if name.split(".")[0] in {"matplotlib", "joblib"}:
-            raise ImportError(f"simulated missing {name}")
+            raise ModuleNotFoundError(f"simulated missing {name}", name=name)
         return real_import_module(name, package)
 
     monkeypatch.setattr(importlib, "import_module", fake_import_module)

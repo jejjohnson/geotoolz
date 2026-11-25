@@ -21,8 +21,8 @@ from collections.abc import Iterator, Mapping
 from typing import Any
 
 import numpy as np
+from pipekit_ops import is_traced
 
-from geoarray._src.backend import is_tracer
 from geoarray._src.errors import GeoArrayTraceError
 
 
@@ -204,7 +204,7 @@ def select_bands(attrs: FrozenAttrs, index: Any, count: int) -> FrozenAttrs:
         >>> select_bands(attrs, [2, 0], 3)
         FrozenAttrs({'band_names': ('B11', 'B04'), 'sensor': 'S2A'})
     """
-    if is_tracer(index):
+    if is_traced(index):
         raise GeoArrayTraceError(
             "a band index must be concrete: the per-band attrs are static, so "
             "the selection must be known when tracing; index g.data instead, "

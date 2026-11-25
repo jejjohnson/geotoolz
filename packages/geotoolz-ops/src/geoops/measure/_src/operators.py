@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from geoarray import GeoArray
 
 from geoops._src.coupling import Coupling
-from geoops._src.optional import import_optional, optional_name
+from geoops._src.optional import optional_module, optional_name
 
 
 if TYPE_CHECKING:
@@ -154,7 +154,7 @@ class RegionProps(Operator):
     def _apply(
         self, gt: GeoArray, intensity_image: GeoArray | np.ndarray | None = None
     ) -> gpd.GeoDataFrame:
-        gpd = import_optional(
+        gpd = optional_module(
             "geopandas", "vector", feature="geoops.measure.RegionProps"
         )
         require_geoarray(gt, "RegionProps")
@@ -255,7 +255,7 @@ class FindContours(Operator):
             "morph",
             feature="geoops.measure.FindContours",
         )
-        gpd = import_optional(
+        gpd = optional_module(
             "geopandas", "vector", feature="geoops.measure.FindContours"
         )
         require_geoarray(gt, "FindContours")

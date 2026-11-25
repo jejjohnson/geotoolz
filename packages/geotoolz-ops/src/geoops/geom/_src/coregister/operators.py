@@ -26,7 +26,7 @@ from pipekit_ops import Operator
 
 from geoops._src.coupling import Coupling
 from geoops._src.geo import affine_of, require_geoarray
-from geoops._src.optional import import_optional, optional_name
+from geoops._src.optional import optional_module, optional_name
 from geoops._src.shape import require_ndim
 from geoops._src.valid import invalid_values
 from geoops._src.wrap import wrap_like
@@ -929,7 +929,7 @@ class VectorToRasterAgg(Operator):
         require_geoarray(like, "VectorToRasterAgg", arg="like")
         _require_axis_aligned(like, "VectorToRasterAgg")
         feature = "geoops.geom.coregister.VectorToRasterAgg"
-        gpd = import_optional("geopandas", "vector", feature=feature)
+        gpd = optional_module("geopandas", "vector", feature=feature)
         rio_rasterize = optional_name(
             "rasterio.features", "rasterize", "raster", feature=feature
         )

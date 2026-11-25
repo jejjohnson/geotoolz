@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from geoops._src.optional import import_optional
+from geoops._src.optional import optional_module
 
 
 if TYPE_CHECKING:
@@ -58,12 +58,14 @@ def functax_module(name: str, *, feature: str) -> ModuleType:
         ImportError: functax (or its JAX / SciPy extras) is missing; the
             message names ``geotoolz-ops[interp]``.
     """
-    return import_optional(f"functax.{name}", _EXTRA, feature=feature)
+    # without JAX, functax raises an error of its own, which names functax[jax]
+    optional_module("jax", _EXTRA, feature=feature)
+    return optional_module(f"functax.{name}", _EXTRA, feature=feature)
 
 
 def x64(feature: str) -> AbstractContextManager[Any]:
     """``jax.enable_x64(True)``: float64 stays float64 inside functax."""
-    jax = import_optional("jax", _EXTRA, feature=feature)
+    jax = optional_module("jax", _EXTRA, feature=feature)
     enable = getattr(jax, "enable_x64", None)
     if enable is not None:
         return enable(True)
@@ -136,7 +138,7 @@ def inverse_distance(
 @functools.cache
 def _compiled_fill_gaps() -> Any:
     """``jax.jit(functax.project.fill_gaps)``, built once per process."""
-    jax = import_optional("jax", _EXTRA, feature="fill_gaps")
+    jax = optional_module("jax", _EXTRA, feature="fill_gaps")
     project = functax_module("project", feature="fill_gaps")
     return jax.jit(project.fill_gaps, static_argnames=("method",))
 

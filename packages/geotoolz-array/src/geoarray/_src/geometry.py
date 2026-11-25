@@ -16,14 +16,13 @@ from typing import Any
 
 import numpy as np
 from pipekit_array.dims import join_backends
-from pipekit_ops import guard_level, report_move
+from pipekit_ops import guard_level, is_traced, report_move
 
 from geoarray._src.array import INHERIT, GeoArray, _normalize_fill, infer_dims
 from geoarray._src.attrs import concat_bands
 from geoarray._src.backend import (
     backend_of,
     import_jax,
-    is_tracer,
     namespace,
     require_x64,
 )
@@ -81,7 +80,7 @@ def _require_same_grid(carriers: list[GeoArray], what: str) -> list[GeoArray]:
                 f"{what}: carrier {i} has spatial shape {g.shape[-2:]} and batch "
                 f"{g.batch_shape}, not {first.shape[-2:]} and {first.batch_shape}"
             )
-        if is_tracer(g.transform) or is_tracer(first.transform):
+        if is_traced(g.transform) or is_traced(first.transform):
             checked.append(_guard_same_transform(g, first, i, what))
             continue
         if not np.array_equal(np.asarray(g.transform), np.asarray(first.transform)):
@@ -521,7 +520,7 @@ def crop(g: GeoArray, offset: Any, size: tuple[int, int]) -> GeoArray:
             f"crop size {(h, w)} must fit in the spatial shape {(height, width)}"
         )
     lead = tuple(g.data.shape[:-2])
-    traced = is_tracer(offset) or any(is_tracer(v) for v in offset)
+    traced = is_traced(offset) or any(is_traced(v) for v in offset)
     if g.backend == "numpy" and not traced:
         row = min(max(int(offset[0]), 0), height - h)
         col = min(max(int(offset[1]), 0), width - w)
@@ -726,7 +725,7 @@ def write_window(g: GeoArray, values: Any, window: PixelWindow) -> GeoArray:
             f"{g.dtype} data without changing their kind; cast them first"
         )
     if g.backend == "numpy" and backend_of(part) == "jax":
-        if not is_tracer(part):
+        if not is_traced(part):
             report_move("write_window", "NumPy data joined jax")
         g = g.to_jax()
     if g.backend == "numpy":
@@ -826,13 +825,13 @@ def require_equal_leaves(a: Any, b: Any, message: str) -> None:
         raise GridMismatchError(
             f"{message}: shapes {tuple(a.shape)} and {tuple(b.shape)}"
         )
-    if not (is_tracer(a) or is_tracer(b)):
+    if not (is_traced(a) or is_traced(b)):
         floating = np.asarray(a).dtype.kind in "fc"
         if not np.array_equal(np.asarray(a), np.asarray(b), equal_nan=floating):
             raise GridMismatchError(message)
         return
     jax = import_jax()
-    xp = namespace(a if is_tracer(a) else b)
+    xp = namespace(a if is_traced(a) else b)
     differs = a != b
     if xp.asarray(a).dtype.kind in "fc":
         differs = differs & ~(xp.isnan(a) & xp.isnan(b))

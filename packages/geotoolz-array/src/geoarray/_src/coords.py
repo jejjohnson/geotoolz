@@ -38,8 +38,9 @@ from typing import Any, ClassVar, Protocol, cast, runtime_checkable
 
 import numpy as np
 import pyproj
+from pipekit_ops import is_traced
 
-from geoarray._src.backend import is_jax_array, is_tracer, namespace
+from geoarray._src.backend import is_jax_array, namespace
 from geoarray._src.grid import apply_transform, as_crs, shift_scale_transform
 
 
@@ -388,7 +389,7 @@ class TimeAxis:
 
     def _host_ns(self) -> np.ndarray | None:
         """The stamps as host ``int64`` ns, or ``None`` under a trace."""
-        if is_tracer(self.stamps):
+        if is_traced(self.stamps):
             return None
         return np.asarray(self.as_leaf(), dtype=np.int64)
 

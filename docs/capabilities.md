@@ -77,7 +77,6 @@ current).
 | `dim_axis` | function | The (negative) position of ``dim`` in ``x``. |
 | `fit_once` | function | Call ``op.fit(x)`` unless ``is_fitted()``; at most once across threads. |
 | `grid_matches` | function | Return whether two rasters share a pixel grid. |
-| `import_optional` | function | Import ``module``, or raise an ``ImportError`` naming the extra. |
 | `invalid_values` | function | Elementwise invalid mask: non-finite, or equal to the fill value. |
 | `jsonable` | function | Recursively coerce a config value into JSON/YAML-safe builtins. |
 | `keep_band_axis` | function | Keep the time axis of a band-collapsing result on a 4-D input. |
@@ -86,6 +85,7 @@ current).
 | `mapping_to_pairs` | function | Emit a mapping config value as ``[[key, value], ...]``. |
 | `mask_invalid_to_nan` | function | Float copy of ``x`` with every invalid pixel set to ``NaN`` in all bands. |
 | `nested_config` | function | Re-exported from `pipekit_ops`. |
+| `optional_module` | function | Import ``module``, or raise an ``ImportError`` naming the extra. |
 | `optional_name` | function | ``from module import name`` lazily, with the extra's install hint. |
 | `optional_root` | function | ``import a.b`` lazily: import ``module`` and return its top package ``a``. |
 | `over_frames` | function | Decorate an operator's ``_apply`` to run per frame on a time series. |
@@ -1665,7 +1665,7 @@ helper is added here, not inline in one caller.
 | `geoops._src.geotensor` | Refusing a georeader ``GeoTensor``, without importing georeader or geoarray. | `is_geotensor`, `reject_geotensor` |
 | `geoops._src.kernels` | Kernel operators: one element-wise L1 kernel, run on every carrier. | `named`, `select_band`, `nodata_where`, `band_kernel`, `carrier_kernel`, `mask_kernel`, `pixel_kernel` |
 | `geoops._src.labels` | Shared connected-component, hole, skeleton and region-property primitives. | `connectivity_structure`, `label_components`, `remove_small_holes`, `skeleton_length`, `regionprops_frame` |
-| `geoops._src.optional` | Lazy import of optional-extra dependencies with an actionable error. | `import_optional`, `optional_root`, `optional_name` |
+| `geoops._src.optional` | Lazy import of optional-extra dependencies with an actionable error. | `optional_module`, `optional_root`, `optional_name` |
 | `geoops._src.samples` | Shared pixel flattening: ``(c, h, w)`` cubes <-> ``(n, c)`` sample matrices. | `SampleLayout`, `cube_to_samples`, `samples_to_cube`, `sample_layout` |
 | `geoops._src.scattered` | functax for geoops: its import, float64 scope, IDW plan and compiled gap fill. | `functax_module`, `x64`, `inverse_distance`, `fill_gaps_plane` |
 | `geoops._src.shape` | Shared shape-normalisation primitives. | `band_axis`, `band_dim`, `dim_axis`, `require_ndim`, `keep_band_axis`, `map_frames`, `over_frames`, `single_band`, `gather_inputs` |

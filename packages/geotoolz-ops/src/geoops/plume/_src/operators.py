@@ -52,10 +52,10 @@ from geoops.carrier import (
     callable_name,
     carried_fill,
     dim_axis,
-    import_optional,
     invalid_values,
     keep_band_axis,
     mask_invalid_to_nan,
+    optional_module,
     optional_name,
     over_frames,
     reject_config_summary,
@@ -422,7 +422,7 @@ class PlumeFootprint(Operator):
     def _apply(
         self, gt: GeoArray, enhancement: GeoArray | np.ndarray | None = None
     ) -> gpd.GeoDataFrame:
-        gpd = import_optional(
+        gpd = optional_module(
             "geopandas", "vector", feature="geoops.plume.PlumeFootprint"
         )
         unary_union = optional_name(
@@ -892,7 +892,7 @@ class CrossSectionalFlux(Operator):
             "vector",
             feature="geoops.plume.CrossSectionalFlux",
         )
-        gpd = import_optional(
+        gpd = optional_module(
             "geopandas", "vector", feature="geoops.plume.CrossSectionalFlux"
         )
         require_ndim(gt, (2, 3), "CrossSectionalFlux")
@@ -1285,7 +1285,7 @@ def _dbscan_clump_count(
     DBSCAN cluster into multiple "clumps" whenever its members are within
     ``eps`` but not 4-adjacent.
     """
-    DBSCAN = import_optional(
+    DBSCAN = optional_module(
         "sklearn.cluster", "learn", feature="DBSCAN plume clump counting"
     ).DBSCAN
 
