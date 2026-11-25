@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import xarray as xr
+from diagnostix import spectra
 from jaxtyping import Complex, Float
 from scipy.fft import fft2, fftfreq, ifft2
 
@@ -60,7 +61,7 @@ def cwt2(
     dim: tuple[str, str] = ("y", "x"),
     *,
     x0: float = 50e3,
-    ntheta: int = 16,
+    ntheta: int = 24,
     k0: float = 1.0,
     a: float = 1.0,
 ) -> xr.DataArray:
@@ -71,7 +72,9 @@ def cwt2(
         s: One-dimensional positive scale coordinate.
         dim: Spatial dimensions as ``(y, x)``.
         x0: Reference length scale in the same units as ``dim`` coords.
-        ntheta: Number of evenly spaced angles in ``[0, 2π)``.
+        ntheta: Number of evenly spaced angles in ``[0, π)``: for a real field
+            the coefficient at ``θ + π`` is the conjugate of that at ``θ``. With
+            fewer than 16 the power depends on the direction of a wave.
         k0: Dimensionless Morlet central wavenumber.
         a: Fourier-domain amplitude multiplier.
 
@@ -85,10 +88,7 @@ def cwt2(
     dy = coord_spacing(da, ydim)
     dx = coord_spacing(da, xdim)
     arr = np.asarray(da.transpose(ydim, xdim).values)
-    nan_mask = np.isnan(arr)
-    if nan_mask.any():
-        fill = float(np.nanmean(arr)) if not np.all(nan_mask) else 0.0
-        arr = np.where(nan_mask, fill, arr)
+    arr = _filled(arr)
 
     ky = fftfreq(arr.shape[0], d=dy)
     kx = fftfreq(arr.shape[1], d=dx)
@@ -96,7 +96,7 @@ def cwt2(
     field_ft = fft2(arr)
 
     scale_values = _scale_values(s)
-    angles = np.linspace(0.0, 2.0 * np.pi, int(ntheta), endpoint=False)
+    angles = np.linspace(0.0, np.pi, int(ntheta), endpoint=False)
     coeffs = np.empty((scale_values.size, angles.size, *arr.shape), dtype=np.complex128)
     for i, scale in enumerate(scale_values):
         for j, angle in enumerate(angles):
@@ -138,20 +138,50 @@ def wvlt_power_spectrum(
     *,
     dim: tuple[str, str] = ("y", "x"),
     x0: float = 50e3,
-    ntheta: int = 16,
-    k0: float = 1.0,
-    isotropic: bool = True,
+    ntheta: int = 24,
 ) -> xr.DataArray:
-    """Return the 2-D Morlet wavelet power spectrum of ``da``."""
+    """The isotropic spectrum of ``da`` about each point, from Morlet wavelets.
+
+    The density of variance over wavenumber, whose integral over every scale is
+    the variance about a point (``diagnostix.spectra.wavelet_power_2d``): its
+    mean over the domain is the isotropic spectrum, smoothed. The squared
+    magnitude of :func:`cwt2` has the direction too.
+
+    Args:
+        da: Two-dimensional field on a Cartesian grid. A missing cell is filled
+            with the mean, and left out of the ``coi_mask``.
+        s: One-dimensional positive scale coordinate, increasing.
+        dim: Spatial dimensions as ``(y, x)``.
+        x0: Reference length scale in the same units as ``dim`` coords: a scale
+            is a wavelength of ``s x0``.
+        ntheta: Number of directions in ``[0, π)``. With 24 the power of a plane
+            wave does not depend on its direction.
+
+    Returns:
+        DataArray with dims ``("scale", y, x)``, a boolean ``coi_mask`` and a
+        ``wavenumber`` coordinate.
+    """
+    ydim, xdim = dim
     s = _as_scale_dataarray(s)
-    coeffs = cwt2(da, s, dim=dim, x0=x0, ntheta=ntheta, k0=k0)
-    power = xr.apply_ufunc(np.abs, coeffs) ** 2
-    power = _normalize_power(power, da)
-    power.name = f"{da.name or 'field'}_wpsd"
-    power.attrs.update({"long_name": "2-D Morlet wavelet power spectrum"})
-    if isotropic:
-        power = power.mean("angle", keep_attrs=True)
-    return power
+    _validate_cwt_input(da, s, dim=dim, ntheta=ntheta)
+    field = da.transpose(ydim, xdim)
+    arr = _filled(np.asarray(field.values))
+    steps = (coord_spacing(da, ydim), coord_spacing(da, xdim))
+    local = spectra.wavelet_power_2d(
+        arr, steps, _scale_values(s) * x0, n_angles=int(ntheta)
+    )
+    scale_dim = s.dims[0]
+    power = xr.DataArray(
+        local.power,
+        dims=(scale_dim, ydim, xdim),
+        coords={scale_dim: s, ydim: da[ydim], xdim: da[xdim]},
+        name=f"{da.name or 'field'}_wpsd",
+        attrs={**da.attrs, "long_name": "2-D Morlet wavelet power spectrum"},
+    )
+    return power.assign_coords(
+        coi_mask=build_coi_mask(da, s, dim=dim, x0=x0),
+        wavenumber=scale_to_wavenumber(s, x0=x0),
+    )
 
 
 def wvlt_cross_spectrum(
@@ -161,7 +191,7 @@ def wvlt_cross_spectrum(
     *,
     dim: tuple[str, str] = ("y", "x"),
     x0: float = 50e3,
-    ntheta: int = 16,
+    ntheta: int = 24,
     k0: float = 1.0,
     isotropic: bool = True,
 ) -> xr.DataArray:
@@ -176,27 +206,13 @@ def wvlt_cross_spectrum(
     return cross
 
 
-def _normalize_power(power: xr.DataArray, source: xr.DataArray) -> xr.DataArray:
-    """Normalize trusted wavelet power to match source-field variance."""
-    scale_dim = power.dims[0]
-    scales = np.asarray(power[scale_dim].values, dtype=float)
-    if scales.size < 2:
-        return power
-    log_scales = np.log(scales)
-    dlog = np.gradient(log_scales)
-    dtheta = 2.0 * np.pi / power.sizes["angle"]
-    weights = xr.DataArray(
-        dlog,
-        dims=(scale_dim,),
-        coords={scale_dim: power[scale_dim]},
-    )
-    integral = (power * weights).sum(dim=[scale_dim])
-    integral = (integral * dtheta).sum("angle")
-    denom = float(integral.where(power["coi_mask"]).mean(skipna=True).real)
-    variance = float(source.var(skipna=True))
-    if denom <= 0 or not np.isfinite(denom) or not np.isfinite(variance):
-        return power
-    return power * (variance / denom)
+def _filled(arr: np.ndarray) -> np.ndarray:
+    """A field with its missing cells at the mean, or 0 if it has none."""
+    missing = np.isnan(arr)
+    if not missing.any():
+        return arr
+    fill = 0.0 if missing.all() else float(np.nanmean(arr))
+    return np.where(missing, fill, arr)
 
 
 def _as_scale_dataarray(scales) -> xr.DataArray:

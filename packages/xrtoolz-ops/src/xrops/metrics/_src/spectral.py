@@ -243,9 +243,7 @@ def wavelet_psd_score(
     *,
     dim: tuple[str, str] = ("y", "x"),
     x0: float = 50e3,
-    ntheta: int = 16,
-    k0: float = 1.0,
-    isotropic: bool = True,
+    ntheta: int = 24,
 ) -> xr.Dataset:
     """Localized wavelet PSD score ``1 - WPSD(err) / WPSD(ref)``.
 
@@ -256,9 +254,7 @@ def wavelet_psd_score(
             scale axis.
         dim: Spatial dimensions as ``(y, x)`` on a locally Cartesian grid.
         x0: Reference length scale in the same units as the spatial coords.
-        ntheta: Number of evenly spaced Morlet angles.
-        k0: Dimensionless central Morlet wavenumber.
-        isotropic: If ``True``, average directional power over angle.
+        ntheta: Number of Morlet directions in ``[0, π)``.
 
     Returns:
         Dataset containing ``score`` with untrusted COI samples masked to NaN.
@@ -270,8 +266,6 @@ def wavelet_psd_score(
         dim=dim,
         x0=x0,
         ntheta=ntheta,
-        k0=k0,
-        isotropic=isotropic,
     )
     ref_psd = wvlt_power_spectrum(
         ref,
@@ -279,8 +273,6 @@ def wavelet_psd_score(
         dim=dim,
         x0=x0,
         ntheta=ntheta,
-        k0=k0,
-        isotropic=isotropic,
     )
     trust = err_psd["coi_mask"] & ref_psd["coi_mask"]
     score = (1.0 - err_psd / ref_psd).where(trust)
@@ -294,8 +286,7 @@ def wavelet_resolved_scale_map(
     *,
     dim: tuple[str, str] = ("y", "x"),
     x0: float = 50e3,
-    ntheta: int = 16,
-    k0: float = 1.0,
+    ntheta: int = 24,
     threshold: float = 0.5,
     wavelength_scale: float = 1e-3,
     wavelength_units: str = "km",
@@ -308,8 +299,7 @@ def wavelet_resolved_scale_map(
         scales: Positive Morlet scales used to compute the local spectra.
         dim: Spatial dimensions as ``(y, x)``.
         x0: Reference length scale in the same units as the spatial coords.
-        ntheta: Number of evenly spaced Morlet angles.
-        k0: Dimensionless central Morlet wavenumber.
+        ntheta: Number of Morlet directions in ``[0, π)``.
         threshold: Score level defining the resolved scale.
         wavelength_scale: Multiplier applied to ``1 / wavenumber`` to
             convert into ``wavelength_units``. Defaults to ``1e-3`` for
@@ -329,14 +319,12 @@ def wavelet_resolved_scale_map(
         dim=dim,
         x0=x0,
         ntheta=ntheta,
-        k0=k0,
-        isotropic=True,
     )["score"]
     scale_dim = scales.dims[0]
     wavelengths = (
         1.0
         / np.asarray(
-            scale_to_wavenumber(scales, x0=x0, k0=k0).values,
+            scale_to_wavenumber(scales, x0=x0).values,
             dtype=float,
         )
         * wavelength_scale
@@ -550,17 +538,13 @@ class WaveletPSDScore(Operator):
         *,
         dim: tuple[str, str] = ("y", "x"),
         x0: float = 50e3,
-        ntheta: int = 16,
-        k0: float = 1.0,
-        isotropic: bool = True,
+        ntheta: int = 24,
     ) -> None:
         self.variable = variable
         self.scales = scales
         self.dim = tuple(dim)
         self.x0 = float(x0)
         self.ntheta = int(ntheta)
-        self.k0 = float(k0)
-        self.isotropic = bool(isotropic)
 
     def _apply(self, ds_pred: xr.Dataset, ds_ref: xr.Dataset) -> xr.Dataset:
         return wavelet_psd_score(
@@ -570,8 +554,6 @@ class WaveletPSDScore(Operator):
             dim=self.dim,
             x0=self.x0,
             ntheta=self.ntheta,
-            k0=self.k0,
-            isotropic=self.isotropic,
         )
 
     def get_config(self) -> dict[str, Any]:
@@ -581,8 +563,6 @@ class WaveletPSDScore(Operator):
             "dim": list(self.dim),
             "x0": self.x0,
             "ntheta": self.ntheta,
-            "k0": self.k0,
-            "isotropic": self.isotropic,
         }
 
 
