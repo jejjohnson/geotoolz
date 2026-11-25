@@ -78,6 +78,7 @@ Design rules:
 | `xarray` / `pandas` | Labeled N-dimensional data interface |
 | `rioxarray` / `pyproj` | CRS assignment, reprojection |
 | `regionmask` | Land/ocean/country masks |
+| `gridax` / `diagnostix` | Collocated grids and their calculus, and the diagnostics built on them (`xrops._src.collocated.on_grid` runs a kernel of theirs on a DataArray) |
 | `xrft` | Fourier transforms on xarray |
 | `xskillscore` | Verification metrics |
 

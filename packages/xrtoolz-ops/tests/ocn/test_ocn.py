@@ -274,17 +274,16 @@ def test_shear_plus_curvature_vorticity_sums_to_relative_vorticity(ds_uv_grid):
     zeta = relative_vorticity(ds_uv_grid)["vort_r"]
     zs = shear_vorticity(ds_uv_grid)["vort_shear"]
     zc = curvature_vorticity(ds_uv_grid)["vort_curv"]
-    # The decomposition omits the spherical curvature correction (it
-    # acts only on the curl operator). Exclude that term from the sum
-    # comparison by reconstructing the plain ``∂v/∂x − ∂u/∂y`` field
-    # — the same pieces shear+curvature reassemble.
-    from xrops.grad import partial as _partial
+    # The sum is the vorticity of the velocity gradient, ∂v/∂x − ∂u/∂y + u tan φ / R;
+    # relative_vorticity is the flux form of the same, equal to truncation.
+    from xrops.grad import curl
 
-    plain_zeta = _partial(ds_uv_grid["v"], "lon", geometry="spherical") - _partial(
-        ds_uv_grid["u"], "lat", geometry="spherical"
-    )
+    plain_zeta = curl(ds_uv_grid, ("u", "v"), dims=("lon", "lat"), geometry="spherical")
     interior = (zs + zc - plain_zeta).values[2:-2, 2:-2]
-    np.testing.assert_allclose(interior, 0.0, atol=1e-12)
+    np.testing.assert_allclose(interior, 0.0, atol=1e-18)
+    np.testing.assert_allclose(
+        (zs + zc).values, zeta.values, atol=0.1 * abs(zeta).max()
+    )
     assert zeta.dims == zs.dims  # shape sanity
 
 
