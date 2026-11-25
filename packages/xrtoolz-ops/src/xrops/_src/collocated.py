@@ -88,6 +88,7 @@ def on_grid(
         input_core_dims=[[ydim, xdim]] * len(fields),
         output_core_dims=[[ydim, xdim]],
         dask="allowed",
+        keep_attrs=False,
         join="inner",
     )
     order = dict.fromkeys(dim for field in fields for dim in field.dims)
@@ -113,6 +114,7 @@ def over_grid(
         *fields,
         input_core_dims=[[ydim, xdim]] * len(fields),
         dask="parallelized",
+        keep_attrs=False,
         output_dtypes=[np.result_type(*(f.dtype for f in fields), np.float32)],
         dask_gufunc_kwargs={"allow_rechunk": True},
         join="inner",

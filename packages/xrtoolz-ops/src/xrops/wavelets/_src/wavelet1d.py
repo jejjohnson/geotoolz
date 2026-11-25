@@ -79,6 +79,7 @@ def cwt1d(
         input_core_dims=[[dim]],
         output_core_dims=[["scale", dim]],
         dask="parallelized",
+        keep_attrs=False,
         output_dtypes=[np.result_type(series.dtype, np.complex64)],
         dask_gufunc_kwargs={"output_sizes": {"scale": scale.size}},
     )
@@ -218,6 +219,7 @@ def wavelet_significance(
         xr.DataArray(variance),
         output_core_dims=[[dim_scale]],
         dask="parallelized",
+        keep_attrs=False,
         output_dtypes=[float],
         dask_gufunc_kwargs={"output_sizes": {dim_scale: scale.size}},
     ).assign_coords({dim_scale: power[dim_scale]})
@@ -284,6 +286,7 @@ def icwt1d(
         wave,
         input_core_dims=[["scale"]],
         dask="parallelized",
+        keep_attrs=False,
         output_dtypes=[wave.real.dtype],
         dask_gufunc_kwargs={"allow_rechunk": True},
     )

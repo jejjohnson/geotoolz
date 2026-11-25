@@ -105,6 +105,7 @@ def eof_project(da: xr.DataArray, eofs: xr.Dataset) -> xr.DataArray:
         input_core_dims=[grid],
         output_core_dims=[["mode"]],
         dask="parallelized",
+        keep_attrs=False,
         output_dtypes=[anomaly.dtype],
         dask_gufunc_kwargs={
             "allow_rechunk": True,
@@ -138,6 +139,7 @@ def eof_reconstruct(
         input_core_dims=[["mode"]],
         output_core_dims=[grid],
         dask="parallelized",
+        keep_attrs=False,
         output_dtypes=[principal_components.dtype],
         dask_gufunc_kwargs={
             "allow_rechunk": True,
@@ -157,7 +159,7 @@ def _grid_dims(da: xr.DataArray, sample_dim: str) -> list[str]:
 
 def _on_grid(weights: xr.DataArray | None, mean: xr.DataArray) -> xr.DataArray:
     """The weights on the grid of the mean, 1 if there are none."""
-    ones = xr.ones_like(mean, dtype=mean.dtype).rename(None)
+    ones = xr.ones_like(mean, dtype=mean.dtype).rename(None).drop_attrs(deep=False)
     if weights is None:
         return ones
     extra = [d for d in weights.dims if d not in mean.dims]

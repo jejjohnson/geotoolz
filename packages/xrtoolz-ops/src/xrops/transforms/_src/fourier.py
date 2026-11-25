@@ -113,6 +113,7 @@ def _transform(
         input_core_dims=[list(core)] * len(fields),
         output_core_dims=[list(out)] * len(dtypes),
         dask="parallelized",
+        keep_attrs=False,
         output_dtypes=list(dtypes),
         dask_gufunc_kwargs={
             "allow_rechunk": True,
@@ -337,6 +338,7 @@ def _even_spectrum(
         psd,
         input_core_dims=[[dim]],
         dask="parallelized",
+        keep_attrs=False,
         output_dtypes=[_real(psd)],
         dask_gufunc_kwargs={"allow_rechunk": True},
     )
@@ -418,6 +420,7 @@ def fit_spectral_slope(
         psd.astype(_real(psd)),
         input_core_dims=[[wavenumber_dim]],
         dask="parallelized",
+        keep_attrs=False,
         output_dtypes=[_real(psd)],
         dask_gufunc_kwargs={"allow_rechunk": True},
     )
@@ -698,6 +701,7 @@ def stft(
         input_core_dims=[[dim]],
         output_core_dims=[["segment", freq_dim]],
         dask="parallelized",
+        keep_attrs=False,
         output_dtypes=[np.complex128],
         dask_gufunc_kwargs={
             "allow_rechunk": True,
