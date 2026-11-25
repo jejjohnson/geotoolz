@@ -1,9 +1,8 @@
-"""`SpatialPatcher.merge` takes batched carriers (#530): parity with the 0.13 path.
+"""`SpatialPatcher.merge` takes batched carriers (#530).
 
-The same scene is split, scored and stitched three ways (patch by patch,
-through the deprecated `BatchedPatch`, and as `PatchBatch` carriers mapped
-with `geoarray.map_over`); all three agree, for Hann and Tukey windows
-(#461). Gate GA-G15: 64 patches run in one trace and stitch the same.
+The same scene is split, scored and stitched two ways (patch by patch, and
+as `PatchBatch` carriers mapped with `geoarray.map_over`); both agree, for
+Hann and Tukey windows (#461). Gate GA-G15: 64 patches run in one trace and stitch the same.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ from geoarray import GeoArray
 
 from geopatcher import RasterField, SpatialPatcher, spatial
 from geopatcher._src.batching import expand_batches
-from geopatcher.run import BatchedPatch, PatchBatch, batch_split, unbatch
+from geopatcher.run import PatchBatch, batch_split
 
 
 UTM = (10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0)
@@ -58,25 +57,16 @@ def _patch_by_patch(patcher: SpatialPatcher, field: RasterField) -> np.ndarray:
 
 
 @pytest.mark.parametrize("window", sorted(WINDOWS))
-def test_batched_carriers_stitch_like_batched_patch(
+def test_batched_carriers_stitch_like_patch_by_patch(
     field: RasterField, window: str
 ) -> None:
     patcher = _patcher(window)
-    with pytest.deprecated_call():
-        legacy = [
-            p
-            for b in BatchedPatch.split(patcher, field, batch_size=16)
-            for p in unbatch(b, _model(b.data))
-        ]
-    old = np.asarray(patcher.merge(legacy, field.domain))
-
     batches = (
         PatchBatch(geoarray.map_over(b.patches, _score, "patch"), b.valid)
         for b in batch_split(patcher, field, batch_size=16)
     )
     new = np.asarray(patcher.merge(batches, field.domain))
 
-    np.testing.assert_allclose(new, old, rtol=1e-6)
     np.testing.assert_allclose(new, _patch_by_patch(patcher, field), rtol=1e-6)
 
 

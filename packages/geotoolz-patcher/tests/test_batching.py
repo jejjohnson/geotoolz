@@ -18,7 +18,7 @@ from _helpers import ArrayField
 from geoarray import GeoArray
 
 from geopatcher import RasterField, SpatialPatcher, spatial
-from geopatcher.run import BatchedPatch, PatchBatch, batch_split, unbatch
+from geopatcher.run import PatchBatch, batch_split, unbatch
 
 
 UTM = (10.0, 0.0, 500_000.0, 0.0, -10.0, 4_600_000.0)
@@ -207,7 +207,7 @@ def test_unbatch_wraps_array_rows_that_keep_the_grid(field: RasterField) -> None
 
 def test_unbatch_needs_the_patcher_and_domain(field: RasterField) -> None:
     batch = next(batch_split(_patcher(), field, batch_size=4))
-    with pytest.raises(TypeError, match="patcher= and domain="):
+    with pytest.raises(TypeError, match="'patcher' and 'domain'"):
         unbatch(batch)
 
 
@@ -253,43 +253,10 @@ def test_batch_split_rejects_mixed_shapes_with_clear_error() -> None:
         list(batch_split(_patcher("shrink"), field, batch_size=9))
 
 
-def test_plain_array_patches_name_the_deprecated_path() -> None:
+def test_plain_array_patches_name_stack_patches() -> None:
     field = ArrayField(np.arange(256, dtype=np.float32).reshape(16, 16))
-    with pytest.raises(TypeError, match=r"BatchedPatch\.split"):
+    with pytest.raises(TypeError, match=r"run\.stack_patches stacks"):
         next(batch_split(_patcher(), field, batch_size=2))
-
-
-def test_batched_patch_split_is_deprecated_and_numpy() -> None:
-    field = ArrayField(np.arange(256, dtype=np.float32).reshape(16, 16))
-    patcher = _patcher()
-
-    with pytest.deprecated_call(match="BatchedPatch.split"):
-        batches = list(BatchedPatch.split(patcher, field, batch_size=3))
-
-    assert all(isinstance(b, BatchedPatch) for b in batches)
-    assert type(batches[-1].data) is np.ndarray
-    np.testing.assert_array_equal(batches[-1].valid, [True, False, False])
-    patches = [p for b in batches for p in unbatch(b)]
-    assert [p.anchor for p in patches] == [p.anchor for p in patcher.split(field)]
-
-
-def test_the_removal_release_is_after_the_installed_one() -> None:
-    """The deprecation shipped in 0.14.0, so removal is a later release."""
-    import re
-
-    from packaging.version import Version
-
-    import geopatcher
-
-    field = ArrayField(np.arange(256, dtype=np.float32).reshape(16, 16))
-    with pytest.raises(TypeError) as raised:
-        next(batch_split(_patcher(), field, batch_size=2))
-    with pytest.warns(DeprecationWarning) as warned:
-        BatchedPatch.split(_patcher(), field, batch_size=2)
-
-    for message in (str(raised.value), str(warned[0].message)):
-        (removed,) = re.findall(r"geotoolz-patcher (\d+\.\d+)", message)
-        assert Version(removed) > Version(geopatcher.__version__), message
 
 
 def test_a_grid_dataarray_field_batches_as_a_geoarray() -> None:
@@ -337,19 +304,6 @@ def test_a_jitted_step_on_a_batch_compiles_once(
         step(PatchBatch(batch.patches.to_jax(), batch.valid))
 
     assert len(traces) == 1
-
-
-def test_batched_patch_is_a_pytree_once_jax_loads() -> None:
-    jax = pytest.importorskip("jax")
-    field = ArrayField(np.arange(256, dtype=np.float32).reshape(16, 16))
-    with pytest.deprecated_call():
-        (batch, *_) = BatchedPatch.split(_patcher(), field, batch_size=3)
-
-    doubled = jax.tree_util.tree_map(lambda x: x * 2, batch)
-
-    assert len(jax.tree_util.tree_leaves(batch)) == 2  # data and valid
-    assert isinstance(doubled, BatchedPatch) and doubled.anchors == batch.anchors
-    np.testing.assert_array_equal(doubled.data, batch.data * 2)
 
 
 def test_a_float_field_without_a_fill_batches_with_nan() -> None:

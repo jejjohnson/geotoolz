@@ -895,18 +895,18 @@ and that is where the options differ.
      `patch` says that.
    - `sample` stays the name of an item of an ML dataset, which may batch
      patches from several scenes (pipekit-train's level, GA-B3).
-6. **Raster fields batch; the others keep `BatchedPatch` for one release.**
+6. **Raster fields batch; the others do not.**
    - `GeoArray` patches (every raster field) and `DataArray` patches that
      read as a grid (`geoarray.from_xarray`) give a `PatchBatch`.
    - Patches of any other carrier (plain arrays, non-grid DataArrays)
-     raise `TypeError` naming the deprecated `BatchedPatch` path, which
-     stays one release behind a `DeprecationWarning` and is removed in
-     geotoolz-patcher 0.16 (the deprecation shipped in 0.14.0).
+     raise `TypeError` naming `stack_patches`. `BatchedPatch` still
+     batched them, deprecated, in 0.14 and 0.15; it is removed in
+     geotoolz-patcher 0.16.
 7. **Same call, new yield type.**
    - `batch_split(patcher, field, *, batch_size, pad_last=True)` keeps
      its signature and yields `PatchBatch`.
-   - `unbatch` accepts a `PatchBatch` (and, for that release, a
-     `BatchedPatch`), placing patches by their transform rows.
+   - `unbatch` accepts a `PatchBatch`, placing patches by their
+     transform rows.
    - The anchors, indices and weights lists are not carried. `stitch`
      (#530) recomputes each patch's offset from its transform row against
      the target grid, and the window weights from the patcher's window

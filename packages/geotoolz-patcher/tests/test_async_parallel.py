@@ -11,7 +11,6 @@ import pytest
 from _helpers import ArrayField
 
 from geopatcher import SpatialPatcher, TemporalPatcher, spatial, temporal
-from geopatcher.run import BatchedPatch, unbatch
 
 
 class AsyncArrayField(ArrayField):
@@ -125,19 +124,6 @@ def test_temporal_asplit_matches_split() -> None:
     sync_patches = list(patcher.split(series))
     async_patches = asyncio.run(collect())
     assert [p.anchor for p in async_patches] == [p.anchor for p in sync_patches]
-
-
-def test_batch_split_pads_last_batch_and_unbatches(
-    field: ArrayField, patcher: SpatialPatcher
-) -> None:
-    # plain-array patches go through the deprecated 0.12 batch (ADR-013)
-    with pytest.deprecated_call():
-        batches = list(BatchedPatch.split(patcher, field, batch_size=3))
-    assert [batch.data.shape[0] for batch in batches] == [3, 3]
-    np.testing.assert_array_equal(batches[-1].valid, [True, False, False])
-
-    patches = [patch for batch in batches for patch in unbatch(batch)]
-    assert [p.anchor for p in patches] == [p.anchor for p in patcher.split(field)]
 
 
 @pytest.mark.parametrize("policy", ["skip", "mask", "retry"])

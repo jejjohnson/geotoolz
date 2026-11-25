@@ -10,9 +10,8 @@ ways to run it faster, in parallel, or on another engine:
 - `to_delayed` / `to_dask_bag` — one Dask task per patch (``[dask]``).
 - `batch_split` / `unbatch` / `PatchBatch` — fixed-size batches of
   raster patches as one `GeoArray` with a ``patch`` dim and a validity
-  mask (ADR-013), NumPy until ``to_jax()``; `BatchedPatch` — the
-  deprecated 0.12 batch; `stack_patches` — stack patch data along a new
-  leading axis.
+  mask (ADR-013), NumPy until ``to_jax()``; `stack_patches` — stack
+  patch data along a new leading axis.
 - `PatchCache` — on-disk cache of read patches keyed by the field's
   identity; `IndexedPatchView` — random access (``len`` / ``[i]``) over a
   patcher's patches, for ML data loaders.
@@ -20,7 +19,7 @@ ways to run it faster, in parallel, or on another engine:
 
 from __future__ import annotations
 
-from geopatcher._src.batching import BatchedPatch, PatchBatch, batch_split, unbatch
+from geopatcher._src.batching import PatchBatch, batch_split, unbatch
 from geopatcher._src.cache import PatchCache, UnstableIdentityError
 from geopatcher._src.dask import to_dask_bag, to_delayed
 from geopatcher._src.indexed import IndexedPatchView
@@ -31,7 +30,6 @@ from geopatcher._src.stacking import stack_patches
 
 __all__ = [
     "Backend",
-    "BatchedPatch",
     "ErrorPolicy",
     "IndexedPatchView",
     "PatchBatch",

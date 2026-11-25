@@ -7,17 +7,11 @@ batch. The batch is NumPy; the caller moves it to JAX once, with
 ``batch.patches.to_jax()``. `unbatch` turns a batch (or a model's output
 for it) back into `Patch` objects that ``patcher.merge`` places, from the
 transform rows.
-
-`BatchedPatch` is the 0.12 batch (stacked payloads next to per-patch
-lists). It stays one release, for patches that are not raster carriers,
-through the deprecated `BatchedPatch.split`.
 """
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator, Sequence
-from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -27,7 +21,7 @@ from geopatcher._src.carrier import raster_grid
 from geopatcher._src.patch import Patch
 
 
-__all__ = ["BatchedPatch", "PatchBatch", "batch_split", "unbatch"]
+__all__ = ["PatchBatch", "batch_split", "unbatch"]
 
 PATCH = "patch"
 """The batch dim of a `PatchBatch`: one place on the ground per item."""
@@ -103,8 +97,7 @@ def batch_split(
             and the NaN its ``boundary="pad"`` edge chips declare agree.
         geoarray.GridMismatchError: The patches of one batch differ in CRS.
         TypeError: A patch is not a raster carrier (a plain array, a
-            ``DataArray`` with no grid): use the deprecated
-            `BatchedPatch.split` for those, until geotoolz-patcher 0.16.
+            ``DataArray`` with no grid): `stack_patches` stacks those.
 
     Example:
         >>> batches = list(batch_split(patcher, field, batch_size=16))
@@ -122,33 +115,31 @@ def batch_split(
 
 
 def unbatch(
-    batch: PatchBatch | BatchedPatch,
+    batch: PatchBatch,
     data: Any | None = None,
     *,
-    patcher: Any | None = None,
-    domain: Any | None = None,
+    patcher: Any,
+    domain: Any,
 ) -> list[Patch]:
     """Turn a batch, or a model's output for it, back into `Patch` objects.
 
     Padding entries (``valid == False``) are dropped, so a padded final
-    batch gives fewer patches than its length. For a `PatchBatch`, each
-    patch is placed from its transform row against ``domain``'s grid: its
-    anchor and indices are what ``patcher.geometry`` gives that pixel
-    offset, and its weights are ``patcher.window``'s, so
+    batch gives fewer patches than its length. Each patch is placed from its
+    transform row against ``domain``'s grid: its anchor and indices are what
+    ``patcher.geometry`` gives that pixel offset, and its weights are
+    ``patcher.window``'s, so
     ``patcher.merge(unbatch(...), domain)`` reassembles the field.
 
     Args:
-        batch: A `PatchBatch` from `batch_split` (or, until 0.16, a
-            deprecated `BatchedPatch`, which carries its own anchors).
+        batch: A `PatchBatch` from `batch_split`.
         data: Optional replacement payload, typically the model output for
             the batch: a `GeoArray` with the ``patch`` dim (from
             `geoarray.map_over`) or an array whose rows line up with the
             batch. Padding rows are ignored.
-        patcher: The patcher that split the field; needed for a
-            `PatchBatch` (its geometry must be
+        patcher: The patcher that split the field (its geometry must be
             `spatial.geometry.Rectangular`).
         domain: The field's domain (``field.domain``, or its bare
-            `geoarray.Grid`); needed for a `PatchBatch`.
+            `geoarray.Grid`).
 
     Returns:
         One `Patch` per valid entry, in batch order, with NumPy data. A row
@@ -157,7 +148,6 @@ def unbatch(
         the stale per-band attrs); any other row stays a bare array.
 
     Raises:
-        TypeError: A `PatchBatch` without ``patcher`` and ``domain``.
         ValueError: The patcher's geometry is not
             `spatial.geometry.Rectangular`, the patches were clipped by
             ``boundary="shrink"``, ``domain`` is not a raster domain, or a
@@ -173,82 +163,6 @@ def unbatch(
         ... ]
         >>> merged = patcher.merge(outs, field.domain)
     """
-    if isinstance(batch, BatchedPatch):
-        return _unbatch_legacy(batch, data)
-    if patcher is None or domain is None:
-        raise TypeError(
-            "unbatch(PatchBatch) places patches from their transform rows: "
-            "pass patcher= and domain= (the field's domain)"
-        )
-    return _unbatch(batch, data, patcher, domain)
-
-
-def _batch_items(patches: Iterator[Patch], size: int) -> Iterator[GeoArray]:
-    """Each patch as the carrier `pipekit_array.batch` stacks, lazily.
-
-    Patches of one batch (``size`` consecutive ones) must share a shape; the
-    error names their anchors, which the stacked carriers no longer know. A
-    float patch with no fill takes NaN: geoarray already reads non-finite
-    pixels as nodata, and the ``boundary="pad"`` edge chips of such a field
-    declare NaN, so one batch keeps one fill.
-    """
-    first: tuple[Any, tuple[int, ...]] | None = None
-    for k, patch in enumerate(patches):
-        shape = tuple(np.shape(patch.data))
-        if k % size == 0:
-            first = (patch.anchor, shape)
-        elif first is not None and shape != first[1]:
-            raise ValueError(
-                "batch_split needs equal-shaped patches to stack, got "
-                f"{first[0]!r}: {first[1]} and {patch.anchor!r}: {shape}. Edge "
-                "chips shrink under boundary='shrink'; use boundary='pad', "
-                "'reflect' or 'drop' for fixed-size chips."
-            )
-        item = _as_geoarray(patch.data)
-        if item.fill_value is None and np.issubdtype(item.dtype, np.floating):
-            item = item.with_data(item.data, fill_value=np.nan)
-        yield item
-
-
-def _check_shapes(patches: list[Patch]) -> None:
-    shapes = [np.shape(p.data) for p in patches]
-    if len(set(shapes)) > 1:
-        detail = ", ".join(
-            f"{p.anchor!r}: {shape}" for p, shape in zip(patches, shapes, strict=True)
-        )
-        raise ValueError(
-            "batch_split needs equal-shaped patches to stack, got "
-            f"{detail}. Edge chips shrink under boundary='shrink'; use "
-            "boundary='pad', 'reflect' or 'drop' for fixed-size chips."
-        )
-
-
-def _as_geoarray(data: Any) -> GeoArray:
-    """A patch as a raster carrier, or a `TypeError` naming the old path."""
-    if isinstance(data, GeoArray) and not data.batch_shape:
-        return data
-    if _is_dataarray(data):
-        try:
-            carrier = GeoArray.from_xarray(data)
-        except (ValueError, GeoArrayError) as exc:
-            raise _not_a_raster(data) from exc
-        if isinstance(carrier, GeoArray):
-            return carrier
-    raise _not_a_raster(data)
-
-
-def _not_a_raster(data: Any) -> TypeError:
-    return TypeError(
-        "batch_split batches raster patches (a GeoArray, or a DataArray on an "
-        f"affine grid), got {type(data).__name__}. For other patches use the "
-        "deprecated geopatcher.run.BatchedPatch.split (removed in "
-        "geotoolz-patcher 0.16)."
-    )
-
-
-def _unbatch(
-    batch: PatchBatch, data: Any | None, patcher: Any, domain: Any
-) -> list[Patch]:
     from geopatcher._src.spatial.geometry import Rectangular
     from geopatcher._src.spatial.patcher import _safe_base_weights
 
@@ -295,6 +209,55 @@ def _unbatch(
             )
         )
     return patches
+
+
+def _batch_items(patches: Iterator[Patch], size: int) -> Iterator[GeoArray]:
+    """Each patch as the carrier `pipekit_array.batch` stacks, lazily.
+
+    Patches of one batch (``size`` consecutive ones) must share a shape; the
+    error names their anchors, which the stacked carriers no longer know. A
+    float patch with no fill takes NaN: geoarray already reads non-finite
+    pixels as nodata, and the ``boundary="pad"`` edge chips of such a field
+    declare NaN, so one batch keeps one fill.
+    """
+    first: tuple[Any, tuple[int, ...]] | None = None
+    for k, patch in enumerate(patches):
+        shape = tuple(np.shape(patch.data))
+        if k % size == 0:
+            first = (patch.anchor, shape)
+        elif first is not None and shape != first[1]:
+            raise ValueError(
+                "batch_split needs equal-shaped patches to stack, got "
+                f"{first[0]!r}: {first[1]} and {patch.anchor!r}: {shape}. Edge "
+                "chips shrink under boundary='shrink'; use boundary='pad', "
+                "'reflect' or 'drop' for fixed-size chips."
+            )
+        item = _as_geoarray(patch.data)
+        if item.fill_value is None and np.issubdtype(item.dtype, np.floating):
+            item = item.with_data(item.data, fill_value=np.nan)
+        yield item
+
+
+def _as_geoarray(data: Any) -> GeoArray:
+    """A patch as a raster carrier, or a `TypeError`."""
+    if isinstance(data, GeoArray) and not data.batch_shape:
+        return data
+    if _is_dataarray(data):
+        try:
+            carrier = GeoArray.from_xarray(data)
+        except (ValueError, GeoArrayError) as exc:
+            raise _not_a_raster(data) from exc
+        if isinstance(carrier, GeoArray):
+            return carrier
+    raise _not_a_raster(data)
+
+
+def _not_a_raster(data: Any) -> TypeError:
+    return TypeError(
+        "batch_split batches raster patches (a GeoArray, or a DataArray on an "
+        f"affine grid), got {type(data).__name__}. "
+        "geopatcher.run.stack_patches stacks patches of any other kind."
+    )
 
 
 def _check_resolution(patches: GeoArray, grid: Any) -> None:
@@ -399,15 +362,9 @@ def _pixel_offset(to_pixel: Any, item: GeoArray) -> tuple[int, int]:
     return int(r), int(c)
 
 
-def _rebuild(template: Any, row: Any) -> Any:
+def _rebuild(template: GeoArray, row: Any) -> Any:
     """Wrap ``row`` in ``template``'s carrier when the spatial shape matches."""
-    if template is None:
-        return row
     values = np.asarray(row)
-    if _is_dataarray(template):
-        if values.shape != template.shape:
-            return row
-        return template.copy(deep=False, data=values)
     if values.shape[-2:] != template.shape[-2:] or not 2 <= values.ndim <= 4:
         return row
     dims = template.dims if values.ndim == template.ndim else DIMS[-values.ndim :]
@@ -420,179 +377,3 @@ def _is_dataarray(data: Any) -> bool:
     except ImportError:  # pragma: no cover - xarray is an optional extra
         return False
     return isinstance(data, xr.DataArray)
-
-
-# --- the 0.12 batch, deprecated (ADR-013) ---------------------------------
-
-
-@dataclass(eq=False)
-class BatchedPatch:
-    """Deprecated: a leading-axis batch of patches with per-patch lists.
-
-    Replaced by `PatchBatch` (ADR-013) and removed in geotoolz-patcher
-    0.16. `BatchedPatch.split` still batches patches that are not raster
-    carriers (plain arrays, ``DataArray`` with no grid); `batch_split`
-    raises for those.
-
-    Attributes:
-        data: ``(batch, *patch_shape)`` NumPy array of the stacked payloads.
-        anchors: Per-patch anchors; ``None`` for padding entries.
-        valid: ``(batch,)`` bool; ``False`` for zero-padding.
-        indices: Per-patch indices (as on `Patch.indices`).
-        weights: Per-patch window weights (as on `Patch.weights`).
-        carriers: Per-patch pixel-free carrier templates, used by `unbatch`
-            to rebuild ``DataArray`` / `GeoArray` chips.
-
-    It is a JAX pytree once JAX is imported (``data`` and ``valid`` are the
-    leaves; the lists are static and compare by identity).
-
-    Example:
-        >>> batches = list(BatchedPatch.split(patcher, field, batch_size=8))
-    """
-
-    data: Any
-    anchors: list[Any]
-    valid: Any
-    indices: list[Any]
-    weights: list[Any]
-    carriers: list[Any] = field(default_factory=list)
-
-    @classmethod
-    def split(
-        cls,
-        patcher: Any,
-        field: Any,
-        *,
-        batch_size: int,
-        pad_last: bool = True,
-    ) -> Iterator[BatchedPatch]:
-        """Deprecated: the 0.12 `batch_split`, NumPy only.
-
-        Yields `BatchedPatch` objects whose short final batch is
-        zero-padded (``pad_last``). Removed in geotoolz-patcher 0.16.
-
-        Raises:
-            ValueError: ``batch_size`` is not positive, or the patches of
-                one batch differ in shape.
-
-        Example:
-            >>> next(BatchedPatch.split(patcher, field, batch_size=4)).data.shape
-            (4, 8, 8)
-        """
-        warnings.warn(
-            "BatchedPatch.split is deprecated and is removed in geotoolz-patcher "
-            "0.16; batch_split yields a PatchBatch (one GeoArray with a 'patch' "
-            "dim) for raster patches",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if batch_size <= 0:
-            raise ValueError(f"batch_size must be positive, got {batch_size}")
-        _register_when_jax_loads()
-        return _legacy_split(patcher, field, batch_size, pad_last)
-
-
-def _legacy_split(
-    patcher: Any, field: Any, batch_size: int, pad_last: bool
-) -> Iterator[BatchedPatch]:
-    group: list[Patch] = []
-    for patch in patcher.split(field):
-        group.append(patch)
-        if len(group) == batch_size:
-            yield _legacy_batch(group, batch_size, pad=False)
-            group = []
-    if group:
-        yield _legacy_batch(group, batch_size, pad=pad_last)
-
-
-def _legacy_batch(patches: list[Patch], batch_size: int, *, pad: bool) -> BatchedPatch:
-    _check_shapes(patches)
-    arrays = [np.asarray(p.data) for p in patches]
-    n_pad = batch_size - len(patches) if pad else 0
-    arrays += [np.zeros_like(arrays[0])] * n_pad
-    return BatchedPatch(
-        data=np.stack(arrays, axis=0),
-        anchors=[p.anchor for p in patches] + [None] * n_pad,
-        valid=np.asarray([True] * len(patches) + [False] * n_pad, dtype=bool),
-        indices=[p.indices for p in patches] + [None] * n_pad,
-        weights=[p.weights for p in patches] + [None] * n_pad,
-        carriers=[_template(p.data) for p in patches] + [None] * n_pad,
-    )
-
-
-def _unbatch_legacy(batch: BatchedPatch, data: Any | None) -> list[Patch]:
-    arrays = batch.data if data is None else data
-    valid = np.asarray(batch.valid, dtype=bool)
-    carriers = batch.carriers or [None] * len(valid)
-    return [
-        Patch(
-            data=_rebuild(carriers[i], arrays[i]),
-            anchor=batch.anchors[i],
-            indices=batch.indices[i],
-            weights=batch.weights[i],
-        )
-        for i in np.flatnonzero(valid)
-    ]
-
-
-def _template(data: Any) -> Any:
-    """A pixel-free copy of ``data``'s carrier metadata (``None`` for arrays)."""
-    if isinstance(data, GeoArray):
-        return GeoArray(
-            np.broadcast_to(np.zeros((), dtype=data.dtype), data.shape),
-            np.asarray(data.transform, dtype=np.float64),
-            data.crs,
-            fill_value=data.fill_value,
-            attrs=data.attrs,
-            dims=data.dims,
-            coords=data.coords,
-        )
-    if _is_dataarray(data):
-        placeholder = np.broadcast_to(np.zeros((), dtype=data.dtype), data.shape)
-        return data.copy(deep=False, data=placeholder)
-    return None
-
-
-def _flatten(batch: BatchedPatch) -> tuple[tuple[Any, Any], _StaticMeta]:
-    meta = _StaticMeta((batch.anchors, batch.indices, batch.weights, batch.carriers))
-    return (batch.data, batch.valid), meta
-
-
-def _unflatten(meta: _StaticMeta, children: tuple[Any, Any]) -> BatchedPatch:
-    anchors, indices, weights, carriers = meta.value
-    data, valid = children
-    return BatchedPatch(data, anchors, valid, indices, weights, carriers)
-
-
-class _StaticMeta:
-    """Pytree aux data compared by identity.
-
-    The per-patch metadata holds numpy weight arrays, whose ``==`` is
-    elementwise — unusable for JAX's treedef comparison. Identity is the
-    only safe equality: a structural "always equal" would let a cached jit
-    trace hand back a stale batch's anchors.
-    """
-
-    __slots__ = ("value",)
-
-    def __init__(self, value: tuple[Any, ...]) -> None:
-        self.value = value
-
-
-_PYTREE_HOOKED = False
-
-
-def _register_when_jax_loads() -> None:
-    """Register `BatchedPatch` with JAX now, or when JAX is imported."""
-    global _PYTREE_HOOKED
-    if _PYTREE_HOOKED:
-        return
-    _PYTREE_HOOKED = True
-    # pipekit core comes with geoarray; importing geopatcher never imports JAX
-    from pipekit_ops import on_import
-
-    on_import("jax", _register_pytree)
-
-
-def _register_pytree(jax: Any) -> None:
-    jax.tree_util.register_pytree_node(BatchedPatch, _flatten, _unflatten)
