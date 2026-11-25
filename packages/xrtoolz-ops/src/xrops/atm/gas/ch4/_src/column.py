@@ -165,7 +165,7 @@ def mixing_ratio_to_column(
     chi = ds[vmr]
     if specific_humidity is not None:
         chi = chi * (1.0 - ds[specific_humidity])
-    integral = column_integral(chi, dim=level, coord=ds[pressure], method="trapezoid")
+    integral = column_integral(chi, dim=level, coord=ds[pressure])
     column = abs(integral) * _MOLECULES_PER_PA
     out = ds.copy()
     out[name] = apply_cf_attrs(column, _CH4_COLUMN, overwrite=True)

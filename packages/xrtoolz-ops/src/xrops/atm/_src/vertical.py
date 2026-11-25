@@ -8,13 +8,14 @@ data are materialised.
 
 from __future__ import annotations
 
-from typing import Literal
-
 import numpy as np
 import xarray as xr
+from diagnostix import columns
 from geophysix.constants import STANDARD
 from geophysix.thermo import virtual_temperature
 from xrproducts.types import Variable, apply_cf_attrs
+
+from xrops._src.columns import on_columns, positional
 
 
 #: ``R_d / g₀`` [m K⁻¹], the hypsometric scale per kelvin.
@@ -28,30 +29,9 @@ _GEOPOTENTIAL_HEIGHT = Variable(
 )
 
 
-def _positional(da: xr.DataArray, dim: str) -> xr.DataArray:
-    """Drop every coordinate on ``dim`` so slices along it align by position."""
-    return da.drop_vars([name for name, c in da.coords.items() if dim in c.dims])
-
-
 def _lo_hi(da: xr.DataArray, dim: str) -> tuple[xr.DataArray, xr.DataArray]:
     """``(da[k], da[k+1])`` pairs along ``dim`` (each of length ``n − 1``)."""
     return da.isel({dim: slice(None, -1)}), da.isel({dim: slice(1, None)})
-
-
-def _cell_widths(z: xr.DataArray, dim: str) -> xr.DataArray:
-    """Δz per level from the coordinate: half-way to each neighbour.
-
-    Interior levels get ``(z[k+1] − z[k−1]) / 2``; the end levels get half
-    of their single adjacent spacing, so the widths sum to ``z[-1] − z[0]``.
-    """
-    z_lo, z_hi = _lo_hi(z, dim)
-    faces = z_hi - z_lo
-    interior = 0.5 * (
-        faces.isel({dim: slice(1, None)}) + faces.isel({dim: slice(None, -1)})
-    )
-    first = 0.5 * faces.isel({dim: slice(0, 1)})
-    last = 0.5 * faces.isel({dim: slice(-1, None)})
-    return xr.concat([first, interior, last], dim=dim)
 
 
 def column_integral(
@@ -59,21 +39,15 @@ def column_integral(
     *,
     dim: str = "z",
     coord: str | xr.DataArray | None = None,
-    method: Literal["trapezoid", "sum"] = "trapezoid",
 ) -> xr.DataArray:
-    """Integrate ``da`` along the vertical coordinate.
-
-    ``method="trapezoid"`` applies the trapezoid rule on the coordinate
-    values (exact for fields linear in ``z``, the right choice for
-    endpoint-inclusive level grids):
+    """Integrate ``da`` along the vertical coordinate, by the trapezoid rule.
 
     ``∫ f dz ≈ Σ_k ½ (f_k + f_{k+1}) (z_{k+1} − z_k)``
 
-    ``method="sum"`` is the cell-centred Riemann sum ``Σ_k f_k Δz_k`` with
-    ``Δz_k`` the cell width around level ``k`` (half-way to each neighbour,
-    half a spacing at the ends). Both methods give ``c (z_1 − z_0)`` for a
-    uniform field ``c`` on ``[z_0, z_1]`` — unlike ``sum · dz`` with a
-    constant ``dz``, which over-counts an endpoint-inclusive grid by
+    (``diagnostix.columns.column_integral``). It is exact for a field linear
+    in ``z``, and equals the sum ``Σ_k f_k Δz_k`` over cells that end half-way
+    to each neighbour and at the first and last levels — unlike ``sum · dz``
+    with a constant ``dz``, which over-counts an endpoint-inclusive grid by
     ``n_z / (n_z − 1)``. The sign follows the coordinate's orientation.
 
     Args:
@@ -84,7 +58,6 @@ def column_integral(
             of ``da`` (may be multi-dimensional, e.g. a terrain-following
             ``z_agl``); a ``DataArray`` is used directly and must carry
             ``dim``.
-        method: ``"trapezoid"`` or ``"sum"``.
 
     Returns:
         ``da`` reduced over ``dim``; units are ``da`` units × coordinate
@@ -92,14 +65,12 @@ def column_integral(
 
     Raises:
         ValueError: If ``dim`` is missing, has fewer than two levels, no
-            coordinate is available, or ``method`` is unknown.
+            coordinate is available.
     """
     if dim not in da.dims:
         raise ValueError(f"dim {dim!r} not in DataArray dims {tuple(da.dims)}")
     if da.sizes[dim] < 2:
         raise ValueError(f"column_integral needs at least two levels along {dim!r}")
-    if method not in ("trapezoid", "sum"):
-        raise ValueError(f"method must be 'trapezoid' or 'sum', got {method!r}")
     if coord is None:
         if dim not in da.coords:
             raise ValueError(
@@ -113,14 +84,8 @@ def column_integral(
     if dim not in z.dims:
         raise ValueError(f"coordinate {z.name!r} does not carry dim {dim!r}")
 
-    f = _positional(da, dim)
-    z = _positional(z, dim)
-    if method == "trapezoid":
-        f_lo, f_hi = _lo_hi(f, dim)
-        z_lo, z_hi = _lo_hi(z, dim)
-        out = (0.5 * (f_lo + f_hi) * (z_hi - z_lo)).sum(dim, skipna=False)
-    else:
-        out = (f * _cell_widths(z, dim)).sum(dim, skipna=False)
+    out = on_columns(columns.column_integral, da, z, dim=dim, reduces=True)
+    out = out.transpose(*(d for d in da.dims if d != dim), ...)
     return out.rename(da.name)
 
 
@@ -188,8 +153,8 @@ def hypsometric_height(
         p = p.isel({level: slice(None, None, -1)})
         tv = tv.isel({level: slice(None, None, -1)})
 
-    p_pos = _positional(p, level)
-    tv_pos = _positional(tv, level)
+    p_pos = positional(p, level)
+    tv_pos = positional(tv, level)
     p_lo, p_hi = _lo_hi(p_pos, level)
     tv_lo, tv_hi = _lo_hi(tv_pos, level)
     dz_layers = _R_D_OVER_G * 0.5 * (tv_lo + tv_hi) * np.log(p_lo / p_hi)
@@ -206,28 +171,6 @@ def hypsometric_height(
     out = ds.copy()
     out[name] = apply_cf_attrs(z, _GEOPOTENTIAL_HEIGHT, overwrite=True)
     return out
-
-
-def _first_crossing(ri: np.ndarray, z: np.ndarray, ri_crit: float) -> np.ndarray:
-    """Height where ``ri`` first reaches ``ri_crit`` (levels on the last axis).
-
-    Linear interpolation between the bracketing levels; NaN where no level
-    above the surface reaches the threshold.
-    """
-    ri = ri.copy()
-    ri[..., 0] = 0.0  # 0/0 at the surface level by construction
-    above = ri >= ri_crit
-    above[..., 0] = False
-    found = above.any(axis=-1)
-    k = np.argmax(above, axis=-1)
-    k = np.where(found, k, 1)  # keep the gather in bounds where not found
-    idx = np.indices(k.shape, sparse=True)
-    ri_k, ri_km1 = ri[(*idx, k)], ri[(*idx, k - 1)]
-    z_k, z_km1 = z[(*idx, k)], z[(*idx, k - 1)]
-    with np.errstate(divide="ignore", invalid="ignore"):
-        frac = (ri_crit - ri_km1) / (ri_k - ri_km1)
-    h = z_km1 + frac * (z_k - z_km1)
-    return np.where(found, h, np.nan)
 
 
 def pbl_height_bulk_richardson(
@@ -256,7 +199,8 @@ def pbl_height_bulk_richardson(
     a level aloft with no shear relative to the surface (``u = u_s``,
     ``v = v_s``) takes the sign of the numerator: ``+∞`` when stably
     stratified (so ``h`` stops at the level below it), ``−∞`` when
-    unstable (never a crossing) and ``0`` when ``θ_v = θ_{v,s}``.
+    unstable (never a crossing) and ``0`` when ``θ_v = θ_{v,s}``. A NaN at
+    or below ``h`` gives NaN (``diagnostix.columns.boundary_layer_height``).
 
     The vertical ordering is read from ``height``: profiles may be surface
     first or top first (they are flipped internally), but every column must
@@ -301,32 +245,16 @@ def pbl_height_bulk_richardson(
     if n_top_first:
         ds = ds.isel({level: slice(None, None, -1)})
         thv, z = ds[theta_v], ds[height]
-    surface = {level: 0}
-    thv_s = thv.isel(surface)
-    z_s = z.isel(surface)
-    shear2 = (ds[u] - ds[u].isel(surface)) ** 2 + (ds[v] - ds[v].isel(surface)) ** 2
-    numerator = STANDARD.standard_gravity * (thv - thv_s) * (z - z_s)
-    # Calm levels (zero shear relative to the surface) have infinite Ri_b
-    # with the sign of the numerator (0 where the numerator is zero too):
-    # mask the denominator so the division never warns, then restore the
-    # limit where the shear was zero (NaN inputs stay NaN). The surface
-    # level is zeroed in the kernel.
-    calm = shear2 == 0.0
-    calm_ri = xr.where(numerator > 0.0, np.inf, 0.0).where(numerator >= 0.0, -np.inf)
-    calm_ri = calm_ri.where(numerator.notnull())
-    ri = (numerator / (thv_s * shear2.where(~calm))).where(~calm, calm_ri)
-    ri, z_b = xr.broadcast(_positional(ri, level), _positional(z, level))
-    if ri.chunks is not None or z_b.chunks is not None:
-        # The kernel needs the whole column: one chunk along ``level``.
-        ri, z_b = ri.chunk({level: -1}), z_b.chunk({level: -1})
-    h = xr.apply_ufunc(
-        _first_crossing,
-        ri,
-        z_b,
-        input_core_dims=[[level], [level]],
-        kwargs={"ri_crit": ri_crit},
-        dask="parallelized",
-        output_dtypes=[np.float64],
+    h = on_columns(
+        lambda theta, u_, v_, height_: columns.boundary_layer_height(
+            theta, u_, v_, height_, critical=ri_crit
+        ),
+        thv,
+        ds[u],
+        ds[v],
+        z,
+        dim=level,
+        reduces=True,
     )
     out = ds.copy()
     out[name] = apply_cf_attrs(h, "blh", overwrite=True)

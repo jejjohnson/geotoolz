@@ -11,8 +11,8 @@ Content:
   ``wrf_height_agl`` / ``wrf_temperature`` helpers it is built from.
 - Wind diagnostics: ``wind_speed``, ``wind_direction`` (meteorological
   "from" bearing by default) and their inverse ``wind_components``.
-- Vertical-column diagnostics: ``column_integral`` (trapezoid or
-  cell-width sum), ``hypsometric_height`` (pressure levels → geopotential
+- Vertical-column diagnostics: ``column_integral`` (the trapezoid
+  rule), ``hypsometric_height`` (pressure levels → geopotential
   height) and ``pbl_height_bulk_richardson``.
 - Layer-1 ``Operator`` wrappers (:mod:`xrops.atm.operators`), all
   re-exported here.

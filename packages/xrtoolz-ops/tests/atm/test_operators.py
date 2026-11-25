@@ -97,11 +97,9 @@ CASES = [
     ),
     (
         "met",
-        ColumnIntegral("theta_v", dim="level", coord="z_agl", method="sum"),
+        ColumnIntegral("theta_v", dim="level", coord="z_agl"),
         lambda ds: ds.assign(
-            theta_v_column=column_integral(
-                ds["theta_v"], dim="level", coord="z_agl", method="sum"
-            )
+            theta_v_column=column_integral(ds["theta_v"], dim="level", coord="z_agl")
         ),
         "theta_v_column",
     ),
