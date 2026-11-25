@@ -47,7 +47,6 @@ dependencies = [
     "rioxarray>=0.15",
     "pyproj>=3.6",
     "regionmask>=0.12",
-    "xrft>=1.0",
     "xskillscore>=0.0.26",
     "numpy-groupies>=0.11",
     # The shared bridges (geostack OP-O2, OP-O3): to_rows / from_rows and

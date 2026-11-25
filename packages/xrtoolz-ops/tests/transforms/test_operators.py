@@ -57,7 +57,7 @@ def test_cross_spectrum_operator_names_output(ds):
 
 
 def test_coherence_operator_self_coherence_unity(ds):
-    out = Coherence("a", "a", "time")(ds)
+    out = Coherence("a", "a", "time", segment=16)(ds)
     finite = np.isfinite(out["a_a_coh"].values)
     np.testing.assert_allclose(out["a_a_coh"].values[finite], 1.0, atol=1e-10)
 
@@ -69,17 +69,13 @@ def test_stft_operator(ds):
 
 
 def test_ke_spectral_flux_operator(taylor_green_ds):
-    out = KESpectralFlux(
-        "u", "v", ("x", "y"), window=None, detrend=None, return_2d=True
-    )(taylor_green_ds)
-    assert {"transfer", "flux", "transfer_2d"} <= set(out.data_vars)
+    out = KESpectralFlux("u", "v", ("x", "y"))(taylor_green_ds)
+    assert set(out.data_vars) == {"transfer", "flux"}
 
 
 def test_enstrophy_spectral_flux_operator(taylor_green_ds):
-    out = EnstrophySpectralFlux(
-        "u", "v", ("x", "y"), window=None, detrend=None, return_2d=True
-    )(taylor_green_ds)
-    assert {"transfer", "flux", "transfer_2d"} <= set(out.data_vars)
+    out = EnstrophySpectralFlux("u", "v", ("x", "y"))(taylor_green_ds)
+    assert set(out.data_vars) == {"transfer", "flux"}
 
 
 def test_dct_operator(ds):

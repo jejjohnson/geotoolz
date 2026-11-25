@@ -6967,22 +6967,6 @@ wheels = [
 ]
 
 [[package]]
-name = "xrft"
-version = "1.0.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "dask" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "scipy" },
-    { name = "xarray" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/e6/2b/774859d185302355ea46cf202add6e3ef37e1a73901d9d6dff3f05cdd162/xrft-1.0.1.tar.gz", hash = "sha256:5e9c4fa33cf458d951d7cc730283aa63665885c76cc029da6b8fd84757506714", size = 636797, upload-time = "2023-02-08T16:15:08.651Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a4/97/31fa97086ba7cd8deaa22ab469b34dc0c131b7cc26fb03e3d8c2735ea8bd/xrft-1.0.1-py2.py3-none-any.whl", hash = "sha256:8f7ce5b01f7728503344352fc376256c0737a7799b40967d66d51f4304d46db9", size = 32121, upload-time = "2023-02-08T16:15:06.207Z" },
-]
-
-[[package]]
 name = "xrtoolz"
 version = "0.4.1"
 source = { editable = "packages/xrtoolz" }
@@ -7048,7 +7032,6 @@ dependencies = [
     { name = "rioxarray" },
     { name = "scipy" },
     { name = "xarray" },
-    { name = "xrft" },
     { name = "xrtoolz-products" },
     { name = "xskillscore" },
 ]
@@ -7138,7 +7121,6 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.12" },
     { name = "shapely", marker = "extra == 'vector'", specifier = ">=2.0" },
     { name = "xarray", specifier = ">=2024.10" },
-    { name = "xrft", specifier = ">=1.0" },
     { name = "xrtoolz-products", editable = "packages/xrtoolz-products" },
     { name = "xskillscore", specifier = ">=0.0.26" },
 ]

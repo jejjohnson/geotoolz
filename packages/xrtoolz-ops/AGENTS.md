@@ -79,7 +79,6 @@ Design rules:
 | `rioxarray` / `pyproj` | CRS assignment, reprojection |
 | `regionmask` | Land/ocean/country masks |
 | `gridax` / `diagnostix` | Collocated grids and their calculus, and the diagnostics built on them (`xrops._src.collocated.on_grid` runs a kernel of theirs on a DataArray) |
-| `xrft` | Fourier transforms on xarray |
 | `xskillscore` | Verification metrics |
 
 xrops's calculus is `xrops.grad`, on geoops's difference kernels (`geotoolz-ops`, which also brings einx); no xrtoolz base install depends on JAX. JAX arrives only with the `xrtoolz-ops[functax]` extra, behind the gap fills and IDW; AGENTS.md ("JAX and `jax.jit`") says where a jit is allowed. PyTorch and sklearn *models* remain non-dependencies — `ModelOp` uses duck typing so the user installs only what they need.

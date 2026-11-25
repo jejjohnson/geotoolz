@@ -144,7 +144,7 @@ class PSDIsotropicPanel(_PSDPanelBase):
     """Log-log isotropic PSD vs radial wavenumber.
 
     Args:
-        freq_dim: Radial-frequency dim name (``xrft`` default
+        freq_dim: Radial-frequency dim name (default
             ``"freq_r"``).
         space_scale: Multiplier converting ``freq_dim`` units to inverse
             length used by the wavelength axis (e.g. ``1e-3`` for

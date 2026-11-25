@@ -47,7 +47,7 @@ class RotaryPolarizationPanel(_PSDPanelBase):
         self.vmax = float(vmax)
         self.wavelength_axis = bool(wavelength_axis)
         # ``space_scale`` multiplies 1/k to convert into the units used in
-        # ``wavelength_label``. xrft outputs cycles/<coord-unit>, so for
+        # ``wavelength_label``. The spectrum is in cycles/<coord-unit>, so for
         # coords in metres + a "[km]" label this is 1e-3; for coords
         # already in km, leave it at the default 1.0.
         self.space_scale = float(space_scale)

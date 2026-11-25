@@ -81,7 +81,8 @@ def psd_error(
             PSD (e.g. average over ``lat`` after computing the lon/time
             spectrum).
         isotropic: If ``True``, use the isotropic power spectrum.
-        **kwargs: Forwarded to the underlying PSD function.
+        **kwargs: ``window`` and ``detrend``, forwarded to
+            :func:`xrops.transforms.power_spectrum`.
 
     Returns:
         Dataset with a single ``"error"`` variable containing the
@@ -115,7 +116,8 @@ def psd_score(
         psd_dims: Dimensions over which to take the PSD.
         avg_dims: Optional conditional-average dims applied after PSD.
         isotropic: If ``True``, use the isotropic power spectrum.
-        **kwargs: Forwarded to the underlying PSD function.
+        **kwargs: ``window`` and ``detrend``, forwarded to
+            :func:`xrops.transforms.power_spectrum`.
 
     Returns:
         Dataset with a single ``"score"`` variable.
@@ -672,8 +674,7 @@ def _bandpass(
     .. note::
        This implementation eagerly materialises ``da.values`` and uses
        ``numpy.fft``; it is **not lazy** under dask. For very large
-       gridded inputs, slice down to a manageable region before scoring
-       (a follow-up will route through ``xrft.fft`` for chunked arrays).
+       gridded inputs, slice down to a manageable region before scoring.
     """
     arr = np.asarray(da.values, dtype=float)
     nan_mask = np.isnan(arr)
