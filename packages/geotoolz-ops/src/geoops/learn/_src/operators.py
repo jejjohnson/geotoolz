@@ -22,8 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
 import numpy as np
-from pipekit_ops import Carrier, Operator
-from pipekit_ops.protocols import Predictor
+from pipekit_ops import Carrier, Operator, Predictor
 
 from geoops._src.config import jsonable
 from geoops._src.coupling import Coupling
@@ -91,8 +90,8 @@ class SklearnOp(Operator):
     Fitted operator (see *Fitted operators* in the concepts guide):
     :meth:`fit` / :meth:`partial_fit` fit the estimator explicitly and
     :meth:`transform` / :meth:`predict` apply it without fitting, so the
-    operator satisfies :class:`pipekit_ops.protocols.FittableTransformer` and
-    :class:`pipekit_ops.protocols.Predictor`. The fitted estimator is never
+    operator satisfies :class:`pipekit_ops.FittableTransformer` and
+    :class:`pipekit_ops.Predictor`. The fitted estimator is never
     part of ``get_config()`` (persist it with :meth:`save_state`).
 
     Examples:
@@ -506,7 +505,7 @@ class ModelOp(Operator):
         method: Method name to invoke on ``model``. Default
             ``"__call__"`` — equivalent to ``model(arr)``. Set to
             ``"predict"`` for sklearn estimators; the model must then
-            satisfy :class:`pipekit_ops.protocols.Predictor`.
+            satisfy :class:`pipekit_ops.Predictor`.
         batch_size: If set, split the input along axis 0 into chunks of
             this size, call the model once per chunk, concatenate the
             results along axis 0. Useful when the model can't fit the
@@ -514,7 +513,7 @@ class ModelOp(Operator):
 
     Raises:
         TypeError: At construction, when ``method="predict"`` and
-            ``model`` is not a :class:`pipekit_ops.protocols.Predictor`, when
+            ``model`` is not a :class:`pipekit_ops.Predictor`, when
             ``method="__call__"`` and ``model`` is not callable, or when
             ``model`` has no callable ``method`` attribute.
 

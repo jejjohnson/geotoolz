@@ -1641,7 +1641,7 @@ upstream, not here.
 | `to_backend` | function | ``x`` with its NumPy and JAX arrays on one of the two backends. |
 | `unregister` | function | Remove ``cls`` from the sandboxed loader's allowlist. |
 | `unregister_adapter` | function | Remove the adapter registered for exactly ``carrier_type``, if any. |
-| `upgrade_state` | function | ``state`` with module names saved before pipekit 0.2.0 renamed. |
+| `upgrade_state` | function | ``state`` with the module names of older releases renamed. |
 
 ## Shared private toolkits
 

@@ -36,7 +36,7 @@ import numpy as np
 
 try:
     from pipekit_ops import Operator
-    from pipekit_ops._base.operator import nested_config
+    from pipekit_ops.core import nested_config
 except ImportError as _e:  # pragma: no cover - exercised when [pipekit] is missing
     raise ImportError(
         "geopatcher.integrations.pipekit requires the `pipekit-ops` package. "

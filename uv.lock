@@ -1082,8 +1082,8 @@ wheels = [
 
 [[package]]
 name = "diagnostix"
-version = "0.0.7"
-source = { git = "https://github.com/jejjohnson/diagnostix?tag=v0.0.7#d3b9ebd8b23de9cee1322654a274df089b6f60e5" }
+version = "0.0.8"
+source = { git = "https://github.com/jejjohnson/diagnostix?tag=v0.0.8#479c4791e6809c80be8b58e98f8237394be677bb" }
 dependencies = [
     { name = "geophysix" },
     { name = "gridax" },
@@ -1526,8 +1526,8 @@ wheels = [
 
 [[package]]
 name = "geophysix"
-version = "0.0.9"
-source = { git = "https://github.com/jejjohnson/geophysix?tag=v0.0.9#c268a991aad9abf6bed2a0f4e4d0b5d324b93de5" }
+version = "0.0.10"
+source = { git = "https://github.com/jejjohnson/geophysix?tag=v0.0.10#3f3fd0774e40d2582df936d5f6cb2686cfa458af" }
 dependencies = [
     { name = "numpy" },
     { name = "pipekit-array", extra = ["compat", "numpy"] },
@@ -1670,8 +1670,8 @@ requires-dist = [
     { name = "georeader-spaceml", marker = "extra == 'georeader'", specifier = ">=2.1" },
     { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.30" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.2.0" },
-    { name = "pipekit-ops", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-ops&tag=pipekit-array-v0.2.0" },
+    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.3.0" },
+    { name = "pipekit-ops", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-ops&tag=pipekit-array-v0.3.0" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "shapely", marker = "extra == 'vector'", specifier = ">=2.0" },
     { name = "typing-extensions", marker = "extra == 'georeader'", specifier = ">=4.0" },
@@ -2155,7 +2155,7 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4" },
     { name = "functax", extras = ["jax", "scipy"], marker = "extra == 'interp'", git = "https://github.com/jejjohnson/functax?tag=v0.0.6" },
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=0.14" },
-    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix?tag=v0.0.9" },
+    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix?tag=v0.0.10" },
     { name = "georeader-spaceml", marker = "extra == 'sensors'", specifier = ">=2.1" },
     { name = "geotoolz-array", editable = "packages/geotoolz-array" },
     { name = "geotoolz-array", extras = ["georeader"], marker = "extra == 'sensors'", editable = "packages/geotoolz-array" },
@@ -2171,10 +2171,10 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'viz'", specifier = ">=3.10.8" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", specifier = ">=2.1" },
-    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.2.0" },
-    { name = "pipekit-ops", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-ops&tag=pipekit-array-v0.2.0" },
+    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.3.0" },
+    { name = "pipekit-ops", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-ops&tag=pipekit-array-v0.3.0" },
     { name = "pyproj", specifier = ">=3.6" },
-    { name = "radiomax", git = "https://github.com/jejjohnson/radiomax?tag=v0.0.12" },
+    { name = "radiomax", git = "https://github.com/jejjohnson/radiomax?tag=v0.0.13" },
     { name = "rasterio", marker = "extra == 'raster'", specifier = ">=1.3" },
     { name = "scikit-image", marker = "extra == 'morph'", specifier = ">=0.25" },
     { name = "scikit-learn", marker = "extra == 'learn'", specifier = ">=1.4" },
@@ -2301,7 +2301,7 @@ requires-dist = [
     { name = "dask", extras = ["bag"], marker = "extra == 'patch-full'", specifier = ">=2024.8.3" },
     { name = "geopandas", marker = "extra == 'patch-full'", specifier = ">=0.14" },
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=0.14" },
-    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix?tag=v0.0.9" },
+    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix?tag=v0.0.10" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz-array", extras = ["georeader"], editable = "packages/geotoolz-array" },
     { name = "geotoolz-array", extras = ["jax"], marker = "extra == 'jax'", editable = "packages/geotoolz-array" },
@@ -2309,9 +2309,9 @@ requires-dist = [
     { name = "geotoolz-cloud", extras = ["cog"], marker = "extra == 'cog'", editable = "packages/geotoolz-cloud" },
     { name = "geotoolz-cloud", extras = ["cog"], marker = "extra == 'patch-full'", editable = "packages/geotoolz-cloud" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.2.0" },
-    { name = "pipekit-ops", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-ops&tag=pipekit-array-v0.2.0" },
-    { name = "pipekit-train", extras = ["equinox"], marker = "extra == 'train'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&tag=pipekit-array-v0.2.0" },
+    { name = "pipekit-array", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.3.0" },
+    { name = "pipekit-ops", marker = "extra == 'pipekit'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-ops&tag=pipekit-array-v0.3.0" },
+    { name = "pipekit-train", extras = ["equinox"], marker = "extra == 'train'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&tag=pipekit-array-v0.3.0" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "rasterio", specifier = ">=1.3" },
     { name = "rioxarray", marker = "extra == 'patch-full'", specifier = ">=0.15" },
@@ -2403,7 +2403,7 @@ typecheck = [
 requires-dist = [
     { name = "affine", specifier = ">=2.4" },
     { name = "geopandas", marker = "extra == 'carbonmapper'", specifier = ">=0.14" },
-    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix?tag=v0.0.9" },
+    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix?tag=v0.0.10" },
     { name = "georeader-spaceml", specifier = ">=2.1" },
     { name = "geotoolz-array", extras = ["georeader"], editable = "packages/geotoolz-array" },
     { name = "geotoolz-cloud", extras = ["hdf5"], marker = "extra == 'goes'", editable = "packages/geotoolz-cloud" },
@@ -2412,7 +2412,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "pandas", marker = "extra == 'carbonmapper'", specifier = ">=2.1" },
     { name = "pydantic", marker = "extra == 'carbonmapper'", specifier = ">=2" },
-    { name = "radiomax", git = "https://github.com/jejjohnson/radiomax?tag=v0.0.12" },
+    { name = "radiomax", git = "https://github.com/jejjohnson/radiomax?tag=v0.0.13" },
     { name = "rasterio", specifier = ">=1.3" },
     { name = "requests", marker = "extra == 'carbonmapper'", specifier = ">=2" },
     { name = "shapely", marker = "extra == 'carbonmapper'", specifier = ">=2" },
@@ -2605,8 +2605,8 @@ wheels = [
 
 [[package]]
 name = "gridax"
-version = "0.3.3"
-source = { git = "https://github.com/jejjohnson/gridax?subdirectory=packages%2Fgridax&tag=gridax-v0.3.3#f86bfc537b8d927e063321c42e4513a1152ad5a7" }
+version = "0.3.4"
+source = { git = "https://github.com/jejjohnson/gridax?subdirectory=packages%2Fgridax&tag=gridax-v0.3.4#17ec4b5cb178828edeb7c57b5c3689238a9df315" }
 dependencies = [
     { name = "geophysix" },
     { name = "jaxtyping" },
@@ -4489,8 +4489,8 @@ wheels = [
 
 [[package]]
 name = "pipekit-array"
-version = "0.2.0"
-source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.2.0#94c766d8b3cebbed07dafba43de32e0680d5d0f6" }
+version = "0.3.0"
+source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.3.0#8213f3a766d41c1e8afd907e8134b82479a215d0" }
 dependencies = [
     { name = "pipekit-ops" },
 ]
@@ -4511,13 +4511,13 @@ xarray = [
 
 [[package]]
 name = "pipekit-ops"
-version = "0.3.0"
-source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-ops&tag=pipekit-array-v0.2.0#94c766d8b3cebbed07dafba43de32e0680d5d0f6" }
+version = "0.4.0"
+source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-ops&tag=pipekit-array-v0.3.0#8213f3a766d41c1e8afd907e8134b82479a215d0" }
 
 [[package]]
 name = "pipekit-train"
-version = "0.2.0"
-source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&tag=pipekit-array-v0.2.0#94c766d8b3cebbed07dafba43de32e0680d5d0f6" }
+version = "0.3.0"
+source = { git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-train&tag=pipekit-array-v0.3.0#8213f3a766d41c1e8afd907e8134b82479a215d0" }
 dependencies = [
     { name = "pipekit-ops" },
 ]
@@ -5756,8 +5756,8 @@ wheels = [
 
 [[package]]
 name = "radiomax"
-version = "0.0.12"
-source = { git = "https://github.com/jejjohnson/radiomax?tag=v0.0.12#6bfecef193bc3c0a54f425b154503129f030f11b" }
+version = "0.0.13"
+source = { git = "https://github.com/jejjohnson/radiomax?tag=v0.0.13#eab84bda9abdd0920845a8a4709d9de3e103d869" }
 dependencies = [
     { name = "geophysix" },
     { name = "numpy" },
@@ -7096,22 +7096,22 @@ typecheck = [
 requires-dist = [
     { name = "cartopy", marker = "extra == 'maps'", specifier = ">=0.22" },
     { name = "dask", extras = ["array"], specifier = ">=2024.10" },
-    { name = "diagnostix", git = "https://github.com/jejjohnson/diagnostix?tag=v0.0.7" },
+    { name = "diagnostix", git = "https://github.com/jejjohnson/diagnostix?tag=v0.0.8" },
     { name = "functax", extras = ["jax", "scipy"], marker = "extra == 'functax'", git = "https://github.com/jejjohnson/functax?tag=v0.0.6" },
     { name = "geopandas", marker = "extra == 'vector'", specifier = ">=1.1.3" },
-    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix?tag=v0.0.9" },
+    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix?tag=v0.0.10" },
     { name = "geotoolz-array", editable = "packages/geotoolz-array" },
     { name = "geotoolz-ops", editable = "packages/geotoolz-ops" },
-    { name = "gridax", git = "https://github.com/jejjohnson/gridax?subdirectory=packages%2Fgridax&tag=gridax-v0.3.3" },
+    { name = "gridax", git = "https://github.com/jejjohnson/gridax?subdirectory=packages%2Fgridax&tag=gridax-v0.3.4" },
     { name = "jaxtyping", specifier = ">=0.2.34" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "netcdf4", specifier = ">=1.6" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "numpy-groupies", specifier = ">=0.11" },
     { name = "pandas", specifier = ">=2.1" },
-    { name = "pipekit-array", extras = ["sklearn"], marker = "extra == 'sklearn'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.2.0" },
-    { name = "pipekit-array", extras = ["xarray"], git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.2.0" },
-    { name = "pipekit-ops", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-ops&tag=pipekit-array-v0.2.0" },
+    { name = "pipekit-array", extras = ["sklearn"], marker = "extra == 'sklearn'", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.3.0" },
+    { name = "pipekit-array", extras = ["xarray"], git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-array&tag=pipekit-array-v0.3.0" },
+    { name = "pipekit-ops", git = "https://github.com/jejjohnson/pipekit?subdirectory=packages%2Fpipekit-ops&tag=pipekit-array-v0.3.0" },
     { name = "pyproj", specifier = ">=3.6" },
     { name = "pywavelets", marker = "extra == 'wavelets'", specifier = ">=1.4" },
     { name = "rasterio", marker = "extra == 'vector'", specifier = ">=1.3" },
@@ -7215,7 +7215,7 @@ requires-dist = [
     { name = "copernicusmarine", marker = "extra == 'cmems'", specifier = ">=2.0" },
     { name = "geopandas", marker = "extra == 'aemet'", specifier = ">=1.1.3" },
     { name = "geopandas", marker = "extra == 'cds-insitu'", specifier = ">=1.1.3" },
-    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix?tag=v0.0.9" },
+    { name = "geophysix", git = "https://github.com/jejjohnson/geophysix?tag=v0.0.10" },
     { name = "httpx", marker = "extra == 'aemet'", specifier = ">=0.28.1" },
     { name = "loguru", marker = "extra == 'aemet'", specifier = ">=0.7.3" },
     { name = "loguru", marker = "extra == 'cds-insitu'", specifier = ">=0.7.3" },

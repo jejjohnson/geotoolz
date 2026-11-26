@@ -3,7 +3,7 @@
 Fitted operators (the ``normalize`` scalers, ``matched_filter.MatchedFilter``,
 ``restore.MNF``, ``learn.SklearnOp``) expose sklearn-style ``fit(x) -> self``
 and a pure ``transform(x)`` so they satisfy
-:class:`pipekit_ops.protocols.FittableTransformer`. Fitted state lives in
+:class:`pipekit_ops.FittableTransformer`. Fitted state lives in
 trailing-underscore attributes (``mean_``, ``cov_op_``, ...) that are never
 constructor parameters, so ``get_config()`` -- which mirrors the
 constructor -- never serialises it.

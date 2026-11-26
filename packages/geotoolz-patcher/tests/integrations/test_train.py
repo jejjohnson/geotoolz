@@ -18,7 +18,7 @@ pytest.importorskip("xarray")
 pytest.importorskip("pipekit_train")
 
 import xarray as xr
-from pipekit_train.adapters.equinox import _is_indexable
+from pipekit_train.backends.equinox._batches import _is_indexable
 
 from geopatcher.integrations.train import (
     XarrayWindowDataset,
@@ -246,7 +246,7 @@ def test_build_batch_iter_declines_without_block_reader():
 
 def test_adapter_uses_block_reader_and_resumes():
     pytest.importorskip("grain")
-    from pipekit_train.adapters.equinox import _BatchSource
+    from pipekit_train.backends.equinox._batches import _BatchSource
 
     cloud = _dataset(block_reader=True, buffer_size_in_bytes=5e3, buffer_diversity=4)
     bs = _BatchSource(cloud, batch_size=4, seed=0)

@@ -42,7 +42,7 @@ from affine import Affine
 from geoarray import GeoArray, PixelWindow
 from jaxtyping import Shaped
 from pipekit_ops import Operator, Sequential
-from pipekit_ops._base.operator import require_operator
+from pipekit_ops.core import require_operator
 
 from geoops._src.bands import band_count, resolve_bands
 from geoops._src.config import (

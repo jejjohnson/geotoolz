@@ -171,7 +171,7 @@ class TestApplyToChips:
         assert config == {
             "operator": {
                 "class": "Lambda",
-                "module": "pipekit_ops.blocks",
+                "module": "pipekit_ops",
                 "config": double.get_config(),
             },
             "check_reach": True,

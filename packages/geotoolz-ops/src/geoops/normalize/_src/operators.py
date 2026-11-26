@@ -9,7 +9,7 @@ carrier-aware wrappers handle:
 * fitting per-band statistics (``fit(x)`` / ``fit_on_call=True``) into
   fitted ``*_`` attributes that ``get_config()`` never serialises, with a
   pure ``transform(x)`` -- the scalers satisfy
-  :class:`pipekit_ops.protocols.FittableTransformer`,
+  :class:`pipekit_ops.FittableTransformer`,
 * JSON-safe ``get_config()`` via the shared
   :func:`geoops._src.config.jsonable` helper (ndarray leaves become
   plain Python lists for Hydra / YAML round-trip),

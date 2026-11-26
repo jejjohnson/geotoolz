@@ -62,7 +62,7 @@ dependencies = [
     # pipekit-ops (formerly xrops.core). Every per-domain operator subclasses
     # `pipekit_ops.Operator`; the dependency is load-bearing. See
     # [tool.uv.sources] below for the dev-time source.
-    "pipekit-ops>=0.2.3",
+    "pipekit-ops>=0.4.0",
     # The data-acquisition layer (CMEMS/CDS/AEMET readers) and the shared
     # typed request vocabulary + CF Variable registry live in the
     # `xrtoolz-products` workspace member, which imports as `xrproducts`.

@@ -36,7 +36,7 @@ from geopatcher._src._extras import missing_extra
 
 try:
     import xarray
-    from pipekit_train.dataset import Split, TrainingDataset, hash_config
+    from pipekit_train.data import Split, TrainingDataset, hash_config
 except ImportError as _e:  # pragma: no cover - exercised when [train] is missing
     raise missing_extra("geopatcher.integrations.train", "train") from _e
 
