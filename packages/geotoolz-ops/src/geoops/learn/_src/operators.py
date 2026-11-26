@@ -22,8 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
 import numpy as np
-from pipekit_ops import Carrier, Operator
-from pipekit_ops import Predictor
+from pipekit_ops import Carrier, Operator, Predictor
 
 from geoops._src.config import jsonable
 from geoops._src.coupling import Coupling

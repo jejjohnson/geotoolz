@@ -42,13 +42,13 @@ from typing import Any, ClassVar, Literal
 
 import xarray as xr
 from pipekit_ops import (
+    BackendError,
     Node,
     Operator as _PipekitOperator,
     backend_of,
     report_move,
     to_backend,
 )
-from pipekit_ops import BackendError
 
 
 def _parts(value: Any) -> Iterator[Any]:
