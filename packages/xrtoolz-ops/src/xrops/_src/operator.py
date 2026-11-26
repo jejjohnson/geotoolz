@@ -48,7 +48,7 @@ from pipekit_ops import (
     report_move,
     to_backend,
 )
-from pipekit_ops.adapters import BackendError
+from pipekit_ops import BackendError
 
 
 def _parts(value: Any) -> Iterator[Any]:
