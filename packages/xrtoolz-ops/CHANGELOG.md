@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/jejjohnson/geotoolz/compare/xrtoolz-ops-v0.7.1...xrtoolz-ops-v0.7.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* **deps:** geotoolz imports the areas of pipekit-ops 0.4.0 and pipekit-train 0.3.0 ([#819](https://github.com/jejjohnson/geotoolz/issues/819)) ([2223b6c](https://github.com/jejjohnson/geotoolz/commit/2223b6c92669275b1ddc19ded418c2c9731879c5))
+
 ## [0.7.1](https://github.com/jejjohnson/geotoolz/compare/xrtoolz-ops-v0.7.0...xrtoolz-ops-v0.7.1) (2026-11-25)
 
 
